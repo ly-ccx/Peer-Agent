@@ -1,10 +1,16 @@
 use peer_project_agent::{
     CircuitBreakerStore, CreateObjectiveRequest, LeaseStatus, MemoryEpisode, MemoryFilter,
-    NativeProjectHost, ObjectiveBudget, ProjectCapabilityProvider, QuestionState, RECOVERY_PHASES,
-    STALL_WINDOW_MS, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, TurnEndKind,
-    TurnExecutionState, WriteCuratedMemoryRequest, assess_same_cause, assess_stall, bot_list_json,
-    host_resource_plan_from_plan, input_message_id, objective_action_card_id,
+    NativeProjectHost, ObjectiveBudget, ProjectCapabilityProvider, PublishInteractiveRequest,
+    QuestionState, RECOVERY_PHASES, STALL_WINDOW_MS, SessionSupervisor, SpawnCriterion,
+    SpawnSessionRequest, TurnEndKind, TurnExecutionState, WriteCuratedMemoryRequest,
+    WriteMemoryRequest, assess_same_cause, assess_stall, bot_list_json,
+    build_cleanup_expected_digest, host_resource_plan_from_plan, input_message_id,
+    load_local_image_attachment, normalize_user_upload, objective_action_card_id,
     project_reply_questions, read_retry_continuity, reconcile_unknown_outcome,
+    task_result_references,
+};
+use peer_protocol::interactive_result::{
+    InteractiveAvailability, InteractiveOwner, InteractiveResultReference, InteractiveResultSource,
 };
 use peer_runtime::{
     CancellationToken,
@@ -4117,5 +4123,745 @@ async fn objective_watch_runner_reconciles_deterministic_and_agent_probes_and_pr
         spawned_plan["delegationOrigin"]["objectiveId"].as_str(),
         Some(obj.objective_id.as_str())
     );
+    host.close();
+}
+
+#[tokio::test]
+async fn interactive_result_capture_publish_reconcile_inspect_tool_and_cleanup_tombstone() {
+    let data_dir = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("InteractiveBot"))
+        .unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let owner = InteractiveOwner {
+        workspace_id: ws_id.clone(),
+        conversation_id: conv_id.clone(),
+    };
+
+    // 1. Capture tool observation with secret redaction
+    let obs = host
+        .interactive_results()
+        .capture_tool_observation(
+            &owner,
+            &conv_id,
+            "call-obs-1",
+            &json!({"secret": "sk-live-secret1234567890abcdef", "safe": "ok"}),
+            "D2_sensitive",
+            "2026-11-20T10:00:00.000Z",
+        )
+        .unwrap();
+    assert_eq!(obs["redacted"], true);
+    let expected_ver = obs["source"]["expectedContentVersion"].as_str().unwrap();
+    let mat = host
+        .interactive_results()
+        .read_material(&owner, &conv_id, "call-obs-1", expected_ver)
+        .unwrap()
+        .expect("captured material present");
+    assert_eq!(mat["value"]["payload"]["secret"], "[REDACTED]");
+    assert_eq!(mat["value"]["payload"]["safe"], "ok");
+
+    // 2. Commit initial "create" publication -> starts as index_pending
+    let pub1 = host
+        .interactive_results()
+        .commit_publication(
+            &PublishInteractiveRequest {
+                owner: owner.clone(),
+                source: InteractiveResultSource {
+                    conversation_id: conv_id.clone(),
+                    plan_id: "plan-ir-e2e-1".into(),
+                    session_id: conv_id.clone(),
+                    tool_call_id: "call-pub-1".into(),
+                    execution_epoch: Some("epoch-1".into()),
+                },
+                publication_kind: "create".into(),
+                base: None,
+                title: "Initial Interactive Chart".into(),
+                text_fallback: "Row 1: metric = 10".into(),
+                program: "root = Text(\"metric=10\")".into(),
+                bindings: json!({"metric": 10}),
+                provenance: vec![],
+                data_level: "D2_sensitive".into(),
+                grant_id: "grant-ir-1".into(),
+                stream_id: None,
+            },
+            true,
+        )
+        .unwrap();
+    assert_eq!(pub1["publicationStatus"], "index_pending");
+    let ref1: InteractiveResultReference =
+        serde_json::from_value(pub1["reference"].clone()).unwrap();
+    let locator1 = ref1.locator();
+
+    // Recovery barrier "tasks" phase reconciles pending publication into EvidenceIndexStore
+    let diag = host
+        .recover_workspace_barrier(&ws_id, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(diag.status, "ready");
+    let op1 = host
+        .interactive_results()
+        .get_operation(&owner, &conv_id, "call-pub-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(op1["publicationStatus"], "published");
+    assert!(
+        !EvidenceIndexStore::new(data_dir.path())
+            .find(std::slice::from_ref(&locator1), None)
+            .unwrap()
+            .is_empty()
+    );
+
+    // 3. Commit "revise" publication and reconcile -> verify read_interactive_result_summary
+    let pub2 = host
+        .interactive_results()
+        .commit_publication(
+            &PublishInteractiveRequest {
+                owner: owner.clone(),
+                source: InteractiveResultSource {
+                    conversation_id: conv_id.clone(),
+                    plan_id: "plan-ir-e2e-1".into(),
+                    session_id: conv_id.clone(),
+                    tool_call_id: "call-pub-2".into(),
+                    execution_epoch: Some("epoch-1".into()),
+                },
+                publication_kind: "revise".into(),
+                base: Some(ref1.clone()),
+                title: "Revised Interactive Chart".into(),
+                text_fallback: "Row 1: metric = 42 (updated)".into(),
+                program: "root = Text(\"metric=42\")".into(),
+                bindings: json!({"metric": 42}),
+                provenance: vec![],
+                data_level: "D2_sensitive".into(),
+                grant_id: "grant-ir-2".into(),
+                stream_id: None,
+            },
+            true,
+        )
+        .unwrap();
+    let ref2: InteractiveResultReference =
+        serde_json::from_value(pub2["reference"].clone()).unwrap();
+    let locator2 = ref2.locator();
+    let reconciled2 = host
+        .interactive_results()
+        .reconcile_pending(&owner)
+        .unwrap();
+    assert_eq!(reconciled2.len(), 1);
+    let summary = host
+        .read_interactive_result_summary(&ws_id, &locator2)
+        .unwrap();
+    assert_eq!(summary.availability, InteractiveAvailability::Available);
+    assert_eq!(summary.title, "Revised Interactive Chart");
+    assert_eq!(summary.text_fallback.text, "Row 1: metric = 42 (updated)");
+
+    // 4. Bot turn calling inspect_interactive_result (metadata -> text -> denied program -> post_reply)
+    host.submit_user_input(
+        &ws_id,
+        "in-ir-1",
+        "Inspect the revised interactive result",
+        None,
+    )
+    .unwrap();
+    let ref2_json = serde_json::to_value(&ref2).unwrap();
+    let ref2_meta = ref2_json.clone();
+    let ref2_text = ref2_json.clone();
+    let ref2_prog = ref2_json.clone();
+    let server = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "ir-insp-1",
+                "inspect_interactive_result",
+                &json!({"target": {"kind": "result", "reference": ref2_meta}, "view": "metadata"}),
+            )
+        }),
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("metadata result");
+            assert_eq!(out["kind"], "interactive_inspection");
+            assert_eq!(out["title"], "Revised Interactive Chart");
+            sse_tool_call(
+                "ir-insp-2",
+                "inspect_interactive_result",
+                &json!({
+                    "target": {"kind": "result", "reference": ref2_text},
+                    "view": "text",
+                    "offset": 0,
+                    "limit": 200
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("text result");
+            assert!(
+                out["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("metric = 42 (updated)")
+            );
+            sse_tool_call(
+                "ir-insp-3",
+                "inspect_interactive_result",
+                &json!({"target": {"kind": "result", "reference": ref2_prog}, "view": "program"}),
+            )
+        }),
+        Box::new(|req| {
+            let err_out = last_tool_result_json(req).expect("program role denied output");
+            assert_eq!(err_out["ok"], false);
+            assert_eq!(err_out["error"], "interactive_role_denied");
+            sse_tool_call(
+                "ir-reply-1",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-ir-1"],
+                    "text": "Inspected metadata & fallback text; program view is blocked by role ceiling."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let fg = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg.bot_turns_run, 1);
+    assert!(
+        host.find_reply_for_input(&ws_id, "in-ir-1")
+            .unwrap()
+            .is_some()
+    );
+
+    // 5. Cleanup commits tombstone -> availability flips to Cleaned
+    let expected_digest = build_cleanup_expected_digest(&ref2, "cleanup-e2e").unwrap();
+    let _receipt = host
+        .interactive_results()
+        .cleanup_result(
+            &ref2,
+            "req-clean-1",
+            &expected_digest,
+            "2026-11-20T10:05:00.000Z",
+            true,
+        )
+        .unwrap();
+    let cleaned = host
+        .read_interactive_result_summary(&ws_id, &locator2)
+        .unwrap();
+    assert_eq!(cleaned.availability, InteractiveAvailability::Cleaned);
+    host.close();
+}
+
+#[tokio::test]
+async fn user_image_and_text_attachments_flow_through_input_queue_to_multimodal_model_request() {
+    let data_dir = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("MediaBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    // Write valid PNG signature + IHDR chunk (width=1, height=1, depth=8, color=2)
+    let mut png_bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png_bytes.extend_from_slice(&13u32.to_be_bytes());
+    png_bytes.extend_from_slice(b"IHDR");
+    png_bytes.extend_from_slice(&1u32.to_be_bytes());
+    png_bytes.extend_from_slice(&1u32.to_be_bytes());
+    png_bytes.extend_from_slice(&[8, 2, 0, 0, 0]);
+    png_bytes.extend_from_slice(&[0u8; 4]);
+    let png_path = ws.path().join("shot.png");
+    fs::write(&png_path, &png_bytes).unwrap();
+
+    let img_att = load_local_image_attachment(ws.path(), "shot.png", Some("att-img-1")).unwrap();
+    let txt_att = normalize_user_upload(&json!({
+        "id": "att-txt-1",
+        "name": "notes.txt",
+        "mimeType": "text/plain",
+        "size": 19,
+        "kind": "text",
+        "text": "hello from txt file",
+    }))
+    .unwrap();
+
+    let server = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "m-img-1",
+                "post_reply",
+                &json!({"replyTo": ["in-img-only"], "text": "Received PNG screenshot."}),
+            )
+        }),
+        Box::new(|_| {
+            sse_tool_call(
+                "m-mix-1",
+                "post_reply",
+                &json!({"replyTo": ["in-mixed"], "text": "Analyzed text and PNG."}),
+            )
+        }),
+    ]);
+    let model = mock_model(&server.endpoint);
+
+    // Input A: image-only with empty prompt ""
+    host.submit_user_input_with_attachments(&ws_id, "in-img-only", "", None, vec![img_att.clone()])
+        .unwrap();
+    let fg1 = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg1.bot_turns_run, 1);
+
+    // Input B: prompt + text attachment + PNG attachment
+    host.submit_user_input_with_attachments(
+        &ws_id,
+        "in-mixed",
+        "Analyze both",
+        None,
+        vec![txt_att, img_att],
+    )
+    .unwrap();
+    let fg2 = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg2.bot_turns_run, 1);
+
+    let reqs = server.requests.lock().unwrap();
+    assert_eq!(reqs.len(), 2);
+
+    // Verify request 0 carried multimodal image_url content part
+    let user0 = reqs[0]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .expect("user message in request 0");
+    let parts0 = user0["content"]
+        .as_array()
+        .expect("image-only input must project content as array");
+    assert!(parts0.iter().any(|p| {
+        p["type"] == "image_url"
+            && p["image_url"]["url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("data:image/png;base64,"))
+    }));
+
+    // Verify request 1 projected both formatted Attached file text block and image_url
+    let user1 = reqs[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .expect("latest user message in request 1");
+    let parts1 = user1["content"]
+        .as_array()
+        .expect("mixed input must project multimodal content array");
+    let has_text_block = parts1.iter().any(|p| {
+        p["type"] == "text"
+            && p["text"].as_str().is_some_and(|t| {
+                t.contains("Analyze both")
+                    && t.contains("Attached file: notes.txt")
+                    && t.contains("hello from txt file")
+            })
+    });
+    let has_img_block = parts1.iter().any(|p| {
+        p["type"] == "image_url"
+            && p["image_url"]["url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("data:image/png;base64,"))
+    });
+    assert!(has_text_block && has_img_block);
+
+    // Verify ConversationStore persisted attachments on canonical user_input rows
+    let committed = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let m_img = committed
+        .iter()
+        .find(|m| m["id"] == input_message_id("in-img-only").unwrap())
+        .unwrap();
+    assert_eq!(m_img["attachments"].as_array().map(Vec::len), Some(1));
+    let m_mix = committed
+        .iter()
+        .find(|m| m["id"] == input_message_id("in-mixed").unwrap())
+        .unwrap();
+    assert_eq!(m_mix["attachments"].as_array().map(Vec::len), Some(2));
+
+    drop(reqs);
+    host.close();
+}
+
+#[tokio::test]
+async fn conversation_search_index_fts5_trigram_chinese_and_redaction_with_memory_conflicts() {
+    let data_dir = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("SearchBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    // Seed visible messages: Chinese text + secret-bearing message
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "input-zh-1",
+                "role": "user",
+                "kind": "user_input",
+                "content": "请检查支付网关的部署日志和超时配置",
+                "createdAt": "2026-11-20T09:00:00.000Z"
+            }),
+            "2026-11-20T09:00:00.000Z",
+            None,
+        )
+        .unwrap();
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "input-sec-1",
+                "role": "user",
+                "kind": "user_input",
+                "content": "deploy token sk-live-secret1234567890abcdef for staging",
+                "createdAt": "2026-11-20T09:01:00.000Z"
+            }),
+            "2026-11-20T09:01:00.000Z",
+            None,
+        )
+        .unwrap();
+
+    // Topic conflict & supersession resolution via MemoryStore
+    let mem1 = host
+        .memory()
+        .write(&WriteMemoryRequest {
+            scope: "project",
+            workspace_id: Some(&ws_id),
+            kind: "fact",
+            text: "Repo uses npm",
+            trust: "verified",
+            source_refs: vec!["input-zh-1".into()],
+            pinned: false,
+            anchor_message_id: Some("input-zh-1"),
+            expires_at: None,
+            topic_key: Some("pkg_mgr"),
+            topic_value: Some("npm"),
+            file_anchors: None,
+        })
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(10));
+    let mem2 = host
+        .memory()
+        .write(&WriteMemoryRequest {
+            scope: "project",
+            workspace_id: Some(&ws_id),
+            kind: "fact",
+            text: "Switched repo to pnpm for 支付网关",
+            trust: "stated",
+            source_refs: vec!["input-zh-1".into()],
+            pinned: false,
+            anchor_message_id: Some("input-zh-1"),
+            expires_at: None,
+            topic_key: Some("pkg_mgr"),
+            topic_value: Some("pnpm"),
+            file_anchors: None,
+        })
+        .unwrap();
+    let mem1_after = host.memory().get(Some(&ws_id), &mem1.id).unwrap();
+    assert_eq!(mem1_after.status, "forgotten");
+    assert_eq!(mem1_after.superseded_by.as_deref(), Some(mem2.id.as_str()));
+    assert_eq!(mem2.status, "active");
+
+    // Non-authoritative inferred user preference (confirmed_count >= 3) conflicts without superseding
+    let upref1 = host
+        .memory()
+        .write(&WriteMemoryRequest {
+            scope: "user",
+            workspace_id: None,
+            kind: "preference",
+            text: "Prefer Neovim for editing",
+            trust: "stated",
+            source_refs: vec!["input-zh-1".into()],
+            pinned: false,
+            anchor_message_id: Some("input-zh-1"),
+            expires_at: None,
+            topic_key: Some("editor"),
+            topic_value: Some("neovim"),
+            file_anchors: None,
+        })
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(10));
+    let upref2 = host
+        .memory()
+        .write_curated(&WriteCuratedMemoryRequest {
+            scope: "user",
+            workspace_id: None,
+            kind: "preference",
+            text: "Inferred preference for VS Code",
+            trust: "inferred",
+            source_refs: vec!["input-zh-1".into()],
+            pinned: false,
+            anchor_message_id: Some("input-zh-1"),
+            expires_at: None,
+            topic_key: Some("editor"),
+            topic_value: Some("vscode"),
+            file_anchors: None,
+            confirmed_count: 3,
+        })
+        .unwrap();
+    let upref1_conf = host.memory().get(None, &upref1.id).unwrap();
+    assert_eq!(upref1_conf.status, "conflicted");
+    assert_eq!(upref2.status, "conflicted");
+    assert!(
+        upref1_conf
+            .conflicts_with
+            .as_deref()
+            .unwrap_or(&[])
+            .contains(&upref2.id)
+    );
+    assert!(
+        upref2
+            .conflicts_with
+            .as_deref()
+            .unwrap_or(&[])
+            .contains(&upref1.id)
+    );
+
+    // Host search_workspace (<3 CJK LIKE fallback + >=3 FTS5 trigram) & search_all
+    let short_hits = host.search_workspace(&ws_id, "支付", 20).unwrap();
+    assert!(
+        short_hits
+            .iter()
+            .any(|h| h.kind == "message" && h.message_id.as_deref() == Some("input-zh-1"))
+    );
+    let fts_hits = host.search_workspace(&ws_id, "部署日志", 20).unwrap();
+    assert!(
+        fts_hits
+            .iter()
+            .any(|h| h.kind == "message" && h.message_id.as_deref() == Some("input-zh-1"))
+    );
+    assert!(
+        data_dir
+            .path()
+            .join("project-runtime")
+            .join(&ws_id)
+            .join("search-index.sqlite")
+            .exists()
+    );
+    let global_hits = host.search_all("支付", 20).unwrap();
+    assert!(!global_hits.is_empty());
+
+    // Bot turn calling search_conversation for Chinese query + secret query
+    host.submit_user_input(
+        &ws_id,
+        "in-search-turn",
+        "Search history for logs and token",
+        None,
+    )
+    .unwrap();
+    let server = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "srch-1",
+                "search_conversation",
+                &json!({"query": "部署日志"}),
+            )
+        }),
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("Chinese search output");
+            assert_eq!(out["ok"], true);
+            let matches = out["matches"].as_array().unwrap();
+            assert!(matches.iter().any(|m| {
+                m["redacted"] == false
+                    && m["snippet"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("部署日志"))
+            }));
+            sse_tool_call(
+                "srch-2",
+                "search_conversation",
+                &json!({"query": "deploy token"}),
+            )
+        }),
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("secret search output");
+            assert_eq!(out["ok"], true);
+            let matches = out["matches"].as_array().unwrap();
+            let sec = matches
+                .iter()
+                .find(|m| m["id"] == "input-sec-1")
+                .expect("secret match present");
+            assert_eq!(sec["redacted"], true);
+            assert_eq!(sec["snippet"], "[REDACTED]");
+            sse_tool_call(
+                "srch-reply",
+                "post_reply",
+                &json!({"replyTo": ["in-search-turn"], "text": "Verified FTS5 search and secret redaction."}),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let fg = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg.bot_turns_run, 1);
+    host.close();
+}
+
+#[tokio::test]
+async fn interactive_result_slash_result_lookup_from_task_evidence_refs() {
+    let data_dir = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("TaskResultBot"))
+        .unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let diag = host
+        .recover_workspace_barrier(&ws_id, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(diag.status, "ready");
+
+    let summary = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: ws_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id.clone(),
+                anchor_message_ids: vec![input_message_id("in-task-ir-1").unwrap()],
+                input_id: "in-task-ir-1".into(),
+                surface: "tui".into(),
+                title: "Build Interactive Report".into(),
+                brief: "Generate fixed interactive summary".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.interactive.publish".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-ir-1".into()),
+                    kind: "custom".into(),
+                    description: "Publish fixed interactive result".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({}),
+            },
+            true,
+        )
+        .unwrap();
+    let sid = summary.session_id.clone();
+    let mut plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &sid)
+        .expect("spawned plan present");
+    let plan_id = plan["planId"].as_str().unwrap().to_owned();
+
+    let owner = InteractiveOwner {
+        workspace_id: ws_id.clone(),
+        conversation_id: conv_id.clone(),
+    };
+    let pub_res = host
+        .interactive_results()
+        .commit_publication(
+            &PublishInteractiveRequest {
+                owner: owner.clone(),
+                source: InteractiveResultSource {
+                    conversation_id: conv_id.clone(),
+                    plan_id: plan_id.clone(),
+                    session_id: sid.clone(),
+                    tool_call_id: "call-task-pub-1".into(),
+                    execution_epoch: Some("epoch-1".into()),
+                },
+                publication_kind: "create".into(),
+                base: None,
+                title: "Task Fixed View".into(),
+                text_fallback: "Task output metric=99".into(),
+                program: "root = Text(\"metric=99\")".into(),
+                bindings: json!({"metric": 99}),
+                provenance: vec![],
+                data_level: "D1_internal".into(),
+                grant_id: "grant-task-1".into(),
+                stream_id: None,
+            },
+            true,
+        )
+        .unwrap();
+    let ref_obj: InteractiveResultReference =
+        serde_json::from_value(pub_res["reference"].clone()).unwrap();
+    let locator = ref_obj.locator();
+    host.interactive_results()
+        .reconcile_pending(&owner)
+        .unwrap();
+
+    // Attach locator to the spawned plan's leaf task evidenceRefs so read_report indexes it
+    let tasks = plan["tasks"].as_array_mut().expect("plan tasks array");
+    assert!(!tasks.is_empty());
+    tasks[0]["evidenceRefs"] = json!([locator]);
+    let plan_path = data_dir
+        .path()
+        .join("goal-plans")
+        .join(format!("{plan_id}.json"));
+    fs::write(
+        &plan_path,
+        format!("{}\n", serde_json::to_string_pretty(&plan).unwrap()),
+    )
+    .unwrap();
+
+    let report = host.supervisor().read_report(&ws_id, &sid).unwrap();
+    let extracted = task_result_references(&report.evidence_refs);
+    assert_eq!(extracted, vec![locator.clone()]);
+
+    let task_ir = host.read_task_result(&ws_id, &sid, &locator).unwrap();
+    assert_eq!(task_ir.availability, InteractiveAvailability::Available);
+    assert_eq!(task_ir.title, "Task Fixed View");
+    assert_eq!(task_ir.text_fallback.text, "Task output metric=99");
+
+    // Scope isolation checks
+    let wrong_session = host.read_task_result(&ws_id, "nonexistent-session", &locator);
+    assert_eq!(wrong_session.unwrap_err().code, "interactive_scope_denied");
+    let other_locator = format!(
+        "interactive-result://{ws_id}/{conv_id}/other-id/{}",
+        "0".repeat(64)
+    );
+    let wrong_locator = host.read_task_result(&ws_id, &sid, &other_locator);
+    assert_eq!(wrong_locator.unwrap_err().code, "interactive_scope_denied");
+
     host.close();
 }

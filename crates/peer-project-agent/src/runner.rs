@@ -452,7 +452,9 @@ fn load_bot_history(history_messages: &[Value]) -> LoadedBotHistory {
             compaction_marker(m).is_none()
                 && !matches!(m["kind"].as_str(), Some("agent_turn" | "system_card"))
                 && matches!(m["role"].as_str(), Some("user" | "assistant"))
-                && !m["content"].as_str().unwrap_or("").trim().is_empty()
+                && (!m["content"].as_str().unwrap_or("").trim().is_empty()
+                    || (m["role"].as_str() == Some("user")
+                        && m["attachments"].as_array().is_some_and(|a| !a.is_empty())))
         })
         .rev()
         .take(MAX_BOT_HISTORY_MESSAGES)
@@ -464,11 +466,18 @@ fn load_bot_history(history_messages: &[Value]) -> LoadedBotHistory {
     let mut live_messages = Vec::with_capacity(filtered.len());
     let mut committed_message_ids = Vec::with_capacity(filtered.len());
     for m in filtered {
-        live_messages.push(json!({
-            "role": m["role"],
-            "content": m["content"].as_str().unwrap_or(""),
-        }));
-        committed_message_ids.push(m["id"].as_str().map(str::to_owned));
+        if m["role"].as_str() == Some("user") {
+            if let Some(projected) = crate::attachments::project_user_message_for_model(m) {
+                live_messages.push(projected);
+                committed_message_ids.push(m["id"].as_str().map(str::to_owned));
+            }
+        } else {
+            live_messages.push(json!({
+                "role": m["role"],
+                "content": m["content"].as_str().unwrap_or(""),
+            }));
+            committed_message_ids.push(m["id"].as_str().map(str::to_owned));
+        }
     }
 
     LoadedBotHistory {
@@ -484,7 +493,25 @@ fn prepare_summary_messages(messages: &[Value]) -> Vec<Value> {
     let mut tool_calls_by_id = HashSet::new();
     for msg in messages {
         match msg["role"].as_str() {
-            Some("user") => expanded.push(msg.clone()),
+            Some("user") => {
+                if let Some(parts) = msg["content"].as_array() {
+                    let mut text_parts = Vec::new();
+                    let mut img_count = 0usize;
+                    for p in parts {
+                        if let Some(t) = p["text"].as_str() {
+                            text_parts.push(t.to_owned());
+                        } else if p["type"] == "image_url" {
+                            img_count += 1;
+                        }
+                    }
+                    if img_count > 0 {
+                        text_parts.push(format!("[{img_count} image attachment(s)]"));
+                    }
+                    expanded.push(json!({ "role": "user", "content": text_parts.join("\n") }));
+                } else {
+                    expanded.push(msg.clone());
+                }
+            }
             Some("assistant") => {
                 if let Some(calls) = msg["toolCalls"].as_array().filter(|a| !a.is_empty()) {
                     if let Some(txt) = msg["content"].as_str().filter(|s| !s.trim().is_empty()) {

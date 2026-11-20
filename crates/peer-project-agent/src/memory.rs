@@ -6,6 +6,7 @@
 //! JSONL is the canonical source of truth; the SQLite index is a disposable cache.
 
 pub mod admission;
+pub mod conflict;
 pub mod curator;
 pub mod episodes;
 pub mod file_anchors;
@@ -31,6 +32,7 @@ pub use admission::{
     AdmissionContext, AdmissionDecision, CuratorCandidate, decide_memory_admission,
     parse_curator_output, validate_curator_candidate,
 };
+pub use conflict::{MemoryConflictDecision, memory_conflict_decision};
 pub use curator::{
     CURATOR_EXCLUDED_CAPABILITY_PREFIXES, CuratorOutcome, MemoryCurator, curator_prompt,
 };
@@ -420,19 +422,82 @@ impl MemoryStore {
             conflicts_with: None,
             extra: Map::new(),
         };
-        let item = normalize_item(candidate).ok_or_else(|| ProjectError::code("INVALID_MEMORY"))?;
+        let mut item =
+            normalize_item(candidate).ok_or_else(|| ProjectError::code("INVALID_MEMORY"))?;
         let file = match item.scope.as_str() {
             "user" => self.user_file(),
             "project" => self.project_file(item.workspace_id.as_deref().unwrap_or(""))?,
             _ => return Err(ProjectError::code("INVALID_MEMORY")),
         };
+        let existing = self.fold_file(&file);
+        let created_at = item.created_at.clone();
+        self.apply_conflict_decision(&file, &existing, &mut item, &created_at);
         self.append_item(&file, &item)?;
-        if let Ok(idx_path) = self.index_file(item.workspace_id.as_deref())
+        if item.status == "active"
+            && let Ok(idx_path) = self.index_file(item.workspace_id.as_deref())
             && let Ok(idx) = MemoryIndex::open(&idx_path)
         {
             let _ = idx.upsert(&item);
         }
         Ok(item)
+    }
+
+    fn apply_conflict_decision(
+        &self,
+        file: &Path,
+        existing: &[MemoryItem],
+        item: &mut MemoryItem,
+        at: &str,
+    ) {
+        let dec = memory_conflict_decision(item, existing);
+        if !dec.replace_ids.is_empty() {
+            let replace_set: std::collections::HashSet<&str> =
+                dec.replace_ids.iter().map(String::as_str).collect();
+            for old in existing {
+                if !replace_set.contains(old.id.as_str()) {
+                    continue;
+                }
+                let mut superseded = old.clone();
+                superseded.status = "forgotten".to_owned();
+                superseded.superseded_by = Some(item.id.clone());
+                superseded.forget_reason = Some("superseded".to_owned());
+                superseded.updated_at = at.to_owned();
+                let _ = self.append_item(file, &superseded);
+                if let Ok(idx_path) = self.index_file(superseded.workspace_id.as_deref())
+                    && let Ok(idx) = MemoryIndex::open(&idx_path)
+                {
+                    let _ = idx.remove(&superseded.id);
+                }
+            }
+        }
+        if !dec.conflict_ids.is_empty() {
+            let conflict_set: std::collections::HashSet<&str> =
+                dec.conflict_ids.iter().map(String::as_str).collect();
+            let conflict_id = format!("conf-{}", uuid::Uuid::new_v4());
+            for old in existing {
+                if !conflict_set.contains(old.id.as_str()) {
+                    continue;
+                }
+                let mut flagged = old.clone();
+                let mut list = flagged.conflicts_with.clone().unwrap_or_default();
+                if !list.contains(&item.id) {
+                    list.push(item.id.clone());
+                }
+                flagged.conflicts_with = Some(list);
+                flagged.conflict_id = Some(conflict_id.clone());
+                flagged.status = "conflicted".to_owned();
+                flagged.updated_at = at.to_owned();
+                let _ = self.append_item(file, &flagged);
+                if let Ok(idx_path) = self.index_file(flagged.workspace_id.as_deref())
+                    && let Ok(idx) = MemoryIndex::open(&idx_path)
+                {
+                    let _ = idx.remove(&flagged.id);
+                }
+            }
+            item.conflict_id = Some(conflict_id);
+            item.conflicts_with = Some(dec.conflict_ids);
+            item.status = "conflicted".to_owned();
+        }
     }
 
     pub fn get(&self, workspace_id: Option<&str>, id: &str) -> Option<MemoryItem> {
@@ -491,42 +556,8 @@ impl MemoryStore {
             _ => return Err(ProjectError::code("INVALID_MEMORY")),
         };
 
-        // Check topic_key conflict against active items in the same file/scope.
-        if let (Some(tk), Some(tv)) = (item.topic_key.as_ref(), item.topic_value.as_ref()) {
-            let conflicting: Vec<MemoryItem> = self
-                .fold_file(&file)
-                .into_iter()
-                .filter(|old| {
-                    old.status == "active"
-                        && old.topic_key.as_deref() == Some(tk.as_str())
-                        && old.topic_value.as_deref() != Some(tv.as_str())
-                })
-                .collect();
-            if !conflicting.is_empty() {
-                let conflict_id = format!("conf-{}", uuid::Uuid::new_v4());
-                let mut clash_ids = Vec::new();
-                for mut old in conflicting {
-                    clash_ids.push(old.id.clone());
-                    let mut list = old.conflicts_with.clone().unwrap_or_default();
-                    if !list.contains(&item.id) {
-                        list.push(item.id.clone());
-                    }
-                    old.conflicts_with = Some(list);
-                    old.conflict_id = Some(conflict_id.clone());
-                    old.status = "conflicted".to_owned();
-                    old.updated_at = at.clone();
-                    let _ = self.append_item(&file, &old);
-                    if let Ok(idx_path) = self.index_file(old.workspace_id.as_deref())
-                        && let Ok(idx) = MemoryIndex::open(&idx_path)
-                    {
-                        let _ = idx.remove(&old.id);
-                    }
-                }
-                item.conflict_id = Some(conflict_id);
-                item.conflicts_with = Some(clash_ids);
-                item.status = "conflicted".to_owned();
-            }
-        }
+        let existing = self.fold_file(&file);
+        self.apply_conflict_decision(&file, &existing, &mut item, &at);
 
         self.append_item(&file, &item)?;
         if item.status == "active"

@@ -19,9 +19,10 @@ use super::{
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
     BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, ForegroundTickReport, LeaseStatus,
-    MemoryFilter, NativeProjectHost, QuestionState, TurnEndKind, now_iso, parse_iso_ms,
-    project_reply_questions,
+    MemoryFilter, NativeProjectHost, QuestionState, TurnEndKind, load_local_image_attachment,
+    now_iso, parse_iso_ms, project_reply_questions, task_result_references,
 };
+use peer_protocol::interactive_result::{InteractiveAvailability, InteractiveOwner};
 use peer_runtime::{
     CancellationToken,
     model_catalog::{ExecSelection, ExecSelectionError, resolve_exec},
@@ -138,6 +139,7 @@ struct BotShellState<'a> {
     last_refresh: Instant,
     last_maintenance: Instant,
     interaction_limit: usize,
+    active_task_results: Vec<(String, String)>,
 }
 
 impl<'a> BotShellState<'a> {
@@ -254,6 +256,7 @@ impl<'a> BotShellState<'a> {
             last_refresh: Instant::now(),
             last_maintenance: Instant::now(),
             interaction_limit: 40,
+            active_task_results: Vec::new(),
         };
         if !matches!(state.screen, BotScreen::BindWorkspace { .. }) {
             state.refresh_snapshot(true);
@@ -1208,6 +1211,14 @@ impl<'a> BotShellState<'a> {
     }
 
     fn handle_submit(&mut self, text: &str) -> Option<ShellOutcome> {
+        let trimmed = text.trim();
+        if trimmed == "/attach"
+            || trimmed
+                .strip_prefix("/attach")
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+        {
+            return self.handle_attach_command(trimmed);
+        }
         match parse_project_command(text) {
             ProjectCommand::Text(body) => {
                 if body.is_empty() {
@@ -1277,8 +1288,23 @@ impl<'a> BotShellState<'a> {
                 };
                 match self.host.supervisor().read_report(ws_id, &row.session_id) {
                     Ok(rep) => {
+                        let result_refs = task_result_references(&rep.evidence_refs);
+                        self.active_task_results = result_refs
+                            .iter()
+                            .map(|r| (row.session_id.clone(), r.clone()))
+                            .collect();
+                        let results_section = if result_refs.is_empty() {
+                            String::new()
+                        } else {
+                            let lines: Vec<String> = result_refs
+                                .iter()
+                                .enumerate()
+                                .map(|(i, r)| format!("  /result {} -> {r}", i + 1))
+                                .collect();
+                            format!("\n\n固定结果 (/result N):\n{}", lines.join("\n"))
+                        };
                         let body = format!(
-                            "状态: {}\n核验结论: {}（独立核验: {}）\n签收: {}\n证据引用 ({}): {}\n\n变更文件 ({}): {}\n\n摘要:\n{}",
+                            "状态: {}\n核验结论: {}（独立核验: {}）\n签收: {}\n证据引用 ({}): {}\n\n变更文件 ({}): {}\n\n摘要:\n{}{results_section}",
                             rep.summary.status,
                             rep.verdict_outcome,
                             rep.independent_verifier,
@@ -1304,12 +1330,79 @@ impl<'a> BotShellState<'a> {
                 }
                 None
             }
-            ProjectCommand::Result(_) => {
+            ProjectCommand::Result(num) => {
                 self.composer.accepted();
                 self.clear_persisted_draft();
-                self.notice = Some(
-                    "可使用 `peer result <interactive-result://…>` 查看完整固定结果。".to_owned(),
-                );
+                let Some(ws_id) = self.active_workspace_id.clone() else {
+                    self.notice = Some("请先打开或绑定一个项目机器人。".to_owned());
+                    return None;
+                };
+                let Some(idx) = num.checked_sub(1) else {
+                    self.notice = Some("结果序号需为从 1 开始的正整数。".to_owned());
+                    return None;
+                };
+                let summary_res = if let Some((sid, locator)) = self.active_task_results.get(idx) {
+                    self.host.read_task_result(&ws_id, sid, locator)
+                } else {
+                    let conv_id = self
+                        .host
+                        .profiles()
+                        .read(&ws_id)
+                        .and_then(|p| p.agent_conversation_id);
+                    if let Some(cid) = conv_id {
+                        let owner = InteractiveOwner {
+                            workspace_id: ws_id.clone(),
+                            conversation_id: cid,
+                        };
+                        match self.host.interactive_results().list_for_owner(&owner) {
+                            Ok(items) => match items.get(idx).and_then(|v| v["ref"].as_str()) {
+                                Some(locator) => {
+                                    self.host.read_interactive_result_summary(&ws_id, locator)
+                                }
+                                None => Err(peer_project_agent::ProjectError::code(
+                                    "interactive_result_unavailable",
+                                )),
+                            },
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Err(peer_project_agent::ProjectError::code(
+                            "interactive_result_unavailable",
+                        ))
+                    }
+                };
+                match summary_res {
+                    Ok(summary) => {
+                        let avail_label = match summary.availability {
+                            InteractiveAvailability::Available => "available",
+                            InteractiveAvailability::Cleaned => "cleaned",
+                            InteractiveAvailability::OriginOnly => "origin_only",
+                        };
+                        let cleaned_line = summary
+                            .cleaned_at
+                            .as_deref()
+                            .map(|at| format!("\n清理时间: {at}"))
+                            .unwrap_or_default();
+                        let trunc_note = if summary.truncated {
+                            "\n（文本已按安全上限截断，可通过 `peer result` CLI 查看完整记录）"
+                        } else {
+                            ""
+                        };
+                        let body = format!(
+                            "引用: {}\n状态: {avail_label}\n数据级别: {}{cleaned_line}\n\n{}{trunc_note}",
+                            summary.locator,
+                            summary.data_level.as_deref().unwrap_or("unknown"),
+                            summary.text_fallback.text,
+                        );
+                        self.screen = BotScreen::TaskDetail {
+                            title: summary.title,
+                            body,
+                        };
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("无法读取固定结果 #{num}（{}）。", err.code));
+                    }
+                }
                 None
             }
             ProjectCommand::Card {
@@ -1543,6 +1636,60 @@ impl<'a> BotShellState<'a> {
                 None
             }
         }
+    }
+
+    fn handle_attach_command(&mut self, trimmed: &str) -> Option<ShellOutcome> {
+        let Some(ws_id) = self.active_workspace_id.clone() else {
+            self.notice = Some("请先打开或绑定一个项目机器人。".to_owned());
+            return None;
+        };
+        let rest = trimmed.strip_prefix("/attach").unwrap_or("").trim();
+        if rest.is_empty() {
+            self.notice = Some("用法: /attach <图片路径> [附带说明]".to_owned());
+            return None;
+        }
+        let (raw_path, prompt) = match rest.split_once(char::is_whitespace) {
+            Some((p, t)) => (p.trim(), t.trim()),
+            None => (rest, ""),
+        };
+        let ws_root = self
+            .host
+            .registry()
+            .get(&ws_id)
+            .ok()
+            .flatten()
+            .map(|e| PathBuf::from(e.path))
+            .unwrap_or_else(|| self.workspace.clone());
+        let att = match load_local_image_attachment(&ws_root, raw_path, None) {
+            Ok(a) => a,
+            Err(err) => {
+                self.notice = Some(format!("附件读取失败（{}）。", err.code));
+                return None;
+            }
+        };
+        let input_id = uuid::Uuid::new_v4().to_string();
+        match self.host.submit_user_input_with_attachments(
+            &ws_id,
+            &input_id,
+            prompt,
+            None,
+            vec![att],
+        ) {
+            Ok(_) => {
+                self.composer.accepted();
+                self.has_persisted_draft = true;
+                self.clear_persisted_draft();
+                self.anchor.jump_to_latest();
+                self.screen = BotScreen::Conversation;
+                self.notice = Some("已接收图片附件并加入队列，正在推进…".to_owned());
+                self.refresh_snapshot(false);
+                self.trigger_background_tick();
+            }
+            Err(err) => {
+                self.notice = Some(format!("附件发送失败（{}），草稿已保留。", err.code));
+            }
+        }
+        None
     }
 
     fn apply_theme_mode(&mut self, next_mode: ThemeMode) {

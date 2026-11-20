@@ -6,13 +6,18 @@
 
 use crate::{
     AcceptanceDecision, AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore,
-    CoordinationHub, CreateBotProfile, DigestQueue, ExecutionObligationService, HandoffOutcome,
-    InputDraftStore, InputQueue, MemoryCurator, MemoryMaintenance, MemoryStore,
+    ConversationSearchHit, ConversationSearchIndex, CoordinationHub, CreateBotProfile, DigestQueue,
+    ExecutionObligationService, HandoffOutcome, InputDraftStore, InputQueue,
+    InteractiveResultStore, MemoryCurator, MemoryFilter, MemoryMaintenance, MemoryStore,
     ObjectiveActionItem, ObjectiveActions, ObjectiveStore, ProjectError, ProjectInbox,
     ProjectInput, ProjectRecoveryBarrier, ProjectRegistry, ProjectRegistryEntry,
     RecoveryDiagnostic, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, SubmitInputRequest,
-    WatchHost, WatchPublisher, now_iso, parse_iso_ms,
+    WatchHost, WatchPublisher, collect_conversation_search_documents, now_iso, parse_iso_ms,
     runner::{ProjectAgentRunner, RunTurnOptions},
+    task_result_references,
+};
+use peer_protocol::interactive_result::{
+    InteractiveOwner, InteractiveResultReference, InteractiveResultSummary,
 };
 use peer_runtime::{
     CancellationToken,
@@ -21,7 +26,7 @@ use peer_runtime::{
 };
 use peer_store::{
     AcquireLease, ApprovalStore, ConversationStore, HostIdentity, HostLeaseRecord, HostLeaseStore,
-    HostSurface, NewProjectConversation, PolicyStore, StoreError,
+    HostSurface, NewProjectConversation, PolicyStore, StoreError, read_interactive_result,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -134,6 +139,7 @@ pub struct NativeProjectHost {
     directory: BotDirectory,
     conversations: ConversationStore,
     digests: DigestQueue,
+    interactive_results: InteractiveResultStore,
 }
 
 impl NativeProjectHost {
@@ -176,6 +182,7 @@ impl NativeProjectHost {
             directory: BotDirectory::new(&home),
             conversations: ConversationStore::new(&home),
             digests: DigestQueue::new(&home),
+            interactive_results: InteractiveResultStore::new(&home),
             supervisor,
             runner,
             host_identity,
@@ -185,6 +192,9 @@ impl NativeProjectHost {
 
     pub fn data_home(&self) -> &Path {
         &self.data_home
+    }
+    pub fn interactive_results(&self) -> &InteractiveResultStore {
+        &self.interactive_results
     }
     pub fn registry(&self) -> &ProjectRegistry {
         &self.registry
@@ -408,6 +418,18 @@ impl NativeProjectHost {
         text: &str,
         answer_to: Option<String>,
     ) -> Result<ProjectInput, ProjectError> {
+        self.submit_user_input_with_attachments(workspace_id, input_id, text, answer_to, vec![])
+    }
+
+    /// Submit a durable user input with normalized multimodal attachments to `InputQueue`.
+    pub fn submit_user_input_with_attachments(
+        &self,
+        workspace_id: &str,
+        input_id: &str,
+        text: &str,
+        answer_to: Option<String>,
+        attachments: Vec<Value>,
+    ) -> Result<ProjectInput, ProjectError> {
         self.inputs.submit_input(&SubmitInputRequest {
             workspace_id,
             input_id,
@@ -416,6 +438,7 @@ impl NativeProjectHost {
             anchor_refs: vec![],
             quote_refs: vec![],
             attachment_refs: vec![],
+            attachments,
             answer_to,
         })
     }
@@ -1196,6 +1219,10 @@ impl NativeProjectHost {
             .map(|e| PathBuf::from(e.path))
             .unwrap_or_default();
 
+        let conv_id_opt = profile
+            .as_ref()
+            .and_then(|p| p.agent_conversation_id.clone());
+
         self.recovery
             .run_phases(
                 workspace_id,
@@ -1203,6 +1230,7 @@ impl NativeProjectHost {
                 |phase, mut counts| {
                     let ws_path = ws_path.clone();
                     let digest_time = digest_time.clone();
+                    let conv_id_opt = conv_id_opt.clone();
                     Box::pin(async move {
                         match phase {
                             "lease" => {
@@ -1230,6 +1258,13 @@ impl NativeProjectHost {
                                 let plans = self.supervisor.list_workspace_plans(workspace_id);
                                 let _ =
                                     self.obligation_service().suspend_live(workspace_id, &plans);
+                                if let Some(ref conv_id) = conv_id_opt {
+                                    let owner = InteractiveOwner {
+                                        workspace_id: workspace_id.to_owned(),
+                                        conversation_id: conv_id.clone(),
+                                    };
+                                    let _ = self.interactive_results.reconcile_pending(&owner);
+                                }
                             }
                             "watch" => {
                                 let plans = self.supervisor.list_workspace_plans(workspace_id);
@@ -1528,6 +1563,138 @@ impl NativeProjectHost {
         }
 
         Ok(report)
+    }
+
+    pub fn read_interactive_result_summary(
+        &self,
+        workspace_id: &str,
+        locator: &str,
+    ) -> Result<InteractiveResultSummary, ProjectError> {
+        let reference = InteractiveResultReference::parse(locator)
+            .ok_or_else(|| ProjectError::code("interactive_reference_invalid"))?;
+        if reference.owner.workspace_id != workspace_id {
+            return Err(ProjectError::code("interactive_scope_denied"));
+        }
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("interactive_scope_denied"))?;
+        if profile.agent_conversation_id.as_deref()
+            != Some(reference.owner.conversation_id.as_str())
+        {
+            return Err(ProjectError::code("interactive_scope_denied"));
+        }
+        read_interactive_result(&self.data_home, &reference)
+            .map_err(|e| ProjectError::code(e.code()))
+    }
+
+    pub fn read_task_result(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        locator: &str,
+    ) -> Result<InteractiveResultSummary, ProjectError> {
+        let rep = self
+            .supervisor
+            .read_report(workspace_id, session_id)
+            .map_err(|_| ProjectError::code("interactive_scope_denied"))?;
+        let allowed = task_result_references(&rep.evidence_refs);
+        if !allowed.iter().any(|r| r == locator) {
+            return Err(ProjectError::code("interactive_scope_denied"));
+        }
+        self.read_interactive_result_summary(workspace_id, locator)
+    }
+
+    pub fn search_workspace(
+        &self,
+        workspace_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>, ProjectError> {
+        let mut msg_storage: Vec<(String, Value)> = Vec::new();
+        if let Some(conv_id) = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .and_then(|p| p.agent_conversation_id)
+            && let Ok(snap) = self
+                .conversations
+                .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        {
+            for m in snap.history.messages {
+                msg_storage.push((workspace_id.to_owned(), m));
+            }
+        }
+        let msg_refs: Vec<(&str, &Value)> =
+            msg_storage.iter().map(|(ws, m)| (ws.as_str(), m)).collect();
+        let tasks: Vec<Value> = self
+            .supervisor
+            .list_sessions(workspace_id)
+            .into_iter()
+            .filter_map(|s| serde_json::to_value(s).ok())
+            .collect();
+        let memories = self.memory.list(&MemoryFilter {
+            scope: None,
+            workspace_id: Some(workspace_id),
+            kind: None,
+            status: Some("active"),
+        });
+        let docs = collect_conversation_search_documents(&[], &msg_refs, &tasks, &memories);
+        let db_path = self
+            .data_home
+            .join("project-runtime")
+            .join(workspace_id)
+            .join("search-index.sqlite");
+        let idx = ConversationSearchIndex::open(&db_path)?;
+        idx.sync(&docs)?;
+        idx.search(query, Some(workspace_id), None, limit)
+    }
+
+    pub fn search_all(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>, ProjectError> {
+        let bots_val = bot_list_json(self);
+        let bots: Vec<Value> = bots_val
+            .as_array()
+            .or_else(|| bots_val["items"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut msg_storage: Vec<(String, Value)> = Vec::new();
+        let mut tasks: Vec<Value> = Vec::new();
+        for bot in &bots {
+            let Some(ws_id) = bot["workspaceId"].as_str() else {
+                continue;
+            };
+            if let Some(conv_id) = bot["profile"]["agentConversationId"].as_str()
+                && let Ok(snap) = self
+                    .conversations
+                    .read_committed(conv_id, None, 4 * 1024 * 1024)
+            {
+                for m in snap.history.messages {
+                    msg_storage.push((ws_id.to_owned(), m));
+                }
+            }
+            for s in self.supervisor.list_sessions(ws_id) {
+                if let Ok(v) = serde_json::to_value(s) {
+                    tasks.push(v);
+                }
+            }
+        }
+        let msg_refs: Vec<(&str, &Value)> =
+            msg_storage.iter().map(|(ws, m)| (ws.as_str(), m)).collect();
+        let memories = self.memory.list(&MemoryFilter {
+            scope: None,
+            workspace_id: None,
+            kind: None,
+            status: Some("active"),
+        });
+        let docs = collect_conversation_search_documents(&bots, &msg_refs, &tasks, &memories);
+        let idx = ConversationSearchIndex::open_in_memory()?;
+        idx.rebuild(&docs)?;
+        idx.search(query, None, None, limit)
     }
 
     pub fn close(&self) {

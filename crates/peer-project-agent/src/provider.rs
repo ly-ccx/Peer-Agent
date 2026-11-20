@@ -4,10 +4,11 @@
 //! `CapabilityProvider -> Manifest -> RuntimeProjection(RuntimeMode::ProjectAgent) -> ToolCall -> PermissionGrant -> Evidence`.
 
 use crate::{
-    BotProfileStore, CommitAgentMessageRequest, CoordinationHub, DigestQueue,
-    ExecutionObligationService, MemoryFilter, MemoryStore, ObjectiveActions, ObjectiveStore,
-    ProjectError, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, UpdateObjectiveRequest,
-    UserAnchorCandidate, WriteMemoryRequest,
+    BotProfileStore, CommitAgentMessageRequest, ConversationSearchDocument,
+    ConversationSearchIndex, CoordinationHub, DigestQueue, ExecutionObligationService,
+    INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL, InteractiveResultStore, MemoryFilter,
+    MemoryStore, ObjectiveActions, ObjectiveStore, ProjectError, SessionSupervisor, SpawnCriterion,
+    SpawnSessionRequest, UpdateObjectiveRequest, UserAnchorCandidate, WriteMemoryRequest,
     acceptance::verdict_ref_for,
     memory_secret_reason, objective_action_card_id,
     objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
@@ -16,7 +17,7 @@ use crate::{
         compose_reply, decide_surfacing, resolve_user_anchors,
     },
 };
-use peer_protocol::ExecutionResourceScope;
+use peer_protocol::{ExecutionResourceScope, interactive_result::InteractiveOwner};
 use peer_runtime::{
     CancellationToken,
     capability::{CapabilityError as HostError, ProviderPermission},
@@ -759,6 +760,25 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                     "additionalProperties": false
                 }),
             ),
+            Self::manifest(
+                INTERACTIVE_INSPECT_TOOL,
+                INTERACTIVE_INSPECT_CAPABILITY,
+                "Inspect metadata or fallback text of an admitted fixed interactive result or publication receipt.",
+                json!({
+                    "type": "object",
+                    "required": ["target", "view"],
+                    "properties": {
+                        "target": {"type": "object"},
+                        "view": {"type": "string", "enum": ["metadata", "text", "program", "data", "evaluate"]},
+                        "bindingId": {"type": "string"},
+                        "selector": {"type": "object"},
+                        "followupId": {"type": "string"},
+                        "offset": {"type": "integer", "minimum": 0},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 4000}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
         ]
     }
 
@@ -773,6 +793,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             && !capability.starts_with("local.memory.")
             && !capability.starts_with("local.objective.")
             && !capability.starts_with("local.continuity.")
+            && !capability.starts_with("local.interactive.")
         {
             return Err(HostError("tool_not_projected"));
         }
@@ -1155,7 +1176,6 @@ fn execute_search_conversation(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ProjectError::code("invalid_input"))?;
-    let needle = query.to_lowercase();
     let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
     let kinds_filter: Option<HashSet<String>> = args["kinds"].as_array().map(|arr| {
         arr.iter()
@@ -1166,7 +1186,10 @@ fn execute_search_conversation(
     let snap = ConversationStore::new(data_home)
         .read_committed(&state.conversation_id, None, 4 * 1024 * 1024)
         .map_err(ProjectError::from)?;
-    let mut matches = Vec::new();
+
+    let mut docs = Vec::new();
+    let mut row_by_id: std::collections::HashMap<String, (&str, Value)> =
+        std::collections::HashMap::new();
     for m in snap.history.messages.iter().rev() {
         if m["meta"]["compaction"].is_object()
             || matches!(m["kind"].as_str(), Some("compaction" | "agent_turn"))
@@ -1186,10 +1209,49 @@ fn execute_search_conversation(
         } else if !matches!(eff_kind, "user_input" | "agent_reply" | "system_card") {
             continue;
         }
+        let Some(msg_id) = m["id"].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
         let content = m["content"].as_str().unwrap_or("");
-        if content.is_empty() || !content.to_lowercase().contains(&needle) {
+        if content.trim().is_empty() {
             continue;
         }
+        let title: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
+        let clipped_title: String = title.chars().take(80).collect();
+        let doc = ConversationSearchDocument {
+            id: format!("message:{}:{msg_id}", state.workspace_id),
+            kind: "message".into(),
+            workspace_id: state.workspace_id.clone(),
+            title: clipped_title,
+            text: content.to_owned(),
+            message_id: Some(msg_id.to_owned()),
+            session_id: None,
+            memory_id: None,
+            updated_at: m["createdAt"].as_str().unwrap_or("").to_owned(),
+        };
+        docs.push(doc);
+        row_by_id.insert(msg_id.to_owned(), (eff_kind, m.clone()));
+    }
+
+    let db_path = data_home
+        .join("project-runtime")
+        .join(&state.workspace_id)
+        .join("search-index.sqlite");
+    let idx = ConversationSearchIndex::open(&db_path)?;
+    for doc in &docs {
+        let _ = idx.upsert(doc)?;
+    }
+    let hits = idx.search(query, Some(&state.workspace_id), Some(&["message"]), 200)?;
+
+    let mut matches = Vec::new();
+    for hit in hits {
+        let Some(msg_id) = hit.message_id.as_deref() else {
+            continue;
+        };
+        let Some((eff_kind, m)) = row_by_id.get(msg_id) else {
+            continue;
+        };
+        let content = m["content"].as_str().unwrap_or("");
         let redacted = memory_secret_reason(content).is_some();
         let snippet: String = if redacted {
             "[REDACTED]".to_owned()
@@ -2383,6 +2445,18 @@ fn execute_project_capability(
                     "action": action,
                 }))
             }
+        }
+        cap if cap == INTERACTIVE_INSPECT_CAPABILITY => {
+            let owner = InteractiveOwner {
+                workspace_id: state.workspace_id.clone(),
+                conversation_id: state.conversation_id.clone(),
+            };
+            let out = InteractiveResultStore::new(data_home).inspect_for_role(
+                "project_agent",
+                &owner,
+                args,
+            )?;
+            Ok(out)
         }
         cap if cap.starts_with("local.objective.") => {
             execute_objective_capability(cap, args, data_home, &state)

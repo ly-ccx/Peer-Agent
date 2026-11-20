@@ -1163,17 +1163,53 @@ impl SessionSupervisor {
                     prompt.push_str(&format!("- [{kind}] {desc}\n"));
                 }
             }
+            let mat_dir = self
+                .data_home
+                .join("project-runtime")
+                .join(workspace_id)
+                .join("session-attachments")
+                .join(session_id);
+            let anchor_ids: Vec<String> = plan["delegationOrigin"]["anchorMessageIds"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let image_paths: Vec<PathBuf> = if let (Some(parent_cid), false) = (
+                plan["delegationOrigin"]["parentConversationId"].as_str(),
+                anchor_ids.is_empty(),
+            ) {
+                self.conversations
+                    .read_committed(parent_cid, None, 8 * 1024 * 1024)
+                    .ok()
+                    .and_then(|snap| {
+                        crate::attachments::attachments_from_messages(
+                            &snap.history.messages,
+                            &anchor_ids,
+                        )
+                        .ok()
+                    })
+                    .and_then(|atts| {
+                        crate::attachments::materialize_image_attachments(&mat_dir, &atts).ok()
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             let runtime = NativeConversationRuntime::new(
                 &self.data_home,
                 ConversationAccess::new(session_profile.access_level),
             );
-            let conv_out = Box::pin(runtime.execute(
+            let conv_res = Box::pin(runtime.execute(
                 &ConversationOptions {
                     workspace: &target_ws,
                     conversation_id: None,
                     resume_from: None,
                     prompt: &prompt,
-                    image_paths: &[],
+                    image_paths: &image_paths,
                     provider_id: worker_model.provider(),
                     mode: RuntimeMode::Chat,
                     effort: "default",
@@ -1185,7 +1221,9 @@ impl SessionSupervisor {
                 permission,
                 cancel,
             ))
-            .await?;
+            .await;
+            let _ = fs::remove_dir_all(&mat_dir);
+            let conv_out = conv_res?;
             let status: &'static str = match conv_out.error {
                 None => "completed",
                 Some("CANCELLED") => "cancelled",

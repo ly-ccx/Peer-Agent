@@ -8,6 +8,7 @@
 //! ProjectAgentRunner actor. Never depends on terminal UI crates.
 
 pub mod acceptance;
+pub mod attachments;
 pub mod circuit_breaker;
 pub mod coordination_bridge;
 pub mod digest;
@@ -16,6 +17,7 @@ pub mod drafts;
 pub mod host;
 pub mod inbox;
 pub mod input_queue;
+pub mod interactive_results;
 pub mod memory;
 pub mod objectives;
 pub mod obligation;
@@ -26,6 +28,7 @@ pub mod registry;
 pub mod reply;
 pub mod runner;
 pub mod scheduler;
+pub mod search_index;
 pub mod supervisor;
 pub mod system_context;
 pub mod verifier;
@@ -41,6 +44,11 @@ pub use acceptance::{
     VerificationCheck, VerificationVerdict, anchor_requests_review, compute_verification_verdict,
     decide_session_acceptance, evaluate_acceptance_close_gate, handoff_question_id,
     verdict_ref_for,
+};
+pub use attachments::{
+    INPUT_ATTACHMENT_LIMIT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_ATTACHMENT_BYTES,
+    attachments_from_messages, load_local_image_attachment, materialize_image_attachments,
+    normalize_input_attachments, normalize_user_upload, project_user_message_for_model,
 };
 pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
@@ -70,15 +78,21 @@ pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
 pub use input_queue::{
     ConsumeOutcome, InputQueue, ProjectInput, SubmitInputRequest, input_message_id,
 };
+pub use interactive_results::{
+    INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_RESULTS_PER_BOT,
+    INTERACTIVE_STORE_BYTES, INTERACTIVE_TOMBSTONE_LIMIT, InteractiveResultStore,
+    PublishInteractiveRequest, build_cleanup_expected_digest, task_result_references,
+};
 pub use memory::{
     AdmissionContext, AdmissionDecision, CURATOR_EXCLUDED_CAPABILITY_PREFIXES, CURATOR_INTERVAL_MS,
     CuratorCandidate, CuratorClock, CuratorOutcome, EpisodeLog, FrozenMemoryItem,
-    MaintenanceOutcome, MemoryCandidateRecord, MemoryCurator, MemoryEpisode, MemoryFileAnchor,
-    MemoryFilter, MemoryHit, MemoryIndex, MemoryItem, MemoryMaintenance, MemorySnapshot,
-    MemoryStore, USER_INPUTS_PER_RUN, WriteCuratedMemoryRequest, WriteMemoryRequest,
-    capture_file_anchors, create_snapshot, curator_prompt, decide_memory_admission,
-    fingerprint_material, is_effective_memory, is_task_end_event, memory_secret_reason,
-    parse_curator_output, read_file_anchor, read_snapshots, validate_curator_candidate,
+    MaintenanceOutcome, MemoryCandidateRecord, MemoryConflictDecision, MemoryCurator,
+    MemoryEpisode, MemoryFileAnchor, MemoryFilter, MemoryHit, MemoryIndex, MemoryItem,
+    MemoryMaintenance, MemorySnapshot, MemoryStore, USER_INPUTS_PER_RUN, WriteCuratedMemoryRequest,
+    WriteMemoryRequest, capture_file_anchors, create_snapshot, curator_prompt,
+    decide_memory_admission, fingerprint_material, is_effective_memory, is_task_end_event,
+    memory_conflict_decision, memory_secret_reason, parse_curator_output, read_file_anchor,
+    read_snapshots, validate_curator_candidate,
 };
 pub use objectives::{
     AppendObservationRequest, CreateObjectiveRequest, ObjectiveActionItem, ObjectiveActions,
@@ -112,6 +126,10 @@ pub use runner::{
 pub use scheduler::{
     ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,
     normalize_concurrency, slot_of,
+};
+pub use search_index::{
+    ConversationSearchDocument, ConversationSearchHit, ConversationSearchIndex,
+    collect_conversation_search_documents,
 };
 pub use supervisor::{
     SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,

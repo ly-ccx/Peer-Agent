@@ -80,6 +80,7 @@ pub struct SubmitInputRequest<'a> {
     pub anchor_refs: Vec<String>,
     pub quote_refs: Vec<String>,
     pub attachment_refs: Vec<String>,
+    pub attachments: Vec<Value>,
     pub answer_to: Option<String>,
 }
 
@@ -217,7 +218,15 @@ impl InputQueue {
             return Err(ProjectError::code("INVALID_SURFACE"));
         }
         let text = request.text.trim();
-        if text.is_empty() && request.attachment_refs.is_empty() {
+        let normalized_attachments = if request.attachments.is_empty() {
+            None
+        } else {
+            Some(crate::attachments::normalize_input_attachments(
+                &request.attachments,
+            )?)
+        };
+        if text.is_empty() && request.attachment_refs.is_empty() && normalized_attachments.is_none()
+        {
             return Err(ProjectError::code("EMPTY_INPUT"));
         }
         if text.len() > MAX_TEXT_BYTES {
@@ -236,7 +245,7 @@ impl InputQueue {
                 anchor_refs: request.anchor_refs.clone(),
                 quote_refs: request.quote_refs.clone(),
                 attachment_refs: request.attachment_refs.clone(),
-                attachments: None,
+                attachments: normalized_attachments,
                 resource_feedback: None,
                 created_at: now_iso(),
                 answer_to: request.answer_to.clone(),
@@ -359,6 +368,11 @@ impl InputQueue {
                 }
                 if !item.attachment_refs.is_empty() {
                     msg["attachmentRefs"] = json!(item.attachment_refs);
+                }
+                if let Some(ref atts) = item.attachments
+                    && !atts.is_empty()
+                {
+                    msg["attachments"] = json!(atts);
                 }
                 if let Some(ref answer_to) = item.answer_to {
                     msg["answerTo"] = json!(answer_to);
@@ -565,6 +579,7 @@ mod tests {
             anchor_refs: vec![],
             quote_refs: vec![],
             attachment_refs: vec![],
+            attachments: vec![],
             answer_to: None,
         };
         let first = queue.submit_input(&req).unwrap();
