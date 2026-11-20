@@ -744,10 +744,7 @@ impl Drop for NativeProjectHost {
 
 /// Helper for tests and `peer exec --bot` to serialize a compact bot list snapshot.
 pub fn bot_list_json(host: &NativeProjectHost) -> Value {
-    let mut by_ws = HashMap::new();
-    for ws in host.profiles().list_workspace_ids() {
-        by_ws.insert(ws.clone(), host.supervisor().list_bot_sessions(&ws));
-    }
+    let by_ws = host.supervisor().list_all_bot_sessions();
     json!(host.directory().list(&by_ws))
 }
 

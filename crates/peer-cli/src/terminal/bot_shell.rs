@@ -192,32 +192,39 @@ impl<'a> BotShellState<'a> {
             last_refresh: Instant::now(),
             interaction_limit: 40,
         };
-        state.refresh_snapshot(true);
+        if !matches!(state.screen, BotScreen::BindWorkspace { .. }) {
+            state.refresh_snapshot(true);
+        }
         Ok(state)
     }
 
     fn refresh_snapshot(&mut self, load_draft: bool) {
         self.last_refresh = Instant::now();
-        // Refresh bot directory list (strictly read-only).
-        let mut by_ws = HashMap::new();
-        for ws in self.host.profiles().list_workspace_ids() {
-            by_ws.insert(ws.clone(), self.host.supervisor().list_bot_sessions(&ws));
-        }
-        let listed = self.host.directory().list(&by_ws);
-        self.bots = listed
-            .into_iter()
-            .map(|item| BotRowView {
-                workspace_id: item.workspace_id,
-                display_name: item.profile.display_name,
-                last_activity: (!item.last_active_at.is_empty()).then_some(item.last_active_at),
-                needs_you: item.state.needs_you,
-                running: item.state.running,
-                unread: item.state.unread,
-                preview: (!item.preview.is_empty()).then_some(item.preview),
-            })
-            .collect();
-        if self.selected_bot >= self.bots.len() && !self.bots.is_empty() {
-            self.selected_bot = self.bots.len() - 1;
+        match &self.screen {
+            BotScreen::BindWorkspace { .. } => return,
+            BotScreen::BotList => {
+                // Refresh full bot directory list only when browsing `/bots` (single supervisor scan).
+                let by_ws = self.host.supervisor().list_all_bot_sessions();
+                let listed = self.host.directory().list(&by_ws);
+                self.bots = listed
+                    .into_iter()
+                    .map(|item| BotRowView {
+                        workspace_id: item.workspace_id,
+                        display_name: item.profile.display_name,
+                        last_activity: (!item.last_active_at.is_empty())
+                            .then_some(item.last_active_at),
+                        needs_you: item.state.needs_you,
+                        running: item.state.running,
+                        unread: item.state.unread,
+                        preview: (!item.preview.is_empty()).then_some(item.preview),
+                    })
+                    .collect();
+                if self.selected_bot >= self.bots.len() && !self.bots.is_empty() {
+                    self.selected_bot = self.bots.len() - 1;
+                }
+                return;
+            }
+            _ => {}
         }
 
         let Some(ws_id) = self.active_workspace_id.clone() else {
@@ -416,28 +423,32 @@ impl<'a> BotShellState<'a> {
             }
         }
 
-        // Memories & Objectives (bounded read)
-        self.memories = self
-            .host
-            .memory()
-            .list(&MemoryFilter {
-                workspace_id: Some(&ws_id),
-                status: Some("active"),
-                ..Default::default()
-            })
-            .into_iter()
-            .take(50)
-            .map(|m| format!("[{}/{}] {}", m.scope, m.kind, m.text))
-            .collect();
-        self.objectives = self
-            .host
-            .objectives()
-            .list(&ws_id)
-            .unwrap_or_default()
-            .into_iter()
-            .take(50)
-            .map(|o| format!("[{}] {} — {}", o.status, o.title, o.outcome))
-            .collect();
+        // Memories & Objectives (lazy-loaded when their subview is open)
+        if self.screen == BotScreen::Memory {
+            self.memories = self
+                .host
+                .memory()
+                .list(&MemoryFilter {
+                    workspace_id: Some(&ws_id),
+                    status: Some("active"),
+                    ..Default::default()
+                })
+                .into_iter()
+                .take(50)
+                .map(|m| format!("[{}/{}] {}", m.scope, m.kind, m.text))
+                .collect();
+        }
+        if self.screen == BotScreen::Objectives {
+            self.objectives = self
+                .host
+                .objectives()
+                .list(&ws_id)
+                .unwrap_or_default()
+                .into_iter()
+                .take(50)
+                .map(|o| format!("[{}] {} — {}", o.status, o.title, o.outcome))
+                .collect();
+        }
 
         // Mark read when viewing latest conversation messages.
         if self.screen == BotScreen::Conversation && self.anchor.is_following() {

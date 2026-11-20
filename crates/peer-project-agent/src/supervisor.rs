@@ -33,13 +33,278 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
-    fs,
+    collections::{HashMap, HashSet},
+    fs::{self, File},
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    time::Duration,
+    sync::Mutex,
+    time::{Duration, SystemTime},
 };
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+const DELEGATION_MARKER: &[u8] = b"\"delegationOrigin\"";
+const LARGE_PLAN_THRESHOLD: u64 = 256 * 1024;
+const LARGE_PLAN_HEAD_BYTES: usize = 32 * 1024;
+const LARGE_PLAN_TAIL_BYTES: usize = 128 * 1024;
+
+type FileStamp = (u64, Option<SystemTime>);
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanIndexMetaRow {
+    plan_id: Option<String>,
+    conversation_id: Option<String>,
+    title: Option<String>,
+    status: Option<String>,
+    updated_at: Option<String>,
+    result_accepted_at: Option<String>,
+    result_accepted_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationOriginSummary {
+    workspace_id: Option<String>,
+    session_id: Option<String>,
+    phase: Option<String>,
+    read_only: Option<bool>,
+    priority: Option<String>,
+    plan_approval_id: Option<String>,
+    superseded_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerSummary {
+    status: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptanceSummary {
+    accepted_at: Option<String>,
+    accepted_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeliveryBindingSummary {
+    worktree_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanSummaryDoc {
+    plan_id: Option<String>,
+    conversation_id: Option<String>,
+    title: Option<String>,
+    status: Option<String>,
+    updated_at: Option<String>,
+    delegation_origin: Option<DelegationOriginSummary>,
+    runner: Option<RunnerSummary>,
+    result_acceptance: Option<AcceptanceSummary>,
+    delivery_binding: Option<DeliveryBindingSummary>,
+}
+
+#[derive(Debug, Default)]
+struct PlanIndexCache {
+    index_stamp: Option<FileStamp>,
+    index_rows: Vec<PlanIndexMetaRow>,
+    /// Maps `plan_id -> (stamp, Some(summary) | None for non-delegated plans)`.
+    entries: HashMap<String, (FileStamp, Option<WorkSessionSummary>)>,
+}
+
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()))
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let n = needle.len();
+    if haystack.len() < n {
+        return None;
+    }
+    if n == 1 {
+        return haystack.iter().position(|&b| b == needle[0]);
+    }
+    let mut skip = [n; 256];
+    for (idx, &b) in needle[..n - 1].iter().enumerate() {
+        skip[usize::from(b)] = n - 1 - idx;
+    }
+    let last = needle[n - 1];
+    let mut i = 0usize;
+    let limit = haystack.len() - n;
+    while i <= limit {
+        let cur_last = haystack[i + n - 1];
+        if cur_last == last && haystack[i..i + n - 1] == needle[..n - 1] {
+            return Some(i);
+        }
+        i += skip[usize::from(cur_last)];
+    }
+    None
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    find_bytes(haystack, needle).is_some()
+}
+
+fn extract_top_level_field<T: for<'de> Deserialize<'de>>(buf: &[u8], key: &str) -> Option<T> {
+    let pattern = format!("\n  \"{key}\":");
+    let pos = find_bytes(buf, pattern.as_bytes())?;
+    let val_slice = &buf[pos + pattern.len()..];
+    serde_json::Deserializer::from_slice(val_slice)
+        .into_iter::<T>()
+        .next()?
+        .ok()
+}
+
+fn derive_doc_status(doc: &PlanSummaryDoc, origin: &DelegationOriginSummary) -> String {
+    if origin
+        .superseded_by
+        .as_deref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        return "superseded".to_owned();
+    }
+    if doc
+        .result_acceptance
+        .as_ref()
+        .and_then(|a| a.accepted_at.as_deref())
+        .is_some()
+    {
+        return "accepted".to_owned();
+    }
+    match doc.status.as_deref().unwrap_or("") {
+        "cancelled" => "cancelled".to_owned(),
+        "failed" => "failed".to_owned(),
+        "completed" => "result_ready".to_owned(),
+        "awaiting_approval" => "waiting_user".to_owned(),
+        _ => match origin.phase.as_deref().unwrap_or("queued") {
+            "paused" => "paused".to_owned(),
+            "awaiting_approval" => "waiting_user".to_owned(),
+            "verifying" => "verifying".to_owned(),
+            "running" => {
+                if doc.runner.as_ref().and_then(|r| r.status.as_deref()) == Some("waiting_user") {
+                    "waiting_user".to_owned()
+                } else {
+                    "running".to_owned()
+                }
+            }
+            "starting" => "starting".to_owned(),
+            _ => "queued".to_owned(),
+        },
+    }
+}
+
+fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
+    let origin = doc.delegation_origin.as_ref()?;
+    let workspace_id = origin
+        .workspace_id
+        .as_deref()
+        .filter(|s| !s.is_empty())?
+        .to_owned();
+    let conversation_id = doc.conversation_id.clone().unwrap_or_default();
+    let session_id = origin
+        .session_id
+        .clone()
+        .unwrap_or_else(|| conversation_id.clone());
+    let acceptance = doc.result_acceptance.as_ref();
+    Some(WorkSessionSummary {
+        session_id,
+        workspace_id,
+        conversation_id,
+        plan_id: doc.plan_id.clone().unwrap_or_default(),
+        title: doc.title.clone().unwrap_or_default(),
+        status: derive_doc_status(doc, origin),
+        phase: origin.phase.clone().unwrap_or_else(|| "queued".to_owned()),
+        read_only: origin.read_only == Some(true),
+        priority: origin
+            .priority
+            .clone()
+            .unwrap_or_else(|| "normal".to_owned()),
+        updated_at: doc.updated_at.clone().unwrap_or_default(),
+        accepted: acceptance.and_then(|a| a.accepted_at.as_deref()).is_some(),
+        accepted_by: acceptance.and_then(|a| a.accepted_by.clone()),
+        worktree_path: doc
+            .delivery_binding
+            .as_ref()
+            .and_then(|d| d.worktree_path.clone()),
+        approval_id: origin.plan_approval_id.clone(),
+    })
+}
+
+fn read_exact_or_eof(file: &mut File, buf: &mut Vec<u8>, limit: usize) -> io::Result<()> {
+    buf.clear();
+    file.take(limit as u64).read_to_end(buf)?;
+    Ok(())
+}
+
+fn extract_large_plan_summary(
+    file: &mut File,
+    file_len: u64,
+    pid: &str,
+    index_row: &PlanIndexMetaRow,
+) -> Option<WorkSessionSummary> {
+    let mut head = Vec::with_capacity(LARGE_PLAN_HEAD_BYTES.min(file_len as usize));
+    file.seek(SeekFrom::Start(0)).ok()?;
+    read_exact_or_eof(file, &mut head, LARGE_PLAN_HEAD_BYTES).ok()?;
+
+    // Confirm 2-space pretty-printed root layout before skipping the middle trace body.
+    if extract_top_level_field::<String>(&head, "planId").as_deref() != Some(pid) {
+        return None;
+    }
+
+    let tail_len = (LARGE_PLAN_TAIL_BYTES as u64).min(file_len);
+    let mut tail = Vec::with_capacity(tail_len as usize);
+    file.seek(SeekFrom::Start(file_len.saturating_sub(tail_len)))
+        .ok()?;
+    read_exact_or_eof(file, &mut tail, tail_len as usize).ok()?;
+
+    // If `delegationOrigin` sits outside both head and tail windows, return `None` to trigger full-file fallback.
+    let origin: DelegationOriginSummary = extract_top_level_field(&tail, "delegationOrigin")
+        .or_else(|| extract_top_level_field(&head, "delegationOrigin"))?;
+
+    let runner = extract_top_level_field::<RunnerSummary>(&tail, "runner")
+        .or_else(|| extract_top_level_field::<RunnerSummary>(&head, "runner"));
+    let result_acceptance = extract_top_level_field::<AcceptanceSummary>(&tail, "resultAcceptance")
+        .or_else(|| extract_top_level_field::<AcceptanceSummary>(&head, "resultAcceptance"))
+        .or_else(|| {
+            (index_row.result_accepted_at.is_some() || index_row.result_accepted_by.is_some()).then(
+                || AcceptanceSummary {
+                    accepted_at: index_row.result_accepted_at.clone(),
+                    accepted_by: index_row.result_accepted_by.clone(),
+                },
+            )
+        });
+    let delivery_binding =
+        extract_top_level_field::<DeliveryBindingSummary>(&head, "deliveryBinding").or_else(|| {
+            extract_top_level_field::<DeliveryBindingSummary>(&tail, "deliveryBinding")
+        });
+
+    let doc = PlanSummaryDoc {
+        plan_id: Some(pid.to_owned()),
+        conversation_id: extract_top_level_field::<String>(&head, "conversationId")
+            .or_else(|| extract_top_level_field::<String>(&tail, "conversationId"))
+            .or_else(|| index_row.conversation_id.clone()),
+        title: extract_top_level_field::<String>(&head, "title")
+            .or_else(|| extract_top_level_field::<String>(&tail, "title"))
+            .or_else(|| index_row.title.clone()),
+        status: extract_top_level_field::<String>(&head, "status")
+            .or_else(|| extract_top_level_field::<String>(&tail, "status"))
+            .or_else(|| index_row.status.clone()),
+        updated_at: extract_top_level_field::<String>(&tail, "updatedAt")
+            .or_else(|| extract_top_level_field::<String>(&head, "updatedAt"))
+            .or_else(|| index_row.updated_at.clone()),
+        delegation_origin: Some(origin),
+        runner,
+        result_acceptance,
+        delivery_binding,
+    };
+    summarize_doc(&doc)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,6 +386,7 @@ pub struct SessionSupervisor {
     inbox: ProjectInbox,
     scheduler: ExecutionScheduler,
     worktrees: GoalWorktreeAdapter,
+    plan_cache: Mutex<PlanIndexCache>,
 }
 
 fn plan_approval_required(policy: &str, read_only: bool) -> bool {
@@ -178,6 +444,7 @@ impl SessionSupervisor {
             scheduler: ExecutionScheduler::new(&home, concurrency),
             worktrees: GoalWorktreeAdapter::new(&home, None),
             data_home: home,
+            plan_cache: Mutex::new(PlanIndexCache::default()),
         }
     }
 
@@ -241,30 +508,163 @@ impl SessionSupervisor {
                 encoded.push('\n');
             }
         }
-        atomic_write(&index_path, encoded.as_bytes())
+        atomic_write(&index_path, encoded.as_bytes())?;
+        if let Ok(mut cache) = self.plan_cache.lock() {
+            cache.index_stamp = None;
+            cache.entries.remove(plan_id);
+        }
+        Ok(())
+    }
+
+    fn all_delegated_summaries(&self) -> Vec<WorkSessionSummary> {
+        let Some(cur_index_stamp) = file_stamp(&self.index_file()) else {
+            if let Ok(mut cache) = self.plan_cache.lock() {
+                cache.index_stamp = None;
+                cache.index_rows.clear();
+                cache.entries.clear();
+            }
+            return Vec::new();
+        };
+
+        let mut cache = match self.plan_cache.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        let index_changed = cache.index_stamp != Some(cur_index_stamp);
+        if index_changed {
+            let Ok(raw_index) = fs::read_to_string(self.index_file()) else {
+                return Vec::new();
+            };
+            let mut seen = HashSet::new();
+            let mut next_rows = Vec::new();
+            for line in raw_index.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if let Ok(row) = serde_json::from_str::<PlanIndexMetaRow>(line)
+                    && let Some(pid) = row.plan_id.clone().filter(|s| !s.is_empty())
+                    && seen.insert(pid)
+                {
+                    next_rows.push(row);
+                }
+            }
+            cache.index_rows = next_rows;
+            cache.index_stamp = Some(cur_index_stamp);
+            if cache.entries.len() > cache.index_rows.len() + 256 {
+                let live: HashSet<String> = cache
+                    .index_rows
+                    .iter()
+                    .filter_map(|r| r.plan_id.clone())
+                    .collect();
+                cache.entries.retain(|pid, _| live.contains(pid));
+            }
+        }
+
+        let rows_to_check: Vec<PlanIndexMetaRow> = if index_changed {
+            cache.index_rows.clone()
+        } else {
+            cache
+                .index_rows
+                .iter()
+                .filter(|row| {
+                    row.plan_id
+                        .as_deref()
+                        .is_some_and(|pid| cache.entries.get(pid).is_none_or(|(_, v)| v.is_some()))
+                })
+                .cloned()
+                .collect()
+        };
+
+        let mut raw_buf = Vec::new();
+        for row in &rows_to_check {
+            let Some(pid) = row.plan_id.as_deref().filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let path = self.plan_file(pid);
+            let Some(stamp) = file_stamp(&path) else {
+                cache.entries.remove(pid);
+                continue;
+            };
+            if cache
+                .entries
+                .get(pid)
+                .is_some_and(|(prev_stamp, _)| *prev_stamp == stamp)
+            {
+                continue;
+            }
+            let Ok(mut file) = File::open(&path) else {
+                cache.entries.remove(pid);
+                continue;
+            };
+            if stamp.0 > LARGE_PLAN_THRESHOLD
+                && let Some(summary) = extract_large_plan_summary(&mut file, stamp.0, pid, row)
+            {
+                cache.entries.insert(pid.to_owned(), (stamp, Some(summary)));
+                continue;
+            }
+            if file.seek(SeekFrom::Start(0)).is_err() {
+                continue;
+            }
+            raw_buf.clear();
+            if file.read_to_end(&mut raw_buf).is_err() {
+                continue;
+            }
+            if !contains_bytes(&raw_buf, DELEGATION_MARKER) {
+                cache.entries.insert(pid.to_owned(), (stamp, None));
+                continue;
+            }
+            let summary = serde_json::from_slice::<PlanSummaryDoc>(&raw_buf)
+                .ok()
+                .and_then(|doc| summarize_doc(&doc));
+            cache.entries.insert(pid.to_owned(), (stamp, summary));
+        }
+
+        cache
+            .index_rows
+            .iter()
+            .filter_map(|row| {
+                let pid = row.plan_id.as_deref()?;
+                cache
+                    .entries
+                    .get(pid)
+                    .and_then(|(_, summary)| summary.clone())
+            })
+            .collect()
     }
 
     pub fn list_workspace_plans(&self, workspace_id: &str) -> Vec<Value> {
-        let Ok(raw) = fs::read_to_string(self.index_file()) else {
-            return Vec::new();
-        };
-        let mut plans = Vec::new();
-        for line in raw.lines() {
-            let Ok(row) = serde_json::from_str::<Value>(line) else {
-                continue;
-            };
-            let Some(pid) = row["planId"].as_str() else {
-                continue;
-            };
-            if let Ok(plan) = self.read_plan(pid)
-                && plan["delegationOrigin"]["workspaceId"].as_str() == Some(workspace_id)
-            {
-                plans.push(plan);
-            }
-        }
-        plans
+        self.list_sessions(workspace_id)
+            .into_iter()
+            .filter_map(|s| self.read_plan(&s.plan_id).ok())
+            .collect()
     }
 
+    pub fn list_all_bot_sessions(&self) -> HashMap<String, Vec<BotListSession>> {
+        let mut grouped: HashMap<String, Vec<BotListSession>> = HashMap::new();
+        for s in self.all_delegated_summaries() {
+            if s.workspace_id.is_empty() {
+                continue;
+            }
+            grouped
+                .entry(s.workspace_id.clone())
+                .or_default()
+                .push(BotListSession {
+                    session_id: s.session_id,
+                    title: s.title,
+                    status: s.status,
+                    updated_at: Some(s.updated_at),
+                    result_confirmation_required: None,
+                    completion_review_required: false,
+                });
+        }
+        for sessions in grouped.values_mut() {
+            sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        }
+        grouped
+    }
+
+    #[cfg_attr(not(test), allow(dead_code))]
     fn summarize(&self, plan: &Value) -> WorkSessionSummary {
         let origin = &plan["delegationOrigin"];
         WorkSessionSummary {
@@ -295,9 +695,9 @@ impl SessionSupervisor {
 
     pub fn list_sessions(&self, workspace_id: &str) -> Vec<WorkSessionSummary> {
         let mut items: Vec<WorkSessionSummary> = self
-            .list_workspace_plans(workspace_id)
-            .iter()
-            .map(|p| self.summarize(p))
+            .all_delegated_summaries()
+            .into_iter()
+            .filter(|s| s.workspace_id == workspace_id)
             .collect();
         items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         items
@@ -1452,5 +1852,200 @@ mod tests {
             .control_session("ws-1", &spawned.session_id, "cancel", "user_stop", true)
             .unwrap();
         assert_eq!(cancelled.status, "cancelled");
+    }
+
+    #[test]
+    fn contains_bytes_and_delegated_plan_cache_skip_non_delegated_and_track_updates() {
+        assert!(contains_bytes(b"hello world", b""));
+        assert!(contains_bytes(
+            b"abc\"delegationOrigin\"xyz",
+            b"\"delegationOrigin\""
+        ));
+        assert!(contains_bytes(
+            b"\"delegationOrigin\"",
+            b"\"delegationOrigin\""
+        ));
+        assert!(contains_bytes(b"aaabaaac", b"aaac"));
+        assert!(!contains_bytes(b"short", b"longer-needle"));
+        assert!(!contains_bytes(
+            b"{\"status\":\"completed\"}",
+            b"\"delegationOrigin\""
+        ));
+
+        let dir = tempdir().unwrap();
+        let sup = SessionSupervisor::new(dir.path(), Some(1));
+        let plans_dir = dir.path().join("goal-plans");
+        fs::create_dir_all(&plans_dir).unwrap();
+
+        // Seed 20 ordinary/non-delegated plans (one even intentionally unparseable as JSON
+        // to prove the byte pre-filter skips JSON decoding completely when marker is absent)
+        // plus 2 delegated plans across two workspaces.
+        let mut index_lines = String::new();
+        for i in 0..20 {
+            let pid = format!("ord-{i}");
+            let body = if i == 0 {
+                "{not-valid-json-without-marker".to_owned()
+            } else {
+                serde_json::to_string(&json!({
+                    "planId": pid,
+                    "title": format!("Ordinary {i}"),
+                    "status": "completed",
+                    "updatedAt": "2026-11-20T00:00:00.000Z"
+                }))
+                .unwrap()
+            };
+            fs::write(plans_dir.join(format!("{pid}.json")), body).unwrap();
+            index_lines.push_str(&format!("{{\"planId\":\"{pid}\"}}\n"));
+        }
+
+        let make_delegated =
+            |pid: &str, ws: &str, sid: &str, status: &str, phase: &str, ts: &str| {
+                json!({
+                    "planId": pid,
+                    "conversationId": format!("conv-{sid}"),
+                    "title": format!("Task {sid}"),
+                    "status": status,
+                    "updatedAt": ts,
+                    "delegationOrigin": {
+                        "workspaceId": ws,
+                        "sessionId": sid,
+                        "phase": phase,
+                        "readOnly": true,
+                        "priority": "normal"
+                    }
+                })
+            };
+
+        fs::write(
+            plans_dir.join("del-a.json"),
+            serde_json::to_string(&make_delegated(
+                "del-a",
+                "ws-a",
+                "sess-a",
+                "running",
+                "running",
+                "2026-11-20T01:00:00.000Z",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        index_lines.push_str("{\"planId\":\"del-a\"}\n");
+
+        fs::write(
+            plans_dir.join("del-b.json"),
+            serde_json::to_string(&make_delegated(
+                "del-b",
+                "ws-b",
+                "sess-b",
+                "completed",
+                "completed",
+                "2026-11-20T02:00:00.000Z",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        index_lines.push_str("{\"planId\":\"del-b\"}\n");
+        fs::write(plans_dir.join("index.jsonl"), &index_lines).unwrap();
+
+        let grouped = sup.list_all_bot_sessions();
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped["ws-a"].len(), 1);
+        assert_eq!(grouped["ws-a"][0].session_id, "sess-a");
+        assert_eq!(grouped["ws-a"][0].status, "running");
+        assert_eq!(grouped["ws-b"].len(), 1);
+        assert_eq!(grouped["ws-b"][0].status, "result_ready");
+
+        // Out-of-process edit to existing delegated plan (even with index.jsonl unchanged and
+        // altering byte length so file stamp changes reliably across coarse filesystems) is detected.
+        fs::write(
+            plans_dir.join("del-a.json"),
+            serde_json::to_string_pretty(&make_delegated(
+                "del-a",
+                "ws-a",
+                "sess-a",
+                "completed",
+                "completed",
+                "2026-11-20T03:00:00.000Z",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let ws_a_after = sup.list_bot_sessions("ws-a");
+        assert_eq!(ws_a_after.len(), 1);
+        assert_eq!(ws_a_after[0].status, "result_ready");
+
+        // New delegated plan added to index.jsonl is picked up automatically.
+        sup.write_plan(&make_delegated(
+            "del-a2",
+            "ws-a",
+            "sess-a2",
+            "running",
+            "running",
+            "2026-11-20T04:00:00.000Z",
+        ))
+        .unwrap();
+        let ws_a_two = sup.list_bot_sessions("ws-a");
+        assert_eq!(ws_a_two.len(), 2);
+        assert_eq!(ws_a_two[0].session_id, "sess-a2");
+
+        // Large (> 256 KiB) pretty-printed plan uses head+tail fast path and matches summarize(&Value).
+        let filler: Vec<String> = (0..600)
+            .map(|idx| format!("{idx:04}:{}", "x".repeat(512)))
+            .collect();
+        let large_pretty_val = json!({
+            "planId": "del-large-pretty",
+            "conversationId": "conv-large-pretty",
+            "deliveryBinding": { "worktreePath": "/tmp/wt-large" },
+            "title": "Large pretty task",
+            "status": "in_progress",
+            "runTrace": filler,
+            "delegationOrigin": {
+                "workspaceId": "ws-large",
+                "sessionId": "sess-large-pretty",
+                "phase": "running",
+                "readOnly": false,
+                "priority": "high",
+                "planApprovalId": "appr-1"
+            },
+            "runner": { "status": "waiting_user" },
+            "updatedAt": "2026-11-20T05:00:00.000Z"
+        });
+        let large_pretty_raw = serde_json::to_string_pretty(&large_pretty_val).unwrap();
+        assert!(large_pretty_raw.len() as u64 > LARGE_PLAN_THRESHOLD);
+        fs::write(plans_dir.join("del-large-pretty.json"), &large_pretty_raw).unwrap();
+
+        // Large (> 256 KiB) single-line compact plan cleanly falls back to full-file PlanSummaryDoc.
+        let large_compact_val = json!({
+            "planId": "del-large-compact",
+            "conversationId": "conv-large-compact",
+            "title": "Large compact task",
+            "status": "completed",
+            "runTrace": filler,
+            "delegationOrigin": {
+                "workspaceId": "ws-large",
+                "sessionId": "sess-large-compact",
+                "phase": "completed",
+                "readOnly": true,
+                "priority": "normal"
+            },
+            "resultAcceptance": {
+                "acceptedAt": "2026-11-20T06:01:00.000Z",
+                "acceptedBy": "policy"
+            },
+            "updatedAt": "2026-11-20T06:00:00.000Z"
+        });
+        let large_compact_raw = serde_json::to_string(&large_compact_val).unwrap();
+        assert!(large_compact_raw.len() as u64 > LARGE_PLAN_THRESHOLD);
+        fs::write(plans_dir.join("del-large-compact.json"), &large_compact_raw).unwrap();
+
+        let mut updated_index = fs::read_to_string(plans_dir.join("index.jsonl")).unwrap();
+        updated_index.push_str("{\"planId\":\"del-large-pretty\"}\n");
+        updated_index.push_str("{\"planId\":\"del-large-compact\"}\n");
+        fs::write(plans_dir.join("index.jsonl"), updated_index).unwrap();
+
+        let ws_large = sup.list_sessions("ws-large");
+        assert_eq!(ws_large.len(), 2);
+        assert_eq!(ws_large[0], sup.summarize(&large_compact_val));
+        assert_eq!(ws_large[1], sup.summarize(&large_pretty_val));
     }
 }
