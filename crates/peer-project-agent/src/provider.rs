@@ -4,12 +4,15 @@
 //! `CapabilityProvider -> Manifest -> RuntimeProjection(RuntimeMode::ProjectAgent) -> ToolCall -> PermissionGrant -> Evidence`.
 
 use crate::{
-    BotProfileStore, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError, SessionSupervisor,
-    SpawnCriterion, SpawnSessionRequest, WriteMemoryRequest,
-    objectives::CreateObjectiveRequest,
+    BotProfileStore, DigestQueue, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError,
+    SessionSupervisor, SpawnCriterion, SpawnSessionRequest, UpdateObjectiveRequest,
+    UserAnchorCandidate, WriteMemoryRequest,
+    acceptance::verdict_ref_for,
+    memory_secret_reason,
+    objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
     reply::{
         ComposeReplyInput, SessionStatusFact, StatusClaim, Surfacing, SurfacingEvent,
-        compose_reply, decide_surfacing,
+        compose_reply, decide_surfacing, resolve_user_anchors,
     },
 };
 use peer_protocol::ExecutionResourceScope;
@@ -37,14 +40,28 @@ pub struct TurnExecutionState {
     pub current_input_id: String,
     pub quote_session_ids: Vec<String>,
     pub valid_user_message_ids: HashSet<String>,
+    pub user_anchor_candidates: Vec<UserAnchorCandidate>,
+    pub unreported_anchor_sessions: Vec<(String, String)>,
     pub prior_report_fact_keys: HashSet<String>,
     pub worker_model_selection: Value,
     pub reply_committed_id: Option<String>,
+    pub post_reply_rejected: bool,
     pub waiting_session_ids: Vec<String>,
     pub spawned_session_ids: Vec<String>,
     pub memory_learned: Vec<String>,
     pub memory_used: Vec<String>,
     pub holds_lease: bool,
+}
+
+struct CapFailure {
+    err: ProjectError,
+    extra: Option<Value>,
+}
+
+impl From<ProjectError> for CapFailure {
+    fn from(err: ProjectError) -> Self {
+        Self { err, extra: None }
+    }
 }
 
 pub struct ProjectCapabilityProvider {
@@ -267,7 +284,9 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                             "properties": {
                                 "options": {"type": "array", "items": {"type": "string"}},
                                 "expiresAt": {"type": "string"},
-                                "prompt": {"type": "string"}
+                                "prompt": {"type": "string"},
+                                "agentRequestId": {"type": "string"},
+                                "expectedRequestRevision": {"type": "integer"}
                             },
                             "additionalProperties": false
                         }
@@ -355,13 +374,18 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                 "Create a tracked project objective with optional deterministic watches.",
                 json!({
                     "type": "object",
-                    "required": ["title", "outcome", "autonomy", "originMessageId"],
+                    "required": ["title", "outcome"],
                     "properties": {
                         "title": {"type": "string", "maxLength": 120},
                         "outcome": {"type": "string", "maxLength": 2000},
                         "autonomy": {"type": "string", "enum": ["report_only", "propose", "act"]},
                         "originMessageId": {"type": "string"},
+                        "anchorMessageId": {"type": "string"},
+                        "createdBy": {"type": "string", "enum": ["user_request", "agent_proposal"]},
                         "watches": {"type": "array"},
+                        "milestones": {"type": "array"},
+                        "successSignals": {"type": "array"},
+                        "budget": {"type": "object"},
                         "deadline": {"type": "string"},
                         "requestId": {"type": "string"}
                     },
@@ -375,6 +399,127 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                 json!({
                     "type": "object",
                     "properties": {},
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "get_objective",
+                "local.objective.get",
+                "Inspect a single tracked project objective by ID.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId"],
+                    "properties": {
+                        "objectiveId": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "update_objective",
+                "local.objective.update",
+                "Update fields, watches, milestones, budget, or deadline of an existing objective.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId"],
+                    "properties": {
+                        "objectiveId": {"type": "string"},
+                        "title": {"type": "string", "maxLength": 120},
+                        "outcome": {"type": "string", "maxLength": 2000},
+                        "autonomy": {"type": "string", "enum": ["report_only", "propose", "act"]},
+                        "watches": {"type": "array"},
+                        "milestones": {"type": "array"},
+                        "successSignals": {"type": "array"},
+                        "budget": {"type": "object"},
+                        "deadline": {"type": ["string", "null"]},
+                        "autoAccept": {"type": "boolean"},
+                        "expectedVersion": {"type": "integer"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "pause_objective",
+                "local.objective.pause",
+                "Pause an active project objective.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId"],
+                    "properties": {
+                        "objectiveId": {"type": "string"},
+                        "expectedVersion": {"type": "integer"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "resume_objective",
+                "local.objective.resume",
+                "Resume a paused project objective.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId"],
+                    "properties": {
+                        "objectiveId": {"type": "string"},
+                        "expectedVersion": {"type": "integer"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "close_objective",
+                "local.objective.close",
+                "Close an objective as achieved or abandoned with optional evidence references.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId", "status"],
+                    "properties": {
+                        "objectiveId": {"type": "string"},
+                        "status": {"type": "string", "enum": ["achieved", "abandoned"]},
+                        "evidenceRefs": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "resume_session",
+                "local.delegation.resume_session",
+                "Resume a paused or waiting delegated work session anchored to a user message.",
+                json!({
+                    "type": "object",
+                    "required": ["sessionId"],
+                    "properties": {
+                        "sessionId": {"type": "string"},
+                        "anchorMessageId": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "get_verification_detail",
+                "local.delegation.get_verification_detail",
+                "Read host verification verdict details, criterion results, evidence references, and changed files for a session.",
+                json!({
+                    "type": "object",
+                    "required": ["sessionId"],
+                    "properties": {
+                        "sessionId": {"type": "string"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "search_conversation",
+                "local.delegation.search_history",
+                "Search visible project conversation history by substring with automatic secret redaction.",
+                json!({
+                    "type": "object",
+                    "required": ["query"],
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                        "kinds": {"type": "array", "items": {"type": "string"}}
+                    },
                     "additionalProperties": false
                 }),
             ),
@@ -460,15 +605,29 @@ impl PreparedEffect for PreparedProjectEffect {
                     materialization: None,
                     not_dispatched: false,
                 },
-                Err(err) => EffectOutcome {
-                    status: "failed",
-                    output: json!({"ok": false, "error": err.code, "message": err.detail}),
-                    error: Some(err.code),
-                    artifacts: vec![],
-                    ended: true,
-                    materialization: None,
-                    not_dispatched: false,
-                },
+                Err(failure) => {
+                    let mut out = json!({
+                        "ok": false,
+                        "error": failure.err.code,
+                        "message": failure.err.detail,
+                    });
+                    if let (Some(dst), Some(Value::Object(src))) =
+                        (out.as_object_mut(), failure.extra)
+                    {
+                        for (k, v) in src {
+                            dst.insert(k, v);
+                        }
+                    }
+                    EffectOutcome {
+                        status: "failed",
+                        output: out,
+                        error: Some(failure.err.code),
+                        artifacts: vec![],
+                        ended: true,
+                        materialization: None,
+                        not_dispatched: false,
+                    }
+                }
             }
         }))
     }
@@ -486,6 +645,510 @@ fn check_quote_scope(state: &TurnExecutionState, target_session: &str) -> Result
     Ok(())
 }
 
+fn resolve_anchors_for_state(
+    supplied: &[String],
+    state: &TurnExecutionState,
+) -> Result<Vec<String>, CapFailure> {
+    if state.user_anchor_candidates.is_empty() {
+        if supplied
+            .iter()
+            .any(|a| !state.valid_user_message_ids.contains(a.trim()))
+        {
+            return Err(ProjectError::code("invalid_anchor").into());
+        }
+        return Ok(supplied.iter().map(|s| s.trim().to_owned()).collect());
+    }
+    resolve_user_anchors(supplied, &state.user_anchor_candidates).map_err(|(err, diag)| {
+        CapFailure {
+            err,
+            extra: Some(diag),
+        }
+    })
+}
+
+fn execute_post_reply(
+    args: &Value,
+    data_home: &Path,
+    supervisor: &SessionSupervisor,
+    state: &mut TurnExecutionState,
+    tool_call_id: &str,
+) -> Result<Value, CapFailure> {
+    let text = args["text"]
+        .as_str()
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let proactive = args["proactive"].as_bool().unwrap_or(false);
+    let raw_reply_to: Vec<String> = args["replyTo"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let reply_to = if raw_reply_to.is_empty() {
+        if !proactive && state.kind == "user" && !state.current_input_anchors.is_empty() {
+            state.current_input_anchors.clone()
+        } else {
+            Vec::new()
+        }
+    } else {
+        resolve_anchors_for_state(&raw_reply_to, state)?
+    };
+    let sources: Vec<String> = args["sources"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let status_claims: Vec<StatusClaim> = args["statusClaims"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|item| {
+                    Some(StatusClaim {
+                        session_id: item["sessionId"].as_str()?.to_owned(),
+                        status: item["status"].as_str()?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let question = args.get("question").filter(|v| v.is_object()).cloned();
+
+    let sessions = supervisor.list_sessions(&state.workspace_id);
+    let project_session_ids: HashSet<String> =
+        sessions.iter().map(|s| s.session_id.clone()).collect();
+    let session_facts: Vec<SessionStatusFact> = sessions
+        .iter()
+        .map(|s| {
+            let rep = supervisor
+                .read_report(&state.workspace_id, &s.session_id)
+                .ok();
+            SessionStatusFact {
+                session_id: s.session_id.clone(),
+                status: s.status.clone(),
+                source_revision: Some(s.updated_at.clone()),
+                observation_revision: None,
+                independent_verifier: rep.as_ref().map(|r| r.independent_verifier.clone()),
+                verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
+                verdict_ref: rep
+                    .as_ref()
+                    .map(|r| verdict_ref_for(&s.session_id, &r.verdict_outcome)),
+            }
+        })
+        .collect();
+
+    let profiles = BotProfileStore::new(data_home);
+    let proactivity = profiles
+        .read(&state.workspace_id)
+        .and_then(|p| p.proactivity)
+        .unwrap_or_else(|| "standard".into());
+    let surfacing = if state.kind == "user" {
+        Surfacing::Message
+    } else {
+        let is_agent_proactive = proactive && reply_to.is_empty() && question.is_none();
+        decide_surfacing(
+            &SurfacingEvent {
+                origin: if is_agent_proactive {
+                    "objective_signal"
+                } else {
+                    "user_request"
+                }
+                .into(),
+                kind: if question.is_some() {
+                    "needs_user"
+                } else if is_agent_proactive && sources.is_empty() {
+                    "idea"
+                } else {
+                    "result"
+                }
+                .into(),
+                novelty: true,
+                severity: if is_agent_proactive && sources.is_empty() {
+                    "info"
+                } else {
+                    "notable"
+                }
+                .into(),
+                deadline_imminent: false,
+            },
+            &proactivity,
+            false,
+            question.is_some(),
+        )
+        .decision
+    };
+
+    let mut ev_refs = Vec::new();
+    for sid in &sources {
+        if let Ok(rep) = supervisor.read_report(&state.workspace_id, sid) {
+            ev_refs.extend(rep.evidence_refs);
+        }
+    }
+
+    let reply_id = format!("reply-{tool_call_id}");
+    let composed = compose_reply(ComposeReplyInput {
+        message_id: reply_id.clone(),
+        turn_id: Some(state.turn_id.clone()),
+        kind: state.kind.clone(),
+        text: text.to_owned(),
+        reply_to,
+        sources: sources.clone(),
+        status_claims,
+        proactive,
+        question,
+        valid_user_message_ids: state.valid_user_message_ids.clone(),
+        project_session_ids,
+        session_facts,
+        memory_used: state.memory_used.clone(),
+        memory_learned: state.memory_learned.clone(),
+        evidence_refs: ev_refs,
+        surfacing,
+        prior_report_fact_keys: state.prior_report_fact_keys.clone(),
+        unreported_anchor_sessions: state.unreported_anchor_sessions.clone(),
+    })?;
+
+    if composed.suppressed_duplicate {
+        state.reply_committed_id = Some("suppressed".into());
+        state.post_reply_rejected = false;
+        return Ok(json!({
+            "ok": true,
+            "suppressed": true,
+            "control": { "terminal": true, "reason": "project_agent_reply" }
+        }));
+    }
+
+    if surfacing == Surfacing::Silent {
+        state.reply_committed_id = Some("silent".into());
+        state.post_reply_rejected = false;
+        return Ok(json!({
+            "ok": true,
+            "suppressed": true,
+            "surfacing": "silent",
+            "control": { "terminal": true, "reason": "project_agent_reply" }
+        }));
+    }
+
+    let at = crate::now_iso();
+    let mut msg = composed.message;
+    msg["createdAt"] = json!(at);
+
+    if surfacing == Surfacing::Digest {
+        DigestQueue::new(data_home).hold(
+            &state.workspace_id,
+            Some(&reply_id),
+            text,
+            Some(msg),
+            Some(&at),
+        )?;
+        for k in composed.report_fact_keys {
+            state.prior_report_fact_keys.insert(k);
+        }
+        state.reply_committed_id = Some(format!("digest:{reply_id}"));
+        state.post_reply_rejected = false;
+        return Ok(json!({
+            "ok": true,
+            "queuedForDigest": true,
+            "messageId": reply_id,
+            "surfacing": "digest",
+            "control": { "terminal": true, "reason": "project_agent_reply" }
+        }));
+    }
+
+    ConversationStore::new(data_home)
+        .append_message_idempotent(&state.conversation_id, &msg, &at, None)
+        .map_err(ProjectError::from)?;
+
+    // Policy auto-acceptance for any cited `result_ready` sessions after reply is durably posted.
+    for sid in &sources {
+        let _ = supervisor.settle_session(
+            &state.workspace_id,
+            sid,
+            true,
+            false,
+            None,
+            state.holds_lease,
+        );
+    }
+    for k in composed.report_fact_keys {
+        state.prior_report_fact_keys.insert(k);
+    }
+    state.reply_committed_id = Some(reply_id.clone());
+    state.post_reply_rejected = false;
+    Ok(json!({
+        "ok": true,
+        "messageId": reply_id,
+        "surfacing": surfacing.as_str(),
+        "control": { "terminal": true, "reason": "project_agent_reply" }
+    }))
+}
+
+fn execute_search_conversation(
+    args: &Value,
+    data_home: &Path,
+    state: &TurnExecutionState,
+) -> Result<Value, CapFailure> {
+    let query = args["query"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let needle = query.to_lowercase();
+    let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
+    let kinds_filter: Option<HashSet<String>> = args["kinds"].as_array().map(|arr| {
+        arr.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    });
+    let snap = ConversationStore::new(data_home)
+        .read_committed(&state.conversation_id, None, 4 * 1024 * 1024)
+        .map_err(ProjectError::from)?;
+    let mut matches = Vec::new();
+    for m in snap.history.messages.iter().rev() {
+        if m["meta"]["compaction"].is_object()
+            || matches!(m["kind"].as_str(), Some("compaction" | "agent_turn"))
+        {
+            continue;
+        }
+        let kind = m["kind"].as_str().unwrap_or("");
+        let eff_kind = if kind.is_empty() && m["role"] == "user" {
+            "user_input"
+        } else {
+            kind
+        };
+        if let Some(ref allowed) = kinds_filter {
+            if !allowed.contains(eff_kind) {
+                continue;
+            }
+        } else if !matches!(eff_kind, "user_input" | "agent_reply" | "system_card") {
+            continue;
+        }
+        let content = m["content"].as_str().unwrap_or("");
+        if content.is_empty() || !content.to_lowercase().contains(&needle) {
+            continue;
+        }
+        let redacted = memory_secret_reason(content).is_some();
+        let snippet: String = if redacted {
+            "[REDACTED]".to_owned()
+        } else {
+            content.chars().take(300).collect()
+        };
+        matches.push(json!({
+            "id": m["id"],
+            "kind": eff_kind,
+            "role": m["role"],
+            "createdAt": m["createdAt"],
+            "snippet": snippet,
+            "redacted": redacted,
+        }));
+        if matches.len() >= limit {
+            break;
+        }
+    }
+    Ok(json!({ "ok": true, "matches": matches }))
+}
+
+fn execute_objective_capability(
+    capability: &str,
+    args: &Value,
+    data_home: &Path,
+    state: &TurnExecutionState,
+) -> Result<Value, CapFailure> {
+    let store = ObjectiveStore::new(data_home);
+    match capability {
+        "local.objective.create" => {
+            let supplied_anchor = args["anchorMessageId"]
+                .as_str()
+                .or_else(|| args["originMessageId"].as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let origin_message_id = if let Some(raw) = supplied_anchor {
+                resolve_anchors_for_state(&[raw.to_owned()], state)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| ProjectError::code("invalid_anchor"))?
+            } else {
+                state
+                    .current_input_anchors
+                    .first()
+                    .cloned()
+                    .or_else(|| {
+                        state
+                            .user_anchor_candidates
+                            .last()
+                            .map(|c| c.message_id.clone())
+                    })
+                    .ok_or_else(|| ProjectError::code("invalid_anchor"))?
+            };
+            let default_created_by = if state.current_input_anchors.is_empty() {
+                "agent_proposal"
+            } else {
+                "user_request"
+            };
+            let created_by = args["createdBy"].as_str().unwrap_or(default_created_by);
+            let milestones: Vec<ObjectiveMilestone> =
+                if args.get("milestones").is_some_and(|v| !v.is_null()) {
+                    serde_json::from_value(args["milestones"].clone())
+                        .map_err(|_| ProjectError::code("invalid_input"))?
+                } else {
+                    vec![]
+                };
+            let budget: Option<ObjectiveBudget> =
+                if args.get("budget").is_some_and(|v| !v.is_null()) {
+                    Some(
+                        serde_json::from_value(args["budget"].clone())
+                            .map_err(|_| ProjectError::code("invalid_input"))?,
+                    )
+                } else {
+                    None
+                };
+            let (item, replayed) = store.create(&CreateObjectiveRequest {
+                workspace_id: &state.workspace_id,
+                project_agent_conversation_id: &state.conversation_id,
+                origin_message_id: &origin_message_id,
+                title: args["title"].as_str().unwrap_or(""),
+                outcome: args["outcome"].as_str().unwrap_or(""),
+                autonomy: args["autonomy"].as_str().unwrap_or("propose"),
+                created_by,
+                watches: args["watches"].as_array().cloned().unwrap_or_default(),
+                milestones,
+                success_signals: args["successSignals"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+                budget,
+                deadline: args["deadline"].as_str(),
+                request_id: args["requestId"].as_str(),
+            })?;
+            Ok(json!({ "ok": true, "objective": item, "replayed": replayed }))
+        }
+        "local.objective.list" => {
+            let items = store.list(&state.workspace_id)?;
+            Ok(json!({ "ok": true, "items": items }))
+        }
+        "local.objective.get" => {
+            let oid = args["objectiveId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let item = store
+                .get(&state.workspace_id, oid)?
+                .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+            Ok(json!({ "ok": true, "objective": item }))
+        }
+        "local.objective.update" => {
+            let oid = args["objectiveId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let watches = args
+                .get("watches")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    v.as_array()
+                        .cloned()
+                        .ok_or_else(|| ProjectError::code("invalid_input"))
+                })
+                .transpose()?;
+            let milestones = args
+                .get("milestones")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    serde_json::from_value::<Vec<ObjectiveMilestone>>(v.clone())
+                        .map_err(|_| ProjectError::code("invalid_input"))
+                })
+                .transpose()?;
+            let success_signals = args
+                .get("successSignals")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    v.as_array()
+                        .cloned()
+                        .ok_or_else(|| ProjectError::code("invalid_input"))
+                })
+                .transpose()?;
+            let budget = args
+                .get("budget")
+                .filter(|v| !v.is_null())
+                .map(|v| {
+                    serde_json::from_value::<ObjectiveBudget>(v.clone())
+                        .map_err(|_| ProjectError::code("invalid_input"))
+                })
+                .transpose()?;
+            let deadline = args
+                .as_object()
+                .and_then(|m| m.get("deadline"))
+                .map(|v| {
+                    if v.is_null() {
+                        Ok(None)
+                    } else {
+                        v.as_str()
+                            .map(Some)
+                            .ok_or_else(|| ProjectError::code("invalid_input"))
+                    }
+                })
+                .transpose()?;
+            let item = store.update(
+                &state.workspace_id,
+                oid,
+                &UpdateObjectiveRequest {
+                    title: args["title"].as_str(),
+                    outcome: args["outcome"].as_str(),
+                    autonomy: args["autonomy"].as_str(),
+                    watches,
+                    milestones,
+                    success_signals,
+                    budget,
+                    deadline,
+                    auto_accept: args["autoAccept"].as_bool(),
+                    expected_version: args["expectedVersion"].as_u64(),
+                },
+            )?;
+            Ok(json!({ "ok": true, "objective": item }))
+        }
+        "local.objective.pause" | "local.objective.resume" => {
+            let oid = args["objectiveId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let status = if capability == "local.objective.pause" {
+                "paused"
+            } else {
+                "active"
+            };
+            let item = store.update_status(
+                &state.workspace_id,
+                oid,
+                status,
+                args["expectedVersion"].as_u64(),
+            )?;
+            Ok(json!({ "ok": true, "objective": item }))
+        }
+        "local.objective.close" => {
+            let oid = args["objectiveId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let status = args["status"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let evidence_refs: Vec<String> = args["evidenceRefs"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let item = store.close(&state.workspace_id, oid, status, evidence_refs)?;
+            Ok(json!({ "ok": true, "objective": item }))
+        }
+        _ => Err(ProjectError::code("tool_not_projected").into()),
+    }
+}
+
 fn execute_project_capability(
     capability: &str,
     args: &Value,
@@ -493,12 +1156,12 @@ fn execute_project_capability(
     supervisor: &SessionSupervisor,
     state_lock: &Mutex<TurnExecutionState>,
     tool_call_id: &str,
-) -> Result<Value, ProjectError> {
+) -> Result<Value, CapFailure> {
     let mut state = state_lock
         .lock()
         .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
     if !state.holds_lease {
-        return Err(ProjectError::code("LEASE_REQUIRED"));
+        return Err(ProjectError::code("LEASE_REQUIRED").into());
     }
     match capability {
         "local.delegation.spawn_session" => {
@@ -506,22 +1169,20 @@ fn execute_project_capability(
                 return Err(ProjectError::new(
                     "current_user_required",
                     "Historical user messages cannot authorize new tasks during an ordinary wake.",
-                ));
+                )
+                .into());
             }
-            let anchors: Vec<String> = args["anchorMessageIds"]
+            let raw_anchors: Vec<String> = args["anchorMessageIds"]
                 .as_array()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?
                 .iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect();
-            if anchors.is_empty()
-                || anchors
-                    .iter()
-                    .any(|a| !state.valid_user_message_ids.contains(a))
-            {
-                return Err(ProjectError::code("invalid_anchor"));
+            if raw_anchors.is_empty() {
+                return Err(ProjectError::code("invalid_anchor").into());
             }
+            let anchors = resolve_anchors_for_state(&raw_anchors, &state)?;
             if let Some(sup) = args["supersedes"].as_str() {
                 check_quote_scope(&state, sup)?;
             }
@@ -604,7 +1265,7 @@ fn execute_project_capability(
         }
         "local.delegation.cancel_session" => {
             if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required"));
+                return Err(ProjectError::code("current_user_required").into());
             }
             let sid = args["sessionId"]
                 .as_str()
@@ -617,7 +1278,7 @@ fn execute_project_capability(
         }
         "local.delegation.control_work" => {
             if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required"));
+                return Err(ProjectError::code("current_user_required").into());
             }
             let sid = args["sessionId"]
                 .as_str()
@@ -637,7 +1298,7 @@ fn execute_project_capability(
         }
         "local.delegation.reprioritize_session" => {
             if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required"));
+                return Err(ProjectError::code("current_user_required").into());
             }
             let sid = args["sessionId"]
                 .as_str()
@@ -652,7 +1313,7 @@ fn execute_project_capability(
         }
         "local.delegation.message_session" => {
             if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required"));
+                return Err(ProjectError::code("current_user_required").into());
             }
             let sid = args["sessionId"]
                 .as_str()
@@ -668,6 +1329,37 @@ fn execute_project_capability(
                 supervisor.message_session(&state.workspace_id, sid, text, intent, true)?;
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
+        "local.delegation.resume_session" => {
+            if state.current_input_anchors.is_empty() {
+                return Err(ProjectError::code("current_user_required").into());
+            }
+            let sid = args["sessionId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            if let Some(raw_anchor) = args["anchorMessageId"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let _ = resolve_anchors_for_state(&[raw_anchor.to_owned()], &state)?;
+            }
+            check_quote_scope(&state, sid)?;
+            let updated = supervisor.resume_session(&state.workspace_id, sid, true)?;
+            Ok(json!({
+                "ok": true,
+                "sessionId": updated.session_id,
+                "status": updated.status,
+                "phase": updated.phase,
+            }))
+        }
+        "local.delegation.get_verification_detail" => {
+            let sid = args["sessionId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let detail = supervisor.read_verification_detail(&state.workspace_id, sid)?;
+            Ok(json!({ "ok": true, "detail": detail }))
+        }
+        "local.delegation.search_history" => execute_search_conversation(args, data_home, &state),
         "local.delegation.verify_session" => {
             let sid = args["sessionId"]
                 .as_str()
@@ -685,18 +1377,18 @@ fn execute_project_capability(
                 .map(str::to_owned)
                 .collect();
             if sids.is_empty() {
-                return Err(ProjectError::code("invalid_input"));
+                return Err(ProjectError::code("invalid_input").into());
             }
             let all = supervisor.list_sessions(&state.workspace_id);
             for sid in &sids {
                 let Some(s) = all.iter().find(|row| &row.session_id == sid) else {
-                    return Err(ProjectError::code("NOT_FOUND"));
+                    return Err(ProjectError::code("NOT_FOUND").into());
                 };
                 if !matches!(
                     s.status.as_str(),
                     "queued" | "starting" | "running" | "verifying" | "waiting_user"
                 ) {
-                    return Err(ProjectError::code("session_not_active"));
+                    return Err(ProjectError::code("session_not_active").into());
                 }
             }
             state.waiting_session_ids = sids.clone();
@@ -705,169 +1397,15 @@ fn execute_project_capability(
             )
         }
         "local.delegation.post_reply" => {
-            let text = args["text"]
-                .as_str()
-                .ok_or_else(|| ProjectError::code("invalid_input"))?;
-            let proactive = args["proactive"].as_bool().unwrap_or(false);
-            let mut reply_to: Vec<String> = args["replyTo"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_else(|| state.current_input_anchors.clone());
-            if reply_to.is_empty()
-                && !proactive
-                && state.kind == "user"
-                && !state.current_input_anchors.is_empty()
-            {
-                reply_to = state.current_input_anchors.clone();
+            let res = execute_post_reply(args, data_home, supervisor, &mut state, tool_call_id);
+            if res.is_err() {
+                state.post_reply_rejected = true;
             }
-            let sources: Vec<String> = args["sources"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let status_claims: Vec<StatusClaim> = args["statusClaims"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|item| {
-                            Some(StatusClaim {
-                                session_id: item["sessionId"].as_str()?.to_owned(),
-                                status: item["status"].as_str()?.to_owned(),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let question = args.get("question").filter(|v| v.is_object()).cloned();
-
-            let sessions = supervisor.list_sessions(&state.workspace_id);
-            let project_session_ids: HashSet<String> =
-                sessions.iter().map(|s| s.session_id.clone()).collect();
-            let session_facts: Vec<SessionStatusFact> = sessions
-                .iter()
-                .map(|s| {
-                    let rep = supervisor
-                        .read_report(&state.workspace_id, &s.session_id)
-                        .ok();
-                    SessionStatusFact {
-                        session_id: s.session_id.clone(),
-                        status: s.status.clone(),
-                        source_revision: Some(s.updated_at.clone()),
-                        observation_revision: None,
-                        independent_verifier: rep.as_ref().map(|r| r.independent_verifier.clone()),
-                        verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
-                    }
-                })
-                .collect();
-
-            let profiles = BotProfileStore::new(data_home);
-            let proactivity = profiles
-                .read(&state.workspace_id)
-                .and_then(|p| p.proactivity)
-                .unwrap_or_else(|| "standard".into());
-            let surfacing = if state.kind == "user" {
-                Surfacing::Message
-            } else {
-                decide_surfacing(
-                    &SurfacingEvent {
-                        origin: "user_request".into(),
-                        kind: if question.is_some() {
-                            "needs_user".into()
-                        } else {
-                            "result".into()
-                        },
-                        novelty: true,
-                        severity: "notable".into(),
-                        deadline_imminent: false,
-                    },
-                    &proactivity,
-                    false,
-                    question.is_some(),
-                )
-                .decision
-            };
-
-            let mut ev_refs = Vec::new();
-            for sid in &sources {
-                if let Ok(rep) = supervisor.read_report(&state.workspace_id, sid) {
-                    ev_refs.extend(rep.evidence_refs);
-                }
-            }
-
-            let reply_id = format!("reply-{tool_call_id}");
-            let composed = compose_reply(ComposeReplyInput {
-                message_id: reply_id.clone(),
-                turn_id: Some(state.turn_id.clone()),
-                kind: state.kind.clone(),
-                text: text.to_owned(),
-                reply_to,
-                sources: sources.clone(),
-                status_claims,
-                proactive,
-                question,
-                valid_user_message_ids: state.valid_user_message_ids.clone(),
-                project_session_ids,
-                session_facts,
-                memory_used: state.memory_used.clone(),
-                memory_learned: state.memory_learned.clone(),
-                evidence_refs: ev_refs,
-                surfacing,
-                prior_report_fact_keys: state.prior_report_fact_keys.clone(),
-            })?;
-
-            if composed.suppressed_duplicate {
-                state.reply_committed_id = Some("suppressed".into());
-                return Ok(json!({
-                    "ok": true,
-                    "suppressed": true,
-                    "control": { "terminal": true, "reason": "project_agent_reply" }
-                }));
-            }
-
-            let at = crate::now_iso();
-            let mut msg = composed.message;
-            msg["createdAt"] = json!(at);
-            ConversationStore::new(data_home).append_message_idempotent(
-                &state.conversation_id,
-                &msg,
-                &at,
-                None,
-            )?;
-
-            // Policy auto-acceptance for any cited `result_ready` sessions after reply is durably posted.
-            for sid in &sources {
-                let _ = supervisor.settle_session(
-                    &state.workspace_id,
-                    sid,
-                    true,
-                    false,
-                    None,
-                    state.holds_lease,
-                );
-            }
-            for k in composed.report_fact_keys {
-                state.prior_report_fact_keys.insert(k);
-            }
-            state.reply_committed_id = Some(reply_id.clone());
-            Ok(json!({
-                "ok": true,
-                "messageId": reply_id,
-                "surfacing": surfacing.as_str(),
-                "control": { "terminal": true, "reason": "project_agent_reply" }
-            }))
+            res
         }
         "local.delegation.set_proactivity" => {
             if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required"));
+                return Err(ProjectError::code("current_user_required").into());
             }
             let level = args["level"]
                 .as_str()
@@ -949,39 +1487,9 @@ fn execute_project_capability(
             });
             Ok(json!({ "ok": true, "items": items }))
         }
-        "local.objective.create" => {
-            let (item, replayed) =
-                ObjectiveStore::new(data_home).create(&CreateObjectiveRequest {
-                    workspace_id: &state.workspace_id,
-                    project_agent_conversation_id: &state.conversation_id,
-                    origin_message_id: args["originMessageId"].as_str().unwrap_or_else(|| {
-                        state
-                            .current_input_anchors
-                            .first()
-                            .map(String::as_str)
-                            .unwrap_or("")
-                    }),
-                    title: args["title"].as_str().unwrap_or(""),
-                    outcome: args["outcome"].as_str().unwrap_or(""),
-                    autonomy: args["autonomy"].as_str().unwrap_or("propose"),
-                    created_by: if state.current_input_anchors.is_empty() {
-                        "agent_proposal"
-                    } else {
-                        "user_request"
-                    },
-                    watches: args["watches"].as_array().cloned().unwrap_or_default(),
-                    milestones: vec![],
-                    success_signals: vec![],
-                    budget: None,
-                    deadline: args["deadline"].as_str(),
-                    request_id: args["requestId"].as_str(),
-                })?;
-            Ok(json!({ "ok": true, "objective": item, "replayed": replayed }))
+        cap if cap.starts_with("local.objective.") => {
+            execute_objective_capability(cap, args, data_home, &state)
         }
-        "local.objective.list" => {
-            let items = ObjectiveStore::new(data_home).list(&state.workspace_id)?;
-            Ok(json!({ "ok": true, "items": items }))
-        }
-        _ => Err(ProjectError::code("tool_not_projected")),
+        _ => Err(ProjectError::code("tool_not_projected").into()),
     }
 }

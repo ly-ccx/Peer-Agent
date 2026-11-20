@@ -142,6 +142,20 @@ pub struct CreateObjectiveRequest<'a> {
     pub request_id: Option<&'a str>,
 }
 
+#[derive(Debug, Default)]
+pub struct UpdateObjectiveRequest<'a> {
+    pub title: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+    pub autonomy: Option<&'a str>,
+    pub watches: Option<Vec<Value>>,
+    pub milestones: Option<Vec<ObjectiveMilestone>>,
+    pub success_signals: Option<Vec<Value>>,
+    pub budget: Option<ObjectiveBudget>,
+    pub deadline: Option<Option<&'a str>>,
+    pub auto_accept: Option<bool>,
+    pub expected_version: Option<u64>,
+}
+
 fn valid_obj_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     !bytes.is_empty()
@@ -423,6 +437,122 @@ impl ObjectiveStore {
             return Err(ProjectError::code("VERSION_CONFLICT"));
         }
         item.status = status.to_owned();
+        item.version += 1;
+        item.updated_at = now_iso();
+        let out = item.clone();
+        self.save_doc(workspace_id, &doc)?;
+        Ok(out)
+    }
+
+    pub fn update(
+        &self,
+        workspace_id: &str,
+        objective_id: &str,
+        patch: &UpdateObjectiveRequest<'_>,
+    ) -> Result<ObjectiveItem, ProjectError> {
+        if let Some(t) = patch.title
+            && (t.trim().is_empty() || t.chars().count() > 120)
+        {
+            return Err(ProjectError::code("INVALID_OBJECTIVE"));
+        }
+        if let Some(o) = patch.outcome
+            && (o.trim().is_empty() || o.chars().count() > 2000)
+        {
+            return Err(ProjectError::code("INVALID_OBJECTIVE"));
+        }
+        if let Some(a) = patch.autonomy
+            && !matches!(a, "report_only" | "propose" | "act")
+        {
+            return Err(ProjectError::code("INVALID_OBJECTIVE"));
+        }
+        if let Some(ref b) = patch.budget
+            && (b.max_auto_sessions_per_day > MAX_AUTO_SESSIONS_PER_DAY
+                || b.max_probe_runs_per_day == 0
+                || b.max_probe_runs_per_day > MAX_PROBE_RUNS_PER_DAY)
+        {
+            return Err(ProjectError::code("INVALID_BUDGET"));
+        }
+        if let Some(Some(dl)) = patch.deadline
+            && parse_iso_ms(dl).is_none()
+        {
+            return Err(ProjectError::code("INVALID_DEADLINE"));
+        }
+        if let Some(ref w) = patch.watches {
+            validate_watches(w)?;
+        }
+
+        let mut doc = self.read_doc(workspace_id)?;
+        let item = doc
+            .items
+            .iter_mut()
+            .find(|i| i.objective_id == objective_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        if let Some(ev) = patch.expected_version
+            && item.version != ev
+        {
+            return Err(ProjectError::code("VERSION_CONFLICT"));
+        }
+        if let Some(t) = patch.title {
+            item.title = t.trim().to_owned();
+        }
+        if let Some(o) = patch.outcome {
+            item.outcome = o.trim().to_owned();
+        }
+        if let Some(a) = patch.autonomy {
+            item.autonomy = a.to_owned();
+        }
+        if let Some(ref w) = patch.watches {
+            item.watches = w.clone();
+        }
+        if let Some(ref m) = patch.milestones {
+            item.milestones = m.clone();
+        }
+        if let Some(ref s) = patch.success_signals {
+            item.success_signals = s.clone();
+        }
+        if let Some(ref b) = patch.budget {
+            item.budget = b.clone();
+        }
+        if let Some(dl) = patch.deadline {
+            item.deadline = dl.map(str::to_owned);
+        }
+        if let Some(aa) = patch.auto_accept {
+            item.auto_accept = Some(aa);
+        }
+        item.version += 1;
+        item.updated_at = now_iso();
+        let out = item.clone();
+        self.save_doc(workspace_id, &doc)?;
+        Ok(out)
+    }
+
+    pub fn close(
+        &self,
+        workspace_id: &str,
+        objective_id: &str,
+        status: &str,
+        evidence_refs: Vec<String>,
+    ) -> Result<ObjectiveItem, ProjectError> {
+        if !matches!(status, "achieved" | "abandoned") {
+            return Err(ProjectError::code("INVALID_STATUS"));
+        }
+        let cleaned_refs: Vec<String> = evidence_refs
+            .into_iter()
+            .map(|r| r.trim().to_owned())
+            .filter(|r| !r.is_empty() && r.len() <= 500)
+            .take(32)
+            .collect();
+        let mut doc = self.read_doc(workspace_id)?;
+        let item = doc
+            .items
+            .iter_mut()
+            .find(|i| i.objective_id == objective_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        item.status = status.to_owned();
+        if !cleaned_refs.is_empty() {
+            item.extra
+                .insert("closeEvidenceRefs".into(), json!(cleaned_refs));
+        }
         item.version += 1;
         item.updated_at = now_iso();
         let out = item.clone();

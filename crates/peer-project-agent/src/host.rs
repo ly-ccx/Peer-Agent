@@ -5,9 +5,10 @@
 //! `WatchHost`, `SessionSupervisor`, `ProjectAgentRunner`, and `BotDirectory`.
 
 use crate::{
-    AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore, CreateBotProfile, InputDraftStore,
-    InputQueue, MemoryStore, ObjectiveStore, ProjectError, ProjectInbox, ProjectInput,
-    ProjectRegistry, ProjectRegistryEntry, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
+    AcceptanceDecision, AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore,
+    CreateBotProfile, DigestQueue, HandoffOutcome, InputDraftStore, InputQueue, MemoryStore,
+    ObjectiveStore, ProjectError, ProjectInbox, ProjectInput, ProjectRegistry,
+    ProjectRegistryEntry, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
     SubmitInputRequest, WatchHost, now_iso, parse_iso_ms,
     runner::{ProjectAgentRunner, RunTurnOptions},
 };
@@ -100,6 +101,7 @@ pub struct NativeProjectHost {
     runner: ProjectAgentRunner,
     directory: BotDirectory,
     conversations: ConversationStore,
+    digests: DigestQueue,
 }
 
 impl NativeProjectHost {
@@ -132,6 +134,7 @@ impl NativeProjectHost {
             watches: WatchHost::new(&home),
             directory: BotDirectory::new(&home),
             conversations: ConversationStore::new(&home),
+            digests: DigestQueue::new(&home),
             supervisor,
             runner,
             host_identity,
@@ -180,6 +183,9 @@ impl NativeProjectHost {
     }
     pub fn conversations(&self) -> &ConversationStore {
         &self.conversations
+    }
+    pub fn digests(&self) -> &DigestQueue {
+        &self.digests
     }
 
     /// Bind a local folder to a persistent project Bot (register workspace, create canonical
@@ -824,6 +830,159 @@ impl NativeProjectHost {
             },
             reused: false,
         })
+    }
+
+    /// Flush due digest items for `workspace_id` at `at_iso` against `digest_time` (`HH:MM` UTC).
+    pub fn flush_due_digest(
+        &self,
+        workspace_id: &str,
+        at_iso: &str,
+        digest_time: &str,
+    ) -> Result<Option<Value>, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        let conv_id = profile
+            .agent_conversation_id
+            .clone()
+            .ok_or_else(|| ProjectError::code("CONVERSATION_REQUIRED"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => return Ok(None),
+            }
+        }
+        let Some(due) = self.digests.consider(workspace_id, at_iso, digest_time)? else {
+            return Ok(None);
+        };
+        let mut msg = due.message.clone();
+        let created_at = if parse_iso_ms(at_iso).is_some() {
+            at_iso.to_owned()
+        } else {
+            now_iso()
+        };
+        if let Some(obj) = msg.as_object_mut() {
+            obj.entry("createdAt").or_insert_with(|| json!(created_at));
+        }
+        self.conversations
+            .append_message_idempotent(&conv_id, &msg, &created_at, None)?;
+        self.digests.acknowledge(workspace_id, &due.date)?;
+        Ok(Some(msg))
+    }
+
+    /// Explicit local-user confirmation of a `result_ready` delegated session.
+    pub fn confirm_session_result(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        independent_verifier: Option<&str>,
+    ) -> Result<AcceptanceDecision, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let decision = self.supervisor.settle_session(
+            workspace_id,
+            session_id,
+            true,
+            true,
+            independent_verifier,
+            true,
+        )?;
+        if decision.accepted_by.is_some() && profile.auto_handoff_on_policy_accept {
+            let _ = self
+                .supervisor
+                .handoff_worktree(workspace_id, session_id, true);
+        }
+        Ok(decision)
+    }
+
+    /// Merge (`merge = true`) or discard (`merge = false`) an isolated session worktree.
+    pub fn handoff_session_worktree(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        merge: bool,
+    ) -> Result<Value, ProjectError> {
+        let _ = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        if merge {
+            let outcome = self
+                .supervisor
+                .handoff_worktree(workspace_id, session_id, true)?;
+            Ok(match outcome {
+                HandoffOutcome::Merged { commit_sha } => json!({
+                    "action": "merge",
+                    "status": "delivered",
+                    "commitSha": commit_sha,
+                }),
+                HandoffOutcome::NothingToMerge => json!({
+                    "action": "merge",
+                    "status": "nothing_to_merge",
+                }),
+                HandoffOutcome::Stopped { reason, detail } => json!({
+                    "action": "merge",
+                    "status": "stopped",
+                    "reason": reason,
+                    "detail": detail,
+                }),
+            })
+        } else {
+            let cleaned = self
+                .supervisor
+                .discard_worktree(workspace_id, session_id, true)?;
+            Ok(json!({
+                "action": "discard",
+                "status": "discarded",
+                "cleaned": cleaned,
+            }))
+        }
+    }
+
+    /// Requeue a previously user-stopped input so the next `tick` re-runs it with retry continuity.
+    pub fn retry_stopped_input(
+        &self,
+        workspace_id: &str,
+        anchor_or_input_id: &str,
+    ) -> Result<bool, ProjectError> {
+        let _ = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let trimmed = anchor_or_input_id.trim();
+        let input_id = trimmed.strip_prefix("input-").unwrap_or(trimmed);
+        self.inputs.requeue_executed(workspace_id, input_id, true)
     }
 
     pub fn close(&self) {

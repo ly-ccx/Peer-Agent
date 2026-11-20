@@ -9,6 +9,7 @@
 
 pub mod acceptance;
 pub mod circuit_breaker;
+pub mod digest;
 pub mod directory;
 pub mod drafts;
 pub mod host;
@@ -40,6 +41,7 @@ pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
     CircuitBreakerStore, FailureOutcome,
 };
+pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
     BotListSession, BotRowState, FamiliarizeOffer, InteractionPage, QuestionState,
@@ -66,8 +68,8 @@ pub use memory::{
 };
 pub use objectives::{
     AppendObservationRequest, CreateObjectiveRequest, ObjectiveActionItem, ObjectiveActions,
-    ObjectiveBudget, ObjectiveItem, ObjectiveMilestone, ObjectiveStore, ProbeOutcome, WatchHost,
-    WatchObservation,
+    ObjectiveBudget, ObjectiveItem, ObjectiveMilestone, ObjectiveStore, ProbeOutcome,
+    UpdateObjectiveRequest, WatchHost, WatchObservation,
 };
 pub use profile::{
     BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BotAvatar, BotProfile, BotProfileStore, CreateBotProfile,
@@ -77,10 +79,12 @@ pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
 pub use registry::{ProjectRegistry, ProjectRegistryEntry};
 pub use reply::{
     ComposeReplyInput, ComposedReply, SessionStatusFact, StatusClaim, Surfacing, SurfacingDecision,
-    SurfacingEvent, compose_reply, decide_surfacing, normalize_proactivity,
+    SurfacingEvent, UserAnchorCandidate, compose_reply, decide_surfacing, normalize_proactivity,
+    resolve_user_anchors,
 };
 pub use runner::{
     AgentTurnOutcome, ProjectAgentActivity, ProjectAgentRunner, RunTurnOptions, TurnEndKind,
+    read_retry_continuity,
 };
 pub use scheduler::{
     ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,

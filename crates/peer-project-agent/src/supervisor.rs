@@ -71,6 +71,8 @@ struct DelegationOriginSummary {
     priority: Option<String>,
     plan_approval_id: Option<String>,
     superseded_by: Option<String>,
+    anchor_message_id: Option<String>,
+    anchor_message_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -94,6 +96,12 @@ struct DeliveryBindingSummary {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DeliveryHandoffSummary {
+    status: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct PlanSummaryDoc {
     plan_id: Option<String>,
     conversation_id: Option<String>,
@@ -104,6 +112,7 @@ struct PlanSummaryDoc {
     runner: Option<RunnerSummary>,
     result_acceptance: Option<AcceptanceSummary>,
     delivery_binding: Option<DeliveryBindingSummary>,
+    delivery_handoff: Option<DeliveryHandoffSummary>,
 }
 
 #[derive(Debug, Default)]
@@ -212,6 +221,19 @@ fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
         .clone()
         .unwrap_or_else(|| conversation_id.clone());
     let acceptance = doc.result_acceptance.as_ref();
+    let anchor_message_ids = origin
+        .anchor_message_ids
+        .as_ref()
+        .filter(|a| !a.is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            origin
+                .anchor_message_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| vec![s.to_owned()])
+                .unwrap_or_default()
+        });
     Some(WorkSessionSummary {
         session_id,
         workspace_id,
@@ -233,6 +255,8 @@ fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
             .as_ref()
             .and_then(|d| d.worktree_path.clone()),
         approval_id: origin.plan_approval_id.clone(),
+        handoff_status: doc.delivery_handoff.as_ref().and_then(|h| h.status.clone()),
+        anchor_message_ids,
     })
 }
 
@@ -283,6 +307,10 @@ fn extract_large_plan_summary(
         extract_top_level_field::<DeliveryBindingSummary>(&head, "deliveryBinding").or_else(|| {
             extract_top_level_field::<DeliveryBindingSummary>(&tail, "deliveryBinding")
         });
+    let delivery_handoff =
+        extract_top_level_field::<DeliveryHandoffSummary>(&tail, "deliveryHandoff").or_else(|| {
+            extract_top_level_field::<DeliveryHandoffSummary>(&head, "deliveryHandoff")
+        });
 
     let doc = PlanSummaryDoc {
         plan_id: Some(pid.to_owned()),
@@ -302,6 +330,7 @@ fn extract_large_plan_summary(
         runner,
         result_acceptance,
         delivery_binding,
+        delivery_handoff,
     };
     summarize_doc(&doc)
 }
@@ -363,6 +392,10 @@ pub struct WorkSessionSummary {
     pub worktree_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_message_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -646,6 +679,7 @@ impl SessionSupervisor {
             if s.workspace_id.is_empty() {
                 continue;
             }
+            let needs_confirm = (s.status == "result_ready" && !s.accepted).then_some(true);
             grouped
                 .entry(s.workspace_id.clone())
                 .or_default()
@@ -654,7 +688,7 @@ impl SessionSupervisor {
                     title: s.title,
                     status: s.status,
                     updated_at: Some(s.updated_at),
-                    result_confirmation_required: None,
+                    result_confirmation_required: needs_confirm,
                     completion_review_required: false,
                 });
         }
@@ -667,6 +701,22 @@ impl SessionSupervisor {
     #[cfg_attr(not(test), allow(dead_code))]
     fn summarize(&self, plan: &Value) -> WorkSessionSummary {
         let origin = &plan["delegationOrigin"];
+        let anchor_message_ids = origin["anchorMessageIds"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| {
+                origin["anchorMessageId"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| vec![s.to_owned()])
+                    .unwrap_or_default()
+            });
         WorkSessionSummary {
             session_id: origin["sessionId"]
                 .as_str()
@@ -690,6 +740,10 @@ impl SessionSupervisor {
                 .as_str()
                 .map(str::to_owned),
             approval_id: origin["planApprovalId"].as_str().map(str::to_owned),
+            handoff_status: plan["deliveryHandoff"]["status"]
+                .as_str()
+                .map(str::to_owned),
+            anchor_message_ids,
         }
     }
 
@@ -706,13 +760,16 @@ impl SessionSupervisor {
     pub fn list_bot_sessions(&self, workspace_id: &str) -> Vec<BotListSession> {
         self.list_sessions(workspace_id)
             .into_iter()
-            .map(|s| BotListSession {
-                session_id: s.session_id,
-                title: s.title,
-                status: s.status,
-                updated_at: Some(s.updated_at),
-                result_confirmation_required: None,
-                completion_review_required: false,
+            .map(|s| {
+                let needs_confirm = (s.status == "result_ready" && !s.accepted).then_some(true);
+                BotListSession {
+                    session_id: s.session_id,
+                    title: s.title,
+                    status: s.status,
+                    updated_at: Some(s.updated_at),
+                    result_confirmation_required: needs_confirm,
+                    completion_review_required: false,
+                }
             })
             .collect()
     }
@@ -1509,6 +1566,59 @@ impl SessionSupervisor {
         self.worktrees.changed_files(&handle)
     }
 
+    pub fn read_verification_detail(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<Value, ProjectError> {
+        let plan = self
+            .find_plan_by_session(workspace_id, session_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let evidence = self.indexed_evidence_refs_for_plan(&plan);
+        let verdict = compute_verification_verdict(
+            &plan,
+            &evidence,
+            &HostAuthorityFacts {
+                independent_verifier: plan["delegationOrigin"]["independentVerifier"]
+                    .as_str()
+                    .map(str::to_owned),
+                ..Default::default()
+            },
+        );
+        Ok(json!({
+            "sessionId": session_id,
+            "planId": plan["planId"],
+            "status": derive_session_status(&plan),
+            "verdict": verdict,
+            "criterionResults": plan["criterionResults"],
+            "evidenceRefs": verdict.evidence_refs,
+            "changedFiles": self.session_changed_files(&plan),
+            "resultAcceptance": plan["resultAcceptance"],
+            "deliveryHandoff": plan["deliveryHandoff"],
+        }))
+    }
+
+    fn worktree_handle_from_plan(
+        &self,
+        plan: &Value,
+    ) -> Result<Option<WorktreeHandle>, ProjectError> {
+        let binding = &plan["deliveryBinding"];
+        let Some(wt) = binding["worktreePath"].as_str().filter(|s| !s.is_empty()) else {
+            return Ok(None);
+        };
+        let ws = binding["targetWorkspacePath"]
+            .as_str()
+            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
+        Ok(Some(WorktreeHandle {
+            workspace_path: PathBuf::from(ws),
+            worktree_path: PathBuf::from(wt),
+            repository_root: PathBuf::from(ws),
+            branch: binding["branch"].as_str().unwrap_or("").to_owned(),
+            target_branch: binding["targetBranch"].as_str().unwrap_or("").to_owned(),
+            baseline_commit: binding["baselineCommit"].as_str().unwrap_or("").to_owned(),
+        }))
+    }
+
     pub fn handoff_worktree(
         &self,
         workspace_id: &str,
@@ -1518,7 +1628,7 @@ impl SessionSupervisor {
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
-        let plan = self
+        let mut plan = self
             .find_plan_by_session(workspace_id, session_id)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
         if plan["resultAcceptance"]["acceptedAt"].as_str().is_none() {
@@ -1527,22 +1637,73 @@ impl SessionSupervisor {
                 detail: "session must be accepted before merging worktree".to_owned(),
             });
         }
-        let binding = &plan["deliveryBinding"];
-        let Some(wt) = binding["worktreePath"].as_str() else {
+        let Some(handle) = self.worktree_handle_from_plan(&plan)? else {
             return Ok(HandoffOutcome::NothingToMerge);
         };
-        let ws = binding["targetWorkspacePath"]
-            .as_str()
-            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
-        let handle = WorktreeHandle {
-            workspace_path: PathBuf::from(ws),
-            worktree_path: PathBuf::from(wt),
-            repository_root: PathBuf::from(ws),
-            branch: binding["branch"].as_str().unwrap_or("").to_owned(),
-            target_branch: binding["targetBranch"].as_str().unwrap_or("").to_owned(),
-            baseline_commit: binding["baselineCommit"].as_str().unwrap_or("").to_owned(),
+        let outcome = self.worktrees.handoff_merge(&handle)?;
+        let at = now_iso();
+        plan["deliveryHandoff"] = match &outcome {
+            HandoffOutcome::Merged { commit_sha } => json!({
+                "status": "delivered",
+                "commitSha": commit_sha,
+                "updatedAt": at,
+            }),
+            HandoffOutcome::NothingToMerge => json!({
+                "status": "nothing_to_merge",
+                "updatedAt": at,
+            }),
+            HandoffOutcome::Stopped { reason, detail } => json!({
+                "status": "stopped",
+                "reason": reason,
+                "detail": detail,
+                "updatedAt": at,
+            }),
         };
-        self.worktrees.handoff_merge(&handle)
+        plan["updatedAt"] = json!(at);
+        self.write_plan(&plan)?;
+        Ok(outcome)
+    }
+
+    pub fn discard_worktree(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        holds_lease: bool,
+    ) -> Result<bool, ProjectError> {
+        if !holds_lease {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
+        let mut plan = self
+            .find_plan_by_session(workspace_id, session_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let cleaned = match self.worktree_handle_from_plan(&plan)? {
+            Some(handle) => self.worktrees.cleanup_if_clean(&handle).unwrap_or(false),
+            None => false,
+        };
+        let at = now_iso();
+        plan["deliveryHandoff"] = json!({
+            "status": "discarded",
+            "cleaned": cleaned,
+            "updatedAt": at,
+        });
+        plan["updatedAt"] = json!(at);
+        self.write_plan(&plan)?;
+        Ok(cleaned)
+    }
+
+    pub fn resume_session(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        holds_lease: bool,
+    ) -> Result<WorkSessionSummary, ProjectError> {
+        self.control_session(
+            workspace_id,
+            session_id,
+            "resume",
+            "user_resume",
+            holds_lease,
+        )
     }
 
     pub fn decide_plan_approval(
@@ -1624,6 +1785,9 @@ impl SessionSupervisor {
                 plan["delegationOrigin"]["phase"] = json!("queued");
                 if plan["status"] == "paused" {
                     plan["status"] = json!("accepted");
+                }
+                if plan["runner"]["status"] == "waiting_user" {
+                    plan["runner"]["status"] = json!("running");
                 }
                 plan["updatedAt"] = json!(at);
             }

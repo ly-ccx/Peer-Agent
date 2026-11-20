@@ -58,7 +58,9 @@ struct ActiveTick {
 enum BotCardAction {
     StartFamiliarize,
     AnswerQuestion { card_id: String, text: String },
-    RetryTurn,
+    ConfirmResult { session_id: String },
+    HandoffWorktree { session_id: String, merge: bool },
+    RetryTurn { stopped_anchor: Option<String> },
     Command(String),
 }
 
@@ -452,6 +454,76 @@ impl<'a> BotShellState<'a> {
                     BotCardAction::Command(format!("/deny {num}")),
                 ]);
             }
+            if s.status == "result_ready" && !s.accepted {
+                let card_id = format!("card:confirm:{}", s.session_id);
+                let num = self.card_numbers.assign(&ws_id, &card_id);
+                cards.push(BotCardRow {
+                    number: num,
+                    card_id,
+                    kind: if zh {
+                        "待确认结果"
+                    } else {
+                        "Confirm Result"
+                    }
+                    .to_owned(),
+                    title: s.title.clone(),
+                    summary: if zh {
+                        format!("委派会话 {} 已完成，等待确认接收", s.session_id)
+                    } else {
+                        format!(
+                            "Work session {} completed and awaits confirmation",
+                            s.session_id
+                        )
+                    },
+                    actions: vec![if zh { "确认接收" } else { "Confirm" }.to_owned()],
+                });
+                card_actions.push(vec![BotCardAction::ConfirmResult {
+                    session_id: s.session_id.clone(),
+                }]);
+            }
+            if s.accepted
+                && s.worktree_path.is_some()
+                && !matches!(
+                    s.handoff_status.as_deref(),
+                    Some("delivered" | "discarded" | "nothing_to_merge")
+                )
+            {
+                let card_id = format!("card:handoff:{}", s.session_id);
+                let num = self.card_numbers.assign(&ws_id, &card_id);
+                cards.push(BotCardRow {
+                    number: num,
+                    card_id,
+                    kind: if zh {
+                        "变更交付"
+                    } else {
+                        "Worktree Handoff"
+                    }
+                    .to_owned(),
+                    title: s.title.clone(),
+                    summary: if zh {
+                        format!("隔离分支变更待处理（{}）", s.session_id)
+                    } else {
+                        format!(
+                            "Isolated worktree changes ready for handoff ({})",
+                            s.session_id
+                        )
+                    },
+                    actions: vec![
+                        if zh { "合并变更" } else { "Merge" }.to_owned(),
+                        if zh { "丢弃分支" } else { "Discard" }.to_owned(),
+                    ],
+                });
+                card_actions.push(vec![
+                    BotCardAction::HandoffWorktree {
+                        session_id: s.session_id.clone(),
+                        merge: true,
+                    },
+                    BotCardAction::HandoffWorktree {
+                        session_id: s.session_id.clone(),
+                        merge: false,
+                    },
+                ]);
+            }
         }
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
         let q_states = project_reply_questions(&raw_messages, now_ms);
@@ -514,24 +586,35 @@ impl<'a> BotShellState<'a> {
                 card_actions.push(acts);
             }
         }
-        if let Some(unavail_idx) = raw_messages
-            .iter()
-            .rposition(|m| m["kind"] == "system_card" && m["card"] == "agent_unavailable")
-        {
-            let superseded = raw_messages[unavail_idx + 1..]
+        if let Some(retry_idx) = raw_messages.iter().rposition(|m| {
+            m["kind"] == "system_card"
+                && matches!(
+                    m["card"].as_str(),
+                    Some("agent_unavailable" | "agent_stopped")
+                )
+        }) {
+            let superseded = raw_messages[retry_idx + 1..]
                 .iter()
                 .any(|m| matches!(m["kind"].as_str(), Some("agent_reply" | "user_input")));
             if !superseded {
-                let m = &raw_messages[unavail_idx];
+                let m = &raw_messages[retry_idx];
+                let card_kind = m["card"].as_str().unwrap_or("agent_unavailable");
                 let turn_id = m["turnId"]
                     .as_str()
                     .or_else(|| m["id"].as_str())
                     .unwrap_or("retry");
-                let card_id = format!("card:agent_unavailable:{turn_id}");
+                let card_id = format!("card:{card_kind}:{turn_id}");
                 let num = self.card_numbers.assign(&ws_id, &card_id);
+                let stopped = card_kind == "agent_stopped";
                 let title: String = m["content"]
                     .as_str()
-                    .unwrap_or(if zh {
+                    .unwrap_or(if stopped {
+                        if zh {
+                            "回复已停止"
+                        } else {
+                            "Reply stopped"
+                        }
+                    } else if zh {
                         "代理暂时不可用"
                     } else {
                         "Agent unavailable"
@@ -539,15 +622,31 @@ impl<'a> BotShellState<'a> {
                     .chars()
                     .take(120)
                     .collect();
+                let stopped_anchor = if stopped {
+                    m["replyTo"]
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                } else {
+                    None
+                };
                 cards.push(BotCardRow {
                     number: num,
                     card_id,
-                    kind: if zh { "代理异常" } else { "Unavailable" }.to_owned(),
+                    kind: if stopped {
+                        if zh { "已停止" } else { "Stopped" }
+                    } else if zh {
+                        "代理异常"
+                    } else {
+                        "Unavailable"
+                    }
+                    .to_owned(),
                     title,
                     summary: String::new(),
                     actions: vec![if zh { "重试" } else { "Retry" }.to_owned()],
                 });
-                card_actions.push(vec![BotCardAction::RetryTurn]);
+                card_actions.push(vec![BotCardAction::RetryTurn { stopped_anchor }]);
             }
         }
         if familiarize_offer.is_some() {
@@ -750,9 +849,64 @@ impl<'a> BotShellState<'a> {
                 }
                 None
             }
-            BotCardAction::RetryTurn => {
+            BotCardAction::ConfirmResult { session_id } => {
+                let ws_id = self.active_workspace_id.clone()?;
+                match self.host.confirm_session_result(&ws_id, &session_id, None) {
+                    Ok(decision) if decision.accepted_by.is_some() => {
+                        self.notice = Some(format!("已确认接收会话 {} 的结果。", session_id));
+                    }
+                    Ok(decision) => {
+                        let reasons = if decision.reasons.is_empty() {
+                            "close_gate_unmet".to_owned()
+                        } else {
+                            decision.reasons.join(", ")
+                        };
+                        self.notice = Some(format!("结果暂未满足接收条件（{reasons}）。"));
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("确认结果失败（{}）。", err.code));
+                    }
+                }
+                self.refresh_snapshot(false);
+                None
+            }
+            BotCardAction::HandoffWorktree { session_id, merge } => {
+                let ws_id = self.active_workspace_id.clone()?;
+                match self
+                    .host
+                    .handoff_session_worktree(&ws_id, &session_id, merge)
+                {
+                    Ok(res) => {
+                        let status = res["status"].as_str().unwrap_or("unknown");
+                        self.notice = Some(match status {
+                            "delivered" => format!("已合并会话 {} 的分支变更。", session_id),
+                            "nothing_to_merge" => {
+                                format!("会话 {} 没有可合并的变更。", session_id)
+                            }
+                            "discarded" => format!("已丢弃会话 {} 的隔离分支。", session_id),
+                            "stopped" => format!(
+                                "无法合并分支（{}）。",
+                                res["reason"].as_str().unwrap_or("stopped")
+                            ),
+                            _ => format!("分支处理状态：{status}"),
+                        });
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("处理工作区分支失败（{}）。", err.code));
+                    }
+                }
+                self.refresh_snapshot(false);
+                None
+            }
+            BotCardAction::RetryTurn { stopped_anchor } => {
                 let ws_id = self.active_workspace_id.clone()?;
                 self.host.runner().reset_circuit_breaker_for(&ws_id);
+                if let Some(anchor) = stopped_anchor
+                    && let Err(err) = self.host.retry_stopped_input(&ws_id, &anchor)
+                {
+                    self.notice = Some(format!("重新排队失败（{}）。", err.code));
+                    return None;
+                }
                 self.notice = Some("已触发重试…".to_owned());
                 self.refresh_snapshot(false);
                 self.trigger_background_tick();

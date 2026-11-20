@@ -11,9 +11,9 @@
 pub use crate::circuit_breaker::CircuitBreaker;
 use crate::{
     BotProfileStore, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError, ProjectInput,
-    SessionSupervisor,
+    SessionSupervisor, UserAnchorCandidate,
     circuit_breaker::{CircuitAdmit, CircuitBreakerStore},
-    is_effective_memory, now_iso, parse_iso_ms,
+    is_effective_memory, memory_secret_reason, now_iso, parse_iso_ms,
     provider::{ProjectCapabilityProvider, TurnExecutionState},
     system_context::{ProjectAgentContextInput, assemble_project_agent_context},
 };
@@ -239,6 +239,149 @@ fn clip_utf8_bytes(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+fn redact_continuity_text(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if memory_secret_reason(trimmed).is_some() {
+        return "[REDACTED]".to_owned();
+    }
+    trimmed.chars().take(max_chars).collect()
+}
+
+/// Reconstruct factual continuity from the latest stopped/failed `agent_turn` for
+/// `current_input_anchors` (before any answering `agent_reply`).
+pub fn read_retry_continuity(
+    messages: &[Value],
+    current_input_anchors: &[String],
+    exclude_turn_id: Option<&str>,
+) -> Option<Value> {
+    if current_input_anchors.is_empty() {
+        return None;
+    }
+    let anchor_set: HashSet<&str> = current_input_anchors.iter().map(String::as_str).collect();
+    let mut found_turn: Option<&Value> = None;
+    for msg in messages.iter().rev() {
+        let kind = msg["kind"].as_str().unwrap_or("");
+        if kind == "agent_reply" {
+            let overlaps = msg["replyTo"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .any(|a| anchor_set.contains(a));
+            if overlaps {
+                return None;
+            }
+            continue;
+        }
+        if kind != "agent_turn" {
+            continue;
+        }
+        let tid = msg["turnId"]
+            .as_str()
+            .or_else(|| msg["id"].as_str())
+            .unwrap_or("");
+        if exclude_turn_id.is_some_and(|ex| ex == tid) {
+            continue;
+        }
+        let outcome = msg["meta"]["diagnosticTiming"]["outcome"]
+            .as_str()
+            .unwrap_or("");
+        if !matches!(outcome, "stopped" | "error") {
+            continue;
+        }
+        let overlaps = msg["userInputs"]
+            .as_array()
+            .or_else(|| msg["replyTo"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .any(|a| anchor_set.contains(a));
+        if overlaps {
+            found_turn = Some(msg);
+            break;
+        }
+    }
+    let turn = found_turn?;
+    let prev_turn_id = turn["turnId"]
+        .as_str()
+        .or_else(|| turn["id"].as_str())
+        .unwrap_or("")
+        .to_owned();
+    let outcome = turn["meta"]["diagnosticTiming"]["outcome"]
+        .as_str()
+        .unwrap_or("stopped")
+        .to_owned();
+
+    let card_partial = messages
+        .iter()
+        .rev()
+        .find(|m| {
+            m["kind"] == "system_card"
+                && m["card"] == "agent_stopped"
+                && m["turnId"].as_str() == Some(prev_turn_id.as_str())
+        })
+        .and_then(|m| m["partialReply"].as_str())
+        .map(|s| redact_continuity_text(s, 1200))
+        .filter(|s| !s.is_empty());
+
+    let raw_partial = card_partial
+        .or_else(|| {
+            turn["publicUpdates"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .rev()
+                .filter_map(|u| u["text"].as_str())
+                .map(|s| redact_continuity_text(s, 1200))
+                .find(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            turn["rounds"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .rev()
+                .filter_map(|r| r["text"].as_str())
+                .map(|s| redact_continuity_text(s, 1200))
+                .find(|s| !s.is_empty())
+        })
+        .unwrap_or_default();
+
+    let mut completed_tools = Vec::new();
+    for round in turn["rounds"].as_array().into_iter().flatten() {
+        for tc in round["toolCalls"].as_array().into_iter().flatten() {
+            if completed_tools.len() >= 16 {
+                break;
+            }
+            let name = tc["name"].as_str().unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            let ok = tc["result"]["ok"] == true;
+            let raw_summary = tc["result"]["error"]
+                .as_str()
+                .or_else(|| tc["result"]["status"].as_str())
+                .unwrap_or(if ok { "ok" } else { "failed" });
+            completed_tools.push(json!({
+                "name": name,
+                "ok": ok,
+                "summary": redact_continuity_text(raw_summary, 200),
+            }));
+        }
+    }
+
+    Some(json!({
+        "previousTurnId": prev_turn_id,
+        "outcome": outcome,
+        "partialReply": raw_partial,
+        "completedTools": completed_tools,
+        "note": "Continue from this factual continuity without repeating already-committed side effects.",
+    }))
 }
 
 fn compaction_marker(msg: &Value) -> Option<&Value> {
@@ -783,6 +926,9 @@ impl ProjectAgentRunner {
 
         let mut valid_user_ids = HashSet::new();
         let mut prior_report_fact_keys = HashSet::new();
+        let mut reported_session_ids = HashSet::new();
+        let mut anchor_seen = HashSet::new();
+        let mut user_anchor_candidates = Vec::new();
         for msg in &history_messages {
             let kind = msg["kind"].as_str().unwrap_or("");
             if (kind == "user_input" || (kind.is_empty() && msg["role"] == "user"))
@@ -790,13 +936,36 @@ impl ProjectAgentRunner {
                 && let Some(id) = msg["id"].as_str()
             {
                 valid_user_ids.insert(id.to_owned());
+                if anchor_seen.insert(id.to_owned()) {
+                    let input_id = msg["inputId"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| id.strip_prefix("input-").map(str::to_owned));
+                    user_anchor_candidates.push(UserAnchorCandidate {
+                        message_id: id.to_owned(),
+                        input_id,
+                        text: msg["content"].as_str().unwrap_or("").to_owned(),
+                    });
+                }
             }
-            if kind == "agent_reply"
-                && let Some(keys) = msg["meta"]["reportFactKeys"].as_array()
-            {
-                for k in keys {
-                    if let Some(s) = k.as_str() {
-                        prior_report_fact_keys.insert(s.to_owned());
+            if kind == "agent_reply" {
+                if let Some(srcs) = msg["sources"].as_array() {
+                    for s in srcs {
+                        if let Some(sid) = s.as_str().filter(|v| !v.is_empty()) {
+                            reported_session_ids.insert(sid.to_owned());
+                        }
+                    }
+                }
+                if let Some(keys) = msg["meta"]["reportFactKeys"].as_array() {
+                    for k in keys {
+                        if let Some(s) = k.as_str() {
+                            prior_report_fact_keys.insert(s.to_owned());
+                            if let Some((sid, _)) = s.split_once('|')
+                                && !sid.is_empty()
+                            {
+                                reported_session_ids.insert(sid.to_owned());
+                            }
+                        }
                     }
                 }
             }
@@ -807,8 +976,16 @@ impl ProjectAgentRunner {
             .iter()
             .map(|i| format!("input-{}", i.input_id))
             .collect();
-        for a in &current_input_anchors {
-            valid_user_ids.insert(a.clone());
+        for inp in opts.user_inputs {
+            let anchor_id = format!("input-{}", inp.input_id);
+            valid_user_ids.insert(anchor_id.clone());
+            if anchor_seen.insert(anchor_id.clone()) {
+                user_anchor_candidates.push(UserAnchorCandidate {
+                    message_id: anchor_id,
+                    input_id: Some(inp.input_id.clone()),
+                    text: inp.text.clone(),
+                });
+            }
         }
         let current_input_id = opts
             .user_inputs
@@ -856,12 +1033,22 @@ impl ProjectAgentRunner {
             Vec::new()
         };
         let sessions = self.supervisor.list_sessions(opts.workspace_id);
+        let mut unreported_anchor_sessions = Vec::new();
+        for s in &sessions {
+            if s.status == "result_ready" && !reported_session_ids.contains(&s.session_id) {
+                for anchor in &s.anchor_message_ids {
+                    unreported_anchor_sessions.push((anchor.clone(), s.session_id.clone()));
+                }
+            }
+        }
         let objectives = ObjectiveStore::new(&self.data_home)
             .list(opts.workspace_id)
             .unwrap_or_default();
         let instructions =
             ProjectInstructions::observe_host(opts.workspace_path, &self.data_home, cancel)
                 .unwrap_or_default();
+        let retry_continuity =
+            read_retry_continuity(&history_messages, &current_input_anchors, Some(&turn_id));
 
         let LoadedBotHistory {
             mut continuity_summary,
@@ -899,6 +1086,7 @@ impl ProjectAgentRunner {
                 current_input_anchors: &current_input_anchors,
                 wake_events: opts.wake_events,
                 continuity_summary: continuity,
+                retry_continuity: retry_continuity.as_ref(),
             })
         };
         let mut system_prompt = build_system_prompt(continuity_summary.as_deref());
@@ -913,9 +1101,12 @@ impl ProjectAgentRunner {
             current_input_id,
             quote_session_ids,
             valid_user_message_ids: valid_user_ids,
+            user_anchor_candidates,
+            unreported_anchor_sessions,
             prior_report_fact_keys,
             worker_model_selection: opts.worker_model_selection.clone(),
             reply_committed_id: None,
+            post_reply_rejected: false,
             waiting_session_ids: vec![],
             spawned_session_ids: vec![],
             memory_learned: vec![],
@@ -982,7 +1173,10 @@ impl ProjectAgentRunner {
             now_ms,
         };
 
-        for _round in 0..max_rounds {
+        let mut delivery_repair_used = false;
+        let mut round = 0usize;
+        while round < max_rounds {
+            round += 1;
             if cancel.is_cancelled() {
                 final_end = TurnEndKind::UserStopped;
                 break;
@@ -1077,12 +1271,53 @@ impl ProjectAgentRunner {
                 &mut public_update_chars,
                 &model_turn.content,
             );
+            if cancel.is_cancelled() {
+                rounds_record.push(json!({
+                    "text": model_turn.content,
+                    "toolCalls": [],
+                }));
+                final_end = TurnEndKind::UserStopped;
+                break;
+            }
 
             if model_turn.calls.is_empty() {
                 rounds_record.push(json!({
                     "text": model_turn.content,
                     "toolCalls": [],
                 }));
+                let (post_rejected, committed_or_waiting) = turn_state
+                    .lock()
+                    .map(|s| {
+                        (
+                            s.post_reply_rejected,
+                            s.reply_committed_id.is_some() || !s.waiting_session_ids.is_empty(),
+                        )
+                    })
+                    .unwrap_or((false, false));
+                if !committed_or_waiting
+                    && !delivery_repair_used
+                    && !cancel.is_cancelled()
+                    && (opts.kind == "wake" || post_rejected)
+                {
+                    delivery_repair_used = true;
+                    let sanitized =
+                        peer_runtime::canonical_history::sanitize_assistant(&model_turn.content);
+                    let trimmed = peer_protocol::javascript_trim(&sanitized);
+                    if !trimmed.is_empty() {
+                        live_messages.push(json!({
+                            "role": "assistant",
+                            "content": trimmed,
+                        }));
+                        committed_message_ids.push(None);
+                    }
+                    live_messages.push(json!({
+                        "role": "user",
+                        "content": "No final reply or session wait has been committed (or your previous post_reply was rejected). Fix any validation error using the tool diagnostics and call post_reply (or wait_for_sessions if active child sessions remain).",
+                    }));
+                    committed_message_ids.push(None);
+                    round = round.saturating_sub(1);
+                    continue;
+                }
                 if opts.kind == "user" && !model_turn.content.trim().is_empty() {
                     let msg_id = persist_fallback_reply(
                         &conv_store,
@@ -1241,6 +1476,30 @@ impl ProjectAgentRunner {
             if stop_loop {
                 break;
             }
+            if round >= max_rounds {
+                let (post_rejected, committed_or_waiting) = turn_state
+                    .lock()
+                    .map(|s| {
+                        (
+                            s.post_reply_rejected,
+                            s.reply_committed_id.is_some() || !s.waiting_session_ids.is_empty(),
+                        )
+                    })
+                    .unwrap_or((false, false));
+                if !committed_or_waiting
+                    && !delivery_repair_used
+                    && !cancel.is_cancelled()
+                    && (opts.kind == "wake" || post_rejected)
+                {
+                    delivery_repair_used = true;
+                    live_messages.push(json!({
+                        "role": "user",
+                        "content": "No final reply or session wait has been committed (or your previous post_reply was rejected). Fix any validation error using the tool diagnostics and call post_reply (or wait_for_sessions if active child sessions remain).",
+                    }));
+                    committed_message_ids.push(None);
+                    round = round.saturating_sub(1);
+                }
+            }
         }
 
         let needs_synthesis = opts.kind == "user"
@@ -1300,6 +1559,12 @@ impl ProjectAgentRunner {
         drop(admission);
         let _ = admission_task.await;
 
+        let live_partial = self
+            .activity
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|a| a.reply_text.trim().to_owned()))
+            .unwrap_or_default();
         let snapshot = turn_state.lock().map(|s| s.clone()).unwrap_or_default();
         if let Some(msg_id) = snapshot.reply_committed_id {
             final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
@@ -1365,6 +1630,57 @@ impl ProjectAgentRunner {
 
         // Persist durable hidden agent_turn process record for diagnostics and replay.
         let finished_at = now_iso();
+        if matches!(final_end, TurnEndKind::UserStopped) {
+            let partial_reply = if !live_partial.is_empty() {
+                live_partial
+            } else {
+                public_updates
+                    .last()
+                    .and_then(|u| u["text"].as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_owned()
+            };
+            let preview: String = partial_reply.chars().take(200).collect();
+            let content = if preview.is_empty() {
+                "已停止当前回复；可点击重试继续。".to_owned()
+            } else {
+                format!("已停止当前回复（保留片段）：{preview}")
+            };
+            let mut card_msg = json!({
+                "id": format!("{turn_id}-stopped"),
+                "role": "assistant",
+                "kind": "system_card",
+                "card": "agent_stopped",
+                "turnId": turn_id,
+                "replyTo": current_input_anchors,
+                "content": content,
+                "actions": ["retry"],
+                "cards": [{
+                    "cardId": format!("card:agent_stopped:{turn_id}"),
+                    "kind": "agent_stopped",
+                    "content": content,
+                    "actions": [{
+                        "id": "retry",
+                        "channel": "project-agent:retry",
+                        "payload": {
+                            "workspaceId": opts.workspace_id,
+                            "turnId": turn_id,
+                        }
+                    }]
+                }],
+                "createdAt": finished_at,
+            });
+            if !partial_reply.is_empty() {
+                card_msg["partialReply"] = json!(partial_reply);
+            }
+            let _ = conv_store.append_message_idempotent(
+                opts.conversation_id,
+                &card_msg,
+                &finished_at,
+                None,
+            );
+        }
         let finished_ms = parse_iso_ms(&finished_at).unwrap_or(now_ms);
         let duration_ms = finished_ms.saturating_sub(now_ms).max(0);
         let outcome_label = match &final_end {

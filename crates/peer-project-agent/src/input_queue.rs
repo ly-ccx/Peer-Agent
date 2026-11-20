@@ -465,6 +465,67 @@ impl InputQueue {
         }
         Ok(pending)
     }
+
+    /// Requeue a previously stopped/executed input so the next `consume` dispatches it again.
+    pub fn requeue_executed(
+        &self,
+        workspace_id: &str,
+        input_id: &str,
+        holds_lease: bool,
+    ) -> Result<bool, ProjectError> {
+        if !holds_lease {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
+        let ws = workspace_id.trim();
+        if !is_valid_workspace_id(ws) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let target_id = input_id.trim();
+        if target_id.is_empty() {
+            return Ok(false);
+        }
+        self.with_lock(ws, || {
+            let inputs = self.read_inputs_unlocked(ws)?;
+            let mut cursor = self.read_cursor_state(ws)?;
+            let Some(delivered_idx) = cursor
+                .input_id
+                .as_deref()
+                .and_then(|id| inputs.iter().position(|r| r.input_id == id))
+            else {
+                return Ok(false);
+            };
+            let Some(idx) = inputs
+                .iter()
+                .take(delivered_idx + 1)
+                .position(|r| r.input_id == target_id)
+            else {
+                return Ok(false);
+            };
+            let through = cursor
+                .executed_input_id
+                .as_deref()
+                .and_then(|id| inputs.iter().position(|r| r.input_id == id));
+            let mut acked: HashSet<String> = cursor.completed_input_ids.iter().cloned().collect();
+            if let Some(t) = through
+                && t >= idx
+            {
+                for row in &inputs[(idx + 1)..=t] {
+                    acked.insert(row.input_id.clone());
+                }
+                cursor.executed_input_id = if idx > 0 {
+                    Some(inputs[idx - 1].input_id.clone())
+                } else {
+                    None
+                };
+            }
+            acked.remove(target_id);
+            let mut next_completed: Vec<String> = acked.into_iter().collect();
+            next_completed.sort();
+            cursor.completed_input_ids = next_completed;
+            self.write_cursor_state(ws, &cursor)?;
+            Ok(true)
+        })
+    }
 }
 
 #[cfg(test)]

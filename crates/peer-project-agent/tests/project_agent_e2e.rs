@@ -1,7 +1,8 @@
 use peer_project_agent::{
     CircuitBreakerStore, LeaseStatus, MemoryFilter, NativeProjectHost, ProjectCapabilityProvider,
     QuestionState, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, TurnEndKind,
-    TurnExecutionState, input_message_id, project_reply_questions,
+    TurnExecutionState, bot_list_json, input_message_id, project_reply_questions,
+    read_retry_continuity,
 };
 use peer_runtime::{
     CancellationToken,
@@ -1596,4 +1597,715 @@ async fn dual_host_takeover_yield_handshake_transfers_lease_cleanly() {
     ));
     assert!(!host_b.takeover_requested(&entry.workspace_id));
     host_b.close();
+}
+
+fn extract_objective_id_from_tools(req: &Value) -> Option<String> {
+    req["messages"]
+        .as_array()?
+        .iter()
+        .rev()
+        .filter(|m| m["role"] == "tool")
+        .find_map(|m| {
+            let parsed: Value = serde_json::from_str(m["content"].as_str()?).ok()?;
+            parsed["objective"]["objectiveId"]
+                .as_str()
+                .map(str::to_owned)
+        })
+}
+
+fn last_tool_result_json(req: &Value) -> Option<Value> {
+    let raw = req["messages"]
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")?["content"]
+        .as_str()?;
+    serde_json::from_str(raw).ok()
+}
+
+fn git_cmd(cwd: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("spawn git");
+    assert!(
+        out.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[tokio::test]
+async fn objective_full_lifecycle_and_conversation_search_redacts_secrets() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("ObjBot")).unwrap();
+
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-obj-1",
+        "Track CI with deploy token sk-secret1234567890abcdef and close objective.",
+        None,
+    )
+    .unwrap();
+
+    let server = start_mock_server(vec![
+        // 1. create_objective using raw inputId anchor
+        Box::new(|_| {
+            sse_tool_call(
+                "obj-1",
+                "create_objective",
+                &json!({
+                    "title": "Nightly Build",
+                    "outcome": "Keep CI green",
+                    "autonomy": "propose",
+                    "anchorMessageId": "in-obj-1",
+                    "milestones": [{"id": "m1", "title": "Green tests", "status": "open"}],
+                    "budget": {"maxAutoSessionsPerDay": 2, "maxProbeRunsPerDay": 10}
+                }),
+            )
+        }),
+        // 2. get_objective
+        Box::new(|req| {
+            let oid = extract_objective_id_from_tools(req).unwrap();
+            sse_tool_call("obj-2", "get_objective", &json!({"objectiveId": oid}))
+        }),
+        // 3. update_objective
+        Box::new(|req| {
+            let oid = extract_objective_id_from_tools(req).unwrap();
+            sse_tool_call(
+                "obj-3",
+                "update_objective",
+                &json!({
+                    "objectiveId": oid,
+                    "title": "Nightly Build v2",
+                    "expectedVersion": 1
+                }),
+            )
+        }),
+        // 4. pause_objective
+        Box::new(|req| {
+            let oid = extract_objective_id_from_tools(req).unwrap();
+            sse_tool_call(
+                "obj-4",
+                "pause_objective",
+                &json!({"objectiveId": oid, "expectedVersion": 2}),
+            )
+        }),
+        // 5. resume_objective
+        Box::new(|req| {
+            let oid = extract_objective_id_from_tools(req).unwrap();
+            sse_tool_call(
+                "obj-5",
+                "resume_objective",
+                &json!({"objectiveId": oid, "expectedVersion": 3}),
+            )
+        }),
+        // 6. close_objective
+        Box::new(|req| {
+            let oid = extract_objective_id_from_tools(req).unwrap();
+            sse_tool_call(
+                "obj-6",
+                "close_objective",
+                &json!({
+                    "objectiveId": oid,
+                    "status": "achieved",
+                    "evidenceRefs": ["ev-ci-1"]
+                }),
+            )
+        }),
+        // 7. search_conversation
+        Box::new(|_| {
+            sse_tool_call(
+                "obj-7",
+                "search_conversation",
+                &json!({"query": "deploy token"}),
+            )
+        }),
+        // 8. verify redacted search result and commit reply
+        Box::new(|req| {
+            let search_out = last_tool_result_json(req).expect("search_conversation output");
+            assert_eq!(search_out["ok"], true);
+            let matches = search_out["matches"].as_array().unwrap();
+            assert!(!matches.is_empty());
+            assert_eq!(matches[0]["redacted"], true);
+            assert_eq!(matches[0]["snippet"], "[REDACTED]");
+            sse_tool_call(
+                "obj-8",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-obj-1"],
+                    "text": "Objective lifecycle and safe history search verified."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.bot_turns_run, 1);
+
+    let objs = host.objectives().list(&entry.workspace_id).unwrap();
+    assert_eq!(objs.len(), 1);
+    assert_eq!(objs[0].title, "Nightly Build v2");
+    assert_eq!(objs[0].status, "achieved");
+    assert_eq!(objs[0].version, 5);
+    assert_eq!(objs[0].extra["closeEvidenceRefs"], json!(["ev-ci-1"]));
+    assert!(
+        host.find_reply_for_input(&entry.workspace_id, "in-obj-1")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn post_reply_anchor_resolution_verdict_marks_and_delivery_repair_after_rejection() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("demo.txt"), "ok\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("RepairBot")).unwrap();
+
+    host.submit_user_input(&entry.workspace_id, "in-repair-1", "Check demo.txt", None)
+        .unwrap();
+    let anchor = input_message_id("in-repair-1").unwrap();
+
+    let server = start_mock_server(vec![
+        // 1. User round 1: spawn read-only check session
+        Box::new(move |_| {
+            sse_tool_call(
+                "rep-spawn",
+                "spawn_session",
+                &json!({
+                    "anchorMessageIds": [anchor],
+                    "title": "Check demo file",
+                    "brief": "List workspace files cleanly",
+                    "kind": "research",
+                    "readOnly": true,
+                    "requiredCapabilities": ["local.file.list"],
+                    "isolation": "none",
+                    "successCriteria": [{
+                        "id": "c-demo",
+                        "kind": "file-exists",
+                        "path": "demo.txt",
+                        "description": "demo.txt exists"
+                    }]
+                }),
+            )
+        }),
+        // 2. User round 2: wait_for_sessions
+        Box::new(|req| {
+            let sid = extract_spawned_session_id(req).unwrap();
+            sse_tool_call(
+                "rep-wait",
+                "wait_for_sessions",
+                &json!({"sessionIds": [sid]}),
+            )
+        }),
+        // 3. Worker round 1: list_files -> creates indexed Host Evidence
+        Box::new(|_| sse_tool_call("w-list", "list_files", &json!({"path": "."}))),
+        // 4. Worker round 2: finish episode
+        Box::new(|_| sse_text("Confirmed demo.txt exists.")),
+        // 5. Wake round 1: attempt post_reply with bad anchor -> rejected with diagnostics
+        Box::new(|_| {
+            sse_tool_call(
+                "wake-bad-anchor",
+                "post_reply",
+                &json!({
+                    "replyTo": ["input-missing"],
+                    "text": "Should fail anchor resolution."
+                }),
+            )
+        }),
+        // 6. Wake round 2: inspect anchor_not_found diagnostic, emit plain text (no tool call) to trigger delivery_repair
+        Box::new(|req| {
+            let err_out = last_tool_result_json(req).expect("post_reply error output");
+            assert_eq!(err_out["ok"], false);
+            assert_eq!(err_out["error"], "anchor_not_found");
+            let avail = err_out["availableReplyAnchors"]
+                .as_array()
+                .expect("availableReplyAnchors diagnostics");
+            assert!(
+                avail.iter().any(|a| a["messageId"] == "input-in-repair-1"),
+                "expected availableReplyAnchors to include input-in-repair-1: {avail:?}"
+            );
+            sse_text("Plain prose without post_reply should trigger delivery_repair.")
+        }),
+        // 7. Wake repair round: resolve raw inputId `"in-repair-1"` -> `"input-in-repair-1"` + cite session verdict
+        Box::new(|req| {
+            let has_repair_nudge = req["messages"].as_array().unwrap().iter().any(|m| {
+                m["role"] == "user"
+                    && m["content"]
+                        .as_str()
+                        .is_some_and(|c| c.contains("post_reply"))
+            });
+            assert!(has_repair_nudge, "expected synthetic repair nudge");
+            let sid = extract_session_id_from_wake(req).unwrap();
+            sse_tool_call(
+                "wake-repaired",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-repair-1"],
+                    "text": "Verified demo.txt exists on disk.",
+                    "sources": [sid.clone()],
+                    "statusClaims": [{"sessionId": sid, "status": "result_ready"}]
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.wake_turns_run, 1);
+
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, "in-repair-1")
+        .unwrap()
+        .expect("committed reply after delivery repair");
+    assert_eq!(reply["replyTo"], json!(["input-in-repair-1"]));
+    let marks = reply["marks"].as_array().expect("verdict marks");
+    assert!(!marks.is_empty());
+    assert!(marks[0]["verdictRef"].as_str().is_some());
+    assert!(reply["meta"]["verdictRef"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn stopped_turn_persists_agent_stopped_card_and_retry_carries_retry_continuity() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("StopBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    host.submit_user_input(&entry.workspace_id, "in-stop-1", "Run stoppable task", None)
+        .unwrap();
+
+    let cancel1 = CancellationToken::new();
+    let cancel1_hook = cancel1.clone();
+    let saw_retry_continuity = Arc::new(Mutex::new(false));
+    let saw_retry_continuity_hook = Arc::clone(&saw_retry_continuity);
+
+    let server = start_mock_server(vec![
+        // 1. Turn 1 round 1: emit partial progress text alongside a read-only tool
+        Box::new(|_| {
+            let text_chunk = json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": { "content": "Partial work before stop" },
+                    "finish_reason": null
+                }]
+            });
+            let tool_chunk = json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "stop-c1",
+                            "type": "function",
+                            "function": { "name": "list_objectives", "arguments": "{}" }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            });
+            let usage = json!({
+                "choices": [],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25}
+            });
+            format!("data: {text_chunk}\n\ndata: {tool_chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n")
+        }),
+        // 2. Turn 1 round 2: user hits Ctrl-C before second round completes
+        Box::new(move |_| {
+            cancel1_hook.cancel();
+            sse_text("Cancelled mid-turn")
+        }),
+        // 3. Turn 2 (retry): verify retry_continuity section in system prompt and complete reply
+        Box::new(move |req| {
+            let sys = req["messages"][0]["content"].as_str().unwrap_or("");
+            if sys.contains("Prior stopped/failed attempt continuity")
+                && sys.contains("list_objectives")
+                && sys.contains("\"outcome\":\"stopped\"")
+            {
+                *saw_retry_continuity_hook.lock().unwrap() = true;
+            }
+            sse_tool_call(
+                "retry-ok",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-stop-1"],
+                    "text": "Continued seamlessly from stopped attempt."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let mut perm = AutoAllowPermission;
+    let tick1 = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel1)
+        .await
+        .unwrap();
+    assert_eq!(tick1.bot_turns_run, 1);
+    assert_eq!(
+        tick1.last_turn.as_ref().unwrap().end,
+        TurnEndKind::UserStopped
+    );
+
+    let messages = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let stopped_card = messages
+        .iter()
+        .find(|m| m["kind"] == "system_card" && m["card"] == "agent_stopped")
+        .expect("agent_stopped system_card persisted");
+    assert_eq!(stopped_card["replyTo"], json!(["input-in-stop-1"]));
+    assert_eq!(stopped_card["partialReply"], "Partial work before stop");
+
+    let continuity = read_retry_continuity(&messages, &["input-in-stop-1".into()], None)
+        .expect("read_retry_continuity reconstructs stopped turn");
+    assert_eq!(continuity["outcome"], "stopped");
+    assert_eq!(continuity["completedTools"][0]["name"], "list_objectives");
+    assert!(
+        host.find_reply_for_input(&entry.workspace_id, "in-stop-1")
+            .unwrap()
+            .is_none()
+    );
+
+    assert!(
+        host.retry_stopped_input(&entry.workspace_id, "input-in-stop-1")
+            .unwrap()
+    );
+    let cancel2 = CancellationToken::new();
+    let tick2 = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel2)
+        .await
+        .unwrap();
+    assert_eq!(tick2.bot_turns_run, 1);
+    assert!(*saw_retry_continuity.lock().unwrap());
+    assert!(
+        host.find_reply_for_input(&entry.workspace_id, "in-stop-1")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn digest_surfacing_defers_to_digest_queue_and_flushes_when_due() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("DigestBot")).unwrap();
+    host.profiles()
+        .set_proactivity(&entry.workspace_id, "low")
+        .unwrap();
+
+    host.inbox()
+        .append(
+            &entry.workspace_id,
+            &[json!({
+                "eventId": "ev-digest-wake-1",
+                "kind": "objective_signal",
+                "summary": "Nightly checks remained healthy"
+            })],
+        )
+        .unwrap();
+
+    let server = start_mock_server(vec![Box::new(|_| {
+        sse_tool_call(
+            "wake-digest-1",
+            "post_reply",
+            &json!({
+                "text": "Overnight status: all checks stayed green.",
+                "proactive": true
+            }),
+        )
+    })]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.wake_turns_run, 1);
+    assert_eq!(host.digests().pending(&entry.workspace_id), 1);
+
+    let before = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap();
+    assert!(!before.messages.iter().any(|m| m["kind"] == "agent_reply"));
+
+    assert!(
+        host.flush_due_digest(&entry.workspace_id, "2026-11-20T08:30:00Z", "09:00")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(host.digests().pending(&entry.workspace_id), 1);
+
+    let flushed = host
+        .flush_due_digest(&entry.workspace_id, "2026-11-20T09:05:00Z", "09:00")
+        .unwrap()
+        .expect("due digest flushes into conversation");
+    assert_eq!(flushed["separatorLabel"], "今天 09:00 · 今日小结");
+    assert_eq!(flushed["meta"]["surfacing"], "digest");
+    assert_eq!(host.digests().pending(&entry.workspace_id), 0);
+
+    let after = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap();
+    assert!(
+        after
+            .messages
+            .iter()
+            .any(|m| m["id"] == flushed["id"] && m["kind"] == "agent_reply")
+    );
+}
+
+#[tokio::test]
+async fn confirm_session_result_and_worktree_handoff_merge_and_discard() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    git_cmd(ws.path(), &["init"]);
+    git_cmd(ws.path(), &["config", "user.name", "Peer Test"]);
+    git_cmd(ws.path(), &["config", "user.email", "peer@test.local"]);
+    fs::write(ws.path().join("README.md"), "# Demo\n").unwrap();
+    git_cmd(ws.path(), &["add", "README.md"]);
+    git_cmd(ws.path(), &["commit", "-m", "initial commit"]);
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, mut profile) = host.bind_workspace(ws.path(), Some("GitBot")).unwrap();
+    profile.acceptance_policy = Some("confirm".into());
+    host.profiles().save(profile.clone()).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    host.submit_user_input(&entry.workspace_id, "in-wt-1", "Create feature A", None)
+        .unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-wt-2", "Create feature B", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    host.inputs()
+        .mark_executed(
+            &entry.workspace_id,
+            &["in-wt-1".into(), "in-wt-2".into()],
+            &[],
+            true,
+        )
+        .unwrap();
+
+    let spawn_worktree_session = |input_id: &str, title: &str, file: &str, token: &str| {
+        host.supervisor()
+            .spawn_session(
+                SpawnSessionRequest {
+                    workspace_id: entry.workspace_id.clone(),
+                    workspace_path: ws.path().to_path_buf(),
+                    parent_conversation_id: conv_id.clone(),
+                    anchor_message_ids: vec![input_message_id(input_id).unwrap()],
+                    input_id: input_id.to_owned(),
+                    surface: "tui".into(),
+                    title: title.into(),
+                    brief: format!("Write {file}"),
+                    kind: "code".into(),
+                    read_only: false,
+                    required_capabilities: vec!["local.file.write".into()],
+                    success_criteria: vec![SpawnCriterion {
+                        id: Some(format!("c-{input_id}")),
+                        kind: "file-contains".into(),
+                        description: format!("{file} contains {token}"),
+                        command: None,
+                        path: Some(file.into()),
+                        expect: Some(token.into()),
+                    }],
+                    priority: "normal".into(),
+                    depends_on: vec![],
+                    supersedes: None,
+                    objective_id: None,
+                    isolation: "worktree".into(),
+                    worker_model_selection: json!({}),
+                },
+                true,
+            )
+            .unwrap()
+    };
+
+    let s1 = spawn_worktree_session("in-wt-1", "Feature A", "feat_a.txt", "alpha");
+    let s2 = spawn_worktree_session("in-wt-2", "Feature B", "feat_b.txt", "beta");
+
+    let server = start_mock_server(vec![
+        // Worker 1
+        Box::new(|_| {
+            sse_tool_call(
+                "wt1-w",
+                "write_file",
+                &json!({"path": "feat_a.txt", "content": "alpha\n"}),
+            )
+        }),
+        Box::new(|_| sse_text("Wrote feat_a.txt")),
+        // Worker 2
+        Box::new(|_| {
+            sse_tool_call(
+                "wt2-w",
+                "write_file",
+                &json!({"path": "feat_b.txt", "content": "beta\n"}),
+            )
+        }),
+        Box::new(|_| sse_text("Wrote feat_b.txt")),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+
+    // Both worktree-isolated sessions are promoted together by the scheduler.
+    let p1 = host
+        .supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+    assert_eq!(p1.start, vec![s1.session_id.clone(), s2.session_id.clone()]);
+    host.supervisor()
+        .run_session_episode(
+            &entry.workspace_id,
+            &s1.session_id,
+            &model,
+            &mut perm,
+            8,
+            &cancel,
+            true,
+        )
+        .await
+        .unwrap();
+
+    host.supervisor()
+        .run_session_episode(
+            &entry.workspace_id,
+            &s2.session_id,
+            &model,
+            &mut perm,
+            8,
+            &cancel,
+            true,
+        )
+        .await
+        .unwrap();
+
+    let sessions = host.supervisor().list_sessions(&entry.workspace_id);
+    let sum1 = sessions
+        .iter()
+        .find(|s| s.session_id == s1.session_id)
+        .unwrap();
+    let sum2 = sessions
+        .iter()
+        .find(|s| s.session_id == s2.session_id)
+        .unwrap();
+    assert_eq!(sum1.status, "result_ready");
+    assert!(!sum1.accepted);
+    assert_eq!(sum2.status, "result_ready");
+    assert!(!sum2.accepted);
+
+    let bot_sessions = host.supervisor().list_bot_sessions(&entry.workspace_id);
+    assert_eq!(
+        bot_sessions
+            .iter()
+            .find(|s| s.session_id == s1.session_id)
+            .unwrap()
+            .result_confirmation_required,
+        Some(true)
+    );
+    assert_eq!(
+        bot_sessions
+            .iter()
+            .find(|s| s.session_id == s2.session_id)
+            .unwrap()
+            .result_confirmation_required,
+        Some(true)
+    );
+    let bots_snap = bot_list_json(&host);
+    assert!(bots_snap.as_array().is_some_and(|a| !a.is_empty()));
+
+    let wt1 = sum1
+        .worktree_path
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap();
+    git_cmd(&wt1, &["add", "feat_a.txt"]);
+    git_cmd(&wt1, &["commit", "-m", "feat a"]);
+
+    let wt2 = sum2
+        .worktree_path
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap();
+    git_cmd(&wt2, &["add", "feat_b.txt"]);
+    git_cmd(&wt2, &["commit", "-m", "feat b"]);
+
+    let d1 = host
+        .confirm_session_result(&entry.workspace_id, &s1.session_id, Some("passed"))
+        .unwrap();
+    assert_eq!(d1.accepted_by.as_deref(), Some("user"));
+    let h1 = host
+        .handoff_session_worktree(&entry.workspace_id, &s1.session_id, true)
+        .unwrap();
+    assert_eq!(h1["status"], "delivered");
+    assert_eq!(
+        fs::read_to_string(ws.path().join("feat_a.txt")).unwrap(),
+        "alpha\n"
+    );
+
+    let d2 = host
+        .confirm_session_result(&entry.workspace_id, &s2.session_id, Some("passed"))
+        .unwrap();
+    assert_eq!(d2.accepted_by.as_deref(), Some("user"));
+    let h2 = host
+        .handoff_session_worktree(&entry.workspace_id, &s2.session_id, false)
+        .unwrap();
+    assert_eq!(h2["status"], "discarded");
+    assert!(!ws.path().join("feat_b.txt").exists());
+
+    let updated = host.supervisor().list_sessions(&entry.workspace_id);
+    assert_eq!(
+        updated
+            .iter()
+            .find(|s| s.session_id == s1.session_id)
+            .unwrap()
+            .handoff_status
+            .as_deref(),
+        Some("delivered")
+    );
+    assert_eq!(
+        updated
+            .iter()
+            .find(|s| s.session_id == s2.session_id)
+            .unwrap()
+            .handoff_status
+            .as_deref(),
+        Some("discarded")
+    );
+    host.close();
 }
