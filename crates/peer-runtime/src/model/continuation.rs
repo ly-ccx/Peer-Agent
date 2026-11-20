@@ -43,6 +43,17 @@ pub(super) fn lower(history: &Value) -> Result<Vec<Value>, ModelError> {
     Ok(out)
 }
 impl LiveHistory {
+    /// Bind authentic provider continuation captured from a live `ModelTurn`
+    /// to the exact canonical messages built for its tool calls and results.
+    pub fn remember_turn(
+        &mut self,
+        history: &Value,
+        ids: &[String],
+        turn: &mut super::ModelTurn,
+    ) -> Result<(), ModelError> {
+        self.remember(history, ids, turn.continuation.take())
+    }
+
     pub(crate) fn remember(
         &mut self,
         history: &Value,

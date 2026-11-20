@@ -378,6 +378,13 @@ impl ProjectInbox {
         }
         events
     }
+
+    pub fn has_pending(&self, workspace_id: &str) -> bool {
+        let cursor = self.read_cursor(workspace_id).seq;
+        self.read_events(workspace_id)
+            .iter()
+            .any(|ev| ev["seq"].as_u64().unwrap_or(0) > cursor)
+    }
 }
 
 #[cfg(test)]

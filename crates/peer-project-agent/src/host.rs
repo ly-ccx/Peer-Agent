@@ -267,6 +267,16 @@ impl NativeProjectHost {
             .unwrap_or(false)
     }
 
+    pub fn has_pending_work(&self, workspace_id: &str) -> bool {
+        self.inputs.has_pending(workspace_id)
+            || self
+                .supervisor
+                .list_sessions(workspace_id)
+                .iter()
+                .any(|s| s.status == "queued")
+            || self.inbox.has_pending(workspace_id)
+    }
+
     /// Read-only inspection of an existing active lease holder (never creates files or steals lease).
     pub fn leases_status_readonly(&self, workspace_id: &str) -> Option<String> {
         let record = self.leases.inspect(workspace_id).ok()??;
@@ -410,11 +420,26 @@ impl NativeProjectHost {
             ))
             .await?;
             report.bot_turns_run += 1;
-            let completed_id = vec![input.input_id.clone()];
-            let _ = self
-                .inputs
-                .mark_executed(workspace_id, &completed_id, &[], true);
+            let should_mark_executed = !matches!(
+                outcome.end,
+                crate::runner::TurnEndKind::Failed { .. } | crate::runner::TurnEndKind::CircuitOpen
+            );
+            let stop_tick = matches!(
+                outcome.end,
+                crate::runner::TurnEndKind::Failed { .. }
+                    | crate::runner::TurnEndKind::CircuitOpen
+                    | crate::runner::TurnEndKind::UserStopped
+            );
+            if should_mark_executed {
+                let completed_id = vec![input.input_id.clone()];
+                let _ = self
+                    .inputs
+                    .mark_executed(workspace_id, &completed_id, &[], true);
+            }
             report.last_turn = Some(outcome);
+            if stop_tick {
+                return Ok(report);
+            }
         }
 
         // Step 3: Promote queued delegated work sessions and run ready episodes.
@@ -447,6 +472,11 @@ impl NativeProjectHost {
             if run_res.is_ok() {
                 report.sessions_executed += 1;
             }
+        }
+
+        // Refresh lease heartbeat after worker execution before draining inbox wakes.
+        if !cancel.is_cancelled() && self.holds_lease(workspace_id) {
+            let _ = self.ensure_lease(workspace_id);
         }
 
         // Step 4: Drain ProjectInbox wake events (e.g. report_available / session_ended).

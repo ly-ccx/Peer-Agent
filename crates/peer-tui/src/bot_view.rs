@@ -10,6 +10,7 @@
 use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
+    classic_view::{ApprovalCard, approval_dock_height, render_approval_dock},
     commands::{clip_bot_line, format_bot_when},
     markdown::{
         LineLink, RenderedBlock, ScreenHyperlink, WrapCacheKey, project_line_links,
@@ -131,6 +132,7 @@ pub struct BotShellView<'a> {
     pub draft_warning: Option<&'a str>,
     pub notice: Option<&'a str>,
     pub model_picker: &'a ModelPickerState,
+    pub approval: Option<(&'a ApprovalCard, usize)>,
     pub overlay: Option<&'a ClassicOverlay>,
     pub wordmark_elapsed_ms: Option<u64>,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
@@ -1984,13 +1986,25 @@ pub fn render_bot_shell_with_links(
     let has_header_divider = !is_list && area.height >= 10;
     let has_lease_banner = !is_list && view.lease_banner.is_some();
     let show_composer = !is_list;
-    let active_dock = view
-        .overlay
-        .filter(|ov| show_composer && ov.is_open() && !ov.is_modal() && !view.model_picker.open);
+    let approval_dock_h =
+        if show_composer && !view.model_picker.open && view.approval.is_some() && area.height >= 10
+        {
+            approval_dock_height(area.height.saturating_sub(9).max(4))
+        } else {
+            0
+        };
+    let active_dock = view.overlay.filter(|ov| {
+        show_composer
+            && ov.is_open()
+            && !ov.is_modal()
+            && !view.model_picker.open
+            && approval_dock_h == 0
+    });
     let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(10)));
     let draft = view.composer.draft();
     let slash_open = show_composer
         && !view.model_picker.open
+        && approval_dock_h == 0
         && active_dock.is_none()
         && draft.starts_with('/')
         && !draft.contains(char::is_whitespace);
@@ -2026,30 +2040,41 @@ pub fn render_bot_shell_with_links(
             .map(|s| (s.to_owned(), palette.info))
     };
     let running_bar_label: Option<String> = if show_composer && area.height >= 8 {
-        view.tasks
-            .iter()
-            .find(|t| is_running_session_status(&t.status))
-            .map(|t| {
-                let name = if t.title.trim().is_empty() {
-                    t.session_id.as_str()
+        if view.approval.is_some() {
+            Some(
+                if view.locale.is_zh() {
+                    "等待授权…"
                 } else {
-                    t.title.as_str()
-                };
-                format!(
-                    "{} · {}",
-                    terminal_text(name),
-                    project_status_label(view.locale, &t.status)
-                )
-            })
-            .or_else(|| {
-                view.is_running.then(|| {
-                    if view.locale.is_zh() {
-                        "正在推进回复 · 进行中".to_owned()
+                    "Awaiting approval…"
+                }
+                .to_owned(),
+            )
+        } else {
+            view.tasks
+                .iter()
+                .find(|t| is_running_session_status(&t.status))
+                .map(|t| {
+                    let name = if t.title.trim().is_empty() {
+                        t.session_id.as_str()
                     } else {
-                        "Processing reply · Running".to_owned()
-                    }
+                        t.title.as_str()
+                    };
+                    format!(
+                        "{} · {}",
+                        terminal_text(name),
+                        project_status_label(view.locale, &t.status)
+                    )
                 })
-            })
+                .or_else(|| {
+                    view.is_running.then(|| {
+                        if view.locale.is_zh() {
+                            "正在推进回复 · 进行中".to_owned()
+                        } else {
+                            "Processing reply · Running".to_owned()
+                        }
+                    })
+                })
+        }
     } else {
         None
     };
@@ -2091,7 +2116,9 @@ pub fn render_bot_shell_with_links(
         if transient_status.is_some() {
             constraints.push(Constraint::Length(1)); // transient notice / draft warning / reading history
         }
-        if dock_h > 0 && area.height >= 10 {
+        if approval_dock_h > 0 {
+            constraints.push(Constraint::Length(approval_dock_h));
+        } else if dock_h > 0 && area.height >= 10 {
             constraints.push(Constraint::Length(dock_h));
         } else if slash_rows > 0 && area.height >= 10 {
             constraints.push(Constraint::Length(slash_rows));
@@ -2396,7 +2423,12 @@ pub fn render_bot_shell_with_links(
             slot += 1;
         }
 
-        if let Some(ov) = active_dock
+        if approval_dock_h > 0
+            && let Some((card, selected)) = view.approval
+        {
+            render_approval_dock(frame, areas[slot], card, selected, view.locale, palette);
+            slot += 1;
+        } else if let Some(ov) = active_dock
             && dock_h > 0
             && area.height >= 10
         {
@@ -2464,8 +2496,10 @@ pub fn render_bot_shell_with_links(
         let composer_rect = areas[slot];
         slot += 1;
         let (inner_rect, composer_bg) = if use_framed_composer {
-            let actively_editing =
-                !view.card_focus && !view.model_picker.open && active_dock.is_none();
+            let actively_editing = !view.card_focus
+                && !view.model_picker.open
+                && active_dock.is_none()
+                && approval_dock_h == 0;
             let border_fg = if actively_editing {
                 palette.border_focus
             } else {
@@ -2554,6 +2588,7 @@ pub fn render_bot_shell_with_links(
             if !view.model_picker.open
                 && !view.card_focus
                 && active_dock.is_none()
+                && approval_dock_h == 0
                 && let Some((x, y)) = caret
             {
                 frame.set_cursor_position((
@@ -2641,6 +2676,7 @@ mod tests {
                     draft_warning: None,
                     notice: None,
                     model_picker: &picker,
+                    approval: None,
                     overlay: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
@@ -2718,6 +2754,7 @@ mod tests {
                         draft_warning: Some("草稿恢复失败，可继续输入或 /save-draft"),
                         notice: None,
                         model_picker: &picker,
+                        approval: None,
                         overlay: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
@@ -2797,6 +2834,7 @@ mod tests {
                             draft_warning: None,
                             notice: None,
                             model_picker: &picker,
+                            approval: None,
                             overlay: None,
                             wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
@@ -2925,6 +2963,7 @@ mod tests {
                         draft_warning: None,
                         notice: None,
                         model_picker: &picker,
+                        approval: None,
                         overlay: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: cache,
@@ -3022,6 +3061,7 @@ mod tests {
                             draft_warning: None,
                             notice: None,
                             model_picker: &picker,
+                            approval: None,
                             overlay: None,
                             wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
@@ -3105,6 +3145,7 @@ mod tests {
                     draft_warning: None,
                     notice: None,
                     model_picker: &picker,
+                    approval: None,
                     overlay: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
@@ -3157,6 +3198,7 @@ mod tests {
                         draft_warning: None,
                         notice: None,
                         model_picker: &picker,
+                        approval: None,
                         overlay: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
@@ -3203,6 +3245,7 @@ mod tests {
                         draft_warning: None,
                         notice: None,
                         model_picker: &picker,
+                        approval: None,
                         overlay: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
@@ -3257,6 +3300,7 @@ mod tests {
                         draft_warning: None,
                         notice: None,
                         model_picker: &picker,
+                        approval: None,
                         overlay: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
@@ -3325,6 +3369,7 @@ mod tests {
                     draft_warning: None,
                     notice: None,
                     model_picker: &picker,
+                    approval: None,
                     overlay: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
@@ -3391,6 +3436,7 @@ mod tests {
                     draft_warning: None,
                     notice: None,
                     model_picker: &picker,
+                    approval: None,
                     overlay: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
@@ -3401,5 +3447,84 @@ mod tests {
         .unwrap();
         assert_eq!(detail_links.len(), 1);
         assert_eq!(detail_links[0].target, "crates/peer-tui/src/bot_view.rs:42");
+    }
+
+    #[test]
+    fn bot_conversation_renders_approval_dock_cleanly_without_corrupting_layout() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 32);
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::default();
+        let picker = ModelPickerState::default();
+        let card = ApprovalCard {
+            action: "git_query".into(),
+            location: "/Users/yinliang/Documents/Develop/peer-dev/Peer-Agent".into(),
+            reason: "Outside workspace file read requires approval.".into(),
+            risk: "l1_local_read".into(),
+            arguments: "{\"operation\":\"snapshot\",\"limit\":30}".into(),
+        };
+
+        for (w, h) in [(100u16, 30u16), (48u16, 22u16)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        workspace_path: Some("~/Documents/Develop/peer-dev"),
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "default",
+                        is_running: true,
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &[],
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        approval: Some((&card, 1)),
+                        overlay: None,
+                        wordmark_elapsed_ms: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            let mut text = String::new();
+            let mut skip_next = false;
+            for cell in &buf.content {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                let sym = cell.symbol();
+                text.push_str(sym);
+                if sym.width() > 1 {
+                    skip_next = true;
+                }
+            }
+            assert!(text.contains("Approval required"));
+            assert!(text.contains("本地授权请求"));
+            assert!(text.contains("Action  git_query"));
+            assert!(text.contains("› 2. 本会话允许此操作"));
+        }
     }
 }

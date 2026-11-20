@@ -1,6 +1,6 @@
 use peer_project_agent::{
     LeaseStatus, MemoryFilter, NativeProjectHost, ProjectCapabilityProvider, SessionSupervisor,
-    SpawnCriterion, SpawnSessionRequest, TurnExecutionState, input_message_id,
+    SpawnCriterion, SpawnSessionRequest, TurnEndKind, TurnExecutionState, input_message_id,
 };
 use peer_runtime::{
     CancellationToken,
@@ -36,6 +36,7 @@ impl PermissionInput for AutoAllowPermission {
 }
 
 type ScriptHandler = Box<dyn Fn(&Value) -> String + Send>;
+type HttpScriptHandler = Box<dyn Fn(&Value) -> (u16, &'static str, String) + Send>;
 
 struct MockModelServer {
     endpoint: String,
@@ -69,6 +70,57 @@ fn sse_tool_call(id: &str, name: &str, args: &Value) -> String {
     format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n")
 }
 
+fn responses_sse_tool_call(call_id: &str, name: &str, args: &Value) -> String {
+    let args_str = serde_json::to_string(args).unwrap();
+    let item_id = format!("fc-{call_id}");
+    let item_added = json!({
+        "type": "response.output_item.added",
+        "output_index": 0,
+        "item": {
+            "id": item_id,
+            "type": "function_call",
+            "call_id": call_id,
+            "name": name,
+            "arguments": ""
+        }
+    });
+    let delta = json!({
+        "type": "response.function_call_arguments.delta",
+        "output_index": 0,
+        "item_id": item_id,
+        "delta": args_str
+    });
+    let args_done = json!({
+        "type": "response.function_call_arguments.done",
+        "output_index": 0,
+        "item_id": item_id,
+        "arguments": args_str
+    });
+    let final_item = json!({
+        "id": item_id,
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+        "arguments": args_str
+    });
+    let item_done = json!({
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": final_item
+    });
+    let completed = json!({
+        "type": "response.completed",
+        "response": {
+            "status": "completed",
+            "output": [final_item],
+            "usage": {"input_tokens": 20, "output_tokens": 5, "total_tokens": 25}
+        }
+    });
+    format!(
+        "data: {item_added}\n\ndata: {delta}\n\ndata: {args_done}\n\ndata: {item_done}\n\ndata: {completed}\n\n"
+    )
+}
+
 fn sse_text(text: &str) -> String {
     let chunk = json!({
         "choices": [{
@@ -84,12 +136,12 @@ fn sse_text(text: &str) -> String {
     format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n")
 }
 
-fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer {
+fn start_http_mock_server(handlers: Vec<HttpScriptHandler>) -> MockModelServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
     let requests = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&requests);
-    let mut queue: VecDeque<ScriptHandler> = handlers.into();
+    let mut queue: VecDeque<HttpScriptHandler> = handlers.into();
     let thread = std::thread::spawn(move || {
         while let Some(handler) = queue.pop_front() {
             let (mut socket, _) = listener.accept().unwrap();
@@ -119,11 +171,12 @@ fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer {
             }
             let req_json: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
             captured.lock().unwrap().push(req_json.clone());
-            let sse = handler(&req_json);
+            let (status, content_type, resp_body) = handler(&req_json);
+            let reason = if status == 200 { "OK" } else { "Error" };
             let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                sse.len(),
-                sse
+                "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                resp_body.len(),
+                resp_body
             );
             socket.write_all(resp.as_bytes()).unwrap();
             let _ = socket.flush();
@@ -136,19 +189,33 @@ fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer {
     }
 }
 
-fn mock_model(endpoint: &str) -> NativeModel {
+fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer {
+    let wrapped = handlers
+        .into_iter()
+        .map(|h| {
+            Box::new(move |req: &Value| (200u16, "text/event-stream", h(req))) as HttpScriptHandler
+        })
+        .collect();
+    start_http_mock_server(wrapped)
+}
+
+fn mock_model_with_wire(endpoint: &str, wire: Wire) -> NativeModel {
     NativeModel::new(
         ModelConfig {
             endpoint: endpoint.to_owned(),
             model: "mock-e2e-model".into(),
             provider: "openai".into(),
-            wire: Wire::Chat,
+            wire,
             generation: GenerationOptions::default(),
         },
         None,
         Duration::from_secs(10),
     )
     .unwrap()
+}
+
+fn mock_model(endpoint: &str) -> NativeModel {
+    mock_model_with_wire(endpoint, Wire::Chat)
 }
 
 fn tool_names_from_request(req: &Value) -> Vec<String> {
@@ -689,4 +756,226 @@ async fn memory_and_objective_tools_through_governed_provider_with_chinese_fts_a
         "all 4 governed bot tools must register Evidence, got {}",
         ev.len()
     );
+}
+
+#[tokio::test]
+async fn multi_round_bot_tool_loop_encodes_valid_wire_tool_calls_for_chat_and_responses() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Test repo\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("WireBot")).unwrap();
+
+    // 1. Wire::Chat multi-round: list_files -> post_reply
+    let chat_input_id = "in-wire-chat-1";
+    let chat_anchor = input_message_id(chat_input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, chat_input_id, "List repo files", None)
+        .unwrap();
+
+    let chat_anchor_clone = chat_anchor.clone();
+    let chat_server = start_mock_server(vec![
+        Box::new(|_req| sse_tool_call("c-list-1", "list_files", &json!({"path": "."}))),
+        Box::new(move |req| {
+            let msgs = req["messages"].as_array().expect("messages array");
+            let asst_idx = msgs
+                .iter()
+                .position(|m| {
+                    m["role"] == "assistant"
+                        && m["tool_calls"][0]["function"]["name"] == "list_files"
+                        && m["tool_calls"][0]["id"]
+                            .as_str()
+                            .is_some_and(|s| !s.is_empty())
+                })
+                .expect("round 1 request must include assistant tool_calls");
+            let call_id = msgs[asst_idx]["tool_calls"][0]["id"].as_str().unwrap();
+            let tool_msg = &msgs[asst_idx + 1];
+            assert_eq!(tool_msg["role"], "tool");
+            assert_eq!(tool_msg["tool_call_id"], call_id);
+            sse_tool_call(
+                "c-reply-1",
+                "post_reply",
+                &json!({
+                    "replyTo": [chat_anchor_clone],
+                    "text": "Found README.md over Chat wire."
+                }),
+            )
+        }),
+    ]);
+
+    let chat_model = mock_model(&chat_server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick1 = host
+        .tick(
+            &entry.workspace_id,
+            &chat_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick1.bot_turns_run, 1);
+    let chat_reply = host
+        .find_reply_for_input(&entry.workspace_id, chat_input_id)
+        .unwrap()
+        .expect("chat reply persisted");
+    assert_eq!(chat_reply["content"], "Found README.md over Chat wire.");
+
+    // 2. Wire::Responses multi-round: list_files -> post_reply
+    let resp_input_id = "in-wire-resp-1";
+    let resp_anchor = input_message_id(resp_input_id).unwrap();
+    host.submit_user_input(
+        &entry.workspace_id,
+        resp_input_id,
+        "Inspect workspace via Responses wire",
+        None,
+    )
+    .unwrap();
+
+    let resp_anchor_clone = resp_anchor.clone();
+    let resp_server = start_mock_server(vec![
+        Box::new(|_req| responses_sse_tool_call("r-list-1", "list_files", &json!({"path": "."}))),
+        Box::new(move |req| {
+            let input = req["input"].as_array().expect("responses input array");
+            let fc = input
+                .iter()
+                .find(|item| item["type"] == "function_call" && item["name"] == "list_files")
+                .expect("round 1 Responses input must contain function_call");
+            let call_id = fc["call_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .expect("function_call call_id");
+            let output = input
+                .iter()
+                .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
+                .expect("round 1 Responses input must contain matching function_call_output");
+            assert!(
+                output["output"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("README.md")),
+                "tool output should include list_files result: {output}"
+            );
+            responses_sse_tool_call(
+                "r-reply-1",
+                "post_reply",
+                &json!({
+                    "replyTo": [resp_anchor_clone],
+                    "text": "Found README.md over Responses wire."
+                }),
+            )
+        }),
+    ]);
+
+    let resp_model = mock_model_with_wire(&resp_server.endpoint, Wire::Responses);
+    let tick2 = host
+        .tick(
+            &entry.workspace_id,
+            &resp_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick2.bot_turns_run, 1);
+    let resp_reply = host
+        .find_reply_for_input(&entry.workspace_id, resp_input_id)
+        .unwrap()
+        .expect("responses reply persisted");
+    assert_eq!(
+        resp_reply["content"],
+        "Found README.md over Responses wire."
+    );
+}
+
+#[tokio::test]
+async fn failed_bot_user_turn_preserves_unexecuted_input_and_recovers_on_retry() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Retry repo\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("RetryBot")).unwrap();
+
+    let input_id = "in-retry-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Check project", None)
+        .unwrap();
+    assert!(host.has_pending_work(&entry.workspace_id));
+
+    let server_fail = start_http_mock_server(vec![
+        Box::new(|_req| {
+            (
+                200,
+                "text/event-stream",
+                sse_tool_call("f-list-1", "list_files", &json!({"path": "."})),
+            )
+        }),
+        Box::new(|_req| {
+            (
+                500,
+                "application/json",
+                json!({"error": {"message": "upstream failure"}}).to_string(),
+            )
+        }),
+    ]);
+    let fail_model = mock_model(&server_fail.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick1 = host
+        .tick(
+            &entry.workspace_id,
+            &fail_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick1.bot_turns_run, 1);
+    assert!(
+        matches!(
+            tick1.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::Failed { .. })
+        ),
+        "expected TurnEndKind::Failed, got {:?}",
+        tick1.last_turn.as_ref().map(|t| &t.end)
+    );
+    assert!(
+        host.has_pending_work(&entry.workspace_id),
+        "failed user input must remain pending in InputQueue for retry"
+    );
+
+    let anchor_clone = anchor.clone();
+    let server_ok = start_mock_server(vec![Box::new(move |_req| {
+        sse_tool_call(
+            "ok-reply-1",
+            "post_reply",
+            &json!({
+                "replyTo": [anchor_clone],
+                "text": "Recovered on retry."
+            }),
+        )
+    })]);
+    let ok_model = mock_model(&server_ok.endpoint);
+    let tick2 = host
+        .tick(
+            &entry.workspace_id,
+            &ok_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick2.bot_turns_run, 1);
+    assert!(
+        !host.has_pending_work(&entry.workspace_id),
+        "pending work must clear once reply commits"
+    );
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, input_id)
+        .unwrap()
+        .expect("canonical reply persisted after retry");
+    assert_eq!(reply["content"], "Recovered on retry.");
 }

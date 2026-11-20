@@ -271,6 +271,41 @@ impl InputQueue {
         self.read_inputs_unlocked(ws)
     }
 
+    /// Read-only check for unconsumed or delivered-but-unexecuted user inputs.
+    pub fn has_pending(&self, workspace_id: &str) -> bool {
+        let ws = workspace_id.trim();
+        if !is_valid_workspace_id(ws) {
+            return false;
+        }
+        let Ok(inputs) = self.read_inputs_unlocked(ws) else {
+            return false;
+        };
+        if inputs.is_empty() {
+            return false;
+        }
+        let Ok(cursor) = self.read_cursor_state(ws) else {
+            return false;
+        };
+        let Some(delivered_id) = cursor.input_id.as_deref() else {
+            return true;
+        };
+        let Some(delivered_idx) = inputs.iter().position(|r| r.input_id == delivered_id) else {
+            return true;
+        };
+        if delivered_idx + 1 < inputs.len() {
+            return true;
+        }
+        let start = cursor
+            .executed_input_id
+            .as_deref()
+            .and_then(|id| inputs.iter().position(|r| r.input_id == id))
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        inputs[start..=delivered_idx]
+            .iter()
+            .any(|item| !cursor.completed_input_ids.contains(&item.input_id))
+    }
+
     pub fn read_cursor(&self, workspace_id: &str) -> Result<Option<String>, ProjectError> {
         let state = self.read_cursor_state(workspace_id)?;
         Ok(state.input_id.filter(|s| !s.trim().is_empty()))

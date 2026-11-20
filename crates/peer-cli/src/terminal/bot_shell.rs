@@ -13,14 +13,17 @@
 use super::{
     ShellOutcome, TerminalGuard,
     model_picker_adapter::load_picker_groups,
+    resumed::ports::{Approval, Display, PermissionPort},
     theme_store::{self, TerminalPreferences},
 };
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
-    BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, LeaseStatus, MemoryFilter,
-    NativeProjectHost,
+    BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, HostTickReport, LeaseStatus,
+    MemoryFilter, NativeProjectHost, TurnEndKind,
 };
-use peer_runtime::{CancellationToken, model_catalog::resolve_exec};
+use peer_runtime::{
+    CancellationToken, model_catalog::resolve_exec, session_host::LocalPermissionDecision,
+};
 use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
     BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
@@ -36,11 +39,16 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::task::{JoinHandle, LocalSet};
+use tokio::{
+    sync::{mpsc, watch},
+    task::{JoinHandle, LocalSet},
+};
 
 struct ActiveTick {
     cancel: CancellationToken,
-    task: JoinHandle<Result<(), String>>,
+    task: JoinHandle<Result<HostTickReport, String>>,
+    prompts: mpsc::Receiver<Approval>,
+    display: watch::Receiver<Display>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,9 +110,11 @@ struct BotShellState<'a> {
     selected_display_name: Option<String>,
     selected_effort: Option<String>,
     model_picker: ModelPickerState,
+    approval: Option<Approval>,
     overlay: ClassicOverlay,
     wrap_cache: ByteBudgetLru<WrapCacheKey, RenderedBlock>,
     active_tick: Option<ActiveTick>,
+    pending_tick_retrigger: bool,
     last_refresh: Instant,
     interaction_limit: usize,
 }
@@ -199,9 +209,11 @@ impl<'a> BotShellState<'a> {
             selected_display_name,
             selected_effort,
             model_picker: ModelPickerState::default(),
+            approval: None,
             overlay: ClassicOverlay::None,
             wrap_cache: ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 512),
             active_tick: None,
+            pending_tick_retrigger: false,
             last_refresh: Instant::now(),
             interaction_limit: 40,
         };
@@ -590,8 +602,10 @@ impl<'a> BotShellState<'a> {
 
     fn trigger_background_tick(&mut self) {
         if self.active_tick.is_some() {
+            self.pending_tick_retrigger = true;
             return;
         }
+        self.pending_tick_retrigger = false;
         let Some(ws_id) = self.active_workspace_id.clone() else {
             return;
         };
@@ -616,17 +630,38 @@ impl<'a> BotShellState<'a> {
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
         let selection = resolved.selection;
+        let (prompt_tx, prompt_rx) = mpsc::channel(4);
+        let (display_tx, display_rx) = watch::channel(Display::default());
         let task = tokio::task::spawn_local(async move {
             let model = peer_runtime::model_config::load_model(&home, &selection, &task_cancel)
                 .await
                 .map_err(|e| e.code.to_owned())?;
-            let mut perm = crate::native_exec::TerminalPermission;
+            let mut perm = PermissionPort {
+                requests: prompt_tx,
+                display: display_tx,
+            };
             host.tick(&ws_id, &model, selection, &mut perm, &task_cancel)
                 .await
-                .map(|_| ())
                 .map_err(|e| e.to_string())
         });
-        self.active_tick = Some(ActiveTick { cancel, task });
+        self.active_tick = Some(ActiveTick {
+            cancel,
+            task,
+            prompts: prompt_rx,
+            display: display_rx,
+        });
+    }
+
+    fn trigger_if_pending(&mut self) {
+        if self.screen == BotScreen::Conversation
+            && self.lease_banner.is_none()
+            && self
+                .active_workspace_id
+                .as_deref()
+                .is_some_and(|ws| self.host.has_pending_work(ws))
+        {
+            self.trigger_background_tick();
+        }
     }
 
     fn handle_submit(&mut self, text: &str) -> Option<ShellOutcome> {
@@ -648,7 +683,14 @@ impl<'a> BotShellState<'a> {
                         self.clear_persisted_draft();
                         self.anchor.jump_to_latest();
                         self.screen = BotScreen::Conversation;
-                        self.notice = Some("已接收，正在推进…".to_owned());
+                        self.notice = Some(
+                            if self.active_tick.is_some() {
+                                "已加入队列，等待当前任务完成后自动回复…"
+                            } else {
+                                "已接收，正在推进…"
+                            }
+                            .to_owned(),
+                        );
                         self.refresh_snapshot(false);
                         self.trigger_background_tick();
                     }
@@ -1042,6 +1084,7 @@ impl<'a> BotShellState<'a> {
     }
 
     fn draw(&mut self, terminal: &mut TerminalGuard) -> io::Result<()> {
+        let zh = self.prefs.locale.is_zh();
         let live_activity = self
             .host
             .runner()
@@ -1049,9 +1092,16 @@ impl<'a> BotShellState<'a> {
             .filter(|act| act.finished_at.is_none())
             .map(|act| {
                 if !act.reply_text.is_empty() {
-                    format!("Bot  {}", act.reply_text)
+                    act.reply_text
                 } else {
-                    format!("Bot  正在推进（{}）…", act.phase)
+                    match (act.phase.as_str(), zh) {
+                        ("thinking", true) => "思考中…".to_owned(),
+                        ("thinking", false) => "Thinking…".to_owned(),
+                        ("tool", true) => "调用工具中…".to_owned(),
+                        ("tool", false) => "Running tools…".to_owned(),
+                        (_, true) => "正在推进…".to_owned(),
+                        (_, false) => "Working…".to_owned(),
+                    }
                 }
             });
         let is_host = self.lease_banner.is_none();
@@ -1070,7 +1120,10 @@ impl<'a> BotShellState<'a> {
             && self.messages.is_empty()
             && live_activity.is_none())
         .then(|| self.wordmark_started_at.elapsed().as_millis() as u64);
+        let approval_view = self.approval.as_ref().map(|a| (&a.card, a.selected));
+        let mut shown_size = None;
         terminal.draw_frame_with_links(&self.workspace, |frame, links| {
+            shown_size = Some((frame.area().width, frame.area().height));
             render_bot_shell_with_links(
                 frame,
                 BotShellView {
@@ -1104,18 +1157,24 @@ impl<'a> BotShellState<'a> {
                     draft_warning: self.draft_warning.as_deref(),
                     notice: self.notice.as_deref(),
                     model_picker: &self.model_picker,
+                    approval: approval_view,
                     overlay: Some(&self.overlay),
                     wordmark_elapsed_ms,
                     wrap_cache: &mut self.wrap_cache,
                 },
                 links,
             );
-        })
+        })?;
+        if let (Some(approval), Some(size)) = (self.approval.as_mut(), shown_size) {
+            approval.shown_at = Some(size);
+        }
+        Ok(())
     }
 
     fn is_hero_wordmark_visible(&self) -> bool {
         self.screen == BotScreen::Conversation
             && self.messages.is_empty()
+            && self.approval.is_none()
             && !self.model_picker.open
             && !self.overlay.is_open()
             && self
@@ -1123,6 +1182,89 @@ impl<'a> BotShellState<'a> {
                 .runner()
                 .current_activity()
                 .is_none_or(|a| a.finished_at.is_some())
+    }
+
+    fn handle_approval_key(&mut self, key: KeyEvent, terminal_size: (u16, u16)) -> bool {
+        let Some(approval) = self.approval.as_mut() else {
+            return false;
+        };
+        if key.kind == KeyEventKind::Release {
+            return false;
+        }
+        let no_ctrl_alt = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let check_viewport = |state: &mut Self| -> bool {
+            if terminal_size.0 < 30 || terminal_size.1 < 10 {
+                state.notice = Some(
+                    "终端视口过小，无法完整核验授权详情，请调大窗口或按 n / 3 / Esc 拒绝。"
+                        .to_owned(),
+                );
+                false
+            } else {
+                true
+            }
+        };
+        match key.code {
+            KeyCode::Up | KeyCode::Left => {
+                approval.selected = (approval.selected + 2) % 3;
+                true
+            }
+            KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                approval.selected = (approval.selected + 1) % 3;
+                true
+            }
+            KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') if no_ctrl_alt => {
+                if !check_viewport(self) {
+                    return true;
+                }
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(LocalPermissionDecision::Approve);
+                }
+                true
+            }
+            KeyCode::Char('2') if no_ctrl_alt => {
+                if !check_viewport(self) {
+                    return true;
+                }
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(LocalPermissionDecision::ApproveSession);
+                }
+                true
+            }
+            KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc
+                if no_ctrl_alt =>
+            {
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(LocalPermissionDecision::Deny);
+                }
+                true
+            }
+            KeyCode::Enter if key.modifiers.is_empty() => {
+                let decision = match approval.selected.min(2) {
+                    0 => LocalPermissionDecision::Approve,
+                    1 => LocalPermissionDecision::ApproveSession,
+                    _ => LocalPermissionDecision::Deny,
+                };
+                if decision != LocalPermissionDecision::Deny && !check_viewport(self) {
+                    return true;
+                }
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(decision);
+                }
+                true
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(LocalPermissionDecision::Cancel);
+                }
+                if let Some(active) = self.active_tick.as_ref() {
+                    active.cancel.cancel();
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn has_running_session(&self) -> bool {
@@ -1143,9 +1285,11 @@ impl<'a> BotShellState<'a> {
         terminal: &mut TerminalGuard,
         shutdown: &CancellationToken,
     ) -> io::Result<ShellOutcome> {
+        self.trigger_if_pending();
         self.draw(terminal)?;
         loop {
             if shutdown.is_cancelled() {
+                self.approval = None;
                 if let Some(active) = self.active_tick.take() {
                     active.cancel.cancel();
                     let _ = active.task.await;
@@ -1156,22 +1300,89 @@ impl<'a> BotShellState<'a> {
 
             let mut dirty = false;
 
+            if let Some(active) = self.active_tick.as_mut() {
+                if active.display.has_changed().unwrap_or(false)
+                    && let Some(n) = active.display.borrow_and_update().notice
+                {
+                    self.notice = Some(n.to_owned());
+                    dirty = true;
+                }
+                if self.approval.is_none()
+                    && let Ok(req) = active.prompts.try_recv()
+                {
+                    self.approval = Some(req);
+                    self.card_focus = false;
+                    dirty = true;
+                }
+            }
+
             if let Some(active) = self.active_tick.as_ref()
                 && active.task.is_finished()
                 && let Some(done) = self.active_tick.take()
             {
+                self.approval = None;
                 match done.task.await {
-                    Ok(Ok(())) => {
-                        self.notice = None;
+                    Ok(Ok(report)) => {
+                        self.refresh_snapshot(false);
+                        if !report.held_lease {
+                            self.pending_tick_retrigger = false;
+                            self.notice = Some(
+                                "已提交消息，但另一宿主持有执行权；可输入 /takeover 接管。"
+                                    .to_owned(),
+                            );
+                        } else {
+                            match report.last_turn.as_ref().map(|t| &t.end) {
+                                Some(TurnEndKind::Failed { code }) => {
+                                    self.pending_tick_retrigger = false;
+                                    self.notice = Some(format!(
+                                        "回复未完成（{}）；可检查 /model 或重新发送重试。",
+                                        terminal_text(code)
+                                    ));
+                                }
+                                Some(TurnEndKind::CircuitOpen) => {
+                                    self.pending_tick_retrigger = false;
+                                    self.notice = Some(
+                                        "代理连续失败，已暂停自动推进；可稍后再试。".to_owned(),
+                                    );
+                                }
+                                Some(TurnEndKind::UserStopped) => {
+                                    self.pending_tick_retrigger = false;
+                                    self.notice = Some("已停止本轮回复。".to_owned());
+                                }
+                                _ => {
+                                    self.notice = None;
+                                    let made_progress = report.inputs_consumed > 0
+                                        || report.bot_turns_run > 0
+                                        || report.sessions_promoted > 0
+                                        || report.sessions_executed > 0
+                                        || report.wake_turns_run > 0;
+                                    let has_more = self
+                                        .active_workspace_id
+                                        .as_deref()
+                                        .is_some_and(|ws| self.host.has_pending_work(ws));
+                                    if self.pending_tick_retrigger || (made_progress && has_more) {
+                                        self.pending_tick_retrigger = false;
+                                        self.trigger_background_tick();
+                                    }
+                                }
+                            }
+                        }
                     }
                     Ok(Err(err)) => {
+                        self.pending_tick_retrigger = false;
                         self.notice = Some(format!("推进暂停（{}）。", terminal_text(&err)));
+                        self.refresh_snapshot(false);
                     }
                     Err(_) => {
+                        self.pending_tick_retrigger = false;
                         self.notice = Some("后台推进任务中断。".to_owned());
+                        self.refresh_snapshot(false);
                     }
                 }
-                self.refresh_snapshot(false);
+                dirty = true;
+            }
+            if self.approval.as_ref().is_some_and(Approval::expired) {
+                self.approval = None;
                 dirty = true;
             }
 
@@ -1219,7 +1430,8 @@ impl<'a> BotShellState<'a> {
                         dirty = true;
                     }
                     Event::Paste(pasted) => {
-                        if !self.model_picker.open
+                        if self.approval.is_none()
+                            && !self.model_picker.open
                             && !self.overlay.is_open()
                             && !matches!(
                                 self.screen,
@@ -1253,11 +1465,17 @@ impl<'a> BotShellState<'a> {
                                 }
                             }
                             dirty = true;
+                        } else if self.approval.is_some() {
+                            let size = crossterm::terminal::size().unwrap_or((80, 24));
+                            if self.handle_approval_key(key, size) {
+                                dirty = true;
+                            }
                         } else if self.overlay.is_open() {
                             if self.handle_overlay_key(key.code) {
                                 dirty = true;
                             }
                         } else if key.code == KeyCode::F(2) {
+                            self.approval = None;
                             if let Some(active) = self.active_tick.take() {
                                 active.cancel.cancel();
                                 let _ = active.task.await;
@@ -1345,6 +1563,7 @@ impl<'a> BotShellState<'a> {
                                             self.anchor.jump_to_latest();
                                             self.screen = BotScreen::Conversation;
                                             self.refresh_snapshot(true);
+                                            self.trigger_if_pending();
                                             dirty = true;
                                         }
                                     }

@@ -683,11 +683,11 @@ struct DockSpec<'a, 's> {
     total_height: u16,
 }
 
-fn approval_dock_height(panel_budget: u16) -> u16 {
+pub(crate) fn approval_dock_height(panel_budget: u16) -> u16 {
     panel_budget.min(12)
 }
 
-fn render_approval_dock(
+pub(crate) fn render_approval_dock(
     frame: &mut Frame<'_>,
     area: Rect,
     card: &ApprovalCard,

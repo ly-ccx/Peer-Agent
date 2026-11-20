@@ -708,7 +708,8 @@ fn execute_project_capability(
             let text = args["text"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
-            let reply_to: Vec<String> = args["replyTo"]
+            let proactive = args["proactive"].as_bool().unwrap_or(false);
+            let mut reply_to: Vec<String> = args["replyTo"]
                 .as_array()
                 .map(|a| {
                     a.iter()
@@ -717,6 +718,13 @@ fn execute_project_capability(
                         .collect()
                 })
                 .unwrap_or_else(|| state.current_input_anchors.clone());
+            if reply_to.is_empty()
+                && !proactive
+                && state.kind == "user"
+                && !state.current_input_anchors.is_empty()
+            {
+                reply_to = state.current_input_anchors.clone();
+            }
             let sources: Vec<String> = args["sources"]
                 .as_array()
                 .map(|a| {
@@ -739,7 +747,6 @@ fn execute_project_capability(
                         .collect()
                 })
                 .unwrap_or_default();
-            let proactive = args["proactive"].as_bool().unwrap_or(false);
             let question = args.get("question").filter(|v| v.is_object()).cloned();
 
             let sessions = supervisor.list_sessions(&state.workspace_id);

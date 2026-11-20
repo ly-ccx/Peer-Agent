@@ -14,7 +14,7 @@ use crate::{
 };
 use peer_runtime::{
     CancellationToken,
-    model::NativeModel,
+    model::{LiveHistory, NativeModel},
     providers::{EffectAdmission, EffectOutcome, ProviderCall, ProviderRegistry, RuntimeMode},
     system_context::instructions::ProjectInstructions,
 };
@@ -29,8 +29,8 @@ use std::{
 
 const CIRCUIT_FAILURE_THRESHOLD: u32 = 5;
 const CIRCUIT_OPEN_MS: i64 = 10 * 60 * 1000;
-const MAX_BOT_ROUNDS: usize = 6;
-const MAX_BOT_TOOL_CALLS: usize = 16;
+const MAX_BOT_ROUNDS: usize = 10;
+const MAX_BOT_TOOL_CALLS: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,6 +152,81 @@ impl ProjectAgentRunner {
         }
     }
 
+    fn record_turn_failure(
+        &self,
+        conv_store: &ConversationStore,
+        conversation_id: &str,
+        turn_id: &str,
+        code: &'static str,
+        now_ms: i64,
+        cancel: &CancellationToken,
+    ) -> TurnEndKind {
+        if cancel.is_cancelled() || code == "CANCELLED" {
+            return TurnEndKind::UserStopped;
+        }
+        let tripped = self
+            .breaker
+            .lock()
+            .map(|mut b| b.record_failure(code, now_ms))
+            .unwrap_or(false);
+        if tripped {
+            let at = now_iso();
+            let _ = conv_store.append_message_idempotent(
+                conversation_id,
+                &json!({
+                    "id": format!("{turn_id}-circuit"),
+                    "role": "assistant",
+                    "kind": "system_card",
+                    "content": "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。",
+                    "createdAt": at,
+                }),
+                &at,
+                None,
+            );
+        }
+        TurnEndKind::Failed {
+            code: code.to_owned(),
+        }
+    }
+}
+
+fn persist_fallback_reply(
+    conv_store: &ConversationStore,
+    conversation_id: &str,
+    turn_id: &str,
+    current_input_anchors: &[String],
+    text: &str,
+) -> String {
+    let msg_id = format!("reply-{turn_id}");
+    let at = now_iso();
+    let _ = conv_store.append_message_idempotent(
+        conversation_id,
+        &json!({
+            "id": msg_id,
+            "role": "assistant",
+            "kind": "agent_reply",
+            "content": text,
+            "replyTo": current_input_anchors,
+            "sources": [],
+            "fallback": true,
+            "turnId": turn_id,
+            "createdAt": at,
+            "meta": {
+                "replyTo": current_input_anchors,
+                "sources": [],
+                "memoryUsed": [],
+                "memoryLearned": [],
+                "surfacing": "message",
+            },
+            "marks": [],
+        }),
+        &at,
+        None,
+    );
+    msg_id
+}
+
+impl ProjectAgentRunner {
     /// Execute one bounded main-Bot cognition turn (`user` or `wake`).
     pub async fn run_turn(
         &self,
@@ -315,7 +390,10 @@ impl ProjectAgentRunner {
         // Build bounded model-facing message list from committed history + synthetic wake prompt.
         let mut live_messages: Vec<Value> = history_messages
             .iter()
-            .filter(|m| matches!(m["role"].as_str(), Some("user" | "assistant")))
+            .filter(|m| {
+                matches!(m["role"].as_str(), Some("user" | "assistant"))
+                    && !m["content"].as_str().unwrap_or("").trim().is_empty()
+            })
             .rev()
             .take(40)
             .collect::<Vec<_>>()
@@ -344,6 +422,7 @@ impl ProjectAgentRunner {
         let (admission, admission_task) =
             EffectAdmission::spawn_read_only_host(cancel.clone(), || true);
         let evidence_store = EvidenceIndexStore::new(&self.data_home);
+        let mut live = LiveHistory::default();
         let mut total_tool_calls = 0usize;
         let mut final_end = TurnEndKind::Yielded;
 
@@ -353,11 +432,12 @@ impl ProjectAgentRunner {
                 break;
             }
             self.set_activity_phase("thinking", None, false);
-            let model_turn = match model
-                .turn(
+            let mut model_turn = match model
+                .turn_with_history(
                     &system_prompt,
                     &json!({"messages": live_messages}),
                     &tools_json,
+                    &live,
                     cancel,
                 )
                 .await
@@ -369,32 +449,14 @@ impl ProjectAgentRunner {
                     t
                 }
                 Err(err) => {
-                    if cancel.is_cancelled() || err.code == "CANCELLED" {
-                        final_end = TurnEndKind::UserStopped;
-                    } else {
-                        let tripped = self
-                            .breaker
-                            .lock()
-                            .map(|mut b| b.record_failure(err.code, now_ms))
-                            .unwrap_or(false);
-                        if tripped {
-                            let _ = conv_store.append_message_idempotent(
-                                opts.conversation_id,
-                                &json!({
-                                    "id": format!("{turn_id}-circuit"),
-                                    "role": "assistant",
-                                    "kind": "system_card",
-                                    "content": "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。",
-                                    "createdAt": now_iso(),
-                                }),
-                                &now_iso(),
-                                None,
-                            );
-                        }
-                        final_end = TurnEndKind::Failed {
-                            code: err.code.to_owned(),
-                        };
-                    }
+                    final_end = self.record_turn_failure(
+                        &conv_store,
+                        opts.conversation_id,
+                        &turn_id,
+                        err.code,
+                        now_ms,
+                        cancel,
+                    );
                     break;
                 }
             };
@@ -403,31 +465,12 @@ impl ProjectAgentRunner {
                 // ADR 87: ordinary user turns without explicit post_reply do not forge verified claims,
                 // but if the model produced plain text on a user turn with no tool calls, persist an anchored reply.
                 if opts.kind == "user" && !model_turn.content.trim().is_empty() {
-                    let msg_id = format!("reply-{turn_id}");
-                    let at = now_iso();
-                    let _ = conv_store.append_message_idempotent(
+                    let msg_id = persist_fallback_reply(
+                        &conv_store,
                         opts.conversation_id,
-                        &json!({
-                            "id": msg_id,
-                            "role": "assistant",
-                            "kind": "agent_reply",
-                            "content": model_turn.content.trim(),
-                            "replyTo": current_input_anchors,
-                            "sources": [],
-                            "fallback": true,
-                            "turnId": turn_id,
-                            "createdAt": at,
-                            "meta": {
-                                "replyTo": current_input_anchors,
-                                "sources": [],
-                                "memoryUsed": [],
-                                "memoryLearned": [],
-                                "surfacing": "message",
-                            },
-                            "marks": [],
-                        }),
-                        &at,
-                        None,
+                        &turn_id,
+                        &current_input_anchors,
+                        model_turn.content.trim(),
                     );
                     final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
                 }
@@ -436,9 +479,11 @@ impl ProjectAgentRunner {
 
             let mut assistant_tool_calls = Vec::new();
             let mut tool_results = Vec::new();
+            let mut executed_ids = Vec::new();
             let mut stop_loop = false;
 
-            for call in model_turn.calls {
+            let calls = std::mem::take(&mut model_turn.calls);
+            for call in calls {
                 if cancel.is_cancelled() {
                     final_end = TurnEndKind::UserStopped;
                     stop_loop = true;
@@ -513,17 +558,16 @@ impl ProjectAgentRunner {
                     None,
                 );
 
+                executed_ids.push(call_id.clone());
                 assistant_tool_calls.push(json!({
                     "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into()),
-                    }
+                    "name": call.name,
+                    "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into()),
                 }));
                 tool_results.push(json!({
                     "role": "tool",
-                    "tool_call_id": call_id,
+                    "toolCallId": call_id,
+                    "name": call.name,
                     "content": serde_json::to_string(&outcome.output).unwrap_or_else(|_| "{}".into()),
                 }));
 
@@ -533,15 +577,85 @@ impl ProjectAgentRunner {
                 }
             }
 
-            live_messages.push(json!({
-                "role": "assistant",
-                "content": model_turn.content,
-                "tool_calls": assistant_tool_calls,
-            }));
-            live_messages.extend(tool_results);
+            if !assistant_tool_calls.is_empty() {
+                let sanitized =
+                    peer_runtime::canonical_history::sanitize_assistant(&model_turn.content);
+                let trimmed = peer_protocol::javascript_trim(&sanitized);
+                if !trimmed.is_empty() {
+                    live_messages.push(json!({
+                        "role": "assistant",
+                        "content": trimmed,
+                    }));
+                }
+                live_messages.push(json!({
+                    "role": "assistant",
+                    "content": Value::Null,
+                    "toolCalls": assistant_tool_calls,
+                }));
+                live_messages.extend(tool_results);
+                if !stop_loop && !executed_ids.is_empty() {
+                    let history_val = json!({"messages": live_messages});
+                    let _ = live.remember_turn(&history_val, &executed_ids, &mut model_turn);
+                }
+            }
 
             if stop_loop {
                 break;
+            }
+        }
+
+        let needs_synthesis = opts.kind == "user"
+            && !cancel.is_cancelled()
+            && !matches!(
+                final_end,
+                TurnEndKind::ReplyCommitted { .. }
+                    | TurnEndKind::AwaitingChildren { .. }
+                    | TurnEndKind::UserStopped
+                    | TurnEndKind::Failed { .. }
+                    | TurnEndKind::CircuitOpen
+            )
+            && turn_state
+                .lock()
+                .map(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty())
+                .unwrap_or(false);
+        if needs_synthesis {
+            self.set_activity_phase("thinking", None, false);
+            match model
+                .turn_with_history(
+                    &system_prompt,
+                    &json!({"messages": live_messages}),
+                    &json!([]),
+                    &live,
+                    cancel,
+                )
+                .await
+            {
+                Ok(t) => {
+                    if let Ok(mut b) = self.breaker.lock() {
+                        b.record_success();
+                    }
+                    let trimmed = t.content.trim();
+                    if !trimmed.is_empty() {
+                        let msg_id = persist_fallback_reply(
+                            &conv_store,
+                            opts.conversation_id,
+                            &turn_id,
+                            &current_input_anchors,
+                            trimmed,
+                        );
+                        final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
+                    }
+                }
+                Err(err) => {
+                    final_end = self.record_turn_failure(
+                        &conv_store,
+                        opts.conversation_id,
+                        &turn_id,
+                        err.code,
+                        now_ms,
+                        cancel,
+                    );
+                }
             }
         }
 
