@@ -12,7 +12,9 @@ use super::{
     ShellOutcome, TerminalGuard,
     capability_store::{load_mcp_servers, load_skills, set_mcp_server_enabled, set_skill_enabled},
     model_picker_adapter::load_picker_groups,
-    resumed::ports::{Approval, Display, OutputPort, PermissionPort, bounded_text},
+    resumed::ports::{
+        Approval, Display, OutputPort, PermissionPort, bounded_text, compact_bounded_text,
+    },
     theme_store::{self, TerminalPreferences},
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -2940,12 +2942,12 @@ fn tool_argument_summary(
     if is_request_user_input_tool(capability_id, raw_tool)
         && let Some(q) = str_arg(args, "question")
     {
-        return bounded_text(q, 120);
+        return compact_bounded_text(q, 256);
     }
     if is_cap("local.shell.exec", "bash")
         && let Some(cmd) = str_arg(args, "command")
     {
-        return bounded_text(cmd, 120);
+        return compact_bounded_text(cmd, 256);
     }
     if (is_cap("local.file.read", "read_file")
         || is_cap("local.file.write", "write_file")
@@ -2953,7 +2955,7 @@ fn tool_argument_summary(
         || is_cap("local.file.list", "list_files"))
         && let Some(p) = str_arg(args, "path").or_else(|| str_arg(args, "file"))
     {
-        return bounded_text(&compact_path_display(p), 120);
+        return compact_bounded_text(&compact_path_display(p), 256);
     }
     if is_cap("local.git.query", "git_query") {
         let op = str_arg(args, "operation");
@@ -2965,7 +2967,7 @@ fn tool_argument_summary(
             (None, None) => String::new(),
         };
         if !summary.is_empty() {
-            return bounded_text(&summary, 120);
+            return compact_bounded_text(&summary, 256);
         }
     }
     if (is_cap("local.search.content", "search_files")
@@ -2976,7 +2978,7 @@ fn tool_argument_summary(
             .or_else(|| str_arg(args, "pattern"))
             .or_else(|| str_arg(args, "path"))
     {
-        return bounded_text(&compact_path_display(q), 120);
+        return compact_bounded_text(&compact_path_display(q), 256);
     }
     if (raw_lower == "read_tool_result" || cap_lower == "local.tool.read_result")
         && let Some(args_val) = args
@@ -3000,7 +3002,7 @@ fn tool_argument_summary(
         "id",
     ] {
         if let Some(val) = str_arg(args, key) {
-            return bounded_text(&compact_path_display(val), 120);
+            return compact_bounded_text(&compact_path_display(val), 256);
         }
     }
     if let Some(obj) = args.and_then(|v| v.as_object())
@@ -3010,7 +3012,7 @@ fn tool_argument_summary(
         return keys.join(", ");
     }
     if let Some(summary) = result.and_then(|r| r["evidence"]["summary"].as_str()) {
-        return bounded_text(summary.trim(), 120);
+        return compact_bounded_text(summary.trim(), 256);
     }
     String::new()
 }
@@ -3019,7 +3021,7 @@ fn push_detail_line(out: &mut Vec<String>, raw: &str) {
     if out.len() >= 4 {
         return;
     }
-    let clean = bounded_text(raw.trim(), 160);
+    let clean = compact_bounded_text(raw.trim(), 240);
     if !clean.is_empty() && !out.iter().any(|existing| existing == &clean) {
         out.push(clean);
     }
@@ -3031,7 +3033,7 @@ fn parse_string_options(value: Option<&Value>) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(|v| v.as_str())
-        .map(|s| bounded_text(s.trim(), 160))
+        .map(|s| compact_bounded_text(s.trim(), 160))
         .filter(|s| !s.is_empty())
         .take(12)
         .collect()
@@ -3063,7 +3065,7 @@ fn extract_user_input_options(
             && !num.is_empty()
             && num.chars().all(|c| c.is_ascii_digit())
         {
-            let opt = bounded_text(rest.trim(), 160);
+            let opt = compact_bounded_text(rest.trim(), 160);
             if !opt.is_empty() {
                 recovered.push(opt);
             }
@@ -3100,7 +3102,7 @@ fn extract_user_input_prompt(seg: &Value) -> Option<UserInputPrompt> {
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
         })
-        .map(|s| bounded_text(s, 400))?;
+        .map(|s| compact_bounded_text(s, 400))?;
     let detail_lines = extract_tool_detail_lines(raw_tool, capability_id, args, Some(result));
     let options = extract_user_input_options(args, Some(result), &detail_lines);
     let tool_call_id = seg["toolCallId"]
@@ -3717,5 +3719,24 @@ mod tests {
             select_preferred_goal_plan_id(&terminal_only, Some("done-2")).as_deref(),
             Some("done-2")
         );
+    }
+
+    #[test]
+    fn long_tool_summary_and_approval_args_use_ellipsis_never_export_preview() {
+        let long_cmd = format!("cd /tmp && git log --oneline {}", "--format=%H ".repeat(30));
+        let args = json!({"command": long_cmd});
+        let summary = tool_argument_summary("local.shell.exec", "bash", Some(&args), None);
+        assert!(summary.ends_with('…'));
+        assert!(!summary.contains("预览，完整正文见导出"));
+
+        let approval_card = super::super::resumed::ports::build_approval_card(
+            "bash",
+            &json!({
+                "capabilityId": "local.shell.exec",
+                "arguments": {"command": long_cmd},
+            }),
+        );
+        assert!(approval_card.arguments.ends_with('…'));
+        assert!(!approval_card.arguments.contains("预览，完整正文见导出"));
     }
 }

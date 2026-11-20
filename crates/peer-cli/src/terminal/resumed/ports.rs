@@ -167,7 +167,7 @@ pub(in crate::terminal) fn build_approval_card(
     let compact_args = if single_line.is_empty() {
         "No arguments".to_owned()
     } else {
-        bounded_text(&single_line, 240)
+        compact_bounded_text(&single_line, 240)
     };
     peer_tui::ApprovalCard {
         action: peer_tui::terminal_text(&action),
@@ -232,6 +232,21 @@ impl PermissionInput for PermissionPort {
             }
         })
     }
+}
+
+pub(in crate::terminal) fn compact_bounded_text(text: &str, limit: usize) -> String {
+    let clean = peer_tui::terminal_text(text);
+    let single_line = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if single_line.len() <= limit {
+        return single_line;
+    }
+    let mut end = limit.min(single_line.len());
+    while end > 0 && !single_line.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = single_line[..end].trim_end().to_owned();
+    out.push('…');
+    out
 }
 
 pub(in crate::terminal) fn bounded_text(text: &str, limit: usize) -> String {

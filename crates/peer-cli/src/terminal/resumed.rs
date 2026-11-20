@@ -25,7 +25,7 @@ use tokio::{
 };
 
 pub(super) mod ports;
-use ports::{Approval, Display, OutputPort, PermissionPort, bounded_text};
+use ports::{Approval, Display, OutputPort, PermissionPort, bounded_text, compact_bounded_text};
 
 const CONTROLS: &str = "Enter 发送 · ↑/↓ 阅读 · PgUp 更早 · PgDn 最新 · Ctrl-C 退出";
 const ACTIVE_CONTROLS: &str = "本轮进行中 · ↑/↓ 阅读 · PgUp 更早 · PgDn 最新 · Ctrl-C 停止本轮";
@@ -90,8 +90,7 @@ impl Session {
             .map_err(io::Error::other)?
             .metadata
             .ok_or_else(|| io::Error::other(StoreError::NotFound))?;
-        let title = bounded_text(metadata["title"].as_str().unwrap_or("会话"), 320)
-            .replace(['\t', '\n'], " ");
+        let title = compact_bounded_text(metadata["title"].as_str().unwrap_or("会话"), 320);
         let title = format!("{title}   {}", terminal_text(&id));
         let mut session = Self {
             home,
@@ -479,9 +478,9 @@ fn history_line(row: TranscriptRow) -> String {
         .flatten()
         .find(|segment| segment["type"] == "tool-call");
     if let Some(tool) = tool {
-        let name = bounded_text(tool["tool"].as_str().unwrap_or(""), 100);
+        let name = compact_bounded_text(tool["tool"].as_str().unwrap_or(""), 100);
         let status = tool["result"]["status"].as_str().unwrap_or("已记录调用");
-        return format!("工具  {name}  {}", bounded_text(status, 100));
+        return format!("工具  {name}  {}", compact_bounded_text(status, 100));
     }
     format!("{role}  ［消息详情见导出］")
 }
