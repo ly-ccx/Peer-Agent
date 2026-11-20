@@ -1,8 +1,10 @@
 use peer_project_agent::{
-    CircuitBreakerStore, LeaseStatus, MemoryFilter, NativeProjectHost, ProjectCapabilityProvider,
-    QuestionState, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, TurnEndKind,
-    TurnExecutionState, bot_list_json, input_message_id, project_reply_questions,
-    read_retry_continuity,
+    CircuitBreakerStore, CreateObjectiveRequest, LeaseStatus, MemoryEpisode, MemoryFilter,
+    NativeProjectHost, ObjectiveBudget, ProjectCapabilityProvider, QuestionState, RECOVERY_PHASES,
+    STALL_WINDOW_MS, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, TurnEndKind,
+    TurnExecutionState, WriteCuratedMemoryRequest, assess_same_cause, assess_stall, bot_list_json,
+    host_resource_plan_from_plan, input_message_id, objective_action_card_id,
+    project_reply_questions, read_retry_continuity, reconcile_unknown_outcome,
 };
 use peer_runtime::{
     CancellationToken,
@@ -13,7 +15,7 @@ use peer_runtime::{
     providers::{EffectAdmission, ProviderCall, ProviderRegistry, RuntimeMode},
     session_host::{LocalPermissionDecision, PermissionInput},
 };
-use peer_store::{ApprovalState, EvidenceIndexStore};
+use peer_store::{ApprovalState, EvidenceIndexStore, ExecutionResourceStore, ResourceReservation};
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -3221,4 +3223,899 @@ async fn coordination_v2_state_survives_host_restart_and_lease_handoff() {
         .await
         .unwrap();
     host_b.close();
+}
+
+#[tokio::test]
+async fn watchdog_detects_running_and_result_ready_stalls_and_stops_auto_retry_on_same_cause_limit()
+{
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    let (entry, _profile) = host
+        .bind_workspace(ws.path(), Some("Watchdog Bot"))
+        .unwrap();
+    let publisher = host.watch_publisher();
+
+    // 1. Running session past STALL_WINDOW_MS emits stall:run:... once and deduplicates repeat calls.
+    let plan_running = json!({
+        "planId": "plan-wd-1",
+        "status": "executing",
+        "createdAt": "2026-11-20T10:00:00.000Z",
+        "updatedAt": "2026-11-20T10:00:00.000Z",
+        "tasks": [{"taskId": "task-wd-1", "status": "pending"}],
+        "delegationOrigin": {
+            "workspaceId": entry.workspace_id,
+            "sessionId": "sess-wd-1",
+            "phase": "running"
+        }
+    });
+    let ev1 = publisher.publish(
+        &entry.workspace_id,
+        std::slice::from_ref(&plan_running),
+        "2026-11-20T10:12:00.000Z",
+        None,
+    );
+    assert_eq!(ev1.len(), 1);
+    assert_eq!(ev1[0]["kind"], "stalled");
+    assert_eq!(ev1[0]["payload"]["anchor"], "2026-11-20T10:00:00.000Z");
+    assert_eq!(
+        ev1[0]["payload"]["stallId"].as_str(),
+        Some("stall:sess-wd-1:2026-11-20T10:00:00.000Z")
+    );
+    let ev1_dup = publisher.publish(
+        &entry.workspace_id,
+        &[plan_running],
+        "2026-11-20T10:14:00.000Z",
+        None,
+    );
+    assert!(ev1_dup.is_empty(), "same stall anchor must deduplicate");
+
+    // 2. Waiting on user approval suppresses stall detection.
+    let plan_waiting = json!({
+        "planId": "plan-wd-2",
+        "status": "paused",
+        "createdAt": "2026-11-20T10:00:00.000Z",
+        "updatedAt": "2026-11-20T10:00:00.000Z",
+        "tasks": [{"taskId": "task-wd-2", "status": "pending"}],
+        "delegationOrigin": {
+            "workspaceId": entry.workspace_id,
+            "sessionId": "sess-wd-2",
+            "phase": "awaiting_approval",
+            "planApprovalId": "appr-1"
+        }
+    });
+    let mut waiting_facts = peer_project_agent::watch_facts_from_plan(&plan_waiting).unwrap();
+    assert_eq!(waiting_facts.status, "waiting_user");
+    let waiting_assess = assess_stall(&waiting_facts, i64::MAX / 2, STALL_WINDOW_MS);
+    assert!(!waiting_assess.stalled);
+    waiting_facts.status = "running".into();
+    let running_wait_assess = assess_stall(&waiting_facts, i64::MAX / 2, STALL_WINDOW_MS);
+    assert!(!running_wait_assess.stalled);
+    assert!(running_wait_assess.waiting);
+
+    // 3. result_ready past STALL_WINDOW_MS emits both result_ready and verification_pending stall.
+    let plan_verify = json!({
+        "planId": "plan-wd-1",
+        "status": "completed",
+        "createdAt": "2026-11-20T10:00:00.000Z",
+        "updatedAt": "2026-11-20T10:00:00.000Z",
+        "completedAt": "2026-11-20T10:00:00.000Z",
+        "tasks": [{"taskId": "task-wd-1", "status": "completed"}],
+        "delegationOrigin": {
+            "workspaceId": entry.workspace_id,
+            "sessionId": "sess-wd-1",
+            "phase": "result_ready",
+            "resultRevision": "rev-1",
+            "verdict": { "outcome": "pass", "evidenceRefs": ["ev-1"] }
+        }
+    });
+    let ev_verify = publisher.publish(
+        &entry.workspace_id,
+        &[plan_verify],
+        "2026-11-20T10:16:00.000Z",
+        None,
+    );
+    assert!(ev_verify.iter().any(|e| e["kind"] == "result_ready"));
+    assert!(ev_verify.iter().any(|e| {
+        e["kind"] == "stalled"
+            && e["payload"]["stallId"] == "stall:verify:sess-wd-1:2026-11-20T10:00:00.000Z"
+            && e["payload"]["anchor"] == "verification_pending"
+    }));
+
+    // 4. Three matching same-cause failures stop auto-retry and ask the user.
+    let plan_failed = json!({
+        "planId": "plan-wd-1",
+        "status": "failed",
+        "createdAt": "2026-11-20T10:00:00.000Z",
+        "updatedAt": "2026-11-20T10:18:00.000Z",
+        "tasks": [{"taskId": "task-wd-1", "status": "failed"}],
+        "failureLog": [
+            {"taskId": "task-wd-1", "cause": "ECONNRESET: read error"},
+            {"taskId": "task-wd-1", "cause": "econnreset during stream"}
+        ],
+        "runner": {
+            "currentTaskId": "task-wd-1",
+            "lastError": "ECONNRESET: socket hang up"
+        },
+        "delegationOrigin": {
+            "workspaceId": entry.workspace_id,
+            "sessionId": "sess-wd-1",
+            "phase": "failed"
+        }
+    });
+    let fail_facts = peer_project_agent::watch_facts_from_plan(&plan_failed).unwrap();
+    let same_assess = assess_same_cause(&fail_facts, None);
+    assert_eq!(same_assess.count, 3);
+    assert!(same_assess.ask_user);
+    assert!(same_assess.stop_auto_retry);
+
+    let ev_fail = publisher.publish(
+        &entry.workspace_id,
+        &[plan_failed],
+        "2026-11-20T10:18:00.000Z",
+        None,
+    );
+    assert!(ev_fail.iter().any(|e| {
+        e["kind"] == "failed"
+            && e["payload"]["sameCauseCount"] == 3
+            && e["payload"]["stopAutoRetry"] == true
+            && e["payload"]["askUser"] == true
+    }));
+    host.close();
+}
+
+#[tokio::test]
+async fn execution_obligation_inspect_authorize_confirm_resolve_and_unknown_outcome_reconciliation()
+{
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let git_init = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(ws.path())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    assert!(git_init.status.success());
+    let cancel = CancellationToken::new();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("Obligation Bot"))
+        .unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    // Run 7-phase barrier before creating the synthetic protected claim so subsequent turns
+    // do not re-run suspend_live on this claim.
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    host.recover_workspace_barrier(&entry.workspace_id, &cancel)
+        .await
+        .unwrap();
+
+    let anchor_setup = input_message_id("in-obl-setup").unwrap();
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![anchor_setup],
+                input_id: "in-obl-setup".into(),
+                surface: "tui".into(),
+                title: "Uncertain external write".into(),
+                brief: "Write artifact with unknown dispatch".into(),
+                kind: "other".into(),
+                read_only: false,
+                required_capabilities: vec!["local.file.write".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-obl-1".into()),
+                    kind: "file-exists".into(),
+                    description: "Verify artifact exists".into(),
+                    command: None,
+                    path: Some("Cargo.toml".into()),
+                    expect: None,
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({}),
+            },
+            true,
+        )
+        .unwrap();
+    host.supervisor()
+        .control_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            "cancel",
+            "stop",
+            true,
+        )
+        .unwrap();
+    let setup_batch = host
+        .inbox()
+        .take_batch(&entry.workspace_id, i64::MAX / 2, true);
+    host.inbox()
+        .commit_batch(&entry.workspace_id, setup_batch.through_seq, true)
+        .unwrap();
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .unwrap();
+    let host_plan = host_resource_plan_from_plan(&plan).unwrap();
+    let mut rstore = ExecutionResourceStore::initialize(home.path(), None).unwrap();
+    rstore
+        .reserve(
+            &host_plan,
+            ResourceReservation {
+                host_epoch: "epoch-1",
+                scopes: &[],
+                record_conflict: false,
+            },
+            "2026-11-20T10:00:00.000Z",
+        )
+        .unwrap();
+    rstore
+        .activate(&host_plan, "epoch-1", "2026-11-20T10:00:01.000Z")
+        .unwrap();
+    rstore
+        .protect(
+            &host_plan,
+            Some("epoch-1"),
+            Some("op-1"),
+            "draining",
+            &[String::from("call-u1")],
+            "2026-11-20T10:00:02.000Z",
+        )
+        .unwrap();
+    let claim = rstore.claims_for(&host_plan).unwrap().pop().unwrap();
+    let claim_id = claim["claimId"].as_str().unwrap().to_owned();
+
+    let work = json!({
+        "budget": {
+            "uncertainDispatches": [{
+                "toolCallId": "call-u1",
+                "capabilityId": "local.file.write"
+            }]
+        }
+    });
+    let recon = reconcile_unknown_outcome(home.path(), &plan, &claim_id, Some(&work))
+        .await
+        .unwrap();
+    assert_eq!(recon["ok"], true);
+    assert_eq!(recon["evidence"]["verdict"], "no_effect_observed");
+
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-obl-1",
+        "Inspect unsettled obligation and request authorization",
+        None,
+    )
+    .unwrap();
+
+    let sid_turn1 = spawned.session_id.clone();
+    let sid_auth = spawned.session_id.clone();
+    let sid_res = spawned.session_id.clone();
+    let observed_grant: Arc<Mutex<Option<(String, String, String)>>> = Arc::new(Mutex::new(None));
+    let observed_grant_capture = Arc::clone(&observed_grant);
+    let observed_grant_use = Arc::clone(&observed_grant);
+
+    let server = start_mock_server(vec![
+        // Turn 1, round 1: inspect_execution_obligation
+        Box::new(move |req| {
+            let tools = tool_names_from_request(req);
+            assert!(tools.iter().any(|t| t == "inspect_execution_obligation"));
+            assert!(
+                tools
+                    .iter()
+                    .any(|t| t == "request_obligation_authorization")
+            );
+            assert!(tools.iter().any(|t| t == "resolve_execution_obligation"));
+            sse_tool_call(
+                "obl-1",
+                "inspect_execution_obligation",
+                &json!({ "sessionIds": [sid_turn1] }),
+            )
+        }),
+        // Turn 1, round 2: request_obligation_authorization
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("inspect output");
+            assert_eq!(out["ok"], true);
+            let row = &out["items"][0];
+            let obl_id = row["obligationId"].as_str().unwrap().to_owned();
+            let op_id = row["operationId"].as_str().unwrap().to_owned();
+            let ev_rev = row["evidenceRevision"].as_str().unwrap().to_owned();
+            sse_tool_call(
+                "obl-2",
+                "request_obligation_authorization",
+                &json!({
+                    "items": [{
+                        "obligationId": obl_id,
+                        "sessionId": sid_auth,
+                        "operationId": op_id,
+                        "evidenceRevision": ev_rev,
+                        "actions": ["retire_follow_up", "acknowledge_unknown"]
+                    }]
+                }),
+            )
+        }),
+        // Turn 1, round 3: capture grantId & opId and post reply
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("authorize output");
+            assert_eq!(out["ok"], true);
+            let grant_id = out["grantId"].as_str().unwrap().to_owned();
+            let op_id = out["items"][0]["operationId"]
+                .as_str()
+                .unwrap_or("op-1")
+                .to_owned();
+            *observed_grant_capture.lock().unwrap() = Some((
+                grant_id.clone(),
+                op_id,
+                "idem-e2e-resolve-key-123456".to_owned(),
+            ));
+            sse_tool_call(
+                "obl-3",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-obl-1"],
+                    "text": format!("Authorization requested ({grant_id}). Confirm to settle.")
+                }),
+            )
+        }),
+        // Turn 2 (wake from obligation_grant_confirmed), round 1: resolve_execution_obligation
+        Box::new(move |_req| {
+            let (grant_id, op_id, idem_key) = observed_grant_use.lock().unwrap().clone().unwrap();
+            sse_tool_call(
+                "obl-4",
+                "resolve_execution_obligation",
+                &json!({
+                    "grantId": grant_id,
+                    "idempotencyKey": idem_key,
+                    "items": [{
+                        "sessionId": sid_res,
+                        "operationId": op_id,
+                        "actions": ["retire_follow_up", "acknowledge_unknown"]
+                    }]
+                }),
+            )
+        }),
+        // Turn 2, round 2: assert applied & complete wake turn
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("resolve output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["items"][0]["result"], "applied");
+            assert_eq!(out["items"][0]["disposition"], "indexed");
+            sse_text("Execution obligation settled.")
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let fg1 = host
+        .tick_foreground(&entry.workspace_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg1.inputs_consumed, 1);
+    assert_eq!(fg1.wake_turns_run, 0);
+
+    let (grant_id, op_id, idem_key) = observed_grant.lock().unwrap().clone().unwrap();
+    let pending = host.pending_obligation_grants(&entry.workspace_id);
+    assert!(pending.iter().any(|g| g["grantId"] == grant_id));
+
+    let confirmed = host
+        .confirm_obligation_grant(&entry.workspace_id, &grant_id, true)
+        .unwrap();
+    assert_eq!(confirmed["ok"], true);
+    let recent_inbox = host.inbox().list_recent(&entry.workspace_id, 20);
+    assert!(
+        recent_inbox
+            .iter()
+            .any(|e| { e["kind"] == "obligation_grant_confirmed" && e["grantId"] == grant_id })
+    );
+
+    // Wake turn resolves the confirmed grant via resolve_execution_obligation tool.
+    let fg2 = host
+        .tick_foreground(&entry.workspace_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg2.wake_turns_run, 1);
+
+    // Direct idempotent replay with the same key & items returns replayed == true.
+    let conv = host
+        .profiles()
+        .read(&entry.workspace_id)
+        .unwrap()
+        .agent_conversation_id
+        .unwrap();
+    let replay = host
+        .obligation_service()
+        .resolve(
+            &entry.workspace_id,
+            &conv,
+            &grant_id,
+            &idem_key,
+            &[json!({
+                "sessionId": spawned.session_id,
+                "operationId": op_id,
+                "actions": ["retire_follow_up", "acknowledge_unknown"]
+            })],
+            "call-obl-replay",
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay["replayed"], true);
+    host.close();
+}
+
+#[tokio::test]
+async fn seven_phase_project_recovery_barrier_persists_recovery_json_and_re_runs_after_lease_drop()
+{
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+
+    let host_a = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    let (entry, _profile) = host_a
+        .bind_workspace(ws.path(), Some("Recovery Bot"))
+        .unwrap();
+    assert!(
+        !host_a
+            .recovery()
+            .is_ready(&entry.workspace_id, host_a.holds_lease(&entry.workspace_id))
+    );
+
+    host_a
+        .submit_user_input(&entry.workspace_id, "in-rec-1", "Check readiness", None)
+        .unwrap();
+    let server = start_mock_server(vec![Box::new(|_req| {
+        sse_tool_call(
+            "rec-1",
+            "post_reply",
+            &json!({ "replyTo": ["in-rec-1"], "text": "Recovery complete and ready." }),
+        )
+    })]);
+    let model = mock_model(&server.endpoint);
+    host_a
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+
+    assert!(
+        host_a
+            .recovery()
+            .is_ready(&entry.workspace_id, host_a.holds_lease(&entry.workspace_id))
+    );
+    let rec_file = host_a
+        .recovery()
+        .diagnostic_file(&entry.workspace_id)
+        .unwrap();
+    assert!(rec_file.is_file(), "recovery.json must be persisted");
+    let rec_json: Value = serde_json::from_str(&fs::read_to_string(&rec_file).unwrap()).unwrap();
+    assert_eq!(rec_json["status"], "ready");
+    assert_eq!(rec_json["phase"], *RECOVERY_PHASES.last().unwrap());
+
+    // Dropping the workspace lease clears in-memory readiness so a subsequent host must re-run
+    // while retaining the last recovery diagnostic artifact.
+    host_a.release_lease(&entry.workspace_id).unwrap();
+    assert!(
+        !host_a
+            .recovery()
+            .is_ready(&entry.workspace_id, host_a.holds_lease(&entry.workspace_id))
+    );
+    assert!(host_a.recovery().status(&entry.workspace_id).is_some());
+
+    let host_b = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    assert!(matches!(
+        host_b.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    assert!(
+        !host_b
+            .recovery()
+            .is_ready(&entry.workspace_id, host_b.holds_lease(&entry.workspace_id))
+    );
+    let diag = host_b
+        .recover_workspace_barrier(&entry.workspace_id, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(diag.status, "ready");
+    assert_eq!(diag.phase, "digest");
+    assert!(
+        host_b
+            .recovery()
+            .is_ready(&entry.workspace_id, host_b.holds_lease(&entry.workspace_id))
+    );
+    host_b.close();
+}
+
+#[tokio::test]
+async fn memory_curator_episode_admission_three_episode_preference_and_file_anchor_maintenance() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::create_dir_all(ws.path().join("src")).unwrap();
+    fs::write(ws.path().join("src/db.rs"), b"pub const POOL: u32 = 16;\n").unwrap();
+
+    let cancel = CancellationToken::new();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("Memory Bot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+
+    let timestamps = [
+        "2026-11-20T09:10:00.000Z",
+        "2026-11-20T09:30:00.000Z",
+        "2026-11-20T09:50:00.000Z",
+    ];
+    for (idx, ts) in timestamps.iter().enumerate() {
+        let ep = MemoryEpisode {
+            id: format!("ep-mem-{}", idx + 1),
+            workspace_id: ws_id.clone(),
+            anchor_message_id: format!("msg-mem-{}", idx + 1),
+            dispositions: vec![],
+            summary: format!("Database pool review #{}", idx + 1),
+            opened_at: (*ts).to_owned(),
+            closed_at: (*ts).to_owned(),
+            trigger: "task_events".into(),
+            session_ids: vec![],
+            evidence_refs: vec![format!("ev-ep-{}", idx + 1)],
+            evidence_texts: std::collections::BTreeMap::from([(
+                format!("ev-ep-{}", idx + 1),
+                "Connection pool defaults to 16 in src/db.rs".to_owned(),
+            )]),
+            texts: vec![format!("Checked src/db.rs POOL=16 round {}", idx + 1)],
+            untrusted: false,
+            fingerprint: format!("fp-mem-{}", idx + 1),
+            extracted: false,
+        };
+        host.memory_curator()
+            .episodes()
+            .append_episode(&ep)
+            .unwrap();
+    }
+
+    let ep1_body = json!({
+        "candidates": [
+            {
+                "kind": "preference",
+                "trust": "inferred",
+                "text": "Always summarize failing assertions first"
+            },
+            {
+                "kind": "fact",
+                "trust": "verified",
+                "text": "Connection pool defaults to 16 in src/db.rs",
+                "evidenceRefs": ["ev-ep-1"],
+                "filePaths": ["src/db.rs"]
+            },
+            {
+                "kind": "fact",
+                "trust": "verified",
+                "text": "Use token sk-live-secret1234567890abcdef in src/db.rs",
+                "evidenceRefs": ["ev-ep-1"],
+                "filePaths": ["src/db.rs"]
+            }
+        ]
+    })
+    .to_string();
+    let ep2_body = json!({
+        "candidates": [{
+            "kind": "preference",
+            "trust": "inferred",
+            "text": "Always summarize failing assertions first"
+        }]
+    })
+    .to_string();
+    let ep3_body = ep2_body.clone();
+
+    let server = start_mock_server(vec![
+        Box::new(move |_req| sse_text(&ep1_body)),
+        Box::new(move |_req| sse_text(&ep2_body)),
+        Box::new(move |_req| sse_text(&ep3_body)),
+    ]);
+    let model = mock_model(&server.endpoint);
+
+    // Episode 1: inferred preference is not active yet; secret candidate is rejected;
+    // verified fact with file anchor is stored.
+    let out1 = host
+        .memory_curator()
+        .extract_due_with_model(&ws_id, ws.path(), timestamps[0], true, &model, &cancel)
+        .await
+        .unwrap();
+    assert!(!out1.learned_ids.is_empty());
+    let active_prefs_after_1 = host.memory().list(&MemoryFilter {
+        scope: Some("user"),
+        workspace_id: None,
+        kind: Some("preference"),
+        status: Some("active"),
+    });
+    assert!(active_prefs_after_1.is_empty());
+    assert!(
+        host.memory()
+            .search(Some(&ws_id), "sk-live", 10)
+            .unwrap()
+            .is_empty()
+    );
+    let anchored_fact = host
+        .memory()
+        .search(Some(&ws_id), "Connection pool defaults", 10)
+        .unwrap();
+    assert_eq!(anchored_fact.len(), 1);
+    assert!(
+        anchored_fact[0]
+            .file_anchors
+            .as_ref()
+            .is_some_and(|a| !a.is_empty())
+    );
+    let fact_id = anchored_fact[0].id.clone();
+
+    // Episode 2: still below 3-episode threshold.
+    let _out2 = host
+        .memory_curator()
+        .extract_due_with_model(&ws_id, ws.path(), timestamps[1], true, &model, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        host.memory()
+            .list(&MemoryFilter {
+                scope: Some("user"),
+                workspace_id: None,
+                kind: Some("preference"),
+                status: Some("active"),
+            })
+            .is_empty()
+    );
+
+    // Episode 3 via host.run_background_maintenance: activates user preference at count 3.
+    let maint_rep = host
+        .run_background_maintenance(&ws_id, timestamps[2], Some(&model), &cancel)
+        .await
+        .unwrap();
+    assert!(!maint_rep.curator_learned_ids.is_empty());
+    let active_prefs_after_3 = host.memory().list(&MemoryFilter {
+        scope: Some("user"),
+        workspace_id: None,
+        kind: Some("preference"),
+        status: Some("active"),
+    });
+    assert_eq!(active_prefs_after_3.len(), 1);
+    assert_eq!(active_prefs_after_3[0].confirmed_count, 3);
+
+    // Write an expired memory and mutate src/db.rs, then run next-day daily maintenance.
+    let exp_item = host
+        .memory()
+        .write_curated(&WriteCuratedMemoryRequest {
+            scope: "project",
+            workspace_id: Some(&ws_id),
+            kind: "fact",
+            text: "Temporary migration flag active",
+            trust: "verified",
+            source_refs: vec!["ev-exp".into()],
+            confirmed_count: 1,
+            pinned: false,
+            anchor_message_id: None,
+            expires_at: Some("2026-11-20T08:00:00.000Z"),
+            topic_key: None,
+            topic_value: None,
+            file_anchors: None,
+        })
+        .unwrap();
+    fs::write(ws.path().join("src/db.rs"), b"pub const POOL: u32 = 32;\n").unwrap();
+
+    let day2_maint = host
+        .memory_maintenance()
+        .run_due(&ws_id, ws.path(), "2026-11-21T09:05:00.000Z", "09:00")
+        .unwrap();
+    assert!(day2_maint.skipped.is_none());
+    assert!(day2_maint.changed_ids.contains(&fact_id));
+    assert!(day2_maint.changed_ids.contains(&exp_item.id));
+
+    let refreshed_fact = host.memory().get(Some(&ws_id), &fact_id).unwrap();
+    assert_eq!(refreshed_fact.needs_reverify, Some(true));
+    assert_eq!(
+        refreshed_fact.maintenance_reason.as_deref(),
+        Some("file_changed")
+    );
+    let expired = host.memory().get(Some(&ws_id), &exp_item.id).unwrap();
+    assert_eq!(expired.status, "expired");
+    host.close();
+}
+
+#[tokio::test]
+async fn objective_watch_runner_reconciles_deterministic_and_agent_probes_and_proposal_card_spawns_session()
+ {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("config.toml"), b"port = 8080\n").unwrap();
+
+    let cancel = CancellationToken::new();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(2)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("Objective Bot"))
+        .unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    // Run initial barrier cleanly before setting up watches.
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    host.recover_workspace_barrier(&ws_id, &cancel)
+        .await
+        .unwrap();
+
+    let origin_msg_id = input_message_id("in-obj-origin").unwrap();
+    let (obj, _) = host
+        .objectives()
+        .create(&CreateObjectiveRequest {
+            workspace_id: &ws_id,
+            project_agent_conversation_id: &conv_id,
+            origin_message_id: &origin_msg_id,
+            title: "Monitor config.toml",
+            outcome: "Keep runtime config healthy",
+            autonomy: "propose",
+            created_by: "user_request",
+            watches: vec![
+                json!({
+                    "watchId": "watch-file",
+                    "kind": "schedule",
+                    "schedule": { "everySeconds": 60 },
+                    "probe": {
+                        "type": "deterministic",
+                        "check": "file_hash",
+                        "spec": { "path": "config.toml" }
+                    }
+                }),
+                json!({
+                    "watchId": "watch-agent",
+                    "kind": "schedule",
+                    "schedule": { "everySeconds": 60 },
+                    "probe": {
+                        "type": "agent",
+                        "question": "Summarize health of config.toml"
+                    }
+                }),
+            ],
+            milestones: vec![],
+            success_signals: vec![],
+            budget: Some(ObjectiveBudget::default()),
+            deadline: None,
+            request_id: Some("req-obj-e2e-1"),
+        })
+        .unwrap();
+
+    let probe_reply = json!({
+        "digest": "cfg-healthy-v1",
+        "summary": "config.toml healthy",
+        "severity": "notable",
+        "succeeded": true,
+        "value": "healthy"
+    })
+    .to_string();
+
+    let captured_action: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
+    let captured_action_write = Arc::clone(&captured_action);
+    let obj_id_for_tool = obj.objective_id.clone();
+
+    let server = start_mock_server(vec![
+        // 1. Agent probe turn inside run_background_maintenance
+        Box::new(move |_req| sse_text(&probe_reply)),
+        // 2. Wake turn reacting to objective_signal inbox event -> propose_objective_action
+        Box::new(move |req| {
+            let sys_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "system")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                sys_text.contains("objective_signal"),
+                "expected objective_signal in wake context:\n{sys_text}"
+            );
+            let event_id = "obj-sig-e2e-1";
+            sse_tool_call(
+                "obj-prop-1",
+                "propose_objective_action",
+                &json!({
+                    "objectiveId": obj_id_for_tool,
+                    "eventIds": [event_id],
+                    "task": {
+                        "title": "Inspect config drift",
+                        "brief": "Read config.toml details",
+                        "kind": "research",
+                        "readOnly": true,
+                        "requiredCapabilities": ["local.file.read"],
+                        "successCriteria": [{
+                            "id": "c-obj-1",
+                            "kind": "file-exists",
+                            "description": "Confirm config.toml exists",
+                            "path": "config.toml"
+                        }]
+                    }
+                }),
+            )
+        }),
+        // 3. Verify proposal mode + cardId and finish wake turn
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("propose_objective_action output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["mode"], "proposal");
+            let action_id = out["actionId"].as_str().unwrap().to_owned();
+            let card_id = out["cardId"].as_str().unwrap().to_owned();
+            assert_eq!(card_id, objective_action_card_id(&action_id));
+            *captured_action_write.lock().unwrap() = Some((action_id, card_id));
+            sse_text("Created objective action proposal card.")
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let rep = host
+        .run_background_maintenance(&ws_id, "2026-11-20T10:00:00.000Z", Some(&model), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(rep.watch_observations, 2);
+    assert!(rep.watch_signals >= 1);
+
+    // Watch cursor persisted & interval gating skips probes 20s later (< 60s).
+    let file_cursor = host
+        .watches()
+        .read_cursor(&ws_id, &obj.objective_id, "watch-file");
+    assert_eq!(
+        file_cursor.last_scheduled_at.as_deref(),
+        Some("2026-11-20T10:00:00.000Z")
+    );
+    let gated = host
+        .watches()
+        .reconcile_workspace(
+            &ws_id,
+            ws.path(),
+            "2026-11-20T10:00:20.000Z",
+            60_000,
+            Some(&model),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(gated.observations_recorded, 0);
+
+    // Confirm inbox recorded objective_signal events and run wake turn to propose an action card.
+    let signals: Vec<Value> = host
+        .inbox()
+        .list_recent(&ws_id, 20)
+        .into_iter()
+        .filter(|e| e["kind"] == "objective_signal")
+        .collect();
+    assert!(!signals.is_empty());
+
+    let fg = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg.wake_turns_run, 1);
+
+    let (action_id, _card_id) = captured_action.lock().unwrap().clone().unwrap();
+    let pending = host.objective_actions().pending(&ws_id);
+    assert!(pending.iter().any(|a| a.action_id == action_id));
+
+    let decided = host
+        .decide_objective_proposal(&ws_id, &action_id, true)
+        .unwrap();
+    let sid = decided
+        .session_id
+        .expect("approving proposal must spawn delegated session");
+    let spawned_plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &sid)
+        .unwrap();
+    assert_eq!(
+        spawned_plan["delegationOrigin"]["objectiveId"].as_str(),
+        Some(obj.objective_id.as_str())
+    );
+    host.close();
 }

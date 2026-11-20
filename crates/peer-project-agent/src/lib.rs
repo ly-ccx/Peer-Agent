@@ -18,8 +18,10 @@ pub mod inbox;
 pub mod input_queue;
 pub mod memory;
 pub mod objectives;
+pub mod obligation;
 pub mod profile;
 pub mod provider;
+pub mod recovery;
 pub mod registry;
 pub mod reply;
 pub mod runner;
@@ -27,6 +29,7 @@ pub mod scheduler;
 pub mod supervisor;
 pub mod system_context;
 pub mod verifier;
+pub mod watchdog;
 pub mod worktree;
 
 use std::{fmt, fs, io::Write, path::Path};
@@ -60,27 +63,42 @@ pub use drafts::{
 };
 pub use host::{
     FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, ForegroundTickReport, HostTickReport,
-    LeaseStatus, NativeProjectHost, RESPONSIBILITY_QUESTION, StartFamiliarizeResult, bot_list_json,
+    LeaseStatus, MaintenanceReport, NativeProjectHost, RESPONSIBILITY_QUESTION,
+    StartFamiliarizeResult, bot_list_json,
 };
 pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
 pub use input_queue::{
     ConsumeOutcome, InputQueue, ProjectInput, SubmitInputRequest, input_message_id,
 };
 pub use memory::{
-    FrozenMemoryItem, MemoryFileAnchor, MemoryFilter, MemoryHit, MemoryIndex, MemoryItem,
-    MemorySnapshot, MemoryStore, WriteMemoryRequest, create_snapshot, is_effective_memory,
-    memory_secret_reason, read_snapshots,
+    AdmissionContext, AdmissionDecision, CURATOR_EXCLUDED_CAPABILITY_PREFIXES, CURATOR_INTERVAL_MS,
+    CuratorCandidate, CuratorClock, CuratorOutcome, EpisodeLog, FrozenMemoryItem,
+    MaintenanceOutcome, MemoryCandidateRecord, MemoryCurator, MemoryEpisode, MemoryFileAnchor,
+    MemoryFilter, MemoryHit, MemoryIndex, MemoryItem, MemoryMaintenance, MemorySnapshot,
+    MemoryStore, USER_INPUTS_PER_RUN, WriteCuratedMemoryRequest, WriteMemoryRequest,
+    capture_file_anchors, create_snapshot, curator_prompt, decide_memory_admission,
+    fingerprint_material, is_effective_memory, is_task_end_event, memory_secret_reason,
+    parse_curator_output, read_file_anchor, read_snapshots, validate_curator_candidate,
 };
 pub use objectives::{
     AppendObservationRequest, CreateObjectiveRequest, ObjectiveActionItem, ObjectiveActions,
     ObjectiveBudget, ObjectiveItem, ObjectiveMilestone, ObjectiveStore, ProbeOutcome,
-    UpdateObjectiveRequest, WatchHost, WatchObservation,
+    UpdateObjectiveRequest, WatchCursorState, WatchHost, WatchObservation, WatchReconcileReport,
+    objective_action_card_id,
+};
+pub use obligation::{
+    ExecutionObligationService, OBLIGATION_FORMAT_VERSION, OBLIGATION_GRANT_TTL_MS,
+    ObligationClassification, canonical_grant_key, classify_execution_obligation,
+    host_resource_plan_from_plan, obligation_id_for, reconcile_unknown_outcome,
 };
 pub use profile::{
     BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BotAvatar, BotProfile, BotProfileStore, CreateBotProfile,
     clean_display_name, generate_avatar,
 };
 pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
+pub use recovery::{
+    ProjectRecoveryBarrier, RECOVERY_PHASES, RecoveryDiagnostic, RecoveryRunCounts,
+};
 pub use registry::{ProjectRegistry, ProjectRegistryEntry};
 pub use reply::{
     ComposeReplyInput, ComposedReply, SessionStatusFact, StatusClaim, Surfacing, SurfacingDecision,
@@ -103,6 +121,12 @@ pub use verifier::{
     READ_ONLY_CAPABILITY_CEILING, VerifierIssue, VerifierOutcome, VerifierReport,
     WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, WORKER_CAPABILITY_CEILING, WorkSessionProfile,
     decode_verifier_report, model_family, resolve_work_session_profile, run_independent_verifier,
+};
+pub use watchdog::{
+    FailureDescription, PROGRESS_THROTTLE_MS, SAME_CAUSE_RETRY_LIMIT, STALL_WINDOW_MS,
+    SameCauseAssessment, StallAssessment, WatchPublisher, WatchSessionFacts, assess_same_cause,
+    assess_stall, delegation_event_id, delegation_facts_for_workspace, describe_failure,
+    stable_failure_class, watch_facts_from_plan,
 };
 pub use worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle};
 

@@ -4,11 +4,12 @@
 //! `CapabilityProvider -> Manifest -> RuntimeProjection(RuntimeMode::ProjectAgent) -> ToolCall -> PermissionGrant -> Evidence`.
 
 use crate::{
-    BotProfileStore, CommitAgentMessageRequest, CoordinationHub, DigestQueue, MemoryFilter,
-    MemoryStore, ObjectiveStore, ProjectError, SessionSupervisor, SpawnCriterion,
-    SpawnSessionRequest, UpdateObjectiveRequest, UserAnchorCandidate, WriteMemoryRequest,
+    BotProfileStore, CommitAgentMessageRequest, CoordinationHub, DigestQueue,
+    ExecutionObligationService, MemoryFilter, MemoryStore, ObjectiveActions, ObjectiveStore,
+    ProjectError, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, UpdateObjectiveRequest,
+    UserAnchorCandidate, WriteMemoryRequest,
     acceptance::verdict_ref_for,
-    memory_secret_reason,
+    memory_secret_reason, objective_action_card_id,
     objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
     reply::{
         ComposeReplyInput, SessionStatusFact, StatusClaim, Surfacing, SurfacingEvent,
@@ -670,6 +671,94 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                     "additionalProperties": false
                 }),
             ),
+            Self::manifest(
+                "inspect_execution_obligation",
+                "local.delegation.inspect_execution_obligation",
+                "Inspect unsettled execution obligations, recorder liveness, resource claims, and allowed follow-up actions.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "sessionIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}},
+                        "obligationIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}},
+                        "detail": {"type": "string", "enum": ["summary", "evidence"]}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "request_obligation_authorization",
+                "local.delegation.request_obligation_authorization",
+                "Request a user-confirmed authorization grant to retire/restore execution follow-up or close an unsettled claim.",
+                json!({
+                    "type": "object",
+                    "required": ["items"],
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 20,
+                            "items": {
+                                "type": "object",
+                                "required": ["obligationId", "sessionId", "operationId", "evidenceRevision", "actions"],
+                                "properties": {
+                                    "obligationId": {"type": "string"},
+                                    "sessionId": {"type": "string"},
+                                    "operationId": {"type": "string"},
+                                    "evidenceRevision": {"type": "string"},
+                                    "actions": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                                },
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "resolve_execution_obligation",
+                "local.delegation.resolve_execution_obligation",
+                "Resolve confirmed execution obligations idempotently using grantId and idempotencyKey.",
+                json!({
+                    "type": "object",
+                    "required": ["grantId", "idempotencyKey", "items"],
+                    "properties": {
+                        "grantId": {"type": "string"},
+                        "idempotencyKey": {"type": "string", "minLength": 16, "maxLength": 128},
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 20,
+                            "items": {
+                                "type": "object",
+                                "required": ["sessionId", "operationId", "actions"],
+                                "properties": {
+                                    "sessionId": {"type": "string"},
+                                    "operationId": {"type": "string"},
+                                    "actions": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                                },
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "propose_objective_action",
+                "local.objective.propose_action",
+                "Reserve an auto-spawn or create a user-approval proposal card for an active objective watch event batch.",
+                json!({
+                    "type": "object",
+                    "required": ["objectiveId", "eventIds", "task"],
+                    "properties": {
+                        "objectiveId": {"type": "string"},
+                        "eventIds": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}},
+                        "task": {"type": "object"},
+                        "forceProposal": {"type": "boolean"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
         ]
     }
 
@@ -737,15 +826,33 @@ impl PreparedEffect for PreparedProjectEffect {
                     not_dispatched: true,
                 };
             }
-            let res = execute_project_capability(
-                &self.capability,
-                &self.args,
-                &self.data_home,
-                &self.supervisor,
-                &self.coordination,
-                &self.state,
-                call.tool_call_id(),
-            );
+            let res = if matches!(
+                self.capability.as_str(),
+                "local.delegation.inspect_execution_obligation"
+                    | "local.delegation.request_obligation_authorization"
+                    | "local.delegation.resolve_execution_obligation"
+            ) {
+                execute_async_obligation_capability(
+                    &self.capability,
+                    &self.args,
+                    &self.data_home,
+                    &self.supervisor,
+                    &self.coordination,
+                    &self.state,
+                    call.tool_call_id(),
+                )
+                .await
+            } else {
+                execute_project_capability(
+                    &self.capability,
+                    &self.args,
+                    &self.data_home,
+                    &self.supervisor,
+                    &self.coordination,
+                    &self.state,
+                    call.tool_call_id(),
+                )
+            };
             match res {
                 Ok(output) => EffectOutcome {
                     status: "success",
@@ -2210,8 +2317,155 @@ fn execute_project_capability(
         cap if cap.starts_with("local.continuity.") => {
             execute_continuity_capability(cap, args, data_home, coordination, &state, tool_call_id)
         }
+        "local.objective.propose_action" => {
+            let oid = args["objectiveId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let event_ids: Vec<String> = args["eventIds"]
+                .as_array()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            if event_ids.is_empty() {
+                return Err(ProjectError::code("invalid_input").into());
+            }
+            let obj = ObjectiveStore::new(data_home)
+                .get(&state.workspace_id, oid)?
+                .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+            if obj.status != "active" {
+                return Err(ProjectError::code("OBJECTIVE_NOT_ACTIVE").into());
+            }
+            let mut task = args["task"].clone();
+            if !task.is_object() {
+                return Err(ProjectError::code("invalid_input").into());
+            }
+            if task["anchorMessageIds"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+            {
+                let fallback = if state.current_input_anchors.is_empty() {
+                    vec![obj.origin_message_id.clone()]
+                } else {
+                    state.current_input_anchors.clone()
+                };
+                task["anchorMessageIds"] = json!(fallback);
+            }
+            task["objectiveId"] = json!(oid);
+            let force_proposal = args["forceProposal"].as_bool().unwrap_or(false);
+            let actions = ObjectiveActions::new(data_home);
+            let (action, replayed) =
+                actions.prepare(&obj, task.clone(), event_ids, force_proposal)?;
+            if action.mode == "auto" && action.session_id.is_none() {
+                let spawned = spawn_from_args(&task, &mut state, supervisor, coordination)?;
+                let _ = actions.link_session(
+                    &state.workspace_id,
+                    &action.action_id,
+                    &spawned.session_id,
+                )?;
+                Ok(json!({
+                    "ok": true,
+                    "mode": "auto",
+                    "actionId": action.action_id,
+                    "sessionId": spawned.session_id,
+                    "replayed": replayed,
+                    "action": action,
+                }))
+            } else {
+                Ok(json!({
+                    "ok": true,
+                    "mode": action.mode,
+                    "actionId": action.action_id,
+                    "cardId": objective_action_card_id(&action.action_id),
+                    "replayed": replayed,
+                    "action": action,
+                }))
+            }
+        }
         cap if cap.starts_with("local.objective.") => {
             execute_objective_capability(cap, args, data_home, &state)
+        }
+        _ => Err(ProjectError::code("tool_not_projected").into()),
+    }
+}
+
+async fn execute_async_obligation_capability(
+    capability: &str,
+    args: &Value,
+    data_home: &Path,
+    supervisor: &SessionSupervisor,
+    coordination: &CoordinationHub,
+    state_lock: &Mutex<TurnExecutionState>,
+    tool_call_id: &str,
+) -> Result<Value, CapFailure> {
+    let (holds_lease, workspace_id, conversation_id) = {
+        let g = state_lock
+            .lock()
+            .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
+        (
+            g.holds_lease,
+            g.workspace_id.clone(),
+            g.conversation_id.clone(),
+        )
+    };
+    if !holds_lease {
+        return Err(ProjectError::code("LEASE_REQUIRED").into());
+    }
+    let svc = ExecutionObligationService::new(data_home, coordination, supervisor);
+    match capability {
+        "local.delegation.inspect_execution_obligation" => {
+            let sids: Vec<String> = args["sessionIds"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let oids: Vec<String> = args["obligationIds"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            svc.inspect_async(&workspace_id, Some(&conversation_id), &sids, &oids)
+                .await
+                .map_err(Into::into)
+        }
+        "local.delegation.request_obligation_authorization" => {
+            let items = args["items"]
+                .as_array()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            svc.request_authorization(&workspace_id, &conversation_id, items)
+                .await
+                .map_err(Into::into)
+        }
+        "local.delegation.resolve_execution_obligation" => {
+            let grant_id = args["grantId"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let idempotency_key = args["idempotencyKey"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let items = args["items"]
+                .as_array()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            svc.resolve(
+                &workspace_id,
+                &conversation_id,
+                grant_id,
+                idempotency_key,
+                items,
+                tool_call_id,
+            )
+            .await
+            .map_err(Into::into)
         }
         _ => Err(ProjectError::code("tool_not_projected").into()),
     }

@@ -5,7 +5,12 @@
 //! Matches `packages/runtime-node/src/memory/*` (ADR 81).
 //! JSONL is the canonical source of truth; the SQLite index is a disposable cache.
 
+pub mod admission;
+pub mod curator;
+pub mod episodes;
+pub mod file_anchors;
 pub mod index;
+pub mod maintenance;
 pub mod snapshot;
 
 use crate::{ProjectError, is_valid_workspace_id, now_iso, parse_iso_ms};
@@ -22,7 +27,20 @@ use std::{
     time::Duration,
 };
 
+pub use admission::{
+    AdmissionContext, AdmissionDecision, CuratorCandidate, decide_memory_admission,
+    parse_curator_output, validate_curator_candidate,
+};
+pub use curator::{
+    CURATOR_EXCLUDED_CAPABILITY_PREFIXES, CuratorOutcome, MemoryCurator, curator_prompt,
+};
+pub use episodes::{
+    CURATOR_INTERVAL_MS, CuratorClock, EpisodeLog, MemoryCandidateRecord, MemoryEpisode,
+    USER_INPUTS_PER_RUN, fingerprint_material, is_task_end_event,
+};
+pub use file_anchors::{capture_file_anchors, read_file_anchor};
 pub use index::{MemoryHit, MemoryIndex};
+pub use maintenance::{MaintenanceOutcome, MemoryMaintenance};
 pub use snapshot::{FrozenMemoryItem, MemorySnapshot, create_snapshot, read_snapshots};
 
 const TEXT_MAX: usize = 2000;
@@ -261,6 +279,22 @@ pub struct WriteMemoryRequest<'a> {
     pub file_anchors: Option<Vec<MemoryFileAnchor>>,
 }
 
+pub struct WriteCuratedMemoryRequest<'a> {
+    pub scope: &'a str,
+    pub workspace_id: Option<&'a str>,
+    pub kind: &'a str,
+    pub text: &'a str,
+    pub trust: &'a str,
+    pub source_refs: Vec<String>,
+    pub confirmed_count: u32,
+    pub pinned: bool,
+    pub anchor_message_id: Option<&'a str>,
+    pub expires_at: Option<&'a str>,
+    pub topic_key: Option<&'a str>,
+    pub topic_value: Option<&'a str>,
+    pub file_anchors: Option<Vec<MemoryFileAnchor>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemoryFilter<'a> {
     pub scope: Option<&'a str>,
@@ -399,6 +433,163 @@ impl MemoryStore {
             let _ = idx.upsert(&item);
         }
         Ok(item)
+    }
+
+    pub fn get(&self, workspace_id: Option<&str>, id: &str) -> Option<MemoryItem> {
+        self.list(&MemoryFilter {
+            scope: None,
+            workspace_id,
+            kind: None,
+            status: None,
+        })
+        .into_iter()
+        .find(|item| item.id == id)
+    }
+
+    /// Write a curated memory item (`verified` or confirmed `inferred` user preference >= 3 episodes),
+    /// annotating single-value `topic_key` conflicts across active items in the same scope.
+    pub fn write_curated(
+        &self,
+        req: &WriteCuratedMemoryRequest<'_>,
+    ) -> Result<MemoryItem, ProjectError> {
+        if memory_secret_reason(req.text).is_some() {
+            return Err(ProjectError::code("sensitive"));
+        }
+        let at = now_iso();
+        let candidate = MemoryItem {
+            id: format!("mem-{}", uuid::Uuid::new_v4()),
+            scope: req.scope.to_owned(),
+            kind: req.kind.to_owned(),
+            text: req.text.to_owned(),
+            trust: req.trust.to_owned(),
+            source_refs: req.source_refs.clone(),
+            pinned: req.pinned,
+            status: "active".to_owned(),
+            confirmed_count: req.confirmed_count.max(1),
+            created_at: at.clone(),
+            updated_at: at.clone(),
+            last_used_at: None,
+            workspace_id: req.workspace_id.map(str::to_owned),
+            anchor_message_id: req.anchor_message_id.map(str::to_owned),
+            forget_reason: None,
+            expires_at: req.expires_at.map(str::to_owned),
+            topic_key: req.topic_key.map(str::to_owned),
+            topic_value: req.topic_value.map(str::to_owned),
+            file_anchors: req.file_anchors.clone(),
+            needs_reverify: None,
+            conflict_id: None,
+            superseded_by: None,
+            maintenance_reason: None,
+            conflicts_with: None,
+            extra: Map::new(),
+        };
+        let mut item =
+            normalize_item(candidate).ok_or_else(|| ProjectError::code("INVALID_MEMORY"))?;
+        let file = match item.scope.as_str() {
+            "user" => self.user_file(),
+            "project" => self.project_file(item.workspace_id.as_deref().unwrap_or(""))?,
+            _ => return Err(ProjectError::code("INVALID_MEMORY")),
+        };
+
+        // Check topic_key conflict against active items in the same file/scope.
+        if let (Some(tk), Some(tv)) = (item.topic_key.as_ref(), item.topic_value.as_ref()) {
+            let conflicting: Vec<MemoryItem> = self
+                .fold_file(&file)
+                .into_iter()
+                .filter(|old| {
+                    old.status == "active"
+                        && old.topic_key.as_deref() == Some(tk.as_str())
+                        && old.topic_value.as_deref() != Some(tv.as_str())
+                })
+                .collect();
+            if !conflicting.is_empty() {
+                let conflict_id = format!("conf-{}", uuid::Uuid::new_v4());
+                let mut clash_ids = Vec::new();
+                for mut old in conflicting {
+                    clash_ids.push(old.id.clone());
+                    let mut list = old.conflicts_with.clone().unwrap_or_default();
+                    if !list.contains(&item.id) {
+                        list.push(item.id.clone());
+                    }
+                    old.conflicts_with = Some(list);
+                    old.conflict_id = Some(conflict_id.clone());
+                    old.status = "conflicted".to_owned();
+                    old.updated_at = at.clone();
+                    let _ = self.append_item(&file, &old);
+                    if let Ok(idx_path) = self.index_file(old.workspace_id.as_deref())
+                        && let Ok(idx) = MemoryIndex::open(&idx_path)
+                    {
+                        let _ = idx.remove(&old.id);
+                    }
+                }
+                item.conflict_id = Some(conflict_id);
+                item.conflicts_with = Some(clash_ids);
+                item.status = "conflicted".to_owned();
+            }
+        }
+
+        self.append_item(&file, &item)?;
+        if item.status == "active"
+            && let Ok(idx_path) = self.index_file(item.workspace_id.as_deref())
+            && let Ok(idx) = MemoryIndex::open(&idx_path)
+        {
+            let _ = idx.upsert(&item);
+        }
+        Ok(item)
+    }
+
+    /// Apply deterministic maintenance transition (`status` and/or `needs_reverify`) to an item.
+    pub fn mark_maintained(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        status: Option<&str>,
+        needs_reverify: Option<bool>,
+        maintenance_reason: &str,
+    ) -> Result<MemoryItem, ProjectError> {
+        let project_path = self.project_file(workspace_id)?;
+        let user_path = self.user_file();
+        let (file, mut current) = if let Some(item) = self
+            .fold_file(&project_path)
+            .into_iter()
+            .find(|item| item.id == id)
+        {
+            (project_path, item)
+        } else if let Some(item) = self
+            .fold_file(&user_path)
+            .into_iter()
+            .find(|item| item.id == id)
+        {
+            (user_path, item)
+        } else {
+            return Err(ProjectError::code("NOT_FOUND"));
+        };
+
+        if let Some(st) = status {
+            if !valid_status(st) {
+                return Err(ProjectError::code("INVALID_MEMORY"));
+            }
+            current.status = st.to_owned();
+        }
+        if let Some(nr) = needs_reverify {
+            current.needs_reverify = Some(nr);
+        }
+        let reason_trim = maintenance_reason.trim();
+        if !reason_trim.is_empty() {
+            current.maintenance_reason = Some(reason_trim.chars().take(REASON_MAX).collect());
+        }
+        current.updated_at = now_iso();
+        self.append_item(&file, &current)?;
+        if let Ok(idx_path) = self.index_file(Some(workspace_id))
+            && let Ok(idx) = MemoryIndex::open(&idx_path)
+        {
+            if current.status == "active" && current.needs_reverify != Some(true) {
+                let _ = idx.upsert(&current);
+            } else {
+                let _ = idx.remove(&current.id);
+            }
+        }
+        Ok(current)
     }
 
     /// Tombstone an existing memory item by appending a `status = "forgotten"` record.

@@ -16,7 +16,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub use watches::{ProbeOutcome, WatchHost};
+pub use watches::{ProbeOutcome, WatchCursorState, WatchHost, WatchReconcileReport};
+
+pub fn objective_action_card_id(action_id: &str) -> String {
+    format!("card:question:objective:{action_id}")
+}
 
 const MAX_AUTO_SESSIONS_PER_DAY: u32 = 3;
 const MAX_PROBE_RUNS_PER_DAY: u32 = 1440;
@@ -866,6 +870,56 @@ impl ObjectiveActions {
         item.session_id = Some(session_id.to_owned());
         self.save_doc(workspace_id, &doc)?;
         Ok(true)
+    }
+
+    pub fn list(&self, workspace_id: &str) -> Vec<ObjectiveActionItem> {
+        self.read_doc(workspace_id)
+            .map(|doc| doc.items)
+            .unwrap_or_default()
+    }
+
+    pub fn get(&self, workspace_id: &str, action_id: &str) -> Option<ObjectiveActionItem> {
+        self.list(workspace_id)
+            .into_iter()
+            .find(|item| item.action_id == action_id)
+    }
+
+    pub fn approve(
+        &self,
+        workspace_id: &str,
+        action_id: &str,
+        objective: &ObjectiveItem,
+        anchor: &str,
+        decline: bool,
+    ) -> Result<ObjectiveActionItem, ProjectError> {
+        let mut doc = self.read_doc(workspace_id)?;
+        let now = now_iso();
+        let now_ms = parse_iso_ms(&now).unwrap_or(0);
+        let Some(item) = doc.items.iter_mut().find(|i| i.action_id == action_id) else {
+            return Err(ProjectError::code("objective_proposal_stale"));
+        };
+        if item.state == "declined" {
+            return Err(ProjectError::code("objective_proposal_declined"));
+        }
+        let expired = parse_iso_ms(&item.created_at)
+            .is_none_or(|created_ms| now_ms.saturating_sub(created_ms) > PROPOSAL_TTL_MS);
+        if item.objective_id != objective.objective_id
+            || (item.version != objective.version && item.state != "spawned")
+            || item.mode != "proposal"
+            || expired
+        {
+            return Err(ProjectError::code("objective_proposal_stale"));
+        }
+        if item.state == "proposed" {
+            item.state = if decline { "declined" } else { "reserved" }.to_owned();
+            item.approval_anchor = Some(anchor.to_owned());
+            item.reserved_at = Some(now);
+            let out = item.clone();
+            self.save_doc(workspace_id, &doc)?;
+            Ok(out)
+        } else {
+            Ok(item.clone())
+        }
     }
 
     pub fn pending(&self, workspace_id: &str) -> Vec<ObjectiveActionItem> {

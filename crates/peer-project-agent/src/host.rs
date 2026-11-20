@@ -6,10 +6,12 @@
 
 use crate::{
     AcceptanceDecision, AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore,
-    CoordinationHub, CreateBotProfile, DigestQueue, HandoffOutcome, InputDraftStore, InputQueue,
-    MemoryStore, ObjectiveStore, ProjectError, ProjectInbox, ProjectInput, ProjectRegistry,
-    ProjectRegistryEntry, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
-    SubmitInputRequest, WatchHost, now_iso, parse_iso_ms,
+    CoordinationHub, CreateBotProfile, DigestQueue, ExecutionObligationService, HandoffOutcome,
+    InputDraftStore, InputQueue, MemoryCurator, MemoryMaintenance, MemoryStore,
+    ObjectiveActionItem, ObjectiveActions, ObjectiveStore, ProjectError, ProjectInbox,
+    ProjectInput, ProjectRecoveryBarrier, ProjectRegistry, ProjectRegistryEntry,
+    RecoveryDiagnostic, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, SubmitInputRequest,
+    WatchHost, WatchPublisher, now_iso, parse_iso_ms,
     runner::{ProjectAgentRunner, RunTurnOptions},
 };
 use peer_runtime::{
@@ -21,12 +23,12 @@ use peer_store::{
     AcquireLease, ApprovalStore, ConversationStore, HostIdentity, HostLeaseRecord, HostLeaseStore,
     HostSurface, NewProjectConversation, PolicyStore, StoreError,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 pub const FAMILIARIZE_READ_CAPABILITIES: [&str; 5] = [
@@ -97,6 +99,17 @@ pub struct ForegroundTickReport {
     pub last_turn: Option<AgentTurnOutcome>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaintenanceReport {
+    pub watchdog_events: usize,
+    pub watch_observations: usize,
+    pub watch_signals: usize,
+    pub memory_maintained_ids: Vec<String>,
+    pub curator_learned_ids: Vec<String>,
+    pub flushed_digest: bool,
+}
+
 pub struct NativeProjectHost {
     data_home: PathBuf,
     host_identity: HostIdentity,
@@ -104,13 +117,17 @@ pub struct NativeProjectHost {
     profiles: BotProfileStore,
     leases: HostLeaseStore,
     coordination: Arc<CoordinationHub>,
-    recovered_workspaces: Mutex<HashMap<String, bool>>,
+    recovery: ProjectRecoveryBarrier,
+    watch_publisher: WatchPublisher,
     inputs: InputQueue,
     drafts: InputDraftStore,
     inbox: ProjectInbox,
     approvals: ApprovalStore,
     memory: MemoryStore,
+    memory_maintenance: MemoryMaintenance,
+    memory_curator: MemoryCurator,
     objectives: ObjectiveStore,
+    objective_actions: ObjectiveActions,
     watches: WatchHost,
     supervisor: Arc<SessionSupervisor>,
     runner: ProjectAgentRunner,
@@ -144,13 +161,17 @@ impl NativeProjectHost {
             profiles: BotProfileStore::new(&home),
             leases: HostLeaseStore::new(&home),
             coordination,
-            recovered_workspaces: Mutex::new(HashMap::new()),
+            recovery: ProjectRecoveryBarrier::new(&home),
+            watch_publisher: WatchPublisher::new(),
             inputs: InputQueue::new(&home),
             drafts: InputDraftStore::new(&home),
             inbox: ProjectInbox::new(&home),
             approvals: ApprovalStore::new(&home),
             memory: MemoryStore::new(&home),
+            memory_maintenance: MemoryMaintenance::new(&home),
+            memory_curator: MemoryCurator::new(&home),
             objectives: ObjectiveStore::new(&home),
+            objective_actions: ObjectiveActions::new(&home),
             watches: WatchHost::new(&home),
             directory: BotDirectory::new(&home),
             conversations: ConversationStore::new(&home),
@@ -189,8 +210,23 @@ impl NativeProjectHost {
     pub fn objectives(&self) -> &ObjectiveStore {
         &self.objectives
     }
+    pub fn objective_actions(&self) -> &ObjectiveActions {
+        &self.objective_actions
+    }
     pub fn watches(&self) -> &WatchHost {
         &self.watches
+    }
+    pub fn watch_publisher(&self) -> &WatchPublisher {
+        &self.watch_publisher
+    }
+    pub fn recovery(&self) -> &ProjectRecoveryBarrier {
+        &self.recovery
+    }
+    pub fn memory_maintenance(&self) -> &MemoryMaintenance {
+        &self.memory_maintenance
+    }
+    pub fn memory_curator(&self) -> &MemoryCurator {
+        &self.memory_curator
     }
     pub fn supervisor(&self) -> &SessionSupervisor {
         &self.supervisor
@@ -209,6 +245,9 @@ impl NativeProjectHost {
     }
     pub fn coordination(&self) -> &Arc<CoordinationHub> {
         &self.coordination
+    }
+    pub fn obligation_service(&self) -> ExecutionObligationService<'_> {
+        ExecutionObligationService::new(&self.data_home, &self.coordination, &self.supervisor)
     }
 
     /// Bind a local folder to a persistent project Bot (register workspace, create canonical
@@ -306,10 +345,18 @@ impl NativeProjectHost {
     }
 
     pub fn release_lease(&self, workspace_id: &str) -> Result<(), ProjectError> {
+        self.recovery.drop_workspace(workspace_id);
+        self.watch_publisher.forget(workspace_id);
         self.coordination.release(workspace_id)
     }
 
     pub fn release_all_leases(&self) {
+        if let Ok(entries) = self.registry.list() {
+            for entry in entries {
+                self.recovery.drop_workspace(&entry.workspace_id);
+                self.watch_publisher.forget(&entry.workspace_id);
+            }
+        }
         self.coordination.release_all();
     }
 
@@ -413,20 +460,12 @@ impl NativeProjectHost {
             }
         }
 
-        // Run one-time startup recovery for this workspace on first tick after lease acquisition.
-        let needs_recovery = self
-            .recovered_workspaces
-            .lock()
-            .map(|g| !g.contains_key(workspace_id))
-            .unwrap_or(false);
-        if needs_recovery {
-            let _ = self
-                .supervisor
-                .recover_workspace(workspace_id, cancel, true)
-                .await;
-            if let Ok(mut g) = self.recovered_workspaces.lock() {
-                g.insert(workspace_id.to_owned(), true);
-            }
+        // Run 7-phase startup recovery barrier once per lease acquisition epoch.
+        if !self
+            .recovery
+            .is_ready(workspace_id, self.holds_lease(workspace_id))
+        {
+            Box::pin(self.recover_workspace_barrier(workspace_id, cancel)).await?;
         }
 
         // Step 1: Consume pending durable inputs into bot conversation.
@@ -1137,6 +1176,358 @@ impl NativeProjectHost {
         let trimmed = anchor_or_input_id.trim();
         let input_id = trimmed.strip_prefix("input-").unwrap_or(trimmed);
         self.inputs.requeue_executed(workspace_id, input_id, true)
+    }
+
+    /// Execute the 7-phase workspace recovery barrier (`lease` -> `inputs` -> `inbox` -> `queue` -> `tasks` -> `watch` -> `digest`).
+    pub async fn recover_workspace_barrier(
+        &self,
+        workspace_id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<RecoveryDiagnostic, ProjectError> {
+        let profile = self.profiles.read(workspace_id);
+        let digest_time = profile
+            .as_ref()
+            .and_then(|p| p.extra.get("digestTime").and_then(Value::as_str))
+            .unwrap_or("09:00")
+            .to_owned();
+        let ws_path = self
+            .registry
+            .get(workspace_id)?
+            .map(|e| PathBuf::from(e.path))
+            .unwrap_or_default();
+
+        self.recovery
+            .run_phases(
+                workspace_id,
+                |ws| self.holds_lease(ws),
+                |phase, mut counts| {
+                    let ws_path = ws_path.clone();
+                    let digest_time = digest_time.clone();
+                    Box::pin(async move {
+                        match phase {
+                            "lease" => {
+                                let _ = self.coordination.ensure_snapshot(workspace_id)?;
+                            }
+                            "inputs" => {
+                                let _ = self.inputs.has_pending(workspace_id);
+                            }
+                            "inbox" => {
+                                let _ = self.inbox.read_cursor(workspace_id);
+                            }
+                            "queue" => {
+                                let _ = self.approvals.recover_owned(
+                                    Some(workspace_id),
+                                    &now_iso(),
+                                    None,
+                                )?;
+                            }
+                            "tasks" => {
+                                counts.recovered_sessions = Box::pin(
+                                    self.supervisor
+                                        .recover_workspace(workspace_id, cancel, true),
+                                )
+                                .await?;
+                                let plans = self.supervisor.list_workspace_plans(workspace_id);
+                                let _ =
+                                    self.obligation_service().suspend_live(workspace_id, &plans);
+                            }
+                            "watch" => {
+                                let plans = self.supervisor.list_workspace_plans(workspace_id);
+                                let wd = self.watch_publisher.publish(
+                                    workspace_id,
+                                    &plans,
+                                    &now_iso(),
+                                    None,
+                                );
+                                if !wd.is_empty() {
+                                    let _ = self.inbox.append(workspace_id, &wd)?;
+                                }
+                                let rec = Box::pin(self.watches.reconcile_workspace(
+                                    workspace_id,
+                                    &ws_path,
+                                    &now_iso(),
+                                    60_000,
+                                    None,
+                                    cancel,
+                                ))
+                                .await?;
+                                counts.watch_signals += wd.len() + rec.signals_emitted;
+                            }
+                            "digest" if self.digests.pending(workspace_id) > 0 => {
+                                counts.flushed_digest = self
+                                    .flush_due_digest(workspace_id, &now_iso(), &digest_time)?
+                                    .is_some();
+                            }
+                            _ => {}
+                        }
+                        Ok(counts)
+                    })
+                },
+            )
+            .await
+    }
+
+    pub fn pending_obligation_grants(&self, workspace_id: &str) -> Vec<Value> {
+        let Some(profile) = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+        else {
+            return Vec::new();
+        };
+        let parent_conv = profile.agent_conversation_id.as_deref();
+        if !self.holds_lease(workspace_id) {
+            return Vec::new();
+        }
+        self.obligation_service()
+            .pending_grants(workspace_id, parent_conv)
+    }
+
+    pub fn confirm_obligation_grant(
+        &self,
+        workspace_id: &str,
+        grant_id: &str,
+        confirm: bool,
+    ) -> Result<Value, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let svc = self.obligation_service();
+        let res = if confirm {
+            let out = svc.confirm_grant(
+                workspace_id,
+                profile.agent_conversation_id.as_deref(),
+                grant_id,
+            )?;
+            let _ = self.inbox.append(
+                workspace_id,
+                &[json!({
+                    "eventId": format!("obl-confirm:{grant_id}"),
+                    "kind": "obligation_grant_confirmed",
+                    "workspaceId": workspace_id,
+                    "grantId": grant_id,
+                    "at": now_iso(),
+                    "payload": { "grantId": grant_id, "status": "confirmed" },
+                })],
+            );
+            out
+        } else {
+            svc.revoke_grant(workspace_id, grant_id)?
+        };
+        Ok(res)
+    }
+
+    pub fn decide_objective_proposal(
+        &self,
+        workspace_id: &str,
+        action_id: &str,
+        approve: bool,
+    ) -> Result<ObjectiveActionItem, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        let conv_id = profile
+            .agent_conversation_id
+            .clone()
+            .ok_or_else(|| ProjectError::code("CONVERSATION_REQUIRED"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let existing = self
+            .objective_actions
+            .get(workspace_id, action_id)
+            .ok_or_else(|| ProjectError::code("objective_proposal_stale"))?;
+        let obj = self
+            .objectives
+            .get(workspace_id, &existing.objective_id)?
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let ws_entry = self
+            .registry
+            .get(workspace_id)?
+            .ok_or_else(|| ProjectError::code("WORKSPACE_NOT_FOUND"))?;
+        let anchor = format!("proposal:{action_id}");
+        let updated =
+            self.objective_actions
+                .approve(workspace_id, action_id, &obj, &anchor, !approve)?;
+        if approve && updated.state == "reserved" && updated.session_id.is_none() {
+            let t = &updated.input;
+            let anchors: Vec<String> = t["anchorMessageIds"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .filter(|v: &Vec<String>| !v.is_empty())
+                .unwrap_or_else(|| vec![obj.origin_message_id.clone()]);
+            let req_caps: Vec<String> = t["requiredCapabilities"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let depends_on: Vec<String> = t["dependsOn"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let criteria: Vec<SpawnCriterion> = t
+                .get("successCriteria")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+            let spawned = self.supervisor.spawn_session(
+                SpawnSessionRequest {
+                    workspace_id: workspace_id.to_owned(),
+                    workspace_path: PathBuf::from(ws_entry.path),
+                    parent_conversation_id: conv_id,
+                    anchor_message_ids: anchors,
+                    input_id: format!("obj-action-{}", updated.action_id),
+                    surface: "tui".into(),
+                    title: t["title"].as_str().unwrap_or(&obj.title).to_owned(),
+                    brief: t["brief"].as_str().unwrap_or(&obj.outcome).to_owned(),
+                    kind: t["kind"].as_str().unwrap_or("other").to_owned(),
+                    read_only: t["readOnly"].as_bool().unwrap_or(true),
+                    required_capabilities: req_caps,
+                    success_criteria: criteria,
+                    priority: t["priority"].as_str().unwrap_or("normal").to_owned(),
+                    depends_on,
+                    supersedes: t["supersedes"].as_str().map(str::to_owned),
+                    objective_id: Some(obj.objective_id),
+                    isolation: t["isolation"].as_str().unwrap_or("auto").to_owned(),
+                    worker_model_selection: json!({}),
+                },
+                true,
+            )?;
+            let _ = self.objective_actions.link_session(
+                workspace_id,
+                action_id,
+                &spawned.session_id,
+            )?;
+            return Ok(self
+                .objective_actions
+                .get(workspace_id, action_id)
+                .unwrap_or(updated));
+        }
+        Ok(updated)
+    }
+
+    /// Periodic background maintenance pass: watchdog stalls/failures -> inbox, objective watch
+    /// reconciliation, daily memory maintenance, optional model-backed curator, and due digest flush.
+    pub async fn run_background_maintenance(
+        &self,
+        workspace_id: &str,
+        at_iso: &str,
+        model_opt: Option<&NativeModel>,
+        cancel: &CancellationToken,
+    ) -> Result<MaintenanceReport, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let ws_entry = self
+            .registry
+            .get(workspace_id)?
+            .ok_or_else(|| ProjectError::code("WORKSPACE_NOT_FOUND"))?;
+        let ws_path = PathBuf::from(&ws_entry.path);
+        let digest_time = profile
+            .extra
+            .get("digestTime")
+            .and_then(Value::as_str)
+            .unwrap_or("09:00");
+        let learn_prefs = profile
+            .extra
+            .get("learnPreferences")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        let mut report = MaintenanceReport::default();
+
+        // 1. Watchdog & delegation facts -> inbox
+        let plans = self.supervisor.list_workspace_plans(workspace_id);
+        let wd_events = self
+            .watch_publisher
+            .publish(workspace_id, &plans, at_iso, None);
+        if !wd_events.is_empty() {
+            report.watchdog_events = wd_events.len();
+            let _ = self.inbox.append(workspace_id, &wd_events)?;
+        }
+
+        // 2. Objective watches reconcile
+        let watch_rep = Box::pin(self.watches.reconcile_workspace(
+            workspace_id,
+            &ws_path,
+            at_iso,
+            60_000,
+            model_opt,
+            cancel,
+        ))
+        .await?;
+        report.watch_observations = watch_rep.observations_recorded;
+        report.watch_signals = watch_rep.signals_emitted;
+
+        // 3. Deterministic memory maintenance
+        let maint = self
+            .memory_maintenance
+            .run_due(workspace_id, &ws_path, at_iso, digest_time)?;
+        report.memory_maintained_ids = maint.changed_ids;
+
+        // 4. Optional model-backed episodic memory curation
+        if let Some(model) = model_opt {
+            let cur = Box::pin(self.memory_curator.extract_due_with_model(
+                workspace_id,
+                &ws_path,
+                at_iso,
+                learn_prefs,
+                model,
+                cancel,
+            ))
+            .await?;
+            report.curator_learned_ids = cur.learned_ids;
+        }
+
+        // 5. Due digest summary
+        if self.digests.pending(workspace_id) > 0 {
+            report.flushed_digest = self
+                .flush_due_digest(workspace_id, at_iso, digest_time)?
+                .is_some();
+        }
+
+        Ok(report)
     }
 
     pub fn close(&self) {

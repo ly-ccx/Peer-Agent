@@ -64,6 +64,8 @@ enum BotCardAction {
     ConfirmResult { session_id: String },
     HandoffWorktree { session_id: String, merge: bool },
     RetryTurn { stopped_anchor: Option<String> },
+    DecideObjectiveProposal { action_id: String, approve: bool },
+    DecideObligationGrant { grant_id: String, confirm: bool },
     Command(String),
 }
 
@@ -134,6 +136,7 @@ struct BotShellState<'a> {
     takeover_pending_since: Option<Instant>,
     last_activity_revision: u64,
     last_refresh: Instant,
+    last_maintenance: Instant,
     interaction_limit: usize,
 }
 
@@ -249,6 +252,7 @@ impl<'a> BotShellState<'a> {
             takeover_pending_since: None,
             last_activity_revision: 0,
             last_refresh: Instant::now(),
+            last_maintenance: Instant::now(),
             interaction_limit: 40,
         };
         if !matches!(state.screen, BotScreen::BindWorkspace { .. }) {
@@ -664,6 +668,85 @@ impl<'a> BotShellState<'a> {
                 card_actions.push(vec![BotCardAction::RetryTurn { stopped_anchor }]);
             }
         }
+        for prop in self.host.objective_actions().pending(&ws_id) {
+            let card_id = peer_project_agent::objective_action_card_id(&prop.action_id);
+            let num = self.card_numbers.assign(&ws_id, &card_id);
+            let title = prop.input["title"]
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(&prop.objective_id)
+                .chars()
+                .take(120)
+                .collect();
+            cards.push(BotCardRow {
+                number: num,
+                card_id,
+                kind: if zh { "目标提案" } else { "Proposal" }.to_owned(),
+                title,
+                summary: if zh {
+                    format!("目标 {} 触发执行提案", prop.objective_id)
+                } else {
+                    format!("Objective {} proposed task execution", prop.objective_id)
+                },
+                actions: vec![
+                    if zh { "批准执行" } else { "Approve" }.to_owned(),
+                    if zh { "忽略" } else { "Decline" }.to_owned(),
+                ],
+            });
+            card_actions.push(vec![
+                BotCardAction::DecideObjectiveProposal {
+                    action_id: prop.action_id.clone(),
+                    approve: true,
+                },
+                BotCardAction::DecideObjectiveProposal {
+                    action_id: prop.action_id,
+                    approve: false,
+                },
+            ]);
+        }
+        for grant in self.host.pending_obligation_grants(&ws_id) {
+            if let Some(grant_id) = grant["grantId"].as_str().filter(|s| !s.is_empty()) {
+                let card_id = format!("card:obligation:{grant_id}");
+                let num = self.card_numbers.assign(&ws_id, &card_id);
+                let title = grant["items"][0]["title"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(grant_id)
+                    .chars()
+                    .take(120)
+                    .collect();
+                cards.push(BotCardRow {
+                    number: num,
+                    card_id,
+                    kind: if zh {
+                        "执行处置授权"
+                    } else {
+                        "Obligation"
+                    }
+                    .to_owned(),
+                    title,
+                    summary: if zh {
+                        "确认收尾/释放未settled执行跟随或占用".to_owned()
+                    } else {
+                        "Confirm disposition or claim closure for unsettled session".to_owned()
+                    },
+                    actions: vec![
+                        if zh { "确认授权" } else { "Confirm" }.to_owned(),
+                        if zh { "拒绝" } else { "Revoke" }.to_owned(),
+                    ],
+                });
+                card_actions.push(vec![
+                    BotCardAction::DecideObligationGrant {
+                        grant_id: grant_id.to_owned(),
+                        confirm: true,
+                    },
+                    BotCardAction::DecideObligationGrant {
+                        grant_id: grant_id.to_owned(),
+                        confirm: false,
+                    },
+                ]);
+            }
+        }
         if familiarize_offer.is_some() {
             let card_id = format!("offer:familiarize:{ws_id}");
             let num = self.card_numbers.assign(&ws_id, &card_id);
@@ -925,6 +1008,58 @@ impl<'a> BotShellState<'a> {
                 self.notice = Some("已触发重试…".to_owned());
                 self.refresh_snapshot(false);
                 self.trigger_background_tick();
+                None
+            }
+            BotCardAction::DecideObjectiveProposal { action_id, approve } => {
+                let ws_id = self.active_workspace_id.clone()?;
+                match self
+                    .host
+                    .decide_objective_proposal(&ws_id, &action_id, approve)
+                {
+                    Ok(_) => {
+                        self.notice = Some(
+                            if approve {
+                                "已批准目标提案并排队执行…"
+                            } else {
+                                "已忽略该目标提案。"
+                            }
+                            .to_owned(),
+                        );
+                        self.refresh_snapshot(false);
+                        if approve {
+                            self.trigger_background_tick();
+                        }
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("处理目标提案失败（{}）。", err.code));
+                    }
+                }
+                None
+            }
+            BotCardAction::DecideObligationGrant { grant_id, confirm } => {
+                let ws_id = self.active_workspace_id.clone()?;
+                match self
+                    .host
+                    .confirm_obligation_grant(&ws_id, &grant_id, confirm)
+                {
+                    Ok(_) => {
+                        self.notice = Some(
+                            if confirm {
+                                "已确认执行处置授权，正在恢复处理…"
+                            } else {
+                                "已拒绝该执行处置授权。"
+                            }
+                            .to_owned(),
+                        );
+                        self.refresh_snapshot(false);
+                        if confirm {
+                            self.trigger_background_tick();
+                        }
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("处理处置授权失败（{}）。", err.code));
+                    }
+                }
                 None
             }
             BotCardAction::Command(cmd) => {
@@ -1912,6 +2047,26 @@ impl<'a> BotShellState<'a> {
                     dirty = true;
                 } else {
                     self.last_refresh = Instant::now();
+                }
+            }
+
+            if self.last_maintenance.elapsed() >= Duration::from_secs(15) {
+                self.last_maintenance = Instant::now();
+                if let Some(ws_id) = self.active_workspace_id.clone()
+                    && self.host.holds_lease(&ws_id)
+                    && self.active_tick.is_none()
+                    && let Ok(mrep) = Box::pin(self.host.run_background_maintenance(
+                        &ws_id,
+                        &now_iso(),
+                        None,
+                        shutdown,
+                    ))
+                    .await
+                    && (mrep.watchdog_events > 0 || mrep.watch_signals > 0 || mrep.flushed_digest)
+                {
+                    self.refresh_snapshot(false);
+                    self.trigger_if_pending();
+                    dirty = true;
                 }
             }
 

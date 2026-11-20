@@ -1835,6 +1835,21 @@ impl ProjectAgentRunner {
             );
         }
 
+        if !matches!(
+            final_end,
+            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+        ) {
+            let curator = crate::MemoryCurator::new(&self.data_home);
+            if opts.kind == "user" && !opts.user_inputs.is_empty() {
+                let texts: Vec<String> = opts.user_inputs.iter().map(|u| u.text.clone()).collect();
+                let anchor = current_input_anchors.last().map(String::as_str);
+                let _ = curator.record_user_inputs(opts.workspace_id, &texts, anchor, &finished_at);
+            } else if opts.kind == "wake" && !opts.wake_events.is_empty() {
+                let _ =
+                    curator.record_task_events(opts.workspace_id, opts.wake_events, &finished_at);
+            }
+        }
+
         Ok(AgentTurnOutcome {
             turn_id,
             end: final_end,
