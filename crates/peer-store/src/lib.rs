@@ -58,8 +58,8 @@ pub use goal::{
     AutomaticInspect, EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease,
     ExplorerSettlement, GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction,
     GoalPublication, GoalSelection, GoalSnapshot, GoalStore, GoalTaskPublication, LocalGoalIntake,
-    OrdinaryGoalDraft, OrdinaryGoalKind, OrdinaryRunner, RunnerAdmission, RunnerPhase, RunnerStop,
-    VerifierLease, VerifierReceipt, VerifierSettlement,
+    OrdinaryGoalDraft, OrdinaryGoalKind, OrdinaryRunner, PlanApprovalDecision, RunnerAdmission,
+    RunnerPhase, RunnerStop, VerifierLease, VerifierReceipt, VerifierSettlement,
 };
 mod history;
 mod hook_config;

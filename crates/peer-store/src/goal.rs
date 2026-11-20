@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
 };
+mod approval;
 mod context;
 mod explorer;
 mod mirror;
@@ -19,6 +20,7 @@ mod runner;
 mod task_update;
 mod tool_view;
 mod verifier;
+pub use approval::PlanApprovalDecision;
 pub use explorer::{
     AutomaticInspect, EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease,
     ExplorerSettlement,

@@ -9,6 +9,10 @@ use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     commands::clip_bot_line,
+    goal_panel::{
+        GoalPanelView, PlanApprovalCard, goal_side_panel_width, plan_approval_dock_height,
+        render_goal_compact_summary, render_goal_status_panel, render_plan_approval_dock,
+    },
     markdown::{
         LineLink, RenderedBlock, ScreenHyperlink, StyledLine, WrapCacheKey, project_line_links,
         render_markdown_themed, stable_hash, stamp_screen_link_id,
@@ -101,7 +105,8 @@ pub struct ClassicView<'a> {
     pub fast_mode: bool,
     pub fast_available: bool,
     pub goal_status: GoalMenuStatus,
-    pub goal_banner: Option<&'a str>,
+    pub goal_panel: Option<&'a GoalPanelView>,
+    pub plan_approval: Option<(&'a PlanApprovalCard, usize)>,
     pub is_running: bool,
     pub activity_label: Option<&'a str>,
     pub animation_frame: usize,
@@ -643,10 +648,11 @@ struct DockSpec<'a, 's> {
     overlay_dock_h: u16,
     model_dock_h: u16,
     approval_dock_h: u16,
+    plan_approval_dock_h: u16,
     user_input_dock_h: u16,
     notice_text: Option<&'a str>,
     notice_is_error: bool,
-    show_goal_banner: bool,
+    show_goal_compact: bool,
     composer_rows: u16,
     status_rows: u16,
     total_height: u16,
@@ -822,7 +828,7 @@ fn render_approval_dock(
     }
 }
 
-fn wrap_plain_lines(text: &str, max_w: usize, max_lines: usize) -> Vec<String> {
+pub(crate) fn wrap_plain_lines(text: &str, max_w: usize, max_lines: usize) -> Vec<String> {
     let safe = terminal_text(text);
     let trimmed = safe.trim();
     if trimmed.is_empty() || max_w == 0 || max_lines == 0 {
@@ -1009,16 +1015,23 @@ fn plan_dock_spec<'a, 's>(
     slash_items: &'s [&'a SlashItem],
     dock_width: u16,
     max_dock_h: u16,
+    show_side_panel: bool,
 ) -> DockSpec<'a, 's> {
     let overlay_open = view.overlay.is_open();
-    let show_goal_banner =
-        view.goal_banner.is_some() && !overlay_open && view.approval.is_none() && max_dock_h >= 6;
-    let notice_text = if !view.anchor.is_following() && view.approval.is_none() {
+    let show_goal_compact = view.goal_panel.is_some()
+        && !show_side_panel
+        && !overlay_open
+        && view.approval.is_none()
+        && view.plan_approval.is_none()
+        && max_dock_h >= 6;
+    let reading_locked =
+        !view.anchor.is_following() && view.approval.is_none() && view.plan_approval.is_none();
+    let notice_text = if reading_locked {
         Some("↑ 历史阅读中 · End/PgDn 回到最新")
     } else {
         view.notice.filter(|s| !s.is_empty())
     };
-    let notice_is_error = if !view.anchor.is_following() && view.approval.is_none() {
+    let notice_is_error = if reading_locked {
         false
     } else {
         view.notice_is_error
@@ -1035,7 +1048,7 @@ fn plan_dock_spec<'a, 's>(
         let (lines, _) = draft_view_styled(view.composer, inner_w, 3, Style::default());
         (lines.len() as u16).clamp(1, 3)
     };
-    let base = u16::from(show_goal_banner)
+    let base = u16::from(show_goal_compact)
         + u16::from(notice_text.is_some())
         + u16::from(view.is_running)
         + 1
@@ -1043,60 +1056,88 @@ fn plan_dock_spec<'a, 's>(
         + status_rows;
     let panel_budget = max_dock_h.saturating_sub(base);
 
-    let (model_dock_h, approval_dock_h, overlay_dock_h, user_input_dock_h, slash_rows) =
-        if view.model_picker.open && panel_budget >= 4 {
-            (view.model_picker.dock_height(panel_budget), 0, 0, 0, 0)
-        } else if view.approval.is_some() && panel_budget >= 4 {
-            (0, approval_dock_height(panel_budget), 0, 0, 0)
-        } else if !view.overlay.is_modal()
-            && view.approval.is_none()
-            && !view.model_picker.open
-            && panel_budget >= 3
-        {
-            let oh = view.overlay.dock_height(panel_budget);
-            if oh > 0 {
-                (0, 0, oh, 0, 0)
-            } else if !slash_items.is_empty() {
-                let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-                (0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
-            } else if let Some((prompt, _)) = view.user_input
-                && !view.is_running
-                && !prompt.options.is_empty()
-                && panel_budget >= 4
-            {
-                (
-                    0,
-                    0,
-                    0,
-                    user_input_dock_height(prompt, dock_width, panel_budget),
-                    0,
-                )
-            } else {
-                (0, 0, 0, 0, 0)
-            }
-        } else if view.approval.is_none()
-            && !view.model_picker.open
-            && !overlay_open
-            && !slash_items.is_empty()
-            && panel_budget >= 2
-        {
+    let (
+        model_dock_h,
+        approval_dock_h,
+        plan_approval_dock_h,
+        overlay_dock_h,
+        user_input_dock_h,
+        slash_rows,
+    ) = if view.model_picker.open && panel_budget >= 4 {
+        (view.model_picker.dock_height(panel_budget), 0, 0, 0, 0, 0)
+    } else if view.approval.is_some() && panel_budget >= 4 {
+        (0, approval_dock_height(panel_budget), 0, 0, 0, 0)
+    } else if let Some((card, _)) = view.plan_approval
+        && !view.is_running
+        && !overlay_open
+        && panel_budget >= 4
+    {
+        (
+            0,
+            0,
+            plan_approval_dock_height(card, dock_width, panel_budget),
+            0,
+            0,
+            0,
+        )
+    } else if !view.overlay.is_modal()
+        && view.approval.is_none()
+        && view.plan_approval.is_none()
+        && !view.model_picker.open
+        && panel_budget >= 3
+    {
+        let oh = view.overlay.dock_height(panel_budget);
+        if oh > 0 {
+            (0, 0, 0, oh, 0, 0)
+        } else if !slash_items.is_empty() {
             let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-            (0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
+            (0, 0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
+        } else if let Some((prompt, _)) = view.user_input
+            && !view.is_running
+            && !prompt.options.is_empty()
+            && panel_budget >= 4
+        {
+            (
+                0,
+                0,
+                0,
+                0,
+                user_input_dock_height(prompt, dock_width, panel_budget),
+                0,
+            )
         } else {
-            (0, 0, 0, 0, 0)
-        };
-    let total_height =
-        base + model_dock_h + approval_dock_h + overlay_dock_h + user_input_dock_h + slash_rows;
+            (0, 0, 0, 0, 0, 0)
+        }
+    } else if view.approval.is_none()
+        && view.plan_approval.is_none()
+        && !view.model_picker.open
+        && !overlay_open
+        && !slash_items.is_empty()
+        && panel_budget >= 2
+    {
+        let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
+        (0, 0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
+    } else {
+        (0, 0, 0, 0, 0, 0)
+    };
+    let total_height = base
+        + model_dock_h
+        + approval_dock_h
+        + plan_approval_dock_h
+        + overlay_dock_h
+        + user_input_dock_h
+        + slash_rows;
     DockSpec {
         slash_items,
         slash_rows,
         overlay_dock_h,
         model_dock_h,
         approval_dock_h,
+        plan_approval_dock_h,
         user_input_dock_h,
         notice_text,
         notice_is_error,
-        show_goal_banner,
+        show_goal_compact,
         composer_rows,
         status_rows,
         total_height,
@@ -1118,13 +1159,15 @@ fn render_composer_dock(
     let overlay_open = view.overlay.is_open();
 
     let mut constraints = Vec::new();
-    if spec.show_goal_banner {
+    if spec.show_goal_compact {
         constraints.push(Constraint::Length(1));
     }
     if spec.model_dock_h > 0 {
         constraints.push(Constraint::Length(spec.model_dock_h));
     } else if spec.approval_dock_h > 0 {
         constraints.push(Constraint::Length(spec.approval_dock_h));
+    } else if spec.plan_approval_dock_h > 0 {
+        constraints.push(Constraint::Length(spec.plan_approval_dock_h));
     } else if spec.overlay_dock_h > 0 {
         constraints.push(Constraint::Length(spec.overlay_dock_h));
     } else if spec.user_input_dock_h > 0 {
@@ -1144,16 +1187,10 @@ fn render_composer_dock(
     let areas = Layout::vertical(constraints).split(dock_area);
     let mut slot = 0usize;
 
-    if spec.show_goal_banner
-        && let Some(banner) = view.goal_banner
+    if spec.show_goal_compact
+        && let Some(panel) = view.goal_panel
     {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                clip_bot_line(banner, usize::from(areas[slot].width)),
-                Style::new().fg(palette.info).bg(palette.background),
-            )),
-            areas[slot],
-        );
+        render_goal_compact_summary(frame, areas[slot], panel, palette);
         slot += 1;
     }
 
@@ -1164,6 +1201,11 @@ fn render_composer_dock(
         && let Some((card, selected)) = view.approval
     {
         render_approval_dock(frame, areas[slot], card, selected, view.locale, palette);
+        slot += 1;
+    } else if spec.plan_approval_dock_h > 0
+        && let Some((card, selected)) = view.plan_approval
+    {
+        render_plan_approval_dock(frame, areas[slot], card, selected, view.locale, palette);
         slot += 1;
     } else if spec.overlay_dock_h > 0 {
         render_classic_overlay(frame, areas[slot], view.overlay, overlay_ctx, palette);
@@ -1310,7 +1352,13 @@ fn render_composer_dock(
             input_area,
         );
         let (draft_lines, caret) = if view.composer.draft().is_empty() {
-            let placeholder = if view.locale.is_zh() {
+            let placeholder = if view.plan_approval.is_some() {
+                if view.locale.is_zh() {
+                    "先在上方确认、修改或拒绝当前计划"
+                } else {
+                    "Approve, revise, or reject the plan above"
+                }
+            } else if view.locale.is_zh() {
                 "输入消息，或 /help · /resume · /model"
             } else {
                 "Message Peer, or /help · /resume · /model"
@@ -1334,6 +1382,7 @@ fn render_composer_dock(
         };
         frame.render_widget(Paragraph::new(draft_lines), input_area);
         if view.approval.is_none()
+            && view.plan_approval.is_none()
             && !view.model_picker.open
             && !overlay_open
             && let Some((x, y)) = caret
@@ -1383,7 +1432,11 @@ pub fn render_classic_with_links(
     }
 
     let overlay_open = view.overlay.is_open();
-    let slash_items = if view.approval.is_none() && !view.model_picker.open && !overlay_open {
+    let slash_items = if view.approval.is_none()
+        && view.plan_approval.is_none()
+        && !view.model_picker.open
+        && !overlay_open
+    {
         filter_classic_slash_items(
             view.composer.draft(),
             SlashFilterContext {
@@ -1423,7 +1476,13 @@ pub fn render_classic_with_links(
             width: area.width,
             height: dock_h,
         };
-        let spec = plan_dock_spec(&view, &slash_items, dock_area.width, dock_area.height);
+        let spec = plan_dock_spec(
+            &view,
+            &slash_items,
+            dock_area.width,
+            dock_area.height,
+            false,
+        );
         render_composer_dock(frame, dock_area, full_area, &view, &spec, &overlay_ctx);
         return;
     }
@@ -1441,6 +1500,7 @@ pub fn render_classic_with_links(
         && view.live_stream.is_empty()
         && view.live_thinking.trim().is_empty()
         && view.approval.is_none()
+        && view.plan_approval.is_none()
         && view.user_input.is_none()
         && !view.is_running
         && !view.overlay.is_modal();
@@ -1453,6 +1513,7 @@ pub fn render_classic_with_links(
             &slash_items,
             welcome_w,
             main_area.height.saturating_sub(2),
+            false,
         );
         let (wm_lines, wm_w) = b3_wordmark_lines(welcome_w, palette);
         let wm_h = wm_lines.len() as u16;
@@ -1513,17 +1574,31 @@ pub fn render_classic_with_links(
         return;
     }
 
+    let side_w = if view.goal_panel.is_some() {
+        goal_side_panel_width(full_area.width)
+    } else {
+        0
+    };
+    let (conv_main_area, side_panel_area) = if side_w > 0 && area.width > side_w + 48 {
+        let cols =
+            Layout::horizontal([Constraint::Min(48), Constraint::Length(side_w)]).split(main_area);
+        (cols[0], Some(cols[1]))
+    } else {
+        (main_area, None)
+    };
+
     let spec = plan_dock_spec(
         &view,
         &slash_items,
-        area.width,
-        main_area.height.saturating_sub(1),
+        conv_main_area.width,
+        conv_main_area.height.saturating_sub(1),
+        side_panel_area.is_some(),
     );
     let body_dock = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(spec.total_height.min(main_area.height)),
+        Constraint::Length(spec.total_height.min(conv_main_area.height)),
     ])
-    .split(main_area);
+    .split(conv_main_area);
     let body_area = body_dock[0];
     let dock_area = body_dock[1];
     let body_w = usize::from(body_area.width).max(1);
@@ -1725,6 +1800,10 @@ pub fn render_classic_with_links(
 
     render_composer_dock(frame, dock_area, full_area, &view, &spec, &overlay_ctx);
 
+    if let (Some(side_area), Some(panel)) = (side_panel_area, view.goal_panel) {
+        render_goal_status_panel(frame, side_area, panel, view.locale, palette);
+    }
+
     if !view.model_picker.open && view.overlay.is_modal() {
         render_classic_overlay(frame, full_area, view.overlay, &overlay_ctx, palette);
     }
@@ -1733,7 +1812,7 @@ pub fn render_classic_with_links(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bounded_cache::MARKDOWN_WRAP_CACHE_BYTES, theme::DARK_PALETTE};
+    use crate::{GoalTaskItem, bounded_cache::MARKDOWN_WRAP_CACHE_BYTES, theme::DARK_PALETTE};
     use ratatui::{Terminal, backend::TestBackend};
 
     fn buffer_text(term: &Terminal<TestBackend>) -> String {
@@ -1828,7 +1907,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: true,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: true,
                         activity_label: Some("正在思考…"),
                         animation_frame: 6,
@@ -1912,7 +1992,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: false,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: true,
                         activity_label: None,
                         animation_frame: 6,
@@ -1963,7 +2044,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: false,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: true,
                         activity_label: None,
                         animation_frame: 6,
@@ -2014,7 +2096,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: false,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: true,
                         activity_label: None,
                         animation_frame: 6,
@@ -2071,7 +2154,8 @@ mod tests {
                     fast_mode: false,
                     fast_available: false,
                     goal_status: GoalMenuStatus::None,
-                    goal_banner: None,
+                    goal_panel: None,
+                    plan_approval: None,
                     is_running: false,
                     activity_label: None,
                     animation_frame: 0,
@@ -2148,7 +2232,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: false,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: false,
                         activity_label: None,
                         animation_frame: 0,
@@ -2227,7 +2312,8 @@ mod tests {
                         fast_mode: false,
                         fast_available: false,
                         goal_status: GoalMenuStatus::None,
-                        goal_banner: None,
+                        goal_panel: None,
+                        plan_approval: None,
                         is_running: true,
                         activity_label: Some("等待授权…"),
                         animation_frame: 2,
@@ -2312,7 +2398,8 @@ mod tests {
                     fast_mode: false,
                     fast_available: false,
                     goal_status: GoalMenuStatus::None,
-                    goal_banner: None,
+                    goal_panel: None,
+                    plan_approval: None,
                     is_running: false,
                     activity_label: None,
                     animation_frame: 0,
@@ -2400,7 +2487,8 @@ mod tests {
                     fast_mode: false,
                     fast_available: false,
                     goal_status: GoalMenuStatus::None,
-                    goal_banner: None,
+                    goal_panel: None,
+                    plan_approval: None,
                     is_running: false,
                     activity_label: None,
                     animation_frame: 0,
@@ -2480,7 +2568,8 @@ mod tests {
                     fast_mode: false,
                     fast_available: false,
                     goal_status: GoalMenuStatus::None,
-                    goal_banner: None,
+                    goal_panel: None,
+                    plan_approval: None,
                     is_running: false,
                     activity_label: None,
                     animation_frame: 0,
@@ -2510,5 +2599,244 @@ mod tests {
         })
         .unwrap();
         assert!(modal_links.is_empty());
+    }
+
+    #[test]
+    fn classic_renders_goal_side_panel_on_wide_compact_on_narrow_and_plan_approval_card() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 32);
+        let composer = Composer::default();
+        let picker = ModelPickerState::default();
+        let anchor = ReadingAnchor::FollowingLatest;
+        let msgs = vec![ClassicMessage {
+            id: "m-goal".into(),
+            revision: 1,
+            role: "assistant".into(),
+            text: "已整理任务并输出参考链接：[Doc](https://example.com/plan)".into(),
+            thinking: None,
+            tools: Vec::new(),
+            continuation: false,
+        }];
+        let panel = GoalPanelView {
+            plan_id: "plan-side-1".into(),
+            title: "补齐 Classic Plan 任务侧栏".into(),
+            goal: "实现右侧任务面板与交互确认卡".into(),
+            status: "executing".into(),
+            completed: 1,
+            total: 3,
+            percent: 33,
+            current_task: Some(GoalTaskItem {
+                id: "t2".into(),
+                title: "渲染右侧任务状态区".into(),
+                status: "running".into(),
+                detail: None,
+            }),
+            tasks: vec![
+                GoalTaskItem {
+                    id: "t1".into(),
+                    title: "定义审批写入".into(),
+                    status: "completed".into(),
+                    detail: None,
+                },
+                GoalTaskItem {
+                    id: "t2".into(),
+                    title: "渲染右侧任务状态区".into(),
+                    status: "running".into(),
+                    detail: None,
+                },
+                GoalTaskItem {
+                    id: "t3".into(),
+                    title: "校验窄屏降级".into(),
+                    status: "pending".into(),
+                    detail: None,
+                },
+            ],
+            blocked_reason: Some("等待用户确认高风险变更".into()),
+            mission_position: 1,
+            total_plans: 2,
+        };
+        let approval_card = PlanApprovalCard {
+            plan_id: "plan-side-1".into(),
+            title: "补齐 Classic Plan 任务侧栏".into(),
+            goal: "实现右侧任务面板与交互确认卡".into(),
+            tasks: vec![
+                "定义审批写入".into(),
+                "渲染右侧任务状态区".into(),
+                "校验窄屏降级".into(),
+            ],
+        };
+
+        // 1. Wide (140x32) renders side panel + accurate OSC 8 coordinates in left column
+        let mut wide_term = Terminal::new(TestBackend::new(140, 32)).unwrap();
+        let mut wide_links = Vec::new();
+        wide_term
+            .draw(|f| {
+                render_classic_with_links(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "high",
+                        mode_badge: "goal",
+                        access_badge: "session",
+                        context_percent: Some(12),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::Running,
+                        goal_panel: Some(&panel),
+                        plan_approval: None,
+                        is_running: false,
+                        activity_label: None,
+                        animation_frame: 0,
+                        running_elapsed_ms: 0,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs,
+                        live_stream: "",
+                        live_thinking: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        user_input: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                    &mut wide_links,
+                );
+            })
+            .unwrap();
+        let wide_text = buffer_text(&wide_term);
+        assert!(wide_text.contains("MISSION / 01 OF 2"));
+        assert!(wide_text.contains("NOW WORKING"));
+        assert!(wide_text.contains("TASKS"));
+        assert!(wide_text.contains("NEEDS ATTENTION"));
+        let doc_link = wide_links
+            .iter()
+            .find(|l| l.target == "https://example.com/plan")
+            .expect("left column link projected");
+        assert!(doc_link.col_end <= 140 - goal_side_panel_width(140));
+        let buf = wide_term.backend().buffer();
+        let link_text: String = (doc_link.col_start..doc_link.col_end)
+            .map(|x| buf[(x, doc_link.row)].symbol())
+            .collect();
+        assert_eq!(link_text, "Doc");
+
+        // 2. Narrow (96x24) hides side panel and renders compact progress summary bar
+        let mut narrow_term = Terminal::new(TestBackend::new(96, 24)).unwrap();
+        narrow_term
+            .draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "high",
+                        mode_badge: "goal",
+                        access_badge: "session",
+                        context_percent: Some(12),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::Running,
+                        goal_panel: Some(&panel),
+                        plan_approval: None,
+                        is_running: false,
+                        activity_label: None,
+                        animation_frame: 0,
+                        running_elapsed_ms: 0,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs,
+                        live_stream: "",
+                        live_thinking: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        user_input: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let narrow_text = buffer_text(&narrow_term);
+        assert!(!narrow_text.contains("MISSION / 01 OF 2"));
+        assert!(narrow_text.contains("━"));
+        assert!(narrow_text.contains("1/3"));
+
+        // 3. Pending Plan Approval card renders rounded selector dock
+        let mut approval_term = Terminal::new(TestBackend::new(100, 28)).unwrap();
+        approval_term
+            .draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "high",
+                        mode_badge: "plan",
+                        access_badge: "ask",
+                        context_percent: Some(12),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_panel: Some(&panel),
+                        plan_approval: Some((&approval_card, 0)),
+                        is_running: false,
+                        activity_label: None,
+                        animation_frame: 0,
+                        running_elapsed_ms: 0,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs,
+                        live_stream: "",
+                        live_thinking: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        user_input: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let approval_text = buffer_text(&approval_term);
+        assert!(approval_text.contains("计划审批"));
+        assert!(approval_text.contains("1. 定义审批写入"));
+        assert!(approval_text.contains("[1] 批准并执行"));
+        assert!(approval_text.contains("[2] 修改计划"));
+        assert!(approval_text.contains("[3] 拒绝"));
     }
 }

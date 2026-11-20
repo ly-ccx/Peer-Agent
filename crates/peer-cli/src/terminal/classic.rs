@@ -32,15 +32,17 @@ use peer_runtime::{
     },
 };
 use peer_store::{
-    ConversationModelSelection, ConversationStore, GoalStore, TranscriptLimits, TranscriptReader,
+    ConversationModelSelection, ConversationStore, GoalStore, PlanApprovalDecision,
+    TranscriptLimits, TranscriptReader,
 };
 use peer_tui::{
     Action, ByteBudgetLru, ClassicCommand, ClassicMessage, ClassicOverlay, ClassicView, Composer,
-    Effect, GoalMenuStatus, GoalPickerRow, HistoryDirection, LeaderAction, LeaderKeyState,
-    MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
-    ResumeSessionRow, SlashFilterContext, ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale,
-    UserInputPrompt, WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event,
-    compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
+    Effect, GoalMenuStatus, GoalPanelView, GoalPickerRow, GoalTaskItem, HistoryDirection,
+    LeaderAction, LeaderKeyState, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState,
+    PlanApprovalCard, ReadingAnchor, RenderedBlock, ResumeSessionRow, SlashFilterContext,
+    ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale, UserInputPrompt,
+    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, compact_workspace_path,
+    filter_classic_slash_items, format_topbar_quota, parse_classic_command,
     render_classic_with_links, terminal_text,
 };
 use serde_json::Value;
@@ -79,6 +81,122 @@ struct ActiveCompaction {
     cancelling: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoadedGoalPlan {
+    plan_id: String,
+    source_revision: String,
+    title: String,
+    goal: String,
+    plan_status: String,
+    runner_status: Option<String>,
+    display_status: String,
+    completed: usize,
+    total: usize,
+    percent: u8,
+    tasks: Vec<GoalTaskItem>,
+    blocked_reason: Option<String>,
+    is_delegated: bool,
+}
+
+fn push_goal_leaf_tasks(items: &[Value], out: &mut Vec<GoalTaskItem>) {
+    for task in items {
+        if let Some(subtasks) = task["subtasks"].as_array().filter(|rows| !rows.is_empty()) {
+            push_goal_leaf_tasks(subtasks, out);
+            continue;
+        }
+        if !task.is_object() {
+            continue;
+        }
+        let idx = out.len() + 1;
+        let id = task["taskId"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("task-{idx}"));
+        let title = task["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(terminal_text)
+            .unwrap_or_else(|| format!("Task {idx}"));
+        let status = task["status"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("pending")
+            .to_owned();
+        let detail = ["blockedReason", "failureReason", "result"]
+            .into_iter()
+            .find_map(|key| {
+                task[key]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(terminal_text)
+            });
+        out.push(GoalTaskItem {
+            id,
+            title,
+            status,
+            detail,
+        });
+    }
+}
+
+fn extract_goal_tasks(raw: &Value) -> Vec<GoalTaskItem> {
+    let mut out = Vec::new();
+    if let Some(tasks) = raw["tasks"].as_array() {
+        push_goal_leaf_tasks(tasks, &mut out);
+    }
+    out
+}
+
+fn pick_current_task(tasks: &[GoalTaskItem]) -> Option<GoalTaskItem> {
+    tasks
+        .iter()
+        .find(|t| {
+            matches!(
+                t.status.as_str(),
+                "running" | "executing" | "waiting_user" | "blocked" | "failed"
+            )
+        })
+        .or_else(|| tasks.iter().find(|t| t.status == "pending"))
+        .cloned()
+}
+
+fn is_terminal_plan_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "failed")
+}
+
+fn select_preferred_goal_plan_id(
+    plans: &[LoadedGoalPlan],
+    current: Option<&str>,
+) -> Option<String> {
+    let active: Vec<&LoadedGoalPlan> = plans
+        .iter()
+        .filter(|p| !is_terminal_plan_status(&p.plan_status))
+        .collect();
+    if let Some(chosen) = active
+        .iter()
+        .find(|p| p.plan_status == "awaiting_approval")
+        .or_else(|| {
+            active.iter().find(|p| {
+                p.plan_status == "executing" || p.runner_status.as_deref() == Some("running")
+            })
+        })
+        .or_else(|| active.first())
+    {
+        return Some(chosen.plan_id.clone());
+    }
+    if let Some(cur) = current
+        && plans.iter().any(|p| p.plan_id == cur)
+    {
+        return Some(cur.to_owned());
+    }
+    plans.first().map(|p| p.plan_id.clone())
+}
+
 struct PendingUserInput {
     prompt: UserInputPrompt,
     selected: usize,
@@ -109,8 +227,10 @@ pub(super) struct ClassicSession<'a> {
         CancellationToken,
         JoinHandle<Option<SubscriptionQuotaSnapshot>>,
     )>,
-    goal_plans: Vec<GoalPickerRow>,
+    goal_plans: Vec<LoadedGoalPlan>,
     selected_goal_plan_id: Option<String>,
+    plan_approval_id: Option<String>,
+    plan_approval_selected: usize,
     composer: Composer,
     messages: Vec<ClassicMessage>,
     older: Option<TranscriptCursor>,
@@ -170,6 +290,8 @@ impl<'a> ClassicSession<'a> {
             quota_task: None,
             goal_plans: Vec::new(),
             selected_goal_plan_id: None,
+            plan_approval_id: None,
+            plan_approval_selected: 0,
             composer: Composer::default(),
             messages: Vec::new(),
             older: None,
@@ -334,6 +456,8 @@ impl<'a> ClassicSession<'a> {
         let Some(ref cid) = self.conversation_id else {
             self.goal_plans.clear();
             self.selected_goal_plan_id = None;
+            self.plan_approval_id = None;
+            self.plan_approval_selected = 0;
             return;
         };
         let Ok(projector) = TuiGoalProjector::new(&capability::now()) else {
@@ -347,69 +471,279 @@ impl<'a> ClassicSession<'a> {
             .into_iter()
             .filter_map(|snap| {
                 let plan_id = snap.facts["planId"].as_str()?.to_owned();
-                let status = snap.facts["runner"]["status"]
+                let plan_status = snap.facts["status"]
                     .as_str()
-                    .or_else(|| snap.facts["status"].as_str())
                     .unwrap_or("unknown")
                     .to_owned();
-                let completed = snap.facts["progress"]["completed"].as_u64().unwrap_or(0) as usize;
-                let total = snap.facts["progress"]["total"].as_u64().unwrap_or(0) as usize;
-                let title = store
-                    .read_context(&plan_id, &snap.source_revision)
-                    .ok()
-                    .and_then(|v| {
-                        v["title"]
-                            .as_str()
-                            .or_else(|| v["goal"].as_str())
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_else(|| plan_id.clone());
-                Some(GoalPickerRow {
+                if plan_status == "cancelled" {
+                    return None;
+                }
+                let ctx = store.read_context(&plan_id, &snap.source_revision).ok();
+                if ctx
+                    .as_ref()
+                    .is_some_and(|v| v["activation"]["kind"] == "intake")
+                {
+                    return None;
+                }
+                let runner_status = snap.facts["runner"]["status"].as_str().map(str::to_owned);
+                let display_status = if plan_status == "awaiting_approval" {
+                    plan_status.clone()
+                } else {
+                    runner_status
+                        .as_deref()
+                        .filter(|s| *s != "idle")
+                        .unwrap_or(&plan_status)
+                        .to_owned()
+                };
+                let tasks = ctx.as_ref().map(extract_goal_tasks).unwrap_or_default();
+                let total = snap.facts["progress"]["total"]
+                    .as_u64()
+                    .map(|n| n as usize)
+                    .filter(|&n| n > 0 || tasks.is_empty())
+                    .unwrap_or(tasks.len());
+                let completed = snap.facts["progress"]["completed"]
+                    .as_u64()
+                    .map(|n| n as usize)
+                    .unwrap_or_else(|| tasks.iter().filter(|t| t.status == "completed").count());
+                let percent = snap.facts["progress"]["percent"]
+                    .as_u64()
+                    .map(|n| n.min(100) as u8)
+                    .unwrap_or_else(|| {
+                        (completed * 100 + total / 2)
+                            .checked_div(total)
+                            .unwrap_or(0)
+                            .min(100) as u8
+                    });
+                let goal = ctx
+                    .as_ref()
+                    .and_then(|v| v["goal"].as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(terminal_text)
+                    .unwrap_or_default();
+                let title = ctx
+                    .as_ref()
+                    .and_then(|v| v["title"].as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(terminal_text)
+                    .unwrap_or_else(|| {
+                        if !goal.is_empty() {
+                            goal.clone()
+                        } else {
+                            plan_id.clone()
+                        }
+                    });
+                let current_task = pick_current_task(&tasks);
+                let blocked_reason = ctx
+                    .as_ref()
+                    .and_then(|v| v["runner"]["blockedReason"].as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(terminal_text)
+                    .or_else(|| {
+                        current_task.as_ref().and_then(|t| {
+                            matches!(t.status.as_str(), "blocked" | "failed" | "waiting_user")
+                                .then(|| t.detail.clone())
+                                .flatten()
+                        })
+                    });
+                let is_delegated = !snap.facts["delegationOrigin"].is_null();
+                Some(LoadedGoalPlan {
                     plan_id,
+                    source_revision: snap.source_revision,
                     title,
-                    status,
+                    goal,
+                    plan_status,
+                    runner_status,
+                    display_status,
                     completed,
                     total,
+                    percent,
+                    tasks,
+                    blocked_reason,
+                    is_delegated,
                 })
             })
             .collect();
-        if self
-            .selected_goal_plan_id
-            .as_ref()
-            .is_none_or(|id| !self.goal_plans.iter().any(|p| &p.plan_id == id))
-        {
-            self.selected_goal_plan_id = self.goal_plans.first().map(|p| p.plan_id.clone());
+        self.selected_goal_plan_id =
+            select_preferred_goal_plan_id(&self.goal_plans, self.selected_goal_plan_id.as_deref());
+        let next_pending_id = self
+            .selected_goal_index()
+            .and_then(|i| self.goal_plans.get(i))
+            .filter(|p| p.plan_status == "awaiting_approval" && !p.is_delegated)
+            .map(|p| p.plan_id.clone());
+        if next_pending_id != self.plan_approval_id {
+            self.plan_approval_id = next_pending_id;
+            self.plan_approval_selected = 0;
         }
+    }
+
+    fn selected_goal_index(&self) -> Option<usize> {
+        if let Some(id) = self.selected_goal_plan_id.as_deref()
+            && let Some(idx) = self.goal_plans.iter().position(|p| p.plan_id == id)
+        {
+            return Some(idx);
+        }
+        (!self.goal_plans.is_empty()).then_some(0)
     }
 
     fn goal_menu_status(&self) -> GoalMenuStatus {
         let active = self
-            .selected_goal_plan_id
-            .as_deref()
-            .and_then(|id| self.goal_plans.iter().find(|p| p.plan_id == id))
-            .or_else(|| self.goal_plans.first());
-        match active.map(|p| p.status.as_str()) {
+            .selected_goal_index()
+            .and_then(|i| self.goal_plans.get(i));
+        match active.map(|p| p.display_status.as_str()) {
             Some("running" | "executing" | "accepted") => GoalMenuStatus::Running,
             Some("paused" | "interrupted") => GoalMenuStatus::Paused,
             _ => GoalMenuStatus::None,
         }
     }
 
-    fn goal_banner(&self) -> Option<String> {
-        let active = self
-            .selected_goal_plan_id
-            .as_deref()
-            .and_then(|id| self.goal_plans.iter().find(|p| p.plan_id == id))
-            .or_else(|| self.goal_plans.first())?;
-        Some(format!(
-            "Goal · {} · {} ({}/{}) · /goals 切换",
-            terminal_text(&active.title),
-            active.status,
-            active.completed,
-            active.total
-        ))
+    fn goal_picker_rows(&self) -> Vec<GoalPickerRow> {
+        self.goal_plans
+            .iter()
+            .map(|p| GoalPickerRow {
+                plan_id: p.plan_id.clone(),
+                title: p.title.clone(),
+                status: p.display_status.clone(),
+                completed: p.completed,
+                total: p.total,
+            })
+            .collect()
+    }
+
+    fn active_goal_panel(&self) -> Option<GoalPanelView> {
+        let idx = self.selected_goal_index()?;
+        let plan = &self.goal_plans[idx];
+        Some(GoalPanelView {
+            plan_id: plan.plan_id.clone(),
+            title: plan.title.clone(),
+            goal: plan.goal.clone(),
+            status: plan.display_status.clone(),
+            completed: plan.completed,
+            total: plan.total,
+            percent: plan.percent,
+            current_task: pick_current_task(&plan.tasks),
+            tasks: plan.tasks.clone(),
+            blocked_reason: plan.blocked_reason.clone(),
+            mission_position: idx + 1,
+            total_plans: self.goal_plans.len(),
+        })
+    }
+
+    fn pending_plan_approval(&self) -> Option<(&LoadedGoalPlan, PlanApprovalCard)> {
+        if self.is_busy()
+            || self.approval.is_some()
+            || self.model_picker.open
+            || self.overlay.is_open()
+        {
+            return None;
+        }
+        let idx = self.selected_goal_index()?;
+        let plan = self.goal_plans.get(idx)?;
+        if plan.plan_status != "awaiting_approval" || plan.is_delegated {
+            return None;
+        }
+        let card = PlanApprovalCard {
+            plan_id: plan.plan_id.clone(),
+            title: plan.title.clone(),
+            goal: plan.goal.clone(),
+            tasks: plan.tasks.iter().map(|t| t.title.clone()).collect(),
+        };
+        Some((plan, card))
+    }
+
+    fn decide_plan_approval(&mut self, decision: PlanApprovalDecision) {
+        let Some((plan, _)) = self.pending_plan_approval() else {
+            return;
+        };
+        let plan_id = plan.plan_id.clone();
+        let revision = plan.source_revision.clone();
+        match GoalStore::new(&self.home).decide_ordinary_plan_approval(
+            &plan_id,
+            &revision,
+            decision,
+            "user",
+            &capability::now(),
+        ) {
+            Ok(_) => match decision {
+                PlanApprovalDecision::Approve => {
+                    if let Some(ref cid) = self.conversation_id {
+                        let _ = self.runtime.update_ordinary_mode(
+                            cid,
+                            &self.workspace,
+                            RuntimeMode::Goal,
+                        );
+                    }
+                    self.mode = RuntimeMode::Goal;
+                    self.refresh_goal_plans();
+                    self.set_notice("计划已批准，正在按计划执行…", false);
+                    self.submit_prompt(
+                        "计划已批准，请按计划依次执行任务并实时更新任务状态与验证结果。".to_owned(),
+                    );
+                }
+                PlanApprovalDecision::Revise => {
+                    if let Some(ref cid) = self.conversation_id {
+                        let _ = self.runtime.update_ordinary_mode(
+                            cid,
+                            &self.workspace,
+                            RuntimeMode::Plan,
+                        );
+                    }
+                    self.mode = RuntimeMode::Plan;
+                    self.refresh_goal_plans();
+                    self.set_notice("已退回修改计划，请在下方输入调整意见。", false);
+                }
+                PlanApprovalDecision::Reject => {
+                    self.refresh_goal_plans();
+                    self.set_notice("已拒绝并取消该计划。", false);
+                }
+            },
+            Err(err) => {
+                self.refresh_goal_plans();
+                self.set_notice(format!("计划状态更新失败（{}）。", err.code()), true);
+            }
+        }
+    }
+
+    fn handle_plan_approval_key(&mut self, key: KeyEvent) -> Option<ShellOutcome> {
+        let no_ctrl_alt = !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(ShellOutcome::Quit)
+            }
+            KeyCode::Up | KeyCode::Left => {
+                self.plan_approval_selected = (self.plan_approval_selected + 2) % 3;
+                None
+            }
+            KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                self.plan_approval_selected = (self.plan_approval_selected + 1) % 3;
+                None
+            }
+            KeyCode::Char('1' | 'y' | 'Y') if no_ctrl_alt => {
+                self.decide_plan_approval(PlanApprovalDecision::Approve);
+                None
+            }
+            KeyCode::Char('2') if no_ctrl_alt => {
+                self.decide_plan_approval(PlanApprovalDecision::Revise);
+                None
+            }
+            KeyCode::Char('3' | 'n' | 'N') | KeyCode::Esc if no_ctrl_alt => {
+                self.decide_plan_approval(PlanApprovalDecision::Reject);
+                None
+            }
+            KeyCode::Enter if key.modifiers.is_empty() => {
+                let decision = match self.plan_approval_selected.min(2) {
+                    0 => PlanApprovalDecision::Approve,
+                    1 => PlanApprovalDecision::Revise,
+                    _ => PlanApprovalDecision::Reject,
+                };
+                self.decide_plan_approval(decision);
+                None
+            }
+            _ => None,
+        }
     }
 
     fn reload_transcript(&mut self, cursor: Option<TranscriptCursor>) -> bool {
@@ -776,6 +1110,8 @@ impl<'a> ClassicSession<'a> {
         self.context_percent = None;
         self.goal_plans.clear();
         self.selected_goal_plan_id = None;
+        self.plan_approval_id = None;
+        self.plan_approval_selected = 0;
         self.interrupted_preview.clear();
         self.pending_user_input = None;
         self.anchor.jump_to_latest();
@@ -882,7 +1218,8 @@ impl<'a> ClassicSession<'a> {
         let mode_badge = self.mode.as_str();
         let access_badge = self.access_badge();
         let goal_status = self.goal_menu_status();
-        let goal_banner = self.goal_banner();
+        let goal_panel = self.active_goal_panel();
+        let plan_approval_card = self.pending_plan_approval().map(|(_, card)| card);
         let is_running = self.is_busy();
         let running_elapsed_ms = if let Some(active) = self.active.as_ref() {
             active.started_at.elapsed().as_millis() as u64
@@ -979,7 +1316,10 @@ impl<'a> ClassicSession<'a> {
                     fast_mode: self.fast_mode,
                     fast_available: self.fast_available,
                     goal_status,
-                    goal_banner: goal_banner.as_deref(),
+                    goal_panel: goal_panel.as_ref(),
+                    plan_approval: plan_approval_card
+                        .as_ref()
+                        .map(|c| (c, self.plan_approval_selected)),
                     is_running,
                     activity_label,
                     animation_frame,
@@ -1201,6 +1541,7 @@ impl<'a> ClassicSession<'a> {
         if need_reload {
             self.reload_transcript(None);
             self.refresh_context_percent();
+            self.refresh_goal_plans();
         }
         if let Some(active) = finished {
             let live_tail = active.display.borrow().live.clone();
@@ -2017,7 +2358,7 @@ impl<'a> ClassicSession<'a> {
                 self.composer.accepted();
                 self.refresh_goal_plans();
                 self.overlay = ClassicOverlay::Goals {
-                    plans: self.goal_plans.clone(),
+                    plans: self.goal_picker_rows(),
                     current_plan_id: self.selected_goal_plan_id.clone(),
                     query: String::new(),
                     selected: 0,
@@ -2101,6 +2442,7 @@ impl<'a> ClassicSession<'a> {
                     Event::Paste(pasted) => {
                         // Paste NEVER triggers approval or model submit!
                         if self.approval.is_none()
+                            && self.pending_plan_approval().is_none()
                             && !self.model_picker.open
                             && !self.overlay.is_open()
                         {
@@ -2167,6 +2509,12 @@ impl<'a> ClassicSession<'a> {
                         {
                             self.shutdown_tasks().await;
                             return Ok(ShellOutcome::Quit);
+                        } else if self.pending_plan_approval().is_some() {
+                            if let Some(outcome) = self.handle_plan_approval_key(key) {
+                                self.shutdown_tasks().await;
+                                return Ok(outcome);
+                            }
+                            dirty = true;
                         } else {
                             match self.leader.resolve(key) {
                                 LeaderAction::Armed => {
@@ -3218,5 +3566,82 @@ mod tests {
         assert_eq!(card.risk, "l1_local_read");
         assert!(card.arguments.contains("\"operation\":\"log\""));
         assert!(!card.arguments.contains('\n'));
+    }
+
+    #[test]
+    fn extract_goal_tasks_flattens_leaf_subtasks_and_selects_active_task() {
+        let plan = json!({
+            "tasks": [
+                {
+                    "taskId": "p1",
+                    "title": "Parent group",
+                    "status": "running",
+                    "subtasks": [
+                        {"taskId": "s1", "title": "Completed leaf", "status": "completed"},
+                        {"taskId": "s2", "title": "Active leaf", "status": "running"}
+                    ]
+                },
+                {
+                    "taskId": "p2",
+                    "title": "Later leaf",
+                    "status": "pending",
+                    "blockedReason": "waiting"
+                }
+            ]
+        });
+        let tasks = extract_goal_tasks(&plan);
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].id, "s1");
+        assert_eq!(tasks[1].id, "s2");
+        assert_eq!(tasks[2].id, "p2");
+        assert_eq!(tasks[2].detail.as_deref(), Some("waiting"));
+        let current = pick_current_task(&tasks).expect("active task chosen");
+        assert_eq!(current.id, "s2");
+    }
+
+    #[test]
+    fn select_preferred_goal_plan_prioritizes_awaiting_approval_then_executing() {
+        let mk = |id: &str, plan_status: &str, runner_status: Option<&str>| LoadedGoalPlan {
+            plan_id: id.into(),
+            source_revision: "rev-1".into(),
+            title: id.into(),
+            goal: "goal".into(),
+            plan_status: plan_status.into(),
+            runner_status: runner_status.map(str::to_owned),
+            display_status: plan_status.into(),
+            completed: 0,
+            total: 1,
+            percent: 0,
+            tasks: Vec::new(),
+            blocked_reason: None,
+            is_delegated: false,
+        };
+        let plans = vec![
+            mk("done", "completed", Some("completed")),
+            mk("exec", "executing", Some("running")),
+            mk("wait", "awaiting_approval", None),
+        ];
+        assert_eq!(
+            select_preferred_goal_plan_id(&plans, Some("done")).as_deref(),
+            Some("wait")
+        );
+
+        let running_only = vec![
+            mk("done", "completed", Some("completed")),
+            mk("exec", "executing", Some("running")),
+        ];
+        assert_eq!(
+            select_preferred_goal_plan_id(&running_only, Some("done")).as_deref(),
+            Some("exec")
+        );
+
+        let terminal_only = vec![
+            mk("done-1", "completed", None),
+            mk("done-2", "failed", None),
+        ];
+        assert_eq!(
+            select_preferred_goal_plan_id(&terminal_only, Some("done-2")).as_deref(),
+            Some("done-2")
+        );
     }
 }

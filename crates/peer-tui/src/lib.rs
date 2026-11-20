@@ -5,6 +5,7 @@ pub mod bounded_cache;
 pub mod classic_view;
 pub mod commands;
 mod composer;
+pub mod goal_panel;
 pub mod leader_key;
 pub mod markdown;
 pub mod model_picker;
@@ -33,6 +34,7 @@ pub use commands::{
     clip_bot_line, format_bot_when, parse_classic_command, parse_project_command,
 };
 pub use composer::{Action, Composer, Effect, MAX_DRAFT_BYTES, action_for_event};
+pub use goal_panel::{GoalPanelView, GoalTaskItem, PlanApprovalCard, goal_side_panel_width};
 pub use leader_key::{LeaderAction, LeaderKeyState};
 pub use markdown::{
     LineLink, MAX_MARKDOWN_INPUT_BYTES, MAX_SCREEN_HYPERLINKS_PER_FRAME,
