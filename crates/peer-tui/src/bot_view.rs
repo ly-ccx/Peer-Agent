@@ -233,6 +233,13 @@ fn is_running_session_status(status: &str) -> bool {
     matches!(status, "queued" | "starting" | "running" | "verifying")
 }
 
+fn is_inline_active_task(task: &BotTaskRow) -> bool {
+    matches!(
+        task.status.as_str(),
+        "queued" | "starting" | "running" | "verifying" | "waiting_user"
+    ) || (task.status == "result_ready" && !task.accepted)
+}
+
 fn render_bot_running_bar(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -821,7 +828,7 @@ fn render_bot_list(
 
 fn push_inline_task_rows(
     lines: &mut Vec<(Line<'static>, Vec<LineLink>)>,
-    tasks: &[BotTaskRow],
+    tasks: &[&BotTaskRow],
     width: usize,
     left_indent: usize,
     show_section_title: bool,
@@ -1221,6 +1228,8 @@ fn render_conversation_body(
     let zh = locale.is_zh();
     let bg = Style::new().bg(palette.background);
     let focused_card_num = cards.get(selected_card).map(|c| c.number);
+    let active_tasks: Vec<&BotTaskRow> =
+        tasks.iter().filter(|t| is_inline_active_task(t)).collect();
 
     // Centered empty-state Hero when no messages or live stream are present yet.
     if messages.is_empty() && live_activity.is_none() {
@@ -1322,13 +1331,13 @@ fn render_conversation_body(
                 }
             }
 
-            if !tasks.is_empty() {
+            if !active_tasks.is_empty() {
                 hero_lines.push((Line::styled("", bg), Vec::new()));
                 let block_w = width.saturating_sub(4).min(76);
                 let task_pad = width.saturating_sub(block_w) / 2;
                 push_inline_task_rows(
                     &mut hero_lines,
-                    tasks,
+                    &active_tasks,
                     block_w,
                     task_pad,
                     false,
@@ -1375,7 +1384,15 @@ fn render_conversation_body(
             );
             tiny_lines.push((Line::styled("", bg), Vec::new()));
         }
-        push_inline_task_rows(&mut tiny_lines, tasks, width, 0, false, palette, locale);
+        push_inline_task_rows(
+            &mut tiny_lines,
+            &active_tasks,
+            width,
+            0,
+            false,
+            palette,
+            locale,
+        );
         if tiny_lines.is_empty() {
             let empty_text = if zh {
                 "这里暂时没有内容"
@@ -1640,13 +1657,13 @@ fn render_conversation_body(
         }
     }
 
-    if !tasks.is_empty() {
+    if !active_tasks.is_empty() {
         if !all_lines.is_empty() && all_lines.last().is_some_and(|(line, _)| line.width() > 0) {
             all_lines.push((Line::styled("", bg), Vec::new()));
         }
         push_inline_task_rows(
             &mut all_lines,
-            tasks,
+            &active_tasks,
             width.saturating_sub(body_indent).max(12),
             body_indent,
             true,
@@ -3093,6 +3110,14 @@ mod tests {
             },
             BotTaskRow {
                 number: 2,
+                session_id: "s-ready".into(),
+                title: "待确认结果任务".into(),
+                status: "result_ready".into(),
+                accepted: false,
+                updated_at: String::new(),
+            },
+            BotTaskRow {
+                number: 3,
                 session_id: "s-done".into(),
                 title: "已完成任务".into(),
                 status: "completed".into(),
@@ -3100,7 +3125,7 @@ mod tests {
                 updated_at: String::new(),
             },
             BotTaskRow {
-                number: 3,
+                number: 4,
                 session_id: "s-fail".into(),
                 title: "失败任务".into(),
                 status: "failed".into(),
@@ -3155,10 +3180,120 @@ mod tests {
         .unwrap();
         let with_tasks = buffer_text(&term);
         assert!(with_tasks.contains("› 运行中任务 · 进行中"));
-        assert!(with_tasks.contains("✓ 已完成任务 · 已完成"));
-        assert!(with_tasks.contains("× 失败任务 · 失败"));
+        assert!(with_tasks.contains("· 待确认结果任务 · 待签收"));
+        assert!(!with_tasks.contains("已完成任务"));
+        assert!(!with_tasks.contains("失败任务"));
         assert!(with_tasks.contains("working..."));
         assert!(with_tasks.contains("PEER / ACTIVE"));
+
+        let mut tasks_screen_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        tasks_screen_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Tasks,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        workspace_path: None,
+                        model_badge: "gpt-5",
+                        effort_badge: "medium",
+                        is_running: false,
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &tasks,
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer_empty,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        approval: None,
+                        overlay: None,
+                        wordmark_elapsed_ms: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let tasks_screen = buffer_text(&tasks_screen_term);
+        assert!(tasks_screen.contains("已完成任务"));
+        assert!(tasks_screen.contains("失败任务"));
+
+        let terminal_only_msgs = [BotMessageView {
+            id: "m-1".into(),
+            revision: 1,
+            kind: "user_input".into(),
+            role: "user".into(),
+            content: "继续检查".into(),
+            created_at: None,
+            reply_to_echo: None,
+            marks: vec![],
+            card_number: None,
+            card_summary: None,
+        }];
+        let terminal_only_tasks = &tasks[2..];
+        let mut hidden_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        hidden_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        workspace_path: None,
+                        model_badge: "gpt-5",
+                        effort_badge: "medium",
+                        is_running: false,
+                        lease_banner: None,
+                        messages: &terminal_only_msgs,
+                        live_activity: None,
+                        tasks: terminal_only_tasks,
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer_empty,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        approval: None,
+                        overlay: None,
+                        wordmark_elapsed_ms: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let hidden_out = buffer_text(&hidden_term);
+        assert!(!hidden_out.contains("── 委派任务 ──"));
+        assert!(!hidden_out.contains("失败任务"));
 
         let mut composer_invalid = Composer::default();
         composer_invalid.apply(crate::Action::Insert("/nope".into()));
