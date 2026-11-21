@@ -84,7 +84,7 @@ test('connects to real peer core --stdio, registers external capabilities, and l
     assert.equal(status.restartCount, 0);
 
     const caps = await client.listCapabilities();
-    assert.deepEqual(caps.domains, ['core', 'classic.chat']);
+    assert.deepEqual(caps.domains, ['core', 'classic.chat', 'classic.goal']);
     assert.equal(caps.externalCapabilities.length, 2);
     assert.equal(caps.externalCapabilities[1].capabilityId, 'local.preview.capture');
   } finally {

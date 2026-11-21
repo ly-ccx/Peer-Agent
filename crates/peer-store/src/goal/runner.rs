@@ -43,6 +43,7 @@ pub enum RunnerStop {
     Failed,
     Blocked(&'static str),
     Waiting(&'static str),
+    Paused,
     BudgetExhausted,
 }
 
@@ -93,22 +94,61 @@ impl GoalStore {
         at: &str,
         admit: impl FnOnce() -> Result<(), &'static str>,
     ) -> Result<RunnerAdmission, GoalError> {
+        self.begin_ordinary_runner_with_resume(goal, identity, at, false, admit)
+    }
+
+    pub fn begin_ordinary_runner_with_resume(
+        &self,
+        goal: &LocalGoalIntake,
+        identity: &ConversationExecutionIdentity,
+        at: &str,
+        allow_resume: bool,
+        admit: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<RunnerAdmission, GoalError> {
         if !valid_id(&identity.stream_id, false) {
             return Err(GoalError::Invalid);
         }
         let transaction = PlanWrite::lock(self)?;
         let mut plan = self.read_local_goal(goal)?;
-        if plan["conversationId"] != identity.conversation_id
-            || plan["originWorkspacePath"].as_str().map(Path::new) != Some(&goal.workspace)
-            || !plan["parentPlanId"].is_null()
-            || !plan["delegationOrigin"].is_null()
-            || !matches!(
+        let status_allowed = if allow_resume {
+            matches!(
+                plan["status"].as_str(),
+                Some(
+                    "accepted"
+                        | "approved"
+                        | "executing"
+                        | "paused"
+                        | "interrupted"
+                        | "failed"
+                        | "completed"
+                )
+            )
+        } else {
+            matches!(
                 plan["status"].as_str(),
                 Some("accepted" | "approved" | "executing" | "completed")
             )
+        };
+        let active_owner_conflict = if allow_resume {
+            (plan["runner"]["nativeRunnerOwner"].is_string()
+                && matches!(
+                    plan["runner"]["status"].as_str(),
+                    Some("running" | "exploring" | "verifying")
+                ))
+                || plan["runner"]["explorers"]
+                    .as_array()
+                    .is_some_and(|rows| rows.iter().any(|w| w["status"] == "running"))
+        } else {
+            plan["runner"]["nativeRunnerOwner"].is_string()
+                || (plan["runner"].is_object() && !explorer::retired(&plan["runner"]))
+        };
+        if plan["conversationId"] != identity.conversation_id
+            || !super::plan_matches_workspace(&plan, &goal.workspace)
+            || !plan["parentPlanId"].is_null()
+            || !plan["delegationOrigin"].is_null()
+            || !status_allowed
             || plan["runner"]["requestedInput"].is_object()
-            || plan["runner"]["nativeRunnerOwner"].is_string()
-            || plan["runner"].is_object() && !explorer::retired(&plan["runner"])
+            || active_owner_conflict
         {
             return Err(GoalError::Projection("goal_plan_requires_current_owner"));
         }
@@ -119,8 +159,14 @@ impl GoalStore {
         let authorized = verify_only
             || plan["approval"]["decision"] == "approve"
             || plan["status"] == "executing"
-            || plan["workflowKind"] == "goal_self_driven"
-                && (plan["activation"]["kind"] == "accepted_goal" || plan["status"] == "accepted");
+            || (plan["workflowKind"] == "goal_self_driven"
+                && (plan["activation"]["kind"] == "accepted_goal"
+                    || plan["status"] == "accepted"
+                    || (allow_resume
+                        && matches!(
+                            plan["status"].as_str(),
+                            Some("paused" | "interrupted" | "failed")
+                        ))));
         if !authorized {
             set_stopped(
                 &mut plan,
@@ -137,6 +183,23 @@ impl GoalStore {
         }
         let runner = &mut plan["runner"];
         let counters = runner.as_object_mut().ok_or(GoalError::Invalid)?;
+        if allow_resume {
+            for stale in [
+                "blockedReason",
+                "interruption",
+                "requestedInput",
+                "lastError",
+                "nativeVerifierId",
+                "nativeExplorerOwner",
+                "visualRepair",
+            ] {
+                counters.remove(stale);
+            }
+            counters.entry("turnCount").or_insert(json!(0));
+            counters.entry("roundCount").or_insert(json!(0));
+            counters.entry("toolCallCount").or_insert(json!(0));
+            counters.entry("explorers").or_insert_with(|| json!([]));
+        }
         // Legacy display budgets are informative. Actual admission is governed
         // by the caller's explicit cap and the no-progress policy.
         for (key, display_limit) in [("maxTurns", 8), ("maxToolCalls", 40), ("maxExplorers", 3)] {
@@ -179,7 +242,7 @@ impl GoalStore {
                     .next()
                     .is_none()
             || !valid_runner_owner(&plan, &runner.identity.stream_id)
-            || plan["originWorkspacePath"].as_str().map(Path::new) != Some(&goal.workspace)
+            || !super::plan_matches_workspace(&plan, &goal.workspace)
             || !plan["parentPlanId"].is_null()
             || !plan["delegationOrigin"].is_null()
             || !matches!(
@@ -234,6 +297,28 @@ impl GoalStore {
         at: &str,
         admit: impl FnOnce() -> Result<(), &'static str>,
     ) -> Result<Value, GoalError> {
+        self.settle_ordinary_runner_with_visual(
+            runner,
+            run,
+            requested,
+            verification,
+            None,
+            at,
+            admit,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle_ordinary_runner_with_visual(
+        &self,
+        runner: &OrdinaryRunner,
+        run: &ConversationExecution,
+        requested: RunnerStop,
+        verification: Option<&VerifierReceipt>,
+        visual_report: Option<&Value>,
+        at: &str,
+        admit: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<Value, GoalError> {
         if runner.identity != run.identity || !is_stopped(run) {
             return Err(GoalError::Projection("goal_runner_stop_unproven"));
         }
@@ -247,17 +332,156 @@ impl GoalStore {
                 RunnerStop::Failed => ("failed", Some("goal_failed")),
                 RunnerStop::Blocked(reason) => ("blocked", Some(reason)),
                 RunnerStop::Waiting(reason) => ("waiting_user", Some(reason)),
+                RunnerStop::Paused => ("paused", Some("paused")),
                 RunnerStop::BudgetExhausted => ("budget_exhausted", Some("max_turns")),
             }
         };
-        if !matches!(status, "completed" | "waiting_user") {
+        if status == "completed"
+            && let Some(report) = visual_report
+        {
+            let summary = report["summary"]
+                .as_str()
+                .unwrap_or("Visual verification passed")
+                .to_owned();
+            let refs = report["evidenceRefs"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(|s| json!(s))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let visual_id = format!("visual-pass-{}", uuid::Uuid::new_v4());
+            let runner_obj = plan["runner"].as_object_mut().ok_or(GoalError::Invalid)?;
+            runner_obj.insert("visualVerification".into(), report.clone());
+            runner_obj.remove("visualRepair");
+            let runs = runner_obj
+                .entry("verifierRuns")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .ok_or(GoalError::Invalid)?;
+            runs.push(json!({
+                "verifierRunId": visual_id,
+                "planId": source.plan_id(),
+                "target": { "kind": "plan" },
+                "status": "passed",
+                "nativeCheck": "visual_verification",
+                "summary": summary,
+                "evidenceRefs": refs,
+                "report": report,
+                "createdAt": at,
+                "updatedAt": at,
+            }));
+        }
+        if !matches!(status, "completed" | "waiting_user" | "paused") {
             reopen_unverified(&mut plan);
+        }
+        if status == "paused"
+            && !matches!(
+                plan["status"].as_str(),
+                Some("completed" | "cancelled" | "failed")
+            )
+        {
+            plan["status"] = json!("paused");
         }
         super::verifier::interrupt_verifier(&mut plan, at)?;
         super::verifier::settle_repair(&mut plan, runner.stream_id(), at, reason)?;
         set_stopped(&mut plan, status, reason, at);
         transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
         Ok(plan)
+    }
+
+    pub fn pause_ordinary_runner(
+        &self,
+        plan_id: &str,
+        reason: &str,
+        at: &str,
+    ) -> Result<Option<Value>, GoalError> {
+        if !valid_id(plan_id, false) {
+            return Err(GoalError::Invalid);
+        }
+        let transaction = PlanWrite::lock(self)?;
+        if files::identity(&self.directory.join(format!("{plan_id}.json")))?.is_none() {
+            return Ok(None);
+        }
+        let revision = self.revision(plan_id)?;
+        let mut plan = self.read_context(plan_id, &revision)?;
+        if !plan["parentPlanId"].is_null() || !plan["delegationOrigin"].is_null() {
+            return Err(GoalError::Projection("goal_plan_requires_current_owner"));
+        }
+        if !matches!(
+            plan["status"].as_str(),
+            Some("completed" | "cancelled" | "failed")
+        ) {
+            plan["status"] = json!("paused");
+        }
+        if !plan["runner"].is_object() {
+            plan["runner"] = json!({"turnCount":0,"roundCount":0,"toolCallCount":0,"explorers":[]});
+        }
+        super::verifier::interrupt_verifier(&mut plan, at)?;
+        if let Some(stream) = plan["runner"]["nativeRunnerOwner"]
+            .as_str()
+            .map(str::to_owned)
+        {
+            let _ = super::verifier::settle_repair(&mut plan, &stream, at, Some(reason));
+        }
+        if let Some(obj) = plan["runner"].as_object_mut() {
+            for key in [
+                "nativeRunnerOwner",
+                "nativeVerifierId",
+                "nativeExplorerOwner",
+            ] {
+                obj.remove(key);
+            }
+        }
+        set_stopped(&mut plan, "paused", Some(reason), at);
+        transaction.publish(plan_id, &revision, &plan, at, || Ok(()))?;
+        Ok(Some(plan))
+    }
+
+    pub fn clear_ordinary_runner(
+        &self,
+        plan_id: &str,
+        reason: &str,
+        at: &str,
+    ) -> Result<Option<Value>, GoalError> {
+        if !valid_id(plan_id, false) {
+            return Err(GoalError::Invalid);
+        }
+        let transaction = PlanWrite::lock(self)?;
+        if files::identity(&self.directory.join(format!("{plan_id}.json")))?.is_none() {
+            return Ok(None);
+        }
+        let revision = self.revision(plan_id)?;
+        let mut plan = self.read_context(plan_id, &revision)?;
+        if !plan["parentPlanId"].is_null() || !plan["delegationOrigin"].is_null() {
+            return Err(GoalError::Projection("goal_plan_requires_current_owner"));
+        }
+        plan["status"] = json!("cancelled");
+        if !plan["runner"].is_object() {
+            plan["runner"] = json!({"turnCount":0,"roundCount":0,"toolCallCount":0,"explorers":[]});
+        }
+        super::verifier::interrupt_verifier(&mut plan, at)?;
+        if let Some(stream) = plan["runner"]["nativeRunnerOwner"]
+            .as_str()
+            .map(str::to_owned)
+        {
+            let _ = super::verifier::settle_repair(&mut plan, &stream, at, Some(reason));
+        }
+        if let Some(obj) = plan["runner"].as_object_mut() {
+            for key in [
+                "nativeRunnerOwner",
+                "nativeVerifierId",
+                "nativeExplorerOwner",
+                "visualRepair",
+            ] {
+                obj.remove(key);
+            }
+        }
+        set_stopped(&mut plan, "idle", Some(reason), at);
+        transaction.publish(plan_id, &revision, &plan, at, || Ok(()))?;
+        Ok(Some(plan))
     }
 
     pub fn recover_stopped_runner(
@@ -410,7 +634,7 @@ pub(super) fn reopen_unverified(plan: &mut Value) {
 
 fn set_stopped(plan: &mut Value, status: &str, reason: Option<&str>, at: &str) {
     let runner = &mut plan["runner"];
-    runner["enabled"] = json!(false);
+    runner["enabled"] = json!(status == "paused");
     runner["status"] = json!(status);
     runner["intent"] = json!(if status == "completed" {
         "synthesize"
@@ -420,6 +644,7 @@ fn set_stopped(plan: &mut Value, status: &str, reason: Option<&str>, at: &str) {
     runner["phase"] = json!(match status {
         "completed" => "synthesize",
         "waiting_user" => "waiting_user",
+        "paused" => "paused",
         _ => "blocked",
     });
     runner["blockedReason"] = json!(reason);

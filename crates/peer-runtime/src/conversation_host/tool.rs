@@ -35,9 +35,13 @@ impl Host<'_> {
         let call_id = format!("call-{}", uuid::Uuid::new_v4());
         let dispatch = format!("dispatch-{}", uuid::Uuid::new_v4());
         let started_at_ms = crate::capability::milliseconds(&now()).unwrap_or(0);
-        let prepared_mode = self.prepared_assistant.is_some();
-        let message_id = if let Some(pa) = &self.prepared_assistant {
-            pa.message_id.clone()
+        let prepared_mode = self.worker.is_none() && self.prepared_assistant.is_some();
+        let message_id = if prepared_mode {
+            self.prepared_assistant
+                .as_ref()
+                .expect("checked prepared_assistant")
+                .message_id
+                .clone()
         } else {
             format!("message-{}", uuid::Uuid::new_v4())
         };
@@ -160,7 +164,9 @@ impl Host<'_> {
         // A real permission fact is canonical before dispatch can be confirmed.
         if grant.facts["granted"] == true {
             self.source_current()?;
-            let grants_patch = if let Some(pa) = &mut self.prepared_assistant {
+            let grants_patch = if self.worker.is_none()
+                && let Some(pa) = &mut self.prepared_assistant
+            {
                 pa.permission_grants.push(grant.facts.clone());
                 json!({"permissionGrants": pa.permission_grants})
             } else {
@@ -446,7 +452,7 @@ impl Host<'_> {
         {
             return Err(HostError("conversation_tool_intent_changed"));
         }
-        let prepared_mode = self.prepared_assistant.is_some();
+        let prepared_mode = self.worker.is_none() && self.prepared_assistant.is_some();
         if !prepared_mode {
             let expected_grants = if grants.first().is_some_and(|g| g["granted"] == true) {
                 json!([grants[0]])
@@ -480,7 +486,9 @@ impl Host<'_> {
         if matched != 1 {
             return Err(HostError("conversation_tool_intent_changed"));
         }
-        let merged_grants = if let Some(pa) = &mut self.prepared_assistant {
+        let merged_grants = if self.worker.is_none()
+            && let Some(pa) = &mut self.prepared_assistant
+        {
             let mut merged = row["permissionGrants"]
                 .as_array()
                 .cloned()

@@ -1,5 +1,6 @@
 use crate::{
     classic::{self, ModelLoader},
+    classic_goal::{self, ClassicGoalRegistry},
     classic_streams::ClassicStreamRegistry,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
@@ -250,6 +251,7 @@ pub struct ServerContext {
     pub access: ConversationAccess,
     pub runtime: Arc<NativeConversationRuntime>,
     pub streams: ClassicStreamRegistry,
+    pub goals: ClassicGoalRegistry,
     local_tx: mpsc::UnboundedSender<LocalJob>,
     active_background: Arc<AtomicUsize>,
     background_done: Arc<Notify>,
@@ -345,8 +347,8 @@ impl ServerContext {
             },
             pid: std::process::id(),
             capabilities: CoreCapabilitiesSummary {
-                domains: vec!["core".into(), "classic.chat".into()],
-                planned_domains: vec!["classic.goal".into(), "bot".into()],
+                domains: vec!["core".into(), "classic.chat".into(), "classic.goal".into()],
+                planned_domains: vec!["bot".into()],
                 bidirectional_host_calls: true,
                 registered_external_capabilities: aliases,
             },
@@ -415,7 +417,7 @@ impl ServerContext {
                 .map_err(|err| RpcError::internal_error(err.to_string()))
             }
             "core.capabilities.list" => serde_json::to_value(CapabilitiesListResult {
-                domains: vec!["core".into(), "classic.chat".into()],
+                domains: vec!["core".into(), "classic.chat".into(), "classic.goal".into()],
                 external_capabilities,
             })
             .map_err(|err| RpcError::internal_error(err.to_string())),
@@ -426,6 +428,11 @@ impl ServerContext {
             "classic.chat.compact" => classic::handle_compact(self, params).await,
             "classic.permission.decide" => classic::handle_permission_decide(self, params),
             "classic.access.set" => classic::handle_access_set(self, params),
+            "classic.goal.start" => classic_goal::handle_start(self, params).await,
+            "classic.goal.resume" => classic_goal::handle_resume(self, params).await,
+            "classic.goal.pause" => classic_goal::handle_pause(self, params).await,
+            "classic.goal.clear" => classic_goal::handle_clear(self, params).await,
+            "classic.goal.getState" => classic_goal::handle_get_state(self, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -482,6 +489,7 @@ where
         access,
         runtime,
         streams: ClassicStreamRegistry::new(),
+        goals: ClassicGoalRegistry::new(),
         local_tx,
         active_background: Arc::new(AtomicUsize::new(0)),
         background_done: Arc::new(Notify::new()),
@@ -666,6 +674,7 @@ where
 
     drop(line_reader);
     shutdown.cancel();
+    context.goals.cancel_all();
     context.streams.cancel_all();
     peer.fail_all_pending("Core server shutting down");
     if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, async {

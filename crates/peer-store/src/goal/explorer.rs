@@ -167,7 +167,7 @@ impl GoalStore {
             .and_then(|_| plan["runner"]["phase"].as_str())
             .map(str::to_owned);
         if plan["conversationId"] != dispatch.conversation
-            || plan["originWorkspacePath"].as_str().map(Path::new) != Some(dispatch.workspace)
+            || !super::plan_matches_workspace(&plan, dispatch.workspace)
             || !plan["parentPlanId"].is_null()
             || !plan["delegationOrigin"].is_null()
             || dispatch.runner.is_some() && parent_phase.is_none()

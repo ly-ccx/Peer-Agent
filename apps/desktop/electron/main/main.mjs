@@ -173,6 +173,7 @@ import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal
 import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
@@ -428,6 +429,9 @@ const classicCoreBridge = createClassicCoreBridge({
   getClient: () => peerCoreClient,
   getLocalToolHost: () => localToolHost,
   broadcast: broadcastToAllWindows,
+  onGoalPlanChanged: (payload) => handleGoalPlanChanged(payload),
+  prepareGoalWorkspace: (params) => prepareClassicGoalWorkspace(params),
+  runVisualVerification: (params) => runClassicVisualVerification(params),
   logger: console,
 });
 let automationRunner = null;
@@ -485,60 +489,61 @@ const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
-  onChange: (payload) => {
-    broadcastToAllWindows('goalPlans:changed', payload);
-    // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
-    if (payload?.changeKind !== 'runner-progress') {
-      taskOverviewBroadcast.request({
-        reason: 'goalPlans:changed',
-        planId: payload?.planId ?? null,
-      });
-    }
-    try {
-      taskNotificationBroker?.handleGoalPlanChanged(payload);
-    } catch (err) {
-      console.warn('[task-notification] handleGoalPlanChanged failed:', err);
-    }
-    if (payload?.changeKind === 'runner-progress') {
-      return;
-    }
-    // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
-    queueMicrotask(() => {
-      try {
-        maybeSyncConversationTitleFromPlan(payload);
-      } catch (error) {
-        console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
-      }
-    });
-    // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
-    // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
-    queueMicrotask(() => {
-      try {
-        maybeAutoStartAcceptedGoalFromPlanChange(payload);
-      } catch (error) {
-        console.error('[main] plan-change auto-start failed:', error?.message || error);
-      }
-    });
-    const planId = typeof payload?.planId === 'string' ? payload.planId : null;
-    scheduleGoalDeliveryHandoff(planId);
-    if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
-      queueMicrotask(() => {
-        try {
-          const plan = goalPlanStore.getPlan(planId);
-          if (!plan) return;
-          if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
-          // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
-          if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
-          void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
-            console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
-          });
-        } catch (error) {
-          console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
-        }
-      });
-    }
-  },
+  onChange: (payload) => handleGoalPlanChanged(payload),
 });
+function handleGoalPlanChanged(payload) {
+  broadcastToAllWindows('goalPlans:changed', payload);
+  // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
+  if (payload?.changeKind !== 'runner-progress') {
+    taskOverviewBroadcast.request({
+      reason: 'goalPlans:changed',
+      planId: payload?.planId ?? null,
+    });
+  }
+  try {
+    taskNotificationBroker?.handleGoalPlanChanged(payload);
+  } catch (err) {
+    console.warn('[task-notification] handleGoalPlanChanged failed:', err);
+  }
+  if (payload?.changeKind === 'runner-progress') {
+    return;
+  }
+  // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
+  queueMicrotask(() => {
+    try {
+      maybeSyncConversationTitleFromPlan(payload);
+    } catch (error) {
+      console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
+    }
+  });
+  // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
+  // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
+  queueMicrotask(() => {
+    try {
+      maybeAutoStartAcceptedGoalFromPlanChange(payload);
+    } catch (error) {
+      console.error('[main] plan-change auto-start failed:', error?.message || error);
+    }
+  });
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  scheduleGoalDeliveryHandoff(planId);
+  if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
+    queueMicrotask(() => {
+      try {
+        const plan = goalPlanStore.getPlan(planId);
+        if (!plan) return;
+        if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
+        // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
+        if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
+        void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
+          console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+        });
+      } catch (error) {
+        console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+      }
+    });
+  }
+}
 let goalRunner = null;
 let localToolHost = null;
 let remoteAccess = null;
@@ -1056,6 +1061,230 @@ goalRunner = createDesktopGoalRunnerHost({
   getMainWindows: () => BrowserWindow.getAllWindows().filter((window) => window.__peerAgentMainWindow === true),
   hostLeases,
 }).goalRunner;
+
+async function prepareClassicGoalWorkspace({ planId, conversationId } = {}) {
+  if (!planId || typeof goalPlanStore?.getPlan !== 'function') {
+    return { workspacePath: null, planId: planId ?? null };
+  }
+  const plan = goalPlanStore.getPlan(planId);
+  if (!plan) return { workspacePath: null, planId };
+  const resolvedConvId = plan.conversationId || conversationId || null;
+  const conversation = resolvedConvId ? conversationStore.getConversation(resolvedConvId) : null;
+  if (plan.delegationOrigin) {
+    if (plan.delegationOrigin.readOnly === true) {
+      return {
+        workspacePath:
+          plan.targetWorkspacePath
+          || plan.originWorkspacePath
+          || conversation?.workspacePath
+          || workspaceRoot,
+        planId,
+      };
+    }
+    throw new Error('delegated_goal_out_of_scope');
+  }
+  try {
+    await preparePlanExecutionWorkspace({
+      plan,
+      conversation,
+      ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+      prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+      isolatePlan: goalWorktreeAdapter?.isolatePlan,
+    });
+  } catch (error) {
+    console.warn('[peer-core] prepareGoalWorkspace failed; falling back to bound workspace:', error?.message || error);
+  }
+  const fresh = goalPlanStore.getPlan(planId) || plan;
+  const workspacePath =
+    (fresh?.deliveryBinding?.executionIsolation === 'worktree'
+      ? fresh.deliveryBinding.worktreePath
+      : null)
+    || fresh?.targetWorkspacePath
+    || fresh?.deliveryBinding?.targetWorkspacePath
+    || fresh?.originWorkspacePath
+    || conversation?.workspacePath
+    || workspaceRoot;
+  return { workspacePath, planId };
+}
+
+async function runClassicVisualVerification({
+  planId,
+  conversationId,
+  verifierRunId,
+  workspacePath,
+} = {}) {
+  const plan = planId && typeof goalPlanStore?.getPlan === 'function'
+    ? goalPlanStore.getPlan(planId)
+    : null;
+  let required = false;
+  try {
+    required = Boolean(plan && desktopPreviewProvider?.authority?.read(planId, plan)?.required === true);
+  } catch {
+    required = true;
+  }
+  if (!required) {
+    return { required: false, passed: true, report: null };
+  }
+  if (!plan) {
+    return {
+      required: true,
+      passed: false,
+      report: { passed: false, summary: 'Goal plan unavailable for visual verification', evidenceRefs: [] },
+    };
+  }
+  const workerModelProviderId = resolveConversationModelProviderId({
+    conversationStore,
+    conversationId: plan.conversationId || conversationId,
+  });
+  const routed = typeof llmChatService?.resolveGoalRole === 'function'
+    ? llmChatService.resolveGoalRole({ role: 'visual_verifier', workerModelProviderId })
+    : { ok: true, selection: { modelProviderId: workerModelProviderId } };
+  if (!routed?.ok) {
+    return {
+      required: true,
+      passed: false,
+      report: {
+        passed: false,
+        summary: routed?.missing || '没有能看图的模型',
+        reason: routed?.reason || 'capability',
+        evidenceRefs: [],
+      },
+    };
+  }
+  const resolvedWorkspace =
+    (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
+    || workspacePath
+    || plan?.targetWorkspacePath
+    || plan?.originWorkspacePath
+    || workspaceRoot;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('visual-verifier-timeout')), 150_000);
+  try {
+    const report = await runPlanVisualVerifier({
+      plan,
+      verifierRunId,
+      signal: controller.signal,
+      goalPlanStore,
+      workspacePath: resolvedWorkspace,
+      llmChatService,
+      modelProviderId: routed.selection?.modelProviderId || workerModelProviderId,
+    });
+    return {
+      required: true,
+      passed: Boolean(report?.passed === true),
+      report: report ?? { passed: false, summary: 'Empty visual verification report', evidenceRefs: [] },
+    };
+  } catch (error) {
+    return {
+      required: true,
+      passed: false,
+      report: {
+        passed: false,
+        summary: error instanceof Error ? error.message : String(error || 'visual_verification_failed'),
+        evidenceRefs: [],
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function forceCompleteActiveConversationStreams(conversationId, options = {}) {
+  const tsRelease = llmChatService?.forceCompleteConversationStreams?.(conversationId, options)?.released
+    ?? Promise.resolve();
+  const rustRelease = classicCoreBridge.forceCompleteConversationStreams(conversationId)?.released
+    ?? Promise.resolve();
+  return {
+    released: Promise.all([Promise.resolve(tsRelease), Promise.resolve(rustRelease)]),
+  };
+}
+
+function finalizeClassicGoalTurnOutcome(outcomePromise, {
+  conversationId,
+  mode,
+  resumeInterruptedReply,
+  visualCompletionPlanId,
+  answeredRequestedUserInputPlanId,
+} = {}) {
+  if (!(!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId)) {
+    return outcomePromise;
+  }
+  return Promise.resolve(outcomePromise).then((outcome) => {
+    convergeIntakeAfterGoalTurn(conversationId, outcome);
+    void visualCompletionHandoff.handoff(conversationId, outcome, visualCompletionPlanId).catch((error) => {
+      console.error('[main] visual completion handoff failed:', error?.message || error);
+    });
+    const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
+    if (answeredRequestedUserInputPlanId) {
+      void serializeAcceptedGoalRunnerHandoff({
+        forceComplete: () => forceCompleteActiveConversationStreams(
+          conversationId,
+          { reason: 'goal_user_decision_handoff' },
+        ),
+        isStillAccepted: () => shouldResumeGoalRunnerAfterUserDecision(
+          goalPlanStore.getPlan?.(answeredRequestedUserInputPlanId),
+        ),
+        startRunner: () => goalRunner?.start(answeredRequestedUserInputPlanId),
+      }).catch((error) => {
+        console.error('[main] resume goal runner after user decision failed:', error?.message || error);
+      });
+    } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
+      void serializeAcceptedGoalRunnerHandoff({
+        forceComplete: () => forceCompleteActiveConversationStreams(
+          conversationId,
+          { reason: 'goal_handoff' },
+        ),
+        isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
+          goalPlanStore.getPlan?.(acceptedGoal.planId),
+        ),
+        startRunner: () => goalRunner?.start(acceptedGoal.planId),
+      }).catch((error) => {
+        console.error('[main] auto-start goal runner failed:', error?.message || error);
+      });
+    }
+    return outcome;
+  });
+}
+
+const tsGoalRunner = goalRunner;
+goalRunner = {
+  ...tsGoalRunner,
+  start(planId, options) {
+    const plan = typeof planId === 'string' ? goalPlanStore.getPlan(planId) : null;
+    if (classicCoreBridge.canHandleGoalPlan(plan)) {
+      return classicCoreBridge.startGoalRunner(planId, options);
+    }
+    return tsGoalRunner.start(planId, options);
+  },
+  resume(planId, options) {
+    const plan = typeof planId === 'string' ? goalPlanStore.getPlan(planId) : null;
+    if (classicCoreBridge.canHandleGoalPlan(plan)) {
+      return classicCoreBridge.resumeGoalRunner(planId, options);
+    }
+    return tsGoalRunner.resume(planId, options);
+  },
+  pause(planId, reason) {
+    const plan = typeof planId === 'string' ? goalPlanStore.getPlan(planId) : null;
+    if (classicCoreBridge.ownsGoalPlan(planId) || classicCoreBridge.canHandleGoalPlan(plan)) {
+      return classicCoreBridge.pauseGoalRunner(planId, reason);
+    }
+    return tsGoalRunner.pause(planId, reason);
+  },
+  clear(planId, reason) {
+    const plan = typeof planId === 'string' ? goalPlanStore.getPlan(planId) : null;
+    if (classicCoreBridge.ownsGoalPlan(planId) || classicCoreBridge.canHandleGoalPlan(plan)) {
+      return classicCoreBridge.clearGoalRunner(planId, reason);
+    }
+    return tsGoalRunner.clear(planId, reason);
+  },
+  getState(planId) {
+    const plan = typeof planId === 'string' ? goalPlanStore.getPlan(planId) : null;
+    if (classicCoreBridge.canHandleGoalPlan(plan)) {
+      return classicCoreBridge.getGoalRunnerState(planId);
+    }
+    return tsGoalRunner.getState(planId);
+  },
+};
 
 function buildRuntimeProjection() {
   const session = sessionStore.getSession();
@@ -2723,10 +2952,10 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   // Both failed and interrupted re-arms use resume() to consume suspension.
   // Recheck after the foreground stream releases, rather than capture stale state.
   void serializeAcceptedGoalRunnerHandoff({
-    forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+    forceComplete: () => forceCompleteActiveConversationStreams(
       plan.conversationId,
       { reason: 'goal_handoff' },
-    ) ?? { released: Promise.resolve() },
+    ),
     isStillAccepted: () => (
       shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
       || shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
@@ -2939,10 +3168,10 @@ function handleChatSend({
           });
           if (appliedRoute?.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({
-              forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+              forceComplete: () => forceCompleteActiveConversationStreams(
                 conversationId,
                 { reason: 'goal_handoff' },
-              ) ?? { released: Promise.resolve() },
+              ),
               isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
                 goalPlanStore.getPlan?.(activeGoal.planId),
               ),
@@ -3025,39 +3254,41 @@ function handleChatSend({
         },
       ]
     : runtimeReminders;
-  // Bind the foreground contract before it can complete or be superseded.
-  const currentActivePlan = conversationId ? goalPlanStore.getActivePlanByConversation(conversationId) : null;
-  const visualCompletionPlanId = currentActivePlan?.planId;
-  const hasActiveAcceptedGoal = Boolean(
-    currentActivePlan
-    && goalPlanIsSelfDriven(currentActivePlan)
-    && currentActivePlan?.activation?.kind === 'accepted_goal',
-  );
   const useClassicCoreBridge = Boolean(
-    !answeredRequestedUserInputPlanId
-    && conversationId
+    conversationId
     && assistantMessageId
-    && classicCoreBridge.canHandleChatSend({ mode: mode || 'chat', hasActiveGoal: hasActiveAcceptedGoal }),
+    && classicCoreBridge.canHandleChatSend({ mode: mode || 'chat' }),
   );
-  const outcomePromise = useClassicCoreBridge
-    ? classicCoreBridge.send({
-        streamId,
-        conversationId,
-        assistantMessageId,
-        workspacePath:
-          persistedConversation?.workspacePath
-          ?? workspacePath
-          ?? settingsStore.getAll().activeWorkspace
-          ?? workspaceRoot,
-        mode: mode || 'chat',
-        modelProviderId: resolvedModelProviderId,
-        effort,
-        fastMode,
-        persistModelSelection: Boolean(modelProviderId),
-        resumeInterruptedReply,
-        runtimeReminders: effectiveRuntimeReminders,
-      }, sender)
-    : llmChatService.sendMessage({
+  if (useClassicCoreBridge) {
+    const classicActivePlan = conversationId ? goalPlanStore.getActivePlanByConversation(conversationId) : null;
+    const classicOutcomePromise = classicCoreBridge.send({
+      streamId,
+      conversationId,
+      assistantMessageId,
+      workspacePath:
+        persistedConversation?.workspacePath
+        ?? workspacePath
+        ?? settingsStore.getAll().activeWorkspace
+        ?? workspaceRoot,
+      mode: mode || 'chat',
+      modelProviderId: resolvedModelProviderId,
+      effort,
+      fastMode,
+      persistModelSelection: Boolean(modelProviderId),
+      resumeInterruptedReply,
+      runtimeReminders: effectiveRuntimeReminders,
+    }, sender);
+    return finalizeClassicGoalTurnOutcome(classicOutcomePromise, {
+      conversationId,
+      mode,
+      resumeInterruptedReply,
+      visualCompletionPlanId: classicActivePlan?.planId,
+      answeredRequestedUserInputPlanId,
+    });
+  }
+  // Bind the foreground contract before it can complete or be superseded.
+  const visualCompletionPlanId = conversationId ? goalPlanStore.getActivePlanByConversation(conversationId)?.planId : undefined;
+  const outcomePromise = llmChatService.sendMessage({
     messages,
     webContents: sender,
     streamId,
@@ -3142,7 +3373,7 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
   if (
     classicCoreBridge.isAvailable()
     && conversationId
-    && (!conv.mode || conv.mode === 'chat' || conv.mode === 'plan')
+    && (!conv.mode || conv.mode === 'chat' || conv.mode === 'plan' || conv.mode === 'goal')
   ) {
     return classicCoreBridge.compact({
       conversationId,

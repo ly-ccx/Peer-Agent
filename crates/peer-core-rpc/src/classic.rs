@@ -26,10 +26,31 @@ use peer_runtime::{
 use peer_store::ConversationStore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::sync::oneshot;
 
 const MAX_STREAM_TOOL_RESULT_CHARS: usize = 32_768;
+
+#[derive(Clone)]
+pub(crate) enum StreamIdRef {
+    Fixed(String),
+    Shared(Arc<Mutex<String>>),
+}
+
+impl StreamIdRef {
+    pub(crate) fn current(&self) -> String {
+        match self {
+            Self::Fixed(id) => id.clone(),
+            Self::Shared(cell) => cell.lock().map(|guard| guard.clone()).unwrap_or_default(),
+        }
+    }
+}
 
 pub struct ResolvedTurnModel {
     pub provider_id: String,
@@ -191,9 +212,12 @@ pub async fn handle_send(ctx: &Arc<ServerContext>, params_val: Value) -> Result<
         .mode
         .parse()
         .map_err(|_| RpcError::invalid_params(format!("Unsupported mode: {}", params.mode)))?;
-    if !matches!(mode, RuntimeMode::Chat | RuntimeMode::Plan) {
+    if !matches!(
+        mode,
+        RuntimeMode::Chat | RuntimeMode::Plan | RuntimeMode::Goal
+    ) {
         return Err(RpcError::invalid_params(format!(
-            "classic.chat.send only supports 'chat' or 'plan' mode (got {})",
+            "classic.chat.send only supports 'chat', 'plan', or 'goal' mode (got {})",
             params.mode
         )));
     }
@@ -324,12 +348,13 @@ async fn run_classic_turn(
         .collect();
 
     let mut permission = RpcPermissionInput {
-        stream_id: stream_id.clone(),
+        stream_id: StreamIdRef::Fixed(stream_id.clone()),
         peer: ctx.peer.clone(),
         streams: ctx.streams.clone(),
     };
     let mut output = RpcConversationOutput {
-        stream_id: stream_id.clone(),
+        stream_id: StreamIdRef::Fixed(stream_id.clone()),
+        conversation_id: conversation_id.clone(),
         peer: ctx.peer.clone(),
         streams: ctx.streams.clone(),
     };
@@ -473,6 +498,7 @@ pub fn handle_abort(ctx: &ServerContext, params_val: Value) -> Result<Value, Rpc
     let params: ClassicChatAbortParams = serde_json::from_value(params_val).map_err(|err| {
         RpcError::invalid_params(format!("Invalid classic.chat.abort params: {err}"))
     })?;
+    ctx.goals.mark_pause_for_tick_stream(&params.stream_id);
     let aborted = ctx.streams.abort_stream(&params.stream_id).is_some();
     Ok(json!({ "aborted": aborted }))
 }
@@ -750,10 +776,10 @@ fn read_compaction_token_counts(store: &ConversationStore, conversation_id: &str
     (before, after)
 }
 
-struct RpcPermissionInput {
-    stream_id: String,
-    peer: RpcPeer,
-    streams: ClassicStreamRegistry,
+pub(crate) struct RpcPermissionInput {
+    pub(crate) stream_id: StreamIdRef,
+    pub(crate) peer: RpcPeer,
+    pub(crate) streams: ClassicStreamRegistry,
 }
 
 impl PermissionInput for RpcPermissionInput {
@@ -763,6 +789,10 @@ impl PermissionInput for RpcPermissionInput {
         cancel: &'a CancellationToken,
     ) -> Pin<Box<dyn Future<Output = LocalPermissionDecision> + 'a>> {
         Box::pin(async move {
+            let stream_id = self.stream_id.current();
+            if stream_id.is_empty() {
+                return LocalPermissionDecision::Unavailable;
+            }
             let tool_call_id = prompt["toolCallId"]
                 .as_str()
                 .filter(|s| !s.is_empty())
@@ -809,15 +839,11 @@ impl PermissionInput for RpcPermissionInput {
             });
 
             let (tx, rx) = oneshot::channel();
-            self.streams.register_permission_waiter(
-                &self.stream_id,
-                &tool_call_id,
-                call.clone(),
-                tx,
-            );
+            self.streams
+                .register_permission_waiter(&stream_id, &tool_call_id, call.clone(), tx);
 
             let mut notif = json!({
-                "streamId": self.stream_id,
+                "streamId": stream_id,
                 "call": call,
             });
             if let Some(deadline) = deadline_at {
@@ -830,7 +856,7 @@ impl PermissionInput for RpcPermissionInput {
                 .is_err()
             {
                 self.streams
-                    .clear_permission_waiter(&self.stream_id, &tool_call_id);
+                    .clear_permission_waiter(&stream_id, &tool_call_id);
                 return LocalPermissionDecision::Unavailable;
             }
 
@@ -841,7 +867,7 @@ impl PermissionInput for RpcPermissionInput {
                 res = rx => res.unwrap_or(LocalPermissionDecision::Cancel),
             };
             self.streams
-                .clear_permission_waiter(&self.stream_id, &tool_call_id);
+                .clear_permission_waiter(&stream_id, &tool_call_id);
             decision
         })
     }
@@ -864,10 +890,11 @@ fn build_arguments_preview(arguments: &Value, reason: &str) -> Value {
     arguments.clone()
 }
 
-struct RpcConversationOutput {
-    stream_id: String,
-    peer: RpcPeer,
-    streams: ClassicStreamRegistry,
+pub(crate) struct RpcConversationOutput {
+    pub(crate) stream_id: StreamIdRef,
+    pub(crate) conversation_id: String,
+    pub(crate) peer: RpcPeer,
+    pub(crate) streams: ClassicStreamRegistry,
 }
 
 impl ConversationOutput for RpcConversationOutput {
@@ -877,17 +904,21 @@ impl ConversationOutput for RpcConversationOutput {
     ) -> Pin<Box<dyn Future<Output = Result<(), peer_runtime::capability::CapabilityError>> + 'a>>
     {
         Box::pin(async move {
+            let stream_id = self.stream_id.current();
+            if stream_id.is_empty() {
+                return Ok(());
+            }
             match event {
                 ConversationEvent::Started { .. } | ConversationEvent::AssistantText(_) => {}
                 ConversationEvent::ThinkingDelta(content) => {
                     self.streams
-                        .append_thinking_delta(&self.stream_id, content, "reasoning");
+                        .append_thinking_delta(&stream_id, content, "reasoning");
                     let _ = self
                         .peer
                         .notify(
                             "chat:stream:thinking",
                             json!({
-                                "streamId": self.stream_id,
+                                "streamId": stream_id,
                                 "content": content,
                                 "kind": "reasoning",
                             }),
@@ -895,13 +926,13 @@ impl ConversationOutput for RpcConversationOutput {
                         .await;
                 }
                 ConversationEvent::AssistantDelta(content) => {
-                    self.streams.append_text_delta(&self.stream_id, content);
+                    self.streams.append_text_delta(&stream_id, content);
                     let _ = self
                         .peer
                         .notify(
                             "chat:stream:delta",
                             json!({
-                                "streamId": self.stream_id,
+                                "streamId": stream_id,
                                 "content": content,
                             }),
                         )
@@ -912,19 +943,15 @@ impl ConversationOutput for RpcConversationOutput {
                     tool,
                     arguments,
                 } => {
-                    let started_at_ms = self.streams.record_tool_prepared(
-                        &self.stream_id,
-                        call_id,
-                        tool,
-                        tool,
-                        arguments,
-                    );
+                    let started_at_ms = self
+                        .streams
+                        .record_tool_prepared(&stream_id, call_id, tool, tool, arguments);
                     let _ = self
                         .peer
                         .notify(
                             "chat:stream:tool-call",
                             json!({
-                                "streamId": self.stream_id,
+                                "streamId": stream_id,
                                 "tool": tool,
                                 "displayName": tool,
                                 "args": arguments,
@@ -939,14 +966,13 @@ impl ConversationOutput for RpcConversationOutput {
                     granted,
                     reason,
                 } => {
-                    self.streams
-                        .clear_permission_waiter(&self.stream_id, call_id);
+                    self.streams.clear_permission_waiter(&stream_id, call_id);
                     let _ = self
                         .peer
                         .notify(
                             "chat:stream:permission-settled",
                             json!({
-                                "streamId": self.stream_id,
+                                "streamId": stream_id,
                                 "toolCallIds": [call_id],
                                 "granted": granted,
                                 "reason": reason,
@@ -962,9 +988,9 @@ impl ConversationOutput for RpcConversationOutput {
                     let stream_result = format_tool_result_for_stream(result);
                     let (started_at_ms, ended_at_ms, duration_ms) = self
                         .streams
-                        .record_tool_settled(&self.stream_id, call_id, &stream_result);
+                        .record_tool_settled(&stream_id, call_id, &stream_result);
                     let mut payload = json!({
-                        "streamId": self.stream_id,
+                        "streamId": stream_id,
                         "toolCallId": call_id,
                         "result": stream_result,
                         "endedAtMs": ended_at_ms,
@@ -979,17 +1005,54 @@ impl ConversationOutput for RpcConversationOutput {
                         payload["evidenceRefs"] = json!([ev]);
                     }
                     let _ = self.peer.notify("chat:stream:tool-result", payload).await;
+
+                    if let Some(capability_id) = result["capabilityId"].as_str()
+                        && matches!(
+                            capability_id,
+                            "local.goal.create_plan" | "local.goal.update_task"
+                        )
+                        && result["status"] == "success"
+                    {
+                        let output = &result["output"];
+                        let plan_id = output["planId"]
+                            .as_str()
+                            .or_else(|| output["plan"]["planId"].as_str())
+                            .filter(|s| !s.is_empty());
+                        if let Some(plan_id) = plan_id {
+                            let workflow_kind = output["workflowKind"]
+                                .as_str()
+                                .or_else(|| output["plan"]["workflowKind"].as_str());
+                            let change_kind = if capability_id == "local.goal.create_plan"
+                                && workflow_kind == Some("goal_self_driven")
+                            {
+                                "goal-accepted"
+                            } else {
+                                "persist"
+                            };
+                            let _ = self
+                                .peer
+                                .notify(
+                                    "goalPlans:changed",
+                                    json!({
+                                        "reason": "persist",
+                                        "planId": plan_id,
+                                        "conversationId": self.conversation_id,
+                                        "changeKind": change_kind,
+                                    }),
+                                )
+                                .await;
+                        }
+                    }
                 }
                 ConversationEvent::Usage(snapshot) => {
                     let usage_json = format_usage_snapshot(snapshot);
-                    self.streams
-                        .record_usage(&self.stream_id, usage_json.clone());
+                    self.streams.record_usage(&stream_id, usage_json.clone());
                     let _ = self
                         .peer
                         .notify(
                             "chat:stream:usage",
                             json!({
-                                "streamId": self.stream_id,
+                                "streamId": stream_id,
                                 "usage": usage_json,
                             }),
                         )
@@ -1001,7 +1064,7 @@ impl ConversationOutput for RpcConversationOutput {
     }
 }
 
-fn format_usage_amounts(amounts: &UsageAmounts) -> Value {
+pub(crate) fn format_usage_amounts(amounts: &UsageAmounts) -> Value {
     json!({
         "inputTokens": amounts.input_tokens,
         "outputTokens": amounts.output_tokens,
@@ -1011,7 +1074,7 @@ fn format_usage_amounts(amounts: &UsageAmounts) -> Value {
     })
 }
 
-fn format_usage_snapshot(snapshot: &UsageSnapshot) -> Value {
+pub(crate) fn format_usage_snapshot(snapshot: &UsageSnapshot) -> Value {
     format_usage_amounts(&snapshot.turn_total.amounts)
 }
 

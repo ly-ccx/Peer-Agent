@@ -533,7 +533,7 @@ impl GoalStore {
         let snapshot = self.read_bounded(plan_id, projector, cancel, 512 * 1024)?;
         let plan = self.read_context(plan_id, &snapshot.source_revision)?;
         if snapshot.facts["conversationId"] != publication.conversation
-            || plan["originWorkspacePath"].as_str().map(Path::new) != Some(publication.workspace)
+            || !super::plan_matches_workspace(&plan, publication.workspace)
         {
             return Err(missing);
         }

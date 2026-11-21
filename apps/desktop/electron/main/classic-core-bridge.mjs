@@ -99,10 +99,14 @@ export function createClassicCoreBridge({
   getClient,
   getLocalToolHost = () => null,
   broadcast = null,
+  onGoalPlanChanged = null,
+  prepareGoalWorkspace = null,
+  runVisualVerification = null,
   logger = console,
 } = {}) {
   const activeStreams = new Map();
   const pendingPermissions = new Map();
+  const activeGoals = new Set();
 
   function activeClient() {
     const client = typeof getClient === 'function' ? getClient() : null;
@@ -117,11 +121,23 @@ export function createClassicCoreBridge({
     return activeClient() !== null;
   }
 
-  function canHandleChatSend({ mode = 'chat', hasActiveGoal = false } = {}) {
+  function canHandleChatSend({ mode = 'chat' } = {}) {
     if (!isAvailable()) return false;
-    if (hasActiveGoal) return false;
     const normalized = mode || 'chat';
-    return normalized === 'chat' || normalized === 'plan';
+    return normalized === 'chat' || normalized === 'plan' || normalized === 'goal';
+  }
+
+  function canHandleGoalPlan(plan) {
+    return Boolean(
+      isAvailable()
+      && plan
+      && !plan.delegationOrigin
+      && !plan.parentPlanId,
+    );
+  }
+
+  function ownsGoalPlan(planId) {
+    return typeof planId === 'string' && activeGoals.has(planId);
   }
 
   function ownsStream(streamId) {
@@ -158,6 +174,53 @@ export function createClassicCoreBridge({
   }
 
   function handleNotification(method, params) {
+    if (method === 'goalPlans:changed') {
+      if (typeof onGoalPlanChanged === 'function') {
+        onGoalPlanChanged(params);
+      } else {
+        broadcast?.(method, params);
+      }
+      return;
+    }
+
+    if (method === 'goalRunner:changed') {
+      const planId = typeof params?.planId === 'string' ? params.planId : '';
+      const eventType = params?.type;
+      if (eventType === 'goalRunner:streamStarted' && typeof params?.streamId === 'string' && params.streamId) {
+        if (planId) activeGoals.add(planId);
+        if (!activeStreams.has(params.streamId)) {
+          let resolveTick;
+          const tickPromise = new Promise((resolve) => {
+            resolveTick = resolve;
+          });
+          activeStreams.set(params.streamId, {
+            streamId: params.streamId,
+            conversationId: params?.conversationId ?? null,
+            webContents: null,
+            startedAt: typeof params?.startedAt === 'number' ? params.startedAt : Date.now(),
+            accumulatedText: '',
+            isGoalTick: true,
+            promise: tickPromise,
+            resolve: resolveTick,
+          });
+        }
+      } else if (planId) {
+        if (eventType === 'goalRunner:started' || eventType === 'goalRunner:resumed') {
+          activeGoals.add(planId);
+        } else if (
+          eventType === 'goalRunner:completed'
+          || eventType === 'goalRunner:paused'
+          || eventType === 'goalRunner:cleared'
+          || eventType === 'goalRunner:failed'
+          || eventType === 'goalRunner:blocked'
+        ) {
+          activeGoals.delete(planId);
+        }
+      }
+      broadcast?.(method, params);
+      return;
+    }
+
     if (method === 'chat:stream:active-changed' || method === 'chat:stream:compaction') {
       broadcast?.(method, params);
       return;
@@ -231,6 +294,7 @@ export function createClassicCoreBridge({
   }
 
   function handleUnexpectedExit() {
+    activeGoals.clear();
     if (activeStreams.size === 0) return;
     const entries = [...activeStreams.entries()];
     activeStreams.clear();
@@ -315,6 +379,16 @@ export function createClassicCoreBridge({
         );
         return normalizeHostToolOutcome(executionResult);
       },
+      'host.goal.prepareWorkspace': async (params = {}) => (
+        typeof prepareGoalWorkspace === 'function'
+          ? await prepareGoalWorkspace(params)
+          : { workspacePath: null }
+      ),
+      'host.goal.runVisualVerification': async (params = {}) => (
+        typeof runVisualVerification === 'function'
+          ? await runVisualVerification(params)
+          : { required: false, passed: true, report: null }
+      ),
     };
   }
 
@@ -340,6 +414,7 @@ export function createClassicCoreBridge({
       webContents,
       startedAt: Date.now(),
       accumulatedText: '',
+      promise: outcomePromise,
       resolve: resolveOutcome,
     };
     activeStreams.set(streamId, record);
@@ -477,18 +552,84 @@ export function createClassicCoreBridge({
     }
   }
 
+  function forceCompleteConversationStreams(conversationId) {
+    if (!conversationId) return { released: Promise.resolve() };
+    const waiters = [];
+    for (const [streamId, record] of activeStreams.entries()) {
+      if (record.conversationId === conversationId) {
+        if (record.promise) waiters.push(record.promise);
+        void abort(streamId);
+      }
+    }
+    return {
+      released: Promise.all(waiters.map((promise) => promise.catch(() => null))),
+    };
+  }
+
+  async function startGoalRunner(planId, options = {}) {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    const timeoutMs = options?.awaitIdle ? 600_000 : 60_000;
+    return client.request('classic.goal.start', {
+      planId,
+      ...(options && Object.keys(options).length > 0 ? { options } : {}),
+    }, { timeoutMs });
+  }
+
+  async function resumeGoalRunner(planId, options = {}) {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    const timeoutMs = options?.awaitIdle ? 600_000 : 60_000;
+    return client.request('classic.goal.resume', {
+      planId,
+      ...(options && Object.keys(options).length > 0 ? { options } : {}),
+    }, { timeoutMs });
+  }
+
+  async function pauseGoalRunner(planId, reason) {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    return client.request('classic.goal.pause', {
+      planId,
+      ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
+    });
+  }
+
+  async function clearGoalRunner(planId, reason) {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    return client.request('classic.goal.clear', {
+      planId,
+      ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
+    });
+  }
+
+  async function getGoalRunnerState(planId) {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    return client.request('classic.goal.getState', { planId });
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
+    canHandleGoalPlan,
+    ownsGoalPlan,
     ownsStream,
     ownsPermission,
     send,
     abort,
     reattach,
     listActiveSync,
+    forceCompleteConversationStreams,
     compact,
     resolvePermissionGrant,
     setLocalAccessLevel,
+    startGoalRunner,
+    resumeGoalRunner,
+    pauseGoalRunner,
+    clearGoalRunner,
+    getGoalRunnerState,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

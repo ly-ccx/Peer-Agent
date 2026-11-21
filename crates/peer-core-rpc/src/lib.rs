@@ -6,6 +6,7 @@
 //! keeping capability projection, permission gates, storage and Evidence local.
 
 pub mod classic;
+mod classic_goal;
 mod classic_streams;
 mod external_provider;
 pub mod protocol;
@@ -146,7 +147,10 @@ mod tests {
             .await;
         let caps = client.recv().await.expect("caps reply");
         assert_eq!(caps["id"], 3);
-        assert_eq!(caps["result"]["domains"], json!(["core", "classic.chat"]));
+        assert_eq!(
+            caps["result"]["domains"],
+            json!(["core", "classic.chat", "classic.goal"])
+        );
         assert_eq!(
             caps["result"]["externalCapabilities"]
                 .as_array()

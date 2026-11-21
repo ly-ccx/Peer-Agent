@@ -353,6 +353,7 @@ impl GoalStore {
         let mut ids = HashSet::new();
         let mut revisions = Vec::new();
         let mut active = None;
+        let mut promote_intake: Option<(String, Value)> = None;
         for row in &index {
             let id = row["planId"]
                 .as_str()
@@ -373,15 +374,161 @@ impl GoalStore {
             }
             if snapshot.facts["active"] == true {
                 let raw = self.read_context(id, &snapshot.source_revision)?;
-                if active.is_some()
-                    || !same_draft(&raw, &expected)
-                    || snapshot.facts["runner"].is_object()
-                {
+                let is_promotable_intake = raw["activation"]["kind"] == "intake"
+                    && raw["delegationOrigin"].is_null()
+                    && raw["parentPlanId"].is_null()
+                    && raw["approval"].is_null()
+                    && !matches!(
+                        raw["runner"]["status"].as_str(),
+                        Some("running" | "exploring" | "verifying")
+                    );
+                if active.is_some() || promote_intake.is_some() {
                     return Err(GoalError::Projection("goal_active_requires_reconciliation"));
                 }
-                active = Some(id.to_owned());
+                if is_promotable_intake {
+                    promote_intake = Some((id.to_owned(), raw));
+                } else {
+                    if !same_draft(&raw, &expected) || snapshot.facts["runner"].is_object() {
+                        return Err(GoalError::Projection("goal_active_requires_reconciliation"));
+                    }
+                    active = Some(id.to_owned());
+                }
             }
             revisions.push((id.to_owned(), snapshot.source_revision));
+        }
+
+        let changes = directory.join(".changes.jsonl");
+        if let Some((target_plan_id, mut promoted)) = promote_intake {
+            let target_plan_path = directory.join(format!("{target_plan_id}.json"));
+            let target_before = files::identity(&target_plan_path)?;
+            for key in [
+                "title",
+                "goal",
+                "targetWorkspacePath",
+                "tasks",
+                "successCriteria",
+                "progress",
+                "executionPolicy",
+            ] {
+                promoted[key] = expected[key].clone();
+            }
+            let (status, workflow_kind, mut activation) =
+                if matches!(request.kind, OrdinaryGoalKind::Plan) {
+                    (
+                        "awaiting_approval",
+                        "plan_approval",
+                        json!({ "kind": "approval_required" }),
+                    )
+                } else {
+                    (
+                        "accepted",
+                        "goal_self_driven",
+                        json!({
+                            "kind": "accepted_goal",
+                            "acceptedAt": request.at,
+                            "acceptedBy": "user",
+                            "intakeResolution": "goal_confirmed",
+                        }),
+                    )
+                };
+            if let Some(source_msg_id) = promoted["activation"]["sourceMessageId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+            {
+                activation["sourceMessageId"] = json!(source_msg_id);
+            }
+            promoted["status"] = json!(status);
+            promoted["workflowKind"] = json!(workflow_kind);
+            if !matches!(request.kind, OrdinaryGoalKind::Plan) {
+                if !promoted["executionPolicy"].is_object() {
+                    promoted["executionPolicy"] = json!({});
+                }
+                promoted["executionPolicy"]["autonomy"] = json!("self_driven");
+            }
+            promoted["activation"] = activation;
+            promoted["updatedAt"] = json!(request.at);
+            promoted["version"] =
+                json!(promoted["version"].as_u64().unwrap_or(1).saturating_add(1));
+            if let Some(runner) = promoted.get_mut("runner").and_then(Value::as_object_mut) {
+                for stale in [
+                    "interruption",
+                    "requestedInput",
+                    "blockedReason",
+                    "lastError",
+                ] {
+                    runner.remove(stale);
+                }
+                if runner.get("status").and_then(Value::as_str) == Some("waiting_user") {
+                    runner.insert("status".into(), json!("idle"));
+                    runner.insert("enabled".into(), json!(false));
+                    runner.insert("phase".into(), json!("orient"));
+                    runner.insert("updatedAt".into(), json!(request.at));
+                }
+            }
+
+            let row = index
+                .iter_mut()
+                .find(|row| row["planId"] == target_plan_id)
+                .ok_or(GoalError::Changed)?;
+            for key in [
+                "title",
+                "status",
+                "workflowKind",
+                "targetWorkspacePath",
+                "version",
+                "updatedAt",
+            ] {
+                row[key] = promoted[key].clone();
+            }
+            row["percent"] = json!(0);
+
+            let index_bytes = log::encode(&index)?;
+            let bytes = serde_json::to_vec(&promoted).map_err(|_| GoalError::Invalid)?;
+            notification_exists(&changes, None, cancel)?;
+            let fingerprint = format!(
+                "{}-{}",
+                at.unix_timestamp_nanos() / 1_000_000,
+                target_plan_id
+            );
+            let change_kind = if matches!(request.kind, OrdinaryGoalKind::Plan) {
+                "persist"
+            } else {
+                "goal-accepted"
+            };
+            let event = log::encode(&[json!({
+                "reason": "persist",
+                "planId": target_plan_id,
+                "conversationId": request.conversation,
+                "revision": fingerprint,
+                "writerPid": std::process::id(),
+                "changedAt": request.at,
+                "changeKind": change_kind,
+            })])?;
+
+            if files::identity(&index_path)? != index_before
+                || files::identity(&target_plan_path)? != target_before
+            {
+                return Err(GoalError::Changed);
+            }
+            for (id, revision) in revisions {
+                if self.revision(&id)? != revision {
+                    return Err(GoalError::Changed);
+                }
+            }
+            admit().map_err(GoalError::Projection)?;
+            log::check_cancel(cancel)?;
+            lock.check_owned()?;
+            log::replace(&target_plan_path, &bytes, cancel)?;
+            log::replace(&index_path, &index_bytes, None).map_err(uncertain)?;
+            log::append_to_limit(&changes, &event, u64::MAX, None).map_err(uncertain)?;
+            let value = self
+                .read_tool_view(request.conversation, Some(&target_plan_id), projector, None)
+                .map_err(|_| GoalError::Store(StoreError::CommitUncertain))?;
+            if value["ok"] != true {
+                return Err(GoalError::Store(StoreError::CommitUncertain));
+            }
+            lock.release().map_err(uncertain)?;
+            return Ok(receipt(value["plan"].clone()));
         }
 
         let plan_path = directory.join(format!("{}.json", request.plan_id));
@@ -417,7 +564,6 @@ impl GoalStore {
         }
         let index_bytes = log::encode(&index)?;
         let bytes = serde_json::to_vec(&raw).map_err(|_| GoalError::Invalid)?;
-        let changes = directory.join(".changes.jsonl");
         let repeated = active.as_deref().filter(|id| *id != request.plan_id);
         let already_notified = repeated.is_none()
             && notification_exists(
@@ -571,5 +717,96 @@ mod tests {
             )
             .unwrap();
         assert_eq!(std::fs::read_to_string(&changes).unwrap(), events);
+    }
+
+    #[test]
+    fn publish_ordinary_goal_promotes_intake_contract_in_place() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path();
+        let store = GoalStore::new(root.path());
+        let dir = root.path().join("goal-plans");
+        std::fs::create_dir_all(&dir).unwrap();
+        let intake_plan_id = "plan-intake-1";
+        let intake_body = json!({
+            "planId": intake_plan_id,
+            "conversationId": "conv-1",
+            "originWorkspacePath": workspace,
+            "targetWorkspacePath": workspace,
+            "title": "",
+            "goal": "raw user text",
+            "tasks": [{ "taskId": "task-1", "title": "intake", "status": "pending" }],
+            "successCriteria": [],
+            "status": "executing",
+            "workflowKind": "goal_self_driven",
+            "activation": { "kind": "intake", "sourceMessageId": "msg-1" },
+            "version": 1,
+            "createdAt": "2026-11-20T00:00:00Z",
+            "updatedAt": "2026-11-20T00:00:00Z",
+            "runner": { "status": "waiting_user", "enabled": false, "interruption": { "source": "stream_interrupted" } },
+            "progress": { "total": 1, "completed": 0, "failed": 0, "blocked": 0, "percent": 0 }
+        });
+        std::fs::write(
+            dir.join(format!("{intake_plan_id}.json")),
+            serde_json::to_vec(&intake_body).unwrap(),
+        )
+        .unwrap();
+        let index_row = json!({
+            "planId": intake_plan_id,
+            "title": "",
+            "status": "executing",
+            "workflowKind": "goal_self_driven",
+            "conversationId": "conv-1",
+            "originWorkspacePath": workspace,
+            "targetWorkspacePath": workspace,
+            "version": 1,
+            "createdAt": "2026-11-20T00:00:00Z",
+            "updatedAt": "2026-11-20T00:00:00Z",
+            "percent": 0
+        });
+        std::fs::write(
+            dir.join("index.jsonl"),
+            format!("{}\n", serde_json::to_string(&index_row).unwrap()),
+        )
+        .unwrap();
+
+        let draft = OrdinaryGoalDraft::parse(
+            &json!({
+                "title": "Structured Goal",
+                "goal": "Complete structured task",
+                "tasks": [{ "taskId": "t1", "title": "Step 1" }]
+            }),
+            workspace,
+        )
+        .unwrap();
+        let res = store
+            .publish_ordinary_goal(
+                &draft,
+                GoalPublication {
+                    plan_id: "new-tool-call-plan-id",
+                    conversation: "conv-1",
+                    workspace,
+                    kind: OrdinaryGoalKind::SelfDriven,
+                    at: "2026-11-20T00:05:00Z",
+                },
+                &ScopedPlanFacts,
+                None,
+                || Ok(()),
+            )
+            .unwrap();
+        assert_eq!(res["planId"], intake_plan_id);
+        assert_eq!(res["status"], "accepted");
+        assert_eq!(res["workflowKind"], "goal_self_driven");
+        let saved: Value = serde_json::from_slice(
+            &std::fs::read(dir.join(format!("{intake_plan_id}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["activation"]["kind"], "accepted_goal");
+        assert_eq!(saved["activation"]["sourceMessageId"], "msg-1");
+        assert_eq!(saved["activation"]["intakeResolution"], "goal_confirmed");
+        assert_eq!(saved["version"], 2);
+        assert_eq!(saved["runner"]["status"], "idle");
+        assert!(saved["runner"].get("interruption").is_none());
+        assert!(!dir.join("new-tool-call-plan-id.json").exists());
+        assert_eq!(log::read(&dir.join("index.jsonl"), None).unwrap().len(), 1);
     }
 }

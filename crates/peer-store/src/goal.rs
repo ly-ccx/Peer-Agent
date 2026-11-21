@@ -139,6 +139,35 @@ impl LocalGoalIntake {
 pub struct GoalStore {
     directory: PathBuf,
 }
+
+fn matches_workspace_path(candidate: Option<&str>, workspace: &Path) -> bool {
+    let Some(raw) = candidate.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    if Path::new(raw) == workspace {
+        return true;
+    }
+    match (
+        std::fs::canonicalize(raw).ok(),
+        std::fs::canonicalize(workspace).ok(),
+    ) {
+        (Some(cand_canon), Some(ws_canon)) => cand_canon == ws_canon,
+        (Some(cand_canon), None) => cand_canon == workspace,
+        _ => false,
+    }
+}
+
+pub(super) fn plan_matches_workspace(plan: &Value, workspace: &Path) -> bool {
+    if plan["deliveryBinding"]["executionIsolation"] == "worktree" {
+        return matches_workspace_path(plan["deliveryBinding"]["worktreePath"].as_str(), workspace);
+    }
+    matches_workspace_path(plan["targetWorkspacePath"].as_str(), workspace)
+        || matches_workspace_path(
+            plan["deliveryBinding"]["targetWorkspacePath"].as_str(),
+            workspace,
+        )
+        || matches_workspace_path(plan["originWorkspacePath"].as_str(), workspace)
+}
 fn read(
     path: &Path,
     spec: &S<'_>,
@@ -488,5 +517,102 @@ impl GoalStore {
             source_bytes: bytes + progress.map_or(0, |(_, n)| n),
             has_delegation_origin: !plan["delegationOrigin"].is_null(),
         })
+    }
+
+    pub fn read_plan_snapshot(&self, plan_id: &str) -> Result<Option<Value>, GoalError> {
+        if !valid_id(plan_id, false) {
+            return Err(GoalError::Invalid);
+        }
+        let path = self.directory.join(format!("{plan_id}.json"));
+        if files::identity(&path)?.is_none() {
+            return Ok(None);
+        }
+        let revision = self.revision(plan_id)?;
+        let plan = self.read_context(plan_id, &revision)?;
+        if plan["planId"] != plan_id {
+            return Err(GoalError::Invalid);
+        }
+        Ok(Some(plan))
+    }
+
+    pub fn observe_plan_for_runner(
+        &self,
+        plan_id: &str,
+        workspace: &Path,
+        projector: &impl GoalFactProjector,
+    ) -> Result<LocalGoalIntake, GoalError> {
+        if !valid_id(plan_id, false) {
+            return Err(GoalError::Invalid);
+        }
+        let index_path = self.directory.join("index.jsonl");
+        let index_before = files::identity(&index_path)?.ok_or(StoreError::NotFound)?;
+        let snapshot = self.read(plan_id, projector, None)?;
+        let raw = self.read_context(plan_id, &snapshot.source_revision)?;
+        if snapshot.has_delegation_origin
+            || !raw["parentPlanId"].is_null()
+            || !raw["delegationOrigin"].is_null()
+        {
+            return Err(GoalError::Projection("goal_plan_requires_current_owner"));
+        }
+        let canonical_ws =
+            std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
+        if !plan_matches_workspace(&raw, &canonical_ws) {
+            return Err(GoalError::Projection("goal_plan_requires_current_owner"));
+        }
+        let resource_dir = snapshot.facts["resourceDirectory"]
+            .as_str()
+            .ok_or(GoalError::Projection("goal_plan_requires_current_owner"))?;
+        if std::fs::canonicalize(resource_dir).as_ref().ok() != Some(&canonical_ws) {
+            return Err(GoalError::Projection("goal_plan_requires_current_owner"));
+        }
+        let index_revision = files::fingerprint(&[Some(index_before)]);
+        Ok(LocalGoalIntake {
+            plan_id: plan_id.to_owned(),
+            plan_revision: snapshot.source_revision,
+            index_revision,
+            workspace: canonical_ws,
+            plan_directory: resource_dir.into(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn plan_matches_workspace_respects_worktree_and_fallback_precedence() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = root.path().join("origin");
+        let worktree = root.path().join("wt-1");
+        let other = root.path().join("other");
+        std::fs::create_dir_all(&origin).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+
+        let isolated = json!({
+            "originWorkspacePath": origin,
+            "targetWorkspacePath": origin,
+            "deliveryBinding": {
+                "executionIsolation": "worktree",
+                "worktreePath": worktree,
+                "targetWorkspacePath": origin,
+            }
+        });
+        assert!(plan_matches_workspace(&isolated, &worktree));
+        assert!(plan_matches_workspace(
+            &isolated,
+            &std::fs::canonicalize(&worktree).unwrap()
+        ));
+        assert!(!plan_matches_workspace(&isolated, &origin));
+        assert!(!plan_matches_workspace(&isolated, &other));
+
+        let direct = json!({
+            "originWorkspacePath": origin,
+            "targetWorkspacePath": other,
+        });
+        assert!(plan_matches_workspace(&direct, &other));
+        assert!(plan_matches_workspace(&direct, &origin));
     }
 }

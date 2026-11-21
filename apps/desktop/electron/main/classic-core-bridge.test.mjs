@@ -247,10 +247,12 @@ test('E2E: Node bridge <-> peer-native core --stdio executes chat streaming, per
   try {
     await client.start();
     assert.equal(bridge.isAvailable(), true);
-    assert.equal(bridge.canHandleChatSend({ mode: 'chat', hasActiveGoal: false }), true);
-    assert.equal(bridge.canHandleChatSend({ mode: 'plan', hasActiveGoal: false }), true);
-    assert.equal(bridge.canHandleChatSend({ mode: 'goal', hasActiveGoal: false }), false);
-    assert.equal(bridge.canHandleChatSend({ mode: 'chat', hasActiveGoal: true }), false);
+    assert.equal(bridge.canHandleChatSend({ mode: 'chat' }), true);
+    assert.equal(bridge.canHandleChatSend({ mode: 'plan' }), true);
+    assert.equal(bridge.canHandleChatSend({ mode: 'goal' }), true);
+    assert.equal(bridge.canHandleGoalPlan({ planId: 'p1', delegationOrigin: null }), true);
+    assert.equal(bridge.canHandleGoalPlan({ planId: 'p2', delegationOrigin: { sessionId: 'bot-1' } }), false);
+    assert.equal(bridge.canHandleGoalPlan({ planId: 'p3', parentPlanId: 'parent-1' }), false);
 
     // 1. Streaming chat turn + single-row JSONL persistence
     seedPreparedConversation({
@@ -393,6 +395,293 @@ test('E2E: Node bridge <-> peer-native core --stdio executes chat streaming, per
     } catch {
       // ignore if already closed
     }
+  } finally {
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});
+
+function seedGoalPlanFile({ dataHome, plan }) {
+  const goalDir = path.join(dataHome, 'goal-plans');
+  mkdirSync(goalDir, { recursive: true });
+  writeFileSync(path.join(goalDir, `${plan.planId}.json`), JSON.stringify(plan, null, 2), 'utf8');
+  const indexPath = path.join(goalDir, 'index.jsonl');
+  const row = {
+    planId: plan.planId,
+    title: plan.title,
+    status: plan.status,
+    workflowKind: plan.workflowKind,
+    conversationId: plan.conversationId,
+    originWorkspacePath: plan.originWorkspacePath,
+    targetWorkspacePath: plan.targetWorkspacePath,
+    version: plan.version,
+    createdAt: plan.createdAt,
+    updatedAt: plan.updatedAt,
+    percent: 0,
+  };
+  const prev = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '';
+  writeFileSync(indexPath, `${prev}${JSON.stringify(row)}\n`, 'utf8');
+}
+
+function extractLastToolEvidenceRef(body) {
+  for (const msg of [...(body?.messages ?? [])].reverse()) {
+    if (msg.role !== 'tool' || typeof msg.content !== 'string') continue;
+    try {
+      const parsed = JSON.parse(msg.content);
+      if (Array.isArray(parsed?.evidenceRefs) && parsed.evidenceRefs[0]) {
+        return parsed.evidenceRefs[0];
+      }
+    } catch {
+      // ignore non-json tool content
+    }
+  }
+  return null;
+}
+
+test('E2E: Node bridge <-> peer-native core --stdio drives Goal Runner with worktree, visual repair, pause, resume, and clear', async () => {
+  const { root, dataHome, workspace: originWorkspace, cleanup } = makeTempDirs();
+  const worktreeWorkspace = path.join(root, 'worktree-ws');
+  mkdirSync(worktreeWorkspace, { recursive: true });
+  const binaryPath = resolveTestBinary();
+  const planId = 'e2e-goal-visual-1';
+  const convId = 'conv-goal-e2e-1';
+  const now = new Date().toISOString();
+
+  seedPreparedConversation({
+    dataHome,
+    workspace: originWorkspace,
+    conversationId: convId,
+    userText: 'Build feature in worktree',
+    assistantMessageId: 'msg-init-asst',
+    mode: 'goal',
+  });
+  seedGoalPlanFile({
+    dataHome,
+    plan: {
+      planId,
+      conversationId: convId,
+      originWorkspacePath: originWorkspace,
+      targetWorkspacePath: originWorkspace,
+      title: 'Worktree Visual Goal',
+      goal: 'Create widget.txt in isolated worktree',
+      tasks: [{
+        taskId: 't1',
+        title: 'Write widget.txt',
+        status: 'pending',
+        involvedFiles: ['widget.txt'],
+      }],
+      successCriteria: [{ id: 'c1', kind: 'model_review', description: 'widget.txt exists' }],
+      status: 'accepted',
+      workflowKind: 'goal_self_driven',
+      activation: { kind: 'accepted_goal', acceptedAt: now, acceptedBy: 'user' },
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      progress: { total: 1, completed: 0, failed: 0, blocked: 0, percent: 0 },
+    },
+  });
+
+  let llmCallIndex = 0;
+  let releasePausedTurn = null;
+  let onPauseTurnStarted;
+  const pauseTurnStarted = new Promise((resolve) => {
+    onPauseTurnStarted = resolve;
+  });
+
+  const mockServer = await startMockSseServer(({ body, res }) => {
+    const step = llmCallIndex++;
+    if (step === 0) {
+      // First start -> pause mid-flight test
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ id: 'g-p', choices: [{ index: 0, delta: { role: 'assistant', content: 'starting...' }, finish_reason: null }] })}\n\n`);
+      releasePausedTurn = () => {
+        try {
+          res.end(sseText('', ' paused chunk'));
+        } catch {
+          // socket already closed
+        }
+      };
+      onPauseTurnStarted();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    if (step === 1) {
+      res.end(sseToolCall('call-w1', 'write_file', { path: 'widget.txt', content: 'draft-v1' }));
+      return;
+    }
+    if (step === 2) {
+      const evRef = extractLastToolEvidenceRef(body);
+      assert.ok(evRef);
+      res.end(sseToolCall('call-u1', 'goal_update_task', {
+        planId,
+        taskId: 't1',
+        status: 'completed',
+        evidenceRefs: [evRef],
+        result: 'Wrote draft-v1',
+      }));
+      return;
+    }
+    if (step === 3) {
+      res.end(sseText('', 'Draft v1 complete.'));
+      return;
+    }
+    if (step === 4) {
+      res.end(sseToolCall('call-ver-1', 'read_file', { path: 'widget.txt' }));
+      return;
+    }
+    if (step === 5) {
+      const evRef = extractLastToolEvidenceRef(body);
+      res.end(sseText('', JSON.stringify({
+        passed: true,
+        failedCriteria: [],
+        missingEvidence: [],
+        risks: [],
+        evidenceRefs: [evRef],
+        summary: 'Verifier 1 passed',
+        recommendedNextAction: 'complete',
+      })));
+      return;
+    }
+    if (step === 6) {
+      res.end(sseToolCall('call-r2', 'read_file', { path: 'widget.txt' }));
+      return;
+    }
+    if (step === 7) {
+      res.end(sseToolCall('call-w2', 'write_file', { path: 'widget.txt', content: 'final-v2', allow_overwrite: true }));
+      return;
+    }
+    if (step === 8) {
+      const evRef = extractLastToolEvidenceRef(body);
+      res.end(sseToolCall('call-u2', 'goal_update_task', {
+        planId,
+        taskId: 't1',
+        status: 'completed',
+        evidenceRefs: [evRef],
+        result: 'Fixed visual defect in final-v2',
+      }));
+      return;
+    }
+    if (step === 9) {
+      res.end(sseText('', 'Applied visual fix.'));
+      return;
+    }
+    if (step === 10) {
+      res.end(sseToolCall('call-ver-2', 'read_file', { path: 'widget.txt' }));
+      return;
+    }
+    const evRef = extractLastToolEvidenceRef(body);
+    res.end(sseText('', JSON.stringify({
+      passed: true,
+      failedCriteria: [],
+      missingEvidence: [],
+      risks: [],
+      evidenceRefs: [evRef],
+      summary: 'Verifier 2 passed',
+      recommendedNextAction: 'complete',
+    })));
+  });
+
+  const planChanges = [];
+  const runnerChanges = [];
+  let prepareCalls = 0;
+  let visualCalls = 0;
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: (channel, payload) => {
+      if (channel === 'goalRunner:changed') runnerChanges.push(payload);
+    },
+    onGoalPlanChanged: (payload) => planChanges.push(payload),
+    prepareGoalWorkspace: async ({ planId: targetPlanId }) => {
+      prepareCalls += 1;
+      const planFile = path.join(dataHome, 'goal-plans', `${targetPlanId}.json`);
+      const plan = JSON.parse(readFileSync(planFile, 'utf8'));
+      plan.deliveryBinding = {
+        executionIsolation: 'worktree',
+        worktreePath: worktreeWorkspace,
+        targetWorkspacePath: originWorkspace,
+      };
+      writeFileSync(planFile, JSON.stringify(plan, null, 2), 'utf8');
+      return { workspacePath: worktreeWorkspace };
+    },
+    runVisualVerification: async ({ workspacePath }) => {
+      visualCalls += 1;
+      assert.ok(workspacePath.includes('worktree-ws'));
+      if (visualCalls === 1) {
+        return {
+          required: true,
+          passed: false,
+          report: {
+            passed: false,
+            summary: 'Button overlaps label',
+            findings: [{ summary: 'Button overlaps label' }],
+            evidenceRefs: ['desktop-preview://e2e-1'],
+          },
+        };
+      }
+      return {
+        required: true,
+        passed: true,
+        report: {
+          passed: true,
+          summary: 'Visual layout ok',
+          evidenceRefs: ['desktop-preview://e2e-2'],
+        },
+      };
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-goal',
+      PEER_MODEL_ID: 'e2e-mock-gpt',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-goal-e2e', version: '0.1.0-test' },
+    externalCapabilities: [],
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    await bridge.setLocalAccessLevel('full_local');
+
+    // Start + Pause mid-flight
+    const started = await bridge.startGoalRunner(planId);
+    assert.equal(started.runner.status, 'running');
+    await pauseTurnStarted;
+    const paused = await bridge.pauseGoalRunner(planId, 'paused');
+    assert.equal(paused.planStatus, 'paused');
+    assert.equal(paused.runner.status, 'paused');
+    releasePausedTurn?.();
+
+    // Resume -> runs to completion through worktree + text verifier + visual fail/repair/pass
+    const completed = await bridge.resumeGoalRunner(planId, { awaitIdle: true });
+    assert.equal(completed.planStatus, 'completed');
+    assert.equal(completed.runner.status, 'completed');
+    assert.equal(completed.runner.visualVerification.passed, true);
+    assert.equal(readFileSync(path.join(worktreeWorkspace, 'widget.txt'), 'utf8'), 'final-v2');
+    assert.equal(existsSync(path.join(originWorkspace, 'widget.txt')), false);
+    assert.equal(prepareCalls, 2);
+    assert.equal(visualCalls, 2);
+    assert.ok(planChanges.length > 0);
+    assert.ok(runnerChanges.some((e) => e.type === 'goalRunner:streamStarted' && e.streamId && e.assistantMessageId));
+    assert.ok(runnerChanges.some((e) => e.type === 'goalRunner:visualRepairStarted'));
+    assert.ok(runnerChanges.some((e) => e.type === 'goalRunner:completed'));
+
+    // getState + clear
+    const state = await bridge.getGoalRunnerState(planId);
+    assert.equal(state.planStatus, 'completed');
+    const cleared = await bridge.clearGoalRunner(planId, 'cleared');
+    assert.equal(cleared.planStatus, 'cancelled');
+    assert.equal(cleared.runner.status, 'idle');
   } finally {
     await client.dispose();
     await mockServer.close();

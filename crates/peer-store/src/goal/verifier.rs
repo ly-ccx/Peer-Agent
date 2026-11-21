@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 const MODEL_REVIEW_HISTORY: usize = 64;
 const VERIFICATION_REPAIR_ATTEMPTS: usize = 2;
+const VISUAL_REPAIR_ATTEMPTS: usize = 2;
 
 pub struct VerifierLease {
     pub id: String,
@@ -27,6 +28,13 @@ pub struct VerifierReceipt {
     source: LocalGoalIntake,
     id: String,
     allows_repair: bool,
+    passed: bool,
+}
+
+impl VerifierReceipt {
+    pub fn passed(&self) -> bool {
+        self.passed
+    }
 }
 
 fn model_review_ids(plan: &Value) -> impl Iterator<Item = &str> {
@@ -245,6 +253,7 @@ impl GoalStore {
             allows_repair: allows_repair
                 && !passed
                 && used.as_array().is_some_and(|refs| !refs.is_empty()),
+            passed,
             source: LocalGoalIntake {
                 plan_revision,
                 index_revision: files::fingerprint(&[index]),
@@ -300,6 +309,91 @@ impl GoalStore {
         reopen_for_repair(&mut plan, at);
         transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
         Ok(true)
+    }
+
+    pub fn begin_visual_verification_repair(
+        &self,
+        owner: &OrdinaryRunner,
+        check_id: &str,
+        report: &Value,
+        at: &str,
+        admit: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<bool, GoalError> {
+        if !valid_id(check_id, false) {
+            return Err(GoalError::Invalid);
+        }
+        let transaction = PlanWrite::lock(self)?;
+        let (source, mut plan) = self.read_ordinary_runner(owner)?;
+        if verifier_runs(&plan).any(|row| row["verifierRunId"] == check_id) {
+            return Err(GoalError::Changed);
+        }
+        let revision = criterion_revision(&plan)?;
+        let summary = report["summary"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("Visual verification failed")
+            .to_owned();
+        let refs = report["evidenceRefs"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| json!(s))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let visual_repair_count = verifier_runs(&plan)
+            .filter(|row| {
+                row["nativeCheck"] == "visual_verification"
+                    && row["nativeRepair"]["streamId"] == owner.stream_id()
+            })
+            .count();
+        let eligible = !plan["runner"]["requestedInput"].is_object()
+            && visual_repair_count < VISUAL_REPAIR_ATTEMPTS
+            && (plan["workflowKind"] == "goal_self_driven"
+                || plan["executionPolicy"]["autonomy"] == "self_driven"
+                || plan["activation"]["kind"] == "accepted_goal"
+                || plan["approval"]["decision"] == "approve");
+
+        let mut row = json!({
+            "verifierRunId": check_id,
+            "planId": source.plan_id(),
+            "target": { "kind": "plan" },
+            "status": "failed",
+            "nativeCheck": "visual_verification",
+            "sourceRevision": revision,
+            "summary": summary,
+            "failureReason": "goal_visual_verification_failed",
+            "evidenceRefs": refs,
+            "report": report,
+            "createdAt": at,
+            "updatedAt": at,
+        });
+        if eligible {
+            row["nativeRepair"] = repair_admission(owner, at);
+        }
+
+        let runner = plan["runner"].as_object_mut().ok_or(GoalError::Invalid)?;
+        runner.insert("visualVerification".into(), report.clone());
+        let runs = runner
+            .entry("verifierRuns")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or(GoalError::Invalid)?;
+        runs.push(row);
+        if eligible {
+            plan["runner"]["visualRepair"] = json!(true);
+            reopen_for_repair(&mut plan, at);
+        } else {
+            if let Some(obj) = plan["runner"].as_object_mut() {
+                obj.remove("visualRepair");
+            }
+            plan["runner"]["updatedAt"] = json!(at);
+            plan["updatedAt"] = json!(at);
+        }
+        transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
+        Ok(eligible)
     }
 
     pub fn begin_completion_gate_repair(

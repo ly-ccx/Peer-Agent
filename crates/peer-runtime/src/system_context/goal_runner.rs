@@ -170,19 +170,27 @@ pub(super) fn sections(plan: &Value) -> Result<[Value; 2], &'static str> {
                     && review["nativeRepair"]["settledAt"].is_null()
             })
     {
-        let source = if review["nativeCheck"] == "completion_gate" {
-            "Completion gate"
-        } else {
-            "Independent verification"
+        let source = match review["nativeCheck"].as_str() {
+            Some("completion_gate") => "Completion gate",
+            Some("visual_verification") => "Visual verification",
+            _ => "Independent verification",
         };
         lines.push(format!("{source} failed: {}", observed(&review["summary"])));
-        for issue in ["failedCriteria", "missingEvidence"]
-            .into_iter()
-            .flat_map(|key| review["report"][key].as_array().into_iter().flatten())
-            .take(6)
+        for issue in [
+            "failedCriteria",
+            "missingEvidence",
+            "findings",
+            "repairSuggestions",
+        ]
+        .into_iter()
+        .flat_map(|key| review["report"][key].as_array().into_iter().flatten())
+        .take(6)
         {
             let reason = if issue.is_object() {
-                &issue["reason"]
+                ["reason", "summary", "message", "suggestion", "description"]
+                    .into_iter()
+                    .find_map(|k| issue.get(k).filter(|v| !v.is_null()))
+                    .unwrap_or(issue)
             } else {
                 issue
             };

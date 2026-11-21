@@ -14,6 +14,19 @@ pub(super) struct Runner {
     pub frame: Option<(LocalGoalIntake, Value)>,
     tick: Option<Tick>,
     verification: Option<VerifierReceipt>,
+    pub visual_report: Option<Value>,
+}
+
+impl Runner {
+    pub(super) fn new(lease: OrdinaryRunner) -> Self {
+        Self {
+            lease,
+            frame: None,
+            tick: None,
+            verification: None,
+            visual_report: None,
+        }
+    }
 }
 
 pub(super) enum RunnerOutcome {
@@ -85,6 +98,7 @@ impl Host<'_> {
             tick: None,
             frame: None,
             verification: None,
+            visual_report: None,
         });
         self.mode = RuntimeMode::Goal;
         self.projection = projection;
@@ -93,7 +107,7 @@ impl Host<'_> {
             .map(|stop| Some(RunnerOutcome::Stop(stop)))
     }
 
-    async fn advance_goal(
+    pub(super) async fn advance_goal(
         &mut self,
         store: &GoalStore,
         lease: &OrdinaryRunner,
@@ -107,6 +121,8 @@ impl Host<'_> {
         };
         let owned = self.owned.clone();
         let external = self.external.clone();
+        let conv_id = self.identity.conversation_id.clone();
+        let workspace = self.workspace.clone();
         loop {
             self.source_current()?;
             let (source, plan) = store.read_ordinary_runner(lease)?;
@@ -139,8 +155,60 @@ impl Host<'_> {
                             )?,
                         };
                         if repairing {
+                            self.emit_goal_event(GoalRunnerEvent::PlanChanged {
+                                plan_id: lease.plan_id(),
+                                conversation_id: &conv_id,
+                                change_kind: "runner-state",
+                            })
+                            .await;
                             phase = RunnerPhase::Repair;
                             continue;
+                        }
+                    }
+                    if result.as_ref().is_some_and(VerifierReceipt::passed)
+                        && self.goal_hooks.is_some()
+                    {
+                        let visual_run_id = format!("visual-{}", uuid::Uuid::new_v4());
+                        let visual = self
+                            .run_visual_verification_hook(
+                                lease.plan_id(),
+                                &conv_id,
+                                &visual_run_id,
+                                &workspace,
+                                &owned,
+                            )
+                            .await?;
+                        if visual.required && !visual.passed {
+                            let admit = || self.check_worker_settled(true).map_err(|error| error.0);
+                            let repairing = store.begin_visual_verification_repair(
+                                lease,
+                                &visual_run_id,
+                                &visual.report,
+                                &now(),
+                                admit,
+                            )?;
+                            self.emit_goal_event(GoalRunnerEvent::PlanChanged {
+                                plan_id: lease.plan_id(),
+                                conversation_id: &conv_id,
+                                change_kind: "runner-state",
+                            })
+                            .await;
+                            if repairing && remaining(self.turns, verifier_turns) != Some(0) {
+                                self.emit_goal_event(GoalRunnerEvent::StateChanged {
+                                    plan_id: lease.plan_id(),
+                                    conversation_id: &conv_id,
+                                    event_type: "goalRunner:visualRepairStarted",
+                                    detail: json!({ "verifierRunId": visual_run_id }),
+                                })
+                                .await;
+                                phase = RunnerPhase::Repair;
+                                continue;
+                            }
+                            return Ok(RunnerStop::Blocked("goal_visual_verification_failed"));
+                        }
+                        if visual.required && visual.passed {
+                            self.runner.as_mut().expect("owned Runner").visual_report =
+                                Some(visual.report);
                         }
                     }
                     self.runner.as_mut().expect("owned Runner").verification = result;
@@ -170,15 +238,87 @@ impl Host<'_> {
             if !matches!(phase, RunnerPhase::Inspect)
                 || !self.drive_deterministic_inspect(source, &plan).await?
             {
+                let with_hooks = self.goal_hooks.is_some();
+                let tick_stream_id = if with_hooks {
+                    let turn_number = plan["runner"]["turnCount"]
+                        .as_u64()
+                        .unwrap_or(0)
+                        .saturating_add(1);
+                    let tick_id = format!("goal-tick-{}", uuid::Uuid::new_v4());
+                    let assistant_id = format!("asst-goal-{}", uuid::Uuid::new_v4());
+                    let started_at = now();
+                    let started_at_ms = crate::capability::milliseconds(&started_at).unwrap_or(0);
+                    let placeholder = json!({
+                        "id": assistant_id,
+                        "role": "assistant",
+                        "content": "",
+                        "segments": [],
+                        "createdAt": started_at,
+                        "streamId": self.identity.stream_id,
+                        "permissionGrants": [],
+                    });
+                    self.append(&placeholder)?;
+                    self.prepared_assistant = Some(PreparedAssistant {
+                        message_id: assistant_id.clone(),
+                        content: String::new(),
+                        thinking_content: String::new(),
+                        segments: Vec::new(),
+                        permission_grants: Vec::new(),
+                        started_at_ms,
+                    });
+                    self.emit_goal_event(GoalRunnerEvent::TickStarted {
+                        plan_id: lease.plan_id(),
+                        conversation_id: &conv_id,
+                        stream_id: &tick_id,
+                        turn_number,
+                        assistant_message_id: &assistant_id,
+                        started_at_ms,
+                    })
+                    .await;
+                    Some(tick_id)
+                } else {
+                    None
+                };
+
                 self.begin_runner_tick(&plan)?;
                 let turn = turn_loop::run(self, budget, &owned, &external).await;
                 self.runner.as_mut().expect("owned Runner").tick = None;
+
+                if let Some(tick_id) = tick_stream_id {
+                    let tick_err = turn.as_ref().err().map(|e| e.0).or_else(|| {
+                        turn.as_ref()
+                            .ok()
+                            .filter(|t| t.stop == turn_loop::LoopStop::MaxTurns)
+                            .map(|_| "agent_loop_exhausted")
+                    });
+                    self.finalize_prepared_assistant(tick_err);
+                    let cancelled = owned.is_cancelled()
+                        || external.is_cancelled()
+                        || tick_err == Some("CANCELLED");
+                    let usage_snap = self.usage.snapshot();
+                    self.emit_goal_event(GoalRunnerEvent::TickFinished {
+                        plan_id: lease.plan_id(),
+                        conversation_id: &conv_id,
+                        stream_id: &tick_id,
+                        error: tick_err,
+                        cancelled,
+                        usage: &usage_snap,
+                    })
+                    .await;
+                }
+
                 let turn = turn?;
                 tool_calls = Some(turn.tool_calls);
                 if turn.stop != turn_loop::LoopStop::Replied {
                     store.record_ordinary_runner_step(lease, phase, tool_calls, &now(), || {
                         self.source_current().map_err(|error| error.0)
                     })?;
+                    self.emit_goal_event(GoalRunnerEvent::PlanChanged {
+                        plan_id: lease.plan_id(),
+                        conversation_id: &conv_id,
+                        change_kind: "runner-progress",
+                    })
+                    .await;
                     return Ok(if turn.stop == turn_loop::LoopStop::MaxTurns {
                         RunnerStop::BudgetExhausted
                     } else {
@@ -190,6 +330,12 @@ impl Host<'_> {
             store.record_ordinary_runner_step(lease, next, tool_calls, &now(), || {
                 self.source_current().map_err(|error| error.0)
             })?;
+            self.emit_goal_event(GoalRunnerEvent::PlanChanged {
+                plan_id: lease.plan_id(),
+                conversation_id: &conv_id,
+                change_kind: "runner-progress",
+            })
+            .await;
             phase = next;
         }
     }
@@ -268,11 +414,12 @@ impl Host<'_> {
         if run.owner != *self.run.owner() {
             return Err(HostError("goal_runner_stop_unproven"));
         }
-        let plan = GoalStore::new(&self.home).settle_ordinary_runner(
+        let plan = GoalStore::new(&self.home).settle_ordinary_runner_with_visual(
             &runner.lease,
             &run,
             stop,
             runner.verification.as_ref(),
+            runner.visual_report.as_ref(),
             &now(),
             || {
                 let latest = current().map_err(|error| error.0)?;
@@ -284,6 +431,10 @@ impl Host<'_> {
         )?;
         Ok(Some(report(&plan)))
     }
+}
+
+pub(super) fn report_value(plan: &Value) -> Value {
+    report(plan)
 }
 
 fn report(plan: &Value) -> Value {

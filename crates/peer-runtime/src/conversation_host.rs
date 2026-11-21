@@ -22,14 +22,17 @@ use peer_protocol::{
 };
 use peer_store::{
     ConversationExecutionToken, ConversationMetadataPublication, ConversationModelSelection,
-    ConversationStore, HistorySnapshot, McpRegistryStore, NewConversation,
-    NewConversationExecution, RunnerStop,
+    ConversationStore, GoalStore, HistorySnapshot, McpRegistryStore, NewConversation,
+    NewConversationExecution, RunnerAdmission, RunnerStop,
 };
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 mod background_shell;
@@ -201,6 +204,88 @@ pub trait ConversationOutput {
         &'a mut self,
         event: ConversationEvent<'a>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HostError>> + 'a>>;
+}
+
+pub enum GoalRunnerEvent<'a> {
+    Started {
+        plan_id: &'a str,
+        conversation_id: &'a str,
+    },
+    TickStarted {
+        plan_id: &'a str,
+        conversation_id: &'a str,
+        stream_id: &'a str,
+        turn_number: u64,
+        assistant_message_id: &'a str,
+        started_at_ms: i64,
+    },
+    TickFinished {
+        plan_id: &'a str,
+        conversation_id: &'a str,
+        stream_id: &'a str,
+        error: Option<&'a str>,
+        cancelled: bool,
+        usage: &'a UsageSnapshot,
+    },
+    PlanChanged {
+        plan_id: &'a str,
+        conversation_id: &'a str,
+        change_kind: &'a str,
+    },
+    StateChanged {
+        plan_id: &'a str,
+        conversation_id: &'a str,
+        event_type: &'a str,
+        detail: Value,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct VisualVerificationOutcome {
+    pub required: bool,
+    pub passed: bool,
+    pub report: Value,
+}
+
+pub trait GoalHostHooks {
+    fn on_goal_event<'a>(
+        &'a mut self,
+        event: GoalRunnerEvent<'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>;
+
+    fn run_visual_verification<'a>(
+        &'a mut self,
+        plan_id: &'a str,
+        conversation_id: &'a str,
+        verifier_run_id: &'a str,
+        workspace: &'a Path,
+        cancel: &'a CancellationToken,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<VisualVerificationOutcome, HostError>> + 'a>,
+    >;
+}
+
+pub struct GoalPlanRunOptions<'a> {
+    pub plan_id: &'a str,
+    pub workspace: &'a Path,
+    pub stream_id: &'a str,
+    pub provider_id: &'a str,
+    pub effort: &'a str,
+    pub allow_resume: bool,
+    pub pause_requested: Option<Arc<AtomicBool>>,
+    pub allowlist: Option<&'a [String]>,
+    pub max_turns: Option<usize>,
+    pub extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
+}
+
+pub struct GoalPlanRunOutcome {
+    pub plan_id: String,
+    pub conversation_id: String,
+    pub turns: usize,
+    pub usage: UsageSnapshot,
+    pub lifetime_usage: Option<Value>,
+    pub error: Option<&'static str>,
+    pub goal: Option<Value>,
 }
 /// One Host instance owns the bounded live registry across ordinary sessions.
 /// Discovery is read-only. A dropped runner stays unknown, never implicitly idle.
@@ -469,6 +554,7 @@ impl NativeConversationRuntime {
             explorer_requests: BTreeSet::new(),
             runner: None,
             prepared_assistant: None,
+            goal_hooks: None,
             runtime_reminders: Vec::new(),
         };
         let result = async {
@@ -819,6 +905,7 @@ impl NativeConversationRuntime {
             explorer_requests: BTreeSet::new(),
             runner: None,
             prepared_assistant: None,
+            goal_hooks: None,
             runtime_reminders: Vec::new(),
         };
         let mut runner_stop = None;
@@ -892,7 +979,7 @@ impl NativeConversationRuntime {
         })
     }
 
-    /// Execute an interactive ordinary conversation turn (`chat` or `plan`) bound to an existing
+    /// Execute an interactive ordinary conversation turn (`chat`, `plan`, or `goal`) bound to an existing
     /// caller-prepared user + placeholder assistant message (`assistant_message_id`) and explicit
     /// `stream_id`. All tool, permission, context, and usage invariants stay owned by `Host`.
     pub async fn execute_prepared_interactive<'a>(
@@ -906,7 +993,10 @@ impl NativeConversationRuntime {
         if external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        if !matches!(options.mode, RuntimeMode::Chat | RuntimeMode::Plan) {
+        if !matches!(
+            options.mode,
+            RuntimeMode::Chat | RuntimeMode::Plan | RuntimeMode::Goal
+        ) {
             return Err(HostError("runtime_mode_invalid"));
         }
         if options.conversation_id.is_empty()
@@ -1204,9 +1294,11 @@ impl NativeConversationRuntime {
             explorer_requests: BTreeSet::new(),
             runner: None,
             prepared_assistant: Some(prepared_assistant),
+            goal_hooks: None,
             runtime_reminders: reminders,
         };
 
+        let mut explorer_error = None;
         let result = async {
             host.publish(ConversationEvent::Started {
                 conversation_id: &conversation,
@@ -1224,73 +1316,19 @@ impl NativeConversationRuntime {
                 .map(|_| "agent_loop_exhausted")
         });
 
-        if let Some(mut pa) = host.prepared_assistant.take() {
-            let ended_ms = crate::capability::milliseconds(&now()).unwrap_or(pa.started_at_ms);
-            let duration_ms = (ended_ms - pa.started_at_ms).max(0);
-            let interrupted = err_code.is_some();
-            for seg in &mut pa.segments {
-                if seg["type"] == "tool-call" && seg.get("result").is_none() {
-                    if let Some(code) = err_code {
-                        let tc_id = seg["toolCallId"].as_str().unwrap_or("").to_owned();
-                        let status = if code == "CANCELLED" {
-                            "cancelled"
-                        } else {
-                            "failed"
-                        };
-                        seg["result"] = json!({
-                            "toolCallId": tc_id,
-                            "status": status,
-                            "output": {},
-                            "error": { "code": code, "message": code, "recoverable": true },
-                            "completedAt": now(),
-                        });
-                    } else {
-                        seg["result"] = json!("工具结果未返回（本轮已结束）");
-                    }
-                }
-            }
-            let mut terminal_patch = json!({
-                "durationMs": duration_ms,
-                "interrupted": interrupted,
-                "segments": pa.segments,
-                "streamId": host.identity.stream_id,
-            });
-            if interrupted {
-                if let Some(code) = err_code {
-                    terminal_patch["streamFailure"] = json!({ "code": code });
-                }
-            } else {
-                terminal_patch["streamFailure"] = Value::Null;
-            }
-            let amounts = &host.usage.snapshot().turn_total.amounts;
-            if amounts.input_tokens > 0
-                || amounts.output_tokens > 0
-                || amounts.cache_read_tokens > 0
-                || amounts.cache_write_tokens > 0
-            {
-                terminal_patch["usage"] = json!({
-                    "inputTokens": amounts.input_tokens,
-                    "outputTokens": amounts.output_tokens,
-                    "cacheWriteTokens": amounts.cache_write_tokens,
-                    "cacheReadTokens": amounts.cache_read_tokens,
-                    "totalTokens": amounts.total_tokens,
-                });
-            }
-            if let Ok(fresh) = host
-                .store
-                .read_committed(&conversation, None, 8 * 1024 * 1024)
-            {
-                let _ = host.store.commit_terminal_message(
-                    &fresh,
-                    &pa.message_id,
-                    &terminal_patch,
-                    &now(),
-                    None,
-                );
-            }
+        host.finalize_prepared_assistant(err_code);
+
+        if err_code.is_none()
+            && result
+                .as_ref()
+                .is_ok_and(|r| r.stop == crate::turn_loop::LoopStop::Replied)
+            && let Err(err) = host.drive_requested_explorers().await
+        {
+            explorer_error = Some(err);
         }
 
         if err_code.is_none()
+            && explorer_error.is_none()
             && host.turns > 0
             && let Some(pipeline) = host.pipeline.as_mut()
         {
@@ -1302,6 +1340,7 @@ impl NativeConversationRuntime {
             .as_ref()
             .err()
             .copied()
+            .or(explorer_error)
             .or_else(|| err_code.map(HostError));
         let stop_reason = result.as_ref().ok().map(|r| r.stop.as_str());
         let content = result
@@ -1328,6 +1367,329 @@ impl NativeConversationRuntime {
             goal: None,
             context_accounting,
             stop_reason,
+        })
+    }
+
+    /// Drive an existing ordinary GoalPlan using `advance_goal` with interactive user input,
+    /// external capabilities, per-tick streaming hooks, and optional desktop visual verification.
+    pub async fn drive_goal_plan<'a>(
+        &self,
+        mut options: GoalPlanRunOptions<'_>,
+        model: &'a NativeModel,
+        permission: &'a mut dyn PermissionInput,
+        output: Option<&'a mut dyn ConversationOutput>,
+        mut hooks: Option<&'a mut dyn GoalHostHooks>,
+        external: &CancellationToken,
+    ) -> Result<GoalPlanRunOutcome, HostError> {
+        if external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        if options.plan_id.is_empty()
+            || options.stream_id.is_empty()
+            || options.max_turns == Some(0)
+        {
+            return Err(HostError("invalid_goal_runner_input"));
+        }
+        let workspace =
+            std::fs::canonicalize(options.workspace).map_err(|_| HostError("invalid_workspace"))?;
+        if !workspace.is_dir() || workspace.to_str().is_none() {
+            return Err(HostError("invalid_workspace"));
+        }
+        let at = now();
+        let goal_store = GoalStore::new(&self.home);
+        let projector = crate::goal_facts::TuiGoalProjector::new(&at).map_err(HostError)?;
+        let goal = goal_store
+            .observe_plan_for_runner(options.plan_id, &workspace, &projector)
+            .map_err(HostError::from)?;
+        let plan_snapshot = goal_store.read_local_goal(&goal)?;
+        let conversation = plan_snapshot["conversationId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or(HostError("goal_conversation_invalid"))?
+            .to_owned();
+
+        let hooks_cfg = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
+        let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
+        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
+            .map_err(HostError)?;
+        let inventory = McpRegistryStore::new(&self.home).read()?;
+        let stream = options.stream_id.to_owned();
+        let owner = crate::recorder::local_recorder(
+            &format!("native-goal-runner-{}", uuid::Uuid::new_v4()),
+            &at,
+        )
+        .await
+        .ok_or(HostError("native_recorder_unavailable"))?;
+        if external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+
+        let store = ConversationStore::new(&self.home);
+        store.recover_runtime_usage(None)?;
+        let meta = store
+            .read_metadata(&conversation)?
+            .metadata
+            .ok_or(HostError("conversation_unavailable"))?;
+        if meta
+            .get("role")
+            .is_some_and(|v| !v.is_null() && v != "chat")
+            || meta
+                .get("parentConversationId")
+                .is_some_and(|v| !v.is_null())
+        {
+            return Err(HostError("out_of_scope"));
+        }
+        if store
+            .read_conversation_execution(&conversation)?
+            .is_some_and(|r| !r.permits_new_run())
+        {
+            return Err(HostError("conversation_execution_busy"));
+        }
+
+        let context_binding = binding(&meta)?;
+        let attribution = json!({
+            "id": stream,
+            "streamId": stream,
+            "at": at,
+            "modelProviderId": format!("{}::{}", options.provider_id, model.model_id()),
+            "model": model.model_id(),
+            "providerName": model.provider(),
+            "role": "chat",
+        });
+        let identity = ConversationExecutionIdentity {
+            conversation_id: conversation.clone(),
+            stream_id: stream.clone(),
+        };
+        let credentials = crate::mcp_oauth::CredentialEpoch::open_conversation(
+            &self.home,
+            &identity,
+            &inventory.source_revision,
+        )
+        .map_err(HostError)?;
+        let mut providers = ProviderRegistry::with_extensions(
+            &inventory,
+            &json!({"recorder": owner}),
+            &self.home,
+            credentials.clone(),
+            skills.clone(),
+            crate::providers::ShellHostMode::Conversation,
+        )?;
+        providers.add_ordinary_tools(RuntimeMode::Goal, true);
+        for extra in options.extra_providers.drain(..) {
+            providers.register(extra);
+        }
+        let projection = providers.project_for_mode(RuntimeMode::Goal, options.allowlist)?;
+        let pipeline = if meta["modelProviderId"].is_string() && meta["model"].is_string() {
+            ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?
+        } else {
+            ContextPipeline::open(&self.home, &conversation, options.provider_id, model)?
+        };
+        let initial = store.read_committed(&conversation, None, 8 * 1024 * 1024)?;
+        let attempt = self
+            .live
+            .begin(&identity)
+            .map_err(|_| HostError("native_execution_owner_unavailable"))?;
+        let intent = NewConversationExecution {
+            stream_id: &stream,
+            engine: "peer-native",
+            owner: &owner,
+            attribution: &attribution,
+            selected_model: None,
+            at: &at,
+        };
+        let (run, publication) = match store.claim_conversation_execution(&initial, &intent, None) {
+            Ok(claimed) => claimed,
+            Err(error) => {
+                let _ = self.live.close_admission(&identity);
+                attempt.finish();
+                let _ = self.live.forget_ended(&identity);
+                let original = error.error();
+                if let Some(cleanup) = error.into_cleanup() {
+                    cleanup.close_unstarted(&store, &now())?;
+                    return Ok(GoalPlanRunOutcome {
+                        plan_id: options.plan_id.to_owned(),
+                        conversation_id: conversation,
+                        turns: 0,
+                        usage: RuntimeUsageAccounting::default().snapshot(),
+                        lifetime_usage: None,
+                        error: Some(original.code()),
+                        goal: None,
+                    });
+                }
+                return Err(original.into());
+            }
+        };
+        let owned = attempt.cancellation();
+        let mut expected = initial;
+        expected.source_revision = publication
+            .advance(
+                &conversation,
+                expected.history.content_revision,
+                &expected.source_revision,
+            )?
+            .into();
+
+        let mut host = Host {
+            home: self.home.clone(),
+            store,
+            run,
+            identity,
+            workspace,
+            mode: RuntimeMode::Goal,
+            effort: options.effort.into(),
+            model,
+            permission: Some(permission),
+            output,
+            access: self.access.clone(),
+            live: self.live.clone(),
+            attempt: Some(attempt),
+            owned: owned.clone(),
+            external: external.clone(),
+            expected,
+            binding: context_binding,
+            instructions,
+            servers: inventory.host_context_servers(),
+            registry: inventory.source_revision,
+            skills,
+            hooks: hooks_cfg,
+            credentials,
+            providers,
+            projection,
+            allowlist: options.allowlist.map(<[String]>::to_vec),
+            pipeline: Some(pipeline),
+            usage: RuntimeUsageAccounting::default(),
+            system: None,
+            turns: 0,
+            request_admitted: false,
+            background_shells: BTreeMap::new(),
+            completed_shells: BTreeMap::new(),
+            foreground_authority: None,
+            cognition_source: None,
+            interactive_user_input: true,
+            worker: None,
+            explorer_requests: BTreeSet::new(),
+            runner: None,
+            prepared_assistant: None,
+            goal_hooks: hooks.take(),
+            runtime_reminders: Vec::new(),
+        };
+
+        let admission = goal_store.begin_ordinary_runner_with_resume(
+            &goal,
+            &host.identity,
+            &now(),
+            options.allow_resume,
+            || host.source_current().map_err(|error| error.0),
+        );
+
+        let lease = match admission {
+            Ok(RunnerAdmission::Started(lease)) => lease,
+            Ok(RunnerAdmission::Waiting(plan)) => {
+                let cleanup = host.finish().await;
+                let report = runner::report_value(&plan);
+                return Ok(GoalPlanRunOutcome {
+                    plan_id: options.plan_id.to_owned(),
+                    conversation_id: conversation,
+                    turns: 0,
+                    usage: host.usage.snapshot(),
+                    lifetime_usage: cleanup.ok().flatten(),
+                    error: None,
+                    goal: Some(report),
+                });
+            }
+            Err(err) => {
+                let _ = host.finish().await;
+                return Err(err.into());
+            }
+        };
+
+        host.runner = Some(runner::Runner::new(lease.clone()));
+        host.emit_goal_event(GoalRunnerEvent::Started {
+            plan_id: options.plan_id,
+            conversation_id: &conversation,
+        })
+        .await;
+        host.emit_goal_event(GoalRunnerEvent::PlanChanged {
+            plan_id: options.plan_id,
+            conversation_id: &conversation,
+            change_kind: "runner-state",
+        })
+        .await;
+
+        let run_result = host
+            .advance_goal(&goal_store, &lease, options.max_turns)
+            .await;
+
+        host.finalize_prepared_assistant(run_result.as_ref().err().map(|e| e.0));
+
+        if run_result.is_ok()
+            && host.turns > 0
+            && let Some(pipeline) = host.pipeline.as_mut()
+        {
+            let _ = pipeline.finish(&self.home);
+        }
+
+        let stop = match &run_result {
+            Ok(stop) => *stop,
+            Err(err) => {
+                let paused = options
+                    .pause_requested
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::SeqCst))
+                    && (external.is_cancelled() || err.0 == "CANCELLED");
+                if paused {
+                    RunnerStop::Paused
+                } else {
+                    RunnerStop::Blocked(err.0)
+                }
+            }
+        };
+
+        let cleanup = host.finish().await;
+        let goal_report = if cleanup.is_ok() {
+            host.settle_runner(stop)
+        } else {
+            Ok(None)
+        };
+
+        host.emit_goal_event(GoalRunnerEvent::PlanChanged {
+            plan_id: options.plan_id,
+            conversation_id: &conversation,
+            change_kind: "runner-state",
+        })
+        .await;
+
+        if let Ok(Some(ref report)) = goal_report {
+            let event_type = match report["runnerStatus"].as_str() {
+                Some("completed") => "goalRunner:completed",
+                Some("paused") => "goalRunner:paused",
+                Some("failed") => "goalRunner:failed",
+                _ => "goalRunner:blocked",
+            };
+            host.emit_goal_event(GoalRunnerEvent::StateChanged {
+                plan_id: options.plan_id,
+                conversation_id: &conversation,
+                event_type,
+                detail: report.clone(),
+            })
+            .await;
+        }
+
+        let final_error = cleanup
+            .as_ref()
+            .err()
+            .copied()
+            .or_else(|| run_result.as_ref().err().copied())
+            .or_else(|| goal_report.as_ref().err().copied());
+
+        Ok(GoalPlanRunOutcome {
+            plan_id: options.plan_id.to_owned(),
+            conversation_id: conversation,
+            turns: host.turns,
+            usage: host.usage.snapshot(),
+            lifetime_usage: cleanup.ok().flatten(),
+            error: final_error.map(|e| e.0),
+            goal: goal_report.ok().flatten(),
         })
     }
 }
@@ -1383,6 +1745,7 @@ struct Host<'a> {
     explorer_requests: BTreeSet<String>,
     runner: Option<runner::Runner>,
     prepared_assistant: Option<PreparedAssistant>,
+    goal_hooks: Option<&'a mut dyn GoalHostHooks>,
     runtime_reminders: Vec<(String, String)>,
 }
 struct PreparedAssistant {
@@ -1398,6 +1761,109 @@ struct CognitionSource {
     content_revision: u64,
 }
 impl Host<'_> {
+    pub(super) fn finalize_prepared_assistant(&mut self, err_code: Option<&str>) {
+        let Some(mut pa) = self.prepared_assistant.take() else {
+            return;
+        };
+        let ended_ms = crate::capability::milliseconds(&now()).unwrap_or(pa.started_at_ms);
+        let duration_ms = (ended_ms - pa.started_at_ms).max(0);
+        let interrupted = err_code.is_some();
+        for seg in &mut pa.segments {
+            if seg["type"] == "tool-call" && seg.get("result").is_none() {
+                if let Some(code) = err_code {
+                    let tc_id = seg["toolCallId"].as_str().unwrap_or("").to_owned();
+                    let status = if code == "CANCELLED" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    seg["result"] = json!({
+                        "toolCallId": tc_id,
+                        "status": status,
+                        "output": {},
+                        "error": { "code": code, "message": code, "recoverable": true },
+                        "completedAt": now(),
+                    });
+                } else {
+                    seg["result"] = json!("工具结果未返回（本轮已结束）");
+                }
+            }
+        }
+        let mut terminal_patch = json!({
+            "durationMs": duration_ms,
+            "interrupted": interrupted,
+            "segments": pa.segments,
+            "streamId": self.identity.stream_id,
+        });
+        if interrupted {
+            if let Some(code) = err_code {
+                terminal_patch["streamFailure"] = json!({ "code": code });
+            }
+        } else {
+            terminal_patch["streamFailure"] = Value::Null;
+        }
+        let amounts = &self.usage.snapshot().turn_total.amounts;
+        if amounts.input_tokens > 0
+            || amounts.output_tokens > 0
+            || amounts.cache_read_tokens > 0
+            || amounts.cache_write_tokens > 0
+        {
+            terminal_patch["usage"] = json!({
+                "inputTokens": amounts.input_tokens,
+                "outputTokens": amounts.output_tokens,
+                "cacheWriteTokens": amounts.cache_write_tokens,
+                "cacheReadTokens": amounts.cache_read_tokens,
+                "totalTokens": amounts.total_tokens,
+            });
+        }
+        if let Ok(fresh) =
+            self.store
+                .read_committed(&self.identity.conversation_id, None, 8 * 1024 * 1024)
+        {
+            let expected_matches = fresh.source_revision == self.expected.source_revision
+                && fresh.history.content_revision == self.expected.history.content_revision;
+            if let Ok(committed) = self.store.commit_terminal_message(
+                &fresh,
+                &pa.message_id,
+                &terminal_patch,
+                &now(),
+                None,
+            ) && expected_matches
+            {
+                self.expected = committed.snapshot;
+            }
+        }
+    }
+
+    pub(super) async fn emit_goal_event(&mut self, event: GoalRunnerEvent<'_>) {
+        if let Some(hooks) = self.goal_hooks.take() {
+            hooks.on_goal_event(event).await;
+            self.goal_hooks = Some(hooks);
+        }
+    }
+
+    pub(super) async fn run_visual_verification_hook(
+        &mut self,
+        plan_id: &str,
+        conversation_id: &str,
+        verifier_run_id: &str,
+        workspace: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<VisualVerificationOutcome, HostError> {
+        let Some(hooks) = self.goal_hooks.take() else {
+            return Ok(VisualVerificationOutcome {
+                required: false,
+                passed: true,
+                report: Value::Null,
+            });
+        };
+        let result = hooks
+            .run_visual_verification(plan_id, conversation_id, verifier_run_id, workspace, cancel)
+            .await;
+        self.goal_hooks = Some(hooks);
+        result
+    }
+
     async fn publish(&mut self, event: ConversationEvent<'_>) -> Result<(), HostError> {
         if let Some(output) = self.output.take() {
             let result = if self.background_shells.is_empty() && self.foreground_authority.is_none()
@@ -1847,7 +2313,9 @@ impl crate::turn_loop::TurnHost for Host<'_> {
             .system
             .take()
             .ok_or(HostError("context_response_unavailable"))?;
-        if let Some(mut pa) = self.prepared_assistant.take() {
+        if self.worker.is_none()
+            && let Some(mut pa) = self.prepared_assistant.take()
+        {
             if !turn.thinking.is_empty() {
                 pa.thinking_content.push_str(&turn.thinking);
                 pa.segments
