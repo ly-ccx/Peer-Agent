@@ -55,3 +55,47 @@ test('manual run records an asynchronous runner startup failure', async () => {
   assert.equal(run.failureReason, 'runner exploded');
   assert.equal(run.receipt.error, 'runner exploded');
 });
+
+test('cancelRun aborts the live runner stream and marks the run cancelled', async () => {
+  const cancelledIds = [];
+  store.createRun({
+    automationId: 'automation-1',
+    idempotencyKey: 'automation-1:manual:run-active',
+    triggerSource: 'manual',
+    status: 'running',
+    scheduledAt: '2026-08-06T00:00:00.000Z',
+    snapshot: {
+      definitionVersion: 1,
+      name: 'Daily',
+      prompt: 'Inspect CI',
+      workspacePath: '/tmp/workspace',
+      schedule: { kind: 'daily', timezone: 'UTC', hour: 9, minute: 0 },
+      grant: {
+        preset: 'observe',
+        workspacePath: '/tmp/workspace',
+        allowedCapabilityIds: [],
+        askCapabilityIds: [],
+        blockedCapabilityIds: [],
+        confirmedAt: '2026-08-06T00:00:00.000Z',
+        version: 1,
+      },
+      budget: { timeoutMs: 60_000 },
+    },
+  }, { runId: 'run-active', now: '2026-08-06T00:00:00.000Z' });
+
+  const service = createAutomationApplicationService({
+    store,
+    getRunner: () => ({
+      cancel: async (runId) => {
+        cancelledIds.push(runId);
+        return { aborted: true };
+      },
+    }),
+    now: () => '2026-08-06T00:03:00.000Z',
+  });
+  const cancelled = service.cancelRun({ runId: 'run-active' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.failureReason, 'cancelled_by_user');
+  assert.deepEqual(cancelledIds, ['run-active']);
+});

@@ -135,6 +135,13 @@ pub struct ConversationOptions<'a> {
     pub allowlist: Option<&'a [String]>,
     pub max_turns: Option<usize>,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutomationPermissionPolicy {
+    pub preset: String,
+    pub allowed_capability_ids: Vec<String>,
+    pub blocked_capability_ids: Vec<String>,
+}
+
 pub struct PreparedConversationOptions<'a> {
     pub workspace: &'a Path,
     pub conversation_id: &'a str,
@@ -149,6 +156,7 @@ pub struct PreparedConversationOptions<'a> {
     pub config_instructions: Option<&'a [crate::system_context::instructions::ConfigInstruction]>,
     pub context_attachments: &'a [Value],
     pub context_extensions: &'a [Value],
+    pub automation_policy: Option<&'a AutomationPermissionPolicy>,
     pub allowlist: Option<&'a [String]>,
     pub max_turns: Option<usize>,
     pub extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
@@ -580,6 +588,7 @@ impl NativeConversationRuntime {
             runtime_reminders: Vec::new(),
             context_attachments: Vec::new(),
             context_extensions: Vec::new(),
+            automation_policy: None,
         };
         let result = async {
             host.source_current()?;
@@ -933,6 +942,7 @@ impl NativeConversationRuntime {
             runtime_reminders: Vec::new(),
             context_attachments: Vec::new(),
             context_extensions: Vec::new(),
+            automation_policy: None,
         };
         let mut runner_stop = None;
         let result = async {
@@ -1093,29 +1103,32 @@ impl NativeConversationRuntime {
         {
             return Err(HostError("conversation_execution_busy"));
         }
-        if options.persist_model_selection {
-            let selection = ConversationModelSelection {
-                provider_id: options.provider_id,
-                model: model.model_id(),
-                effort: options.effort,
-            };
-            if !selection.matches(&meta)
-                && let Some(meta_ws) = meta["workspacePath"].as_str().filter(|s| !s.is_empty())
-            {
-                store.update_ordinary_model(&conversation, meta_ws, &selection, &at)?;
-                meta = store
-                    .read_metadata(&conversation)?
-                    .metadata
-                    .ok_or(HostError("conversation_unavailable"))?;
-            }
+        let rebind_unbound_provider = meta["model"].as_str().is_none_or(str::is_empty)
+            && meta["modelProviderId"]
+                .as_str()
+                .is_some_and(|provider| !provider.is_empty() && provider != options.provider_id);
+        let persisted_effort = (!options.persist_model_selection)
+            .then(|| meta["effort"].as_str().map(str::to_owned))
+            .flatten();
+        let effective_effort = persisted_effort.as_deref().unwrap_or(options.effort);
+        let selection = ConversationModelSelection {
+            provider_id: options.provider_id,
+            model: model.model_id(),
+            effort: effective_effort,
+        };
+        if (options.persist_model_selection || rebind_unbound_provider)
+            && !selection.matches(&meta)
+            && matches!(meta["mode"].as_str(), Some("chat" | "plan" | "goal"))
+            && let Some(meta_ws) = meta["workspacePath"].as_str().filter(|s| !s.is_empty())
+        {
+            store.update_ordinary_model(&conversation, meta_ws, &selection, &at)?;
+            meta = store
+                .read_metadata(&conversation)?
+                .metadata
+                .ok_or(HostError("conversation_unavailable"))?;
         }
-        let selected_for_claim = options
-            .persist_model_selection
-            .then_some(ConversationModelSelection {
-                provider_id: options.provider_id,
-                model: model.model_id(),
-                effort: options.effort,
-            })
+        let selected_for_claim = (options.persist_model_selection || rebind_unbound_provider)
+            .then_some(selection)
             .filter(|selection| selection.matches(&meta));
 
         let context_binding = binding(&meta)?;
@@ -1329,6 +1342,7 @@ impl NativeConversationRuntime {
             runtime_reminders: reminders,
             context_attachments: options.context_attachments.to_vec(),
             context_extensions: options.context_extensions.to_vec(),
+            automation_policy: options.automation_policy.cloned(),
         };
 
         let mut explorer_error = None;
@@ -1608,6 +1622,7 @@ impl NativeConversationRuntime {
             runtime_reminders: Vec::new(),
             context_attachments: Vec::new(),
             context_extensions: Vec::new(),
+            automation_policy: None,
         };
 
         let admission = goal_store.begin_ordinary_runner_with_resume(
@@ -1785,6 +1800,7 @@ struct Host<'a> {
     runtime_reminders: Vec<(String, String)>,
     context_attachments: Vec<Value>,
     context_extensions: Vec<Value>,
+    automation_policy: Option<AutomationPermissionPolicy>,
 }
 struct PreparedAssistant {
     message_id: String,

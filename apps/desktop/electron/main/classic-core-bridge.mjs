@@ -271,6 +271,12 @@ export function createClassicCoreBridge({
 
     if (method === 'chat:stream:delta' && record && typeof params?.content === 'string') {
       record.accumulatedText += params.content;
+    } else if (method === 'chat:stream:tool-result' && record && Array.isArray(params?.evidenceRefs)) {
+      for (const ref of params.evidenceRefs) {
+        if (typeof ref === 'string' && ref && !record.evidenceRefs.includes(ref)) {
+          record.evidenceRefs.push(ref);
+        }
+      }
     } else if (method === 'chat:stream:permission-request') {
       const toolCallId = params?.call?.toolCallId;
       if (typeof toolCallId === 'string' && typeof streamId === 'string') {
@@ -297,6 +303,7 @@ export function createClassicCoreBridge({
         streamId,
         conversationId: params?.conversationId ?? record?.conversationId ?? null,
         text: record?.accumulatedText ?? '',
+        evidenceRefs: [...(record?.evidenceRefs ?? [])],
         usage: params?.usage ?? null,
         lifetimeUsage: params?.lifetimeUsage ?? null,
         contextAccounting: params?.contextAccounting ?? null,
@@ -312,6 +319,7 @@ export function createClassicCoreBridge({
         streamId,
         conversationId: params?.conversationId ?? record?.conversationId ?? null,
         text: record?.accumulatedText ?? '',
+        evidenceRefs: [...(record?.evidenceRefs ?? [])],
         usage: params?.usage ?? null,
         lifetimeUsage: params?.lifetimeUsage ?? null,
         error: params?.error ?? 'peer_core_stream_error',
@@ -326,6 +334,7 @@ export function createClassicCoreBridge({
         streamId,
         conversationId: params?.conversationId ?? record?.conversationId ?? null,
         text: record?.accumulatedText ?? '',
+        evidenceRefs: [...(record?.evidenceRefs ?? [])],
         aborted: true,
       });
     }
@@ -457,6 +466,7 @@ export function createClassicCoreBridge({
       webContents,
       startedAt: Date.now(),
       accumulatedText: '',
+      evidenceRefs: [],
       promise: outcomePromise,
       resolve: resolveOutcome,
     };
@@ -465,8 +475,16 @@ export function createClassicCoreBridge({
     try {
       const reminders = Array.isArray(params.runtimeReminders)
         ? params.runtimeReminders
-            .filter((r) => typeof r?.id === 'string' && typeof r?.content === 'string')
-            .map((r) => ({ id: r.id, content: r.content }))
+            .map((r, index) => {
+              if (typeof r === 'string' && r.trim()) {
+                return { id: `runtime-reminder-${index + 1}`, content: r.trim() };
+              }
+              if (typeof r?.id === 'string' && typeof r?.content === 'string') {
+                return { id: r.id, content: r.content };
+              }
+              return null;
+            })
+            .filter(Boolean)
         : [];
       await client.request('classic.chat.send', {
         conversationId,
@@ -480,6 +498,9 @@ export function createClassicCoreBridge({
         persistModelSelection: Boolean(params.persistModelSelection),
         resumeInterruptedReply: Boolean(params.resumeInterruptedReply),
         ...(reminders.length > 0 ? { runtimeReminders: reminders } : {}),
+        ...(params.permissionPolicy && typeof params.permissionPolicy === 'object'
+          ? { permissionPolicy: params.permissionPolicy }
+          : {}),
         ...(Array.isArray(params.configInstructions) ? { configInstructions: params.configInstructions } : {}),
         ...(Array.isArray(params.contextAttachments) && params.contextAttachments.length > 0
           ? { contextAttachments: params.contextAttachments }

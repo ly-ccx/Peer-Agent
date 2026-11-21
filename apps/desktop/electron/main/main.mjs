@@ -4484,6 +4484,7 @@ function startAutomationRuntime() {
     store: automationStore,
     conversationStore,
     llmChatService,
+    classicCoreBridge,
     worktreeAdapter,
     onBackgroundEvent: ({ channel, payload }) => broadcastToAllWindows(channel, payload),
     onRunUpdated: (run) => outcomeController.handleRunUpdated(run),

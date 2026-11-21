@@ -813,6 +813,11 @@ impl ConversationStore {
             .and_then(normalize_automation_origin);
         let workspace_id = params.get("workspaceId").and_then(trimmed_non_empty);
         let role = params.get("role").and_then(trimmed_non_empty);
+        let model_provider_id = params
+            .get("modelProviderId")
+            .and_then(trimmed_non_empty)
+            .map(Value::String)
+            .unwrap_or(Value::Null);
         let now = now_iso()?;
 
         let directory = self.write_directory()?;
@@ -832,7 +837,7 @@ impl ConversationStore {
             "fastMode": fast_mode,
             "preferredExecutionIsolation": preferred_isolation,
             "effort": "default",
-            "modelProviderId": Value::Null,
+            "modelProviderId": model_provider_id,
             "status": "active",
             "archivedAt": Value::Null,
             "lastReadAt": now,
@@ -1527,5 +1532,26 @@ mod tests {
 
         let restored = store.set_archive_status(&c1_id, false).unwrap().unwrap();
         assert_eq!(restored["status"], "active");
+
+        let auto_conv = store
+            .create_classic_conversation(&json!({
+                "title": "Automation: Inspect",
+                "workspacePath": "/ws/auto",
+                "mode": "goal",
+                "modelProviderId": "provider-auto-1",
+                "automationOrigin": {
+                    "kind": "automation_run",
+                    "automationId": "auto-1",
+                    "runId": "run-1",
+                    "automationName": "Inspect",
+                    "triggerSource": "scheduled",
+                    "originWorkspacePath": "/ws/auto",
+                    "createdAt": "2026-11-21T00:00:00Z"
+                }
+            }))
+            .unwrap();
+        assert_eq!(auto_conv["modelProviderId"], "provider-auto-1");
+        assert_eq!(auto_conv["automationOrigin"]["kind"], "automation_run");
+        assert_eq!(auto_conv["automationOrigin"]["automationId"], "auto-1");
     }
 }

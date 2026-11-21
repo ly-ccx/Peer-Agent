@@ -13,8 +13,8 @@ use peer_protocol::{LocalAccessLevel, UsageAmounts};
 use peer_runtime::{
     CancellationToken,
     conversation_host::{
-        CompactOptions, ConversationEvent, ConversationOutcome, ConversationOutput,
-        PreparedConversationOptions,
+        AutomationPermissionPolicy, CompactOptions, ConversationEvent, ConversationOutcome,
+        ConversationOutput, PreparedConversationOptions,
     },
     model::NativeModel,
     model_catalog::resolve_desktop_model,
@@ -71,10 +71,25 @@ pub type ModelLoader = Arc<
 >;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RuntimeReminderParam {
+    Entry { id: String, content: String },
+    Text(String),
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeReminderParam {
-    pub id: String,
-    pub content: String,
+pub struct PermissionPolicyParam {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub preset: String,
+    #[serde(default)]
+    pub allowed_capability_ids: Vec<String>,
+    #[serde(default)]
+    pub ask_capability_ids: Vec<String>,
+    #[serde(default)]
+    pub blocked_capability_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,6 +136,8 @@ pub struct ClassicChatSendParams {
     pub attachment_context: Vec<Value>,
     #[serde(default)]
     pub context_extensions: Vec<Value>,
+    #[serde(default)]
+    pub permission_policy: Option<PermissionPolicyParam>,
     #[serde(default)]
     pub allowlist: Option<Vec<String>>,
     #[serde(default)]
@@ -243,6 +260,14 @@ pub async fn handle_send(ctx: &Arc<ServerContext>, params_val: Value) -> Result<
             "classic.chat.send only supports 'chat', 'plan', or 'goal' mode (got {})",
             params.mode
         )));
+    }
+    if let Some(policy) = params.permission_policy.as_ref() {
+        let kind = policy.kind.trim();
+        if !kind.is_empty() && kind != "automation" {
+            return Err(RpcError::invalid_params(format!(
+                "Unsupported permissionPolicy.kind: {kind}"
+            )));
+        }
     }
 
     let external_capabilities = ctx.snapshot_external_capabilities()?;
@@ -367,8 +392,31 @@ async fn run_classic_turn(
     let reminders: Vec<(String, String)> = params
         .runtime_reminders
         .iter()
-        .map(|r| (r.id.clone(), r.content.clone()))
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            RuntimeReminderParam::Entry { id, content } => Some((id.clone(), content.clone())),
+            RuntimeReminderParam::Text(text) => {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| {
+                    (
+                        format!("runtime-reminder-{}", index + 1),
+                        trimmed.to_owned(),
+                    )
+                })
+            }
+        })
         .collect();
+    let automation_policy = params.permission_policy.as_ref().and_then(|policy| {
+        if policy.kind.trim() != "automation" {
+            return None;
+        }
+        let _ = &policy.ask_capability_ids;
+        Some(AutomationPermissionPolicy {
+            preset: policy.preset.trim().to_owned(),
+            allowed_capability_ids: policy.allowed_capability_ids.clone(),
+            blocked_capability_ids: policy.blocked_capability_ids.clone(),
+        })
+    });
     let config_instructions: Option<
         Vec<peer_runtime::system_context::instructions::ConfigInstruction>,
     > = params.config_instructions.as_ref().map(|items| {
@@ -420,6 +468,7 @@ async fn run_classic_turn(
                 config_instructions: config_instructions.as_deref(),
                 context_attachments,
                 context_extensions: &params.context_extensions,
+                automation_policy: automation_policy.as_ref(),
                 allowlist: params.allowlist.as_deref(),
                 max_turns: params.max_turns,
                 extra_providers,

@@ -17,34 +17,38 @@ impl Host<'_> {
             worker.admit_tool()?;
         }
         self.reap_background_shells(true).await?;
+        let raw_args_for_automation = (self.worker.is_none() && self.automation_policy.is_some())
+            .then(|| call.arguments.clone());
         let projection = self
             .worker
             .as_ref()
             .map_or(&self.projection, |worker| &worker.projection);
-        let effect = self.providers.prepare(
+        let effect = match self.providers.prepare(
             projection,
             &call.name,
             call.arguments,
             &self.workspace,
             &self.home,
-        )?;
+        ) {
+            Ok(effect) => effect,
+            Err(HostError(risk_error @ ("privileged_command" | "destructive_command")))
+                if raw_args_for_automation.is_some()
+                    && self.projection.capability(&call.name) == Some("local.shell.exec") =>
+            {
+                return self
+                    .deny_automation_high_risk_shell(
+                        &call.name,
+                        raw_args_for_automation.expect("checked raw_args_for_automation"),
+                        risk_error,
+                    )
+                    .await;
+            }
+            Err(error) => return Err(error),
+        };
         let capability = projection
             .capability(&call.name)
             .ok_or(HostError("tool_not_projected"))?
             .to_owned();
-        let call_id = format!("call-{}", uuid::Uuid::new_v4());
-        let dispatch = format!("dispatch-{}", uuid::Uuid::new_v4());
-        let started_at_ms = crate::capability::milliseconds(&now()).unwrap_or(0);
-        let prepared_mode = self.worker.is_none() && self.prepared_assistant.is_some();
-        let message_id = if prepared_mode {
-            self.prepared_assistant
-                .as_ref()
-                .expect("checked prepared_assistant")
-                .message_id
-                .clone()
-        } else {
-            format!("message-{}", uuid::Uuid::new_v4())
-        };
         let args = effect.args().clone();
         let scopes = effect.scopes()?;
         let evidence = effect.evidence();
@@ -60,59 +64,14 @@ impl Host<'_> {
             effect.read_scope()?
         }
         .map(Path::to_owned);
-        if prepared_mode {
-            let tool_segment = json!({
-                "type": "tool-call",
-                "tool": call.name,
-                "toolCallId": call_id,
-                "args": args,
-                "startedAtMs": started_at_ms,
-            });
-            let segments_value = {
-                let pa = self
-                    .prepared_assistant
-                    .as_mut()
-                    .ok_or(HostError("prepared_assistant_unavailable"))?;
-                pa.segments.push(tool_segment);
-                json!(pa.segments)
-            };
-            self.source_current()?;
-            self.expected = self
-                .store
-                .commit_terminal_message(
-                    &self.expected,
-                    &message_id,
-                    &json!({"segments": segments_value, "streamId": self.identity.stream_id}),
-                    &now(),
-                    None,
-                )?
-                .snapshot;
-        } else {
-            self.append(&json!({"id":message_id,"role":"assistant","content":"","createdAt":now(),"streamId":self.identity.stream_id,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args}],"permissionGrants":[]}))?;
-        }
-        let receipt = self.store.prepare_conversation_tool(
-            &mut self.run,
-            &ConversationPendingTool {
-                tool_call_id: call_id.clone(),
-                dispatch_id: dispatch.clone(),
-                message_id: message_id.clone(),
-                capability_id: capability.clone(),
-                args_digest: peer_protocol::approval_args_digest(&args)
-                    .map_err(|_| HostError("permission_arguments_invalid"))?,
-                phase: ConversationDispatchPhase::Prepared,
-                declared_scopes: scopes.iter().map(|s| json!(s)).collect(),
-                native_process: None,
-            },
-            &now(),
-            None,
-        )?;
-        self.publication(receipt)?;
-        self.publish(ConversationEvent::ToolPrepared {
-            call_id: &call_id,
-            tool: &call.name,
-            arguments: &args,
-        })
-        .await?;
+        let (call_id, dispatch, message_id) = self
+            .prepare_tool_intent(
+                &call.name,
+                &capability,
+                &args,
+                scopes.iter().map(|s| json!(s)).collect(),
+            )
+            .await?;
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_prepared");
         let operation = permission::PermissionCall {
@@ -212,6 +171,24 @@ impl Host<'_> {
                         && grant.facts["reason"] == "denied_in_tui"
                     {
                         "hook_approval_denied"
+                    } else if self.automation_policy.is_some()
+                        && let Some(reason) = match grant.facts["reason"].as_str() {
+                            Some("automation_high_risk_blocked") => {
+                                Some("automation_high_risk_blocked")
+                            }
+                            Some("automation_capability_blocked") => {
+                                Some("automation_capability_blocked")
+                            }
+                            Some("automation_observe_read_only") => {
+                                Some("automation_observe_read_only")
+                            }
+                            Some("automation_capability_not_granted") => {
+                                Some("automation_capability_not_granted")
+                            }
+                            _ => None,
+                        }
+                    {
+                        reason
                     } else {
                         "permission_denied"
                     }),
@@ -521,5 +498,180 @@ impl Host<'_> {
             )?
             .snapshot;
         Ok(())
+    }
+
+    async fn prepare_tool_intent(
+        &mut self,
+        tool_name: &str,
+        capability: &str,
+        args: &Value,
+        declared_scopes: Vec<Value>,
+    ) -> Result<(String, String, String), HostError> {
+        let call_id = format!("call-{}", uuid::Uuid::new_v4());
+        let dispatch = format!("dispatch-{}", uuid::Uuid::new_v4());
+        let started_at_ms = crate::capability::milliseconds(&now()).unwrap_or(0);
+        let prepared_mode = self.worker.is_none() && self.prepared_assistant.is_some();
+        let message_id = if prepared_mode {
+            self.prepared_assistant
+                .as_ref()
+                .expect("checked prepared_assistant")
+                .message_id
+                .clone()
+        } else {
+            format!("message-{}", uuid::Uuid::new_v4())
+        };
+        if prepared_mode {
+            let tool_segment = json!({
+                "type": "tool-call",
+                "tool": tool_name,
+                "toolCallId": call_id,
+                "args": args,
+                "startedAtMs": started_at_ms,
+            });
+            let segments_value = {
+                let pa = self
+                    .prepared_assistant
+                    .as_mut()
+                    .ok_or(HostError("prepared_assistant_unavailable"))?;
+                pa.segments.push(tool_segment);
+                json!(pa.segments)
+            };
+            self.source_current()?;
+            self.expected = self
+                .store
+                .commit_terminal_message(
+                    &self.expected,
+                    &message_id,
+                    &json!({"segments": segments_value, "streamId": self.identity.stream_id}),
+                    &now(),
+                    None,
+                )?
+                .snapshot;
+        } else {
+            self.append(&json!({
+                "id": message_id,
+                "role": "assistant",
+                "content": "",
+                "createdAt": now(),
+                "streamId": self.identity.stream_id,
+                "segments": [{"type": "tool-call", "tool": tool_name, "toolCallId": call_id, "args": args}],
+                "permissionGrants": [],
+            }))?;
+        }
+        let receipt = self.store.prepare_conversation_tool(
+            &mut self.run,
+            &ConversationPendingTool {
+                tool_call_id: call_id.clone(),
+                dispatch_id: dispatch.clone(),
+                message_id: message_id.clone(),
+                capability_id: capability.to_owned(),
+                args_digest: peer_protocol::approval_args_digest(args)
+                    .map_err(|_| HostError("permission_arguments_invalid"))?,
+                phase: ConversationDispatchPhase::Prepared,
+                declared_scopes,
+                native_process: None,
+            },
+            &now(),
+            None,
+        )?;
+        self.publication(receipt)?;
+        self.publish(ConversationEvent::ToolPrepared {
+            call_id: &call_id,
+            tool: tool_name,
+            arguments: args,
+        })
+        .await?;
+        Ok((call_id, dispatch, message_id))
+    }
+
+    async fn deny_automation_high_risk_shell(
+        &mut self,
+        tool_name: &str,
+        args: Value,
+        risk_error: &'static str,
+    ) -> Result<ToolStep, HostError> {
+        let capability = "local.shell.exec";
+        let _args_digest = peer_protocol::approval_args_digest(&args)
+            .map_err(|_| HostError("permission_arguments_invalid"))?;
+        let (call_id, _dispatch, message_id) = self
+            .prepare_tool_intent(tool_name, capability, &args, vec![])
+            .await?;
+        let revision = self.access.snapshot()?.1;
+        let grant_facts = json!({
+            "grantId": format!("grant-{}", uuid::Uuid::new_v4()),
+            "toolCallId": call_id,
+            "granted": false,
+            "scope": capability,
+            "duration": "denied",
+            "decidedAt": now(),
+            "reason": "automation_high_risk_blocked",
+            "metadata": {
+                "policyRevision": format!("ordinary:{}:{revision}", self.identity.stream_id),
+                "shellRiskError": risk_error,
+            },
+        });
+        let result = json!({
+            "toolCallId": call_id,
+            "capabilityId": capability,
+            "status": "denied",
+            "output": {},
+            "outputPreview": { "kind": "json" },
+            "completedAt": now(),
+            "error": {
+                "code": "automation_high_risk_blocked",
+                "message": "automation_high_risk_blocked",
+                "recoverable": true,
+            },
+            "evidence": {
+                "evidenceId": format!("evidence-{}", uuid::Uuid::new_v4()),
+                "toolCallId": call_id,
+                "permissionGrantId": grant_facts["grantId"],
+                "summary": format!("{tool_name}: denied"),
+                "artifactRefs": [],
+                "dispatchOutcome": "not_dispatched",
+            },
+        });
+        self.tool_facts(
+            &message_id,
+            &call_id,
+            tool_name,
+            &args,
+            &result,
+            std::slice::from_ref(&grant_facts),
+        )?;
+        let evidence_ref = EvidenceIndexStore::new(&self.home)
+            .register(
+                &HostToolEvidence {
+                    conversation_id: &self.identity.conversation_id,
+                    plan_id: None,
+                    stream_id: Some(&self.identity.stream_id),
+                    tool_name,
+                    capability_id: capability,
+                    tool_call_id: &call_id,
+                    grant: &grant_facts,
+                    result: &result,
+                },
+                None,
+            )?
+            .into_iter()
+            .next()
+            .and_then(|record| record["evidenceRef"].as_str().map(str::to_owned));
+        let receipt =
+            self.store
+                .settle_conversation_tool(&mut self.run, &call_id, &message_id, &now())?;
+        if let Err(error) = self.publication(receipt) {
+            self.owned.cancel();
+            return Err(error);
+        }
+        self.publish(ConversationEvent::ToolSettled {
+            call_id: &call_id,
+            result: &result,
+            evidence_ref: evidence_ref.as_deref(),
+        })
+        .await?;
+        if self.owned.is_cancelled() || self.external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        Ok(ToolStep::Continue(call_id))
     }
 }

@@ -28,7 +28,8 @@ impl Host<'_> {
         &mut self,
         permission: ProviderPermission,
     ) -> Result<GoalIntake, HostError> {
-        if self.mode != RuntimeMode::Goal
+        if self.automation_policy.is_some()
+            || self.mode != RuntimeMode::Goal
             || !matches!(
                 permission,
                 ProviderPermission::FileWrite | ProviderPermission::Shell

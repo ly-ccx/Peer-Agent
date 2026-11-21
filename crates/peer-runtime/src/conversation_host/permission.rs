@@ -102,6 +102,45 @@ fn automatic(
                     )
                 ))
 }
+
+fn evaluate_automation_policy(
+    policy: &AutomationPermissionPolicy,
+    capability: &str,
+    permission: ProviderPermission,
+    risk: Option<ShellRisk>,
+) -> Option<(bool, &'static str)> {
+    if matches!(
+        permission,
+        ProviderPermission::UserInput
+            | ProviderPermission::ConversationGoal
+            | ProviderPermission::ShellStop
+    ) {
+        return None;
+    }
+    if permission == ProviderPermission::Shell
+        && matches!(risk, Some(ShellRisk::Privileged | ShellRisk::Destructive))
+    {
+        return Some((false, "automation_high_risk_blocked"));
+    }
+    if policy
+        .blocked_capability_ids
+        .iter()
+        .any(|id| id == capability)
+    {
+        return Some((false, "automation_capability_blocked"));
+    }
+    if policy
+        .allowed_capability_ids
+        .iter()
+        .any(|id| id == capability)
+    {
+        return Some((true, "automation_grant_allowed"));
+    }
+    if policy.preset == "observe" {
+        return Some((false, "automation_observe_read_only"));
+    }
+    Some((false, "automation_capability_not_granted"))
+}
 impl Host<'_> {
     fn session_op_key(
         &self,
@@ -244,6 +283,18 @@ impl Host<'_> {
             (false, reason, None, false)
         } else if hook == HookDecision::Deny {
             (false, "hook_denied", None, false)
+        } else if let Some((allowed, auto_reason)) = self
+            .automation_policy
+            .as_ref()
+            .and_then(|policy| evaluate_automation_policy(policy, capability, permission, risk))
+        {
+            if !allowed {
+                (false, auto_reason, None, false)
+            } else if hook == HookDecision::Allow {
+                (true, auto_reason, None, false)
+            } else {
+                (false, "hook_denied", None, false)
+            }
         } else if permitted && hook == HookDecision::Allow {
             (
                 true,
@@ -520,6 +571,12 @@ impl Host<'_> {
         let level = self.access.snapshot()?.0;
         let (granted, reason, terminal) = if self.worker.is_some() && !inside {
             (false, "explorer_scope_denied", None)
+        } else if !inside
+            && let Some((allowed, auto_reason)) = self.automation_policy.as_ref().and_then(|p| {
+                evaluate_automation_policy(p, &grant.capability, ProviderPermission::Read, None)
+            })
+        {
+            (allowed, auto_reason, None)
         } else if level == LocalAccessLevel::FullLocal || inside {
             (true, "host_policy_read", None)
         } else {
@@ -558,5 +615,87 @@ impl Host<'_> {
         }
         grant.scopes.push(scope);
         self.validate_grant(grant, args)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evaluate_automation_policy_enforces_grants_and_blocks_high_risk() {
+        let observe = AutomationPermissionPolicy {
+            preset: "observe".into(),
+            allowed_capability_ids: vec!["local.file.read".into()],
+            blocked_capability_ids: vec!["local.file.write".into()],
+        };
+        assert_eq!(
+            evaluate_automation_policy(
+                &observe,
+                "local.shell.exec",
+                ProviderPermission::Shell,
+                Some(ShellRisk::Privileged),
+            ),
+            Some((false, "automation_high_risk_blocked"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(
+                &observe,
+                "local.shell.exec",
+                ProviderPermission::Shell,
+                Some(ShellRisk::Destructive),
+            ),
+            Some((false, "automation_high_risk_blocked"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(
+                &observe,
+                "local.file.write",
+                ProviderPermission::FileWrite,
+                None,
+            ),
+            Some((false, "automation_capability_blocked"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(&observe, "local.file.read", ProviderPermission::Read, None),
+            Some((true, "automation_grant_allowed"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(&observe, "local.git.query", ProviderPermission::Read, None,),
+            Some((false, "automation_observe_read_only"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(
+                &observe,
+                "local.goal.create_plan",
+                ProviderPermission::ConversationGoal,
+                None,
+            ),
+            None
+        );
+
+        let workspace_policy = AutomationPermissionPolicy {
+            preset: "work_in_workspace".into(),
+            allowed_capability_ids: vec!["local.file.write".into()],
+            blocked_capability_ids: vec![],
+        };
+        assert_eq!(
+            evaluate_automation_policy(
+                &workspace_policy,
+                "local.file.write",
+                ProviderPermission::FileWrite,
+                None,
+            ),
+            Some((true, "automation_grant_allowed"))
+        );
+        assert_eq!(
+            evaluate_automation_policy(
+                &workspace_policy,
+                "local.shell.exec",
+                ProviderPermission::Shell,
+                Some(ShellRisk::LocalRead),
+            ),
+            Some((false, "automation_capability_not_granted"))
+        );
     }
 }

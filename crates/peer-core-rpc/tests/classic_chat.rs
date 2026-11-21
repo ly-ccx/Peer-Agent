@@ -880,3 +880,236 @@ async fn desktop_settings_config_instructions_attachments_extensions_and_compact
     rpc_task.await.unwrap().unwrap();
     server_task.await.unwrap();
 }
+
+#[tokio::test]
+async fn automation_permission_policy_enforces_grants_and_blocks_under_full_local() {
+    let home = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    let (endpoint, _recorded, server_task) = spawn_mock_openai_sse(vec![
+        // Turn 1 (observe): attempts write_file -> blocked -> text reply
+        sse_tool_call_response(
+            "tc-auto-blocked",
+            "write_file",
+            r#"{"path":"blocked.txt","content":"should not exist"}"#,
+        ),
+        sse_text_and_thinking_response("", "Observe run blocked write."),
+        // Turn 2 (work_in_workspace, mode=goal without GoalPlan): write_file (allowed) -> bash sudo (high risk blocked) -> text reply
+        sse_tool_call_response(
+            "tc-auto-write",
+            "write_file",
+            r#"{"path":"allowed.txt","content":"automation_ok"}"#,
+        ),
+        sse_tool_call_response("tc-auto-priv", "bash", r#"{"command":"sudo id"}"#),
+        sse_text_and_thinking_response("", "Created allowed.txt safely."),
+    ])
+    .await;
+
+    let (mut client, _shutdown, rpc_task) = setup_test_server(home.path(), endpoint, vec![]).await;
+
+    // Even with full_local host policy, automation permissionPolicy must govern strictly.
+    let access_res = client
+        .call(
+            2,
+            "classic.access.set",
+            json!({ "accessLevel": "full_local" }),
+        )
+        .await;
+    assert_eq!(access_res["result"]["accessLevel"], "full_local");
+
+    // 1. Create observe automation conversation and append user + assistant placeholder.
+    let conv1 = client
+        .call(
+            3,
+            "classic.conversations.create",
+            json!({
+                "title": "Automation: Observe",
+                "workspacePath": workspace.path().to_string_lossy(),
+                "mode": "goal",
+                "modelProviderId": "provider-auto-1",
+                "automationOrigin": {
+                    "kind": "automation_run",
+                    "automationId": "auto-1",
+                    "runId": "run-1",
+                    "automationName": "Observe",
+                    "triggerSource": "scheduled"
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(conv1["modelProviderId"], "provider-auto-1");
+    assert_eq!(conv1["automationOrigin"]["automationId"], "auto-1");
+    let conv1_id = conv1["id"].as_str().unwrap().to_owned();
+    let asst1 = "msg-auto-asst-1";
+    client
+        .call(
+            4,
+            "classic.conversations.appendMessage",
+            json!({
+                "id": conv1_id,
+                "message": { "id": "u-auto-1", "role": "user", "content": "Inspect workspace" }
+            }),
+        )
+        .await;
+    client
+        .call(
+            5,
+            "classic.conversations.appendMessage",
+            json!({
+                "id": conv1_id,
+                "message": { "id": asst1, "role": "assistant", "content": "", "segments": [] }
+            }),
+        )
+        .await;
+
+    let send1 = client
+        .call(
+            6,
+            "classic.chat.send",
+            json!({
+                "conversationId": conv1_id,
+                "streamId": "stream-auto-1",
+                "assistantMessageId": asst1,
+                "workspacePath": workspace.path().to_string_lossy(),
+                "mode": "goal",
+                "runtimeReminders": ["Automation run run-1. Observe only."],
+                "permissionPolicy": {
+                    "kind": "automation",
+                    "preset": "observe",
+                    "allowedCapabilityIds": ["local.file.read"],
+                    "askCapabilityIds": [],
+                    "blockedCapabilityIds": ["local.file.write"]
+                }
+            }),
+        )
+        .await;
+    assert_eq!(send1["result"]["accepted"], true);
+
+    let events1 = client
+        .drain_until(|msg| {
+            matches!(
+                msg.get("method").and_then(Value::as_str),
+                Some("chat:stream:done" | "chat:stream:error")
+            )
+        })
+        .await;
+    assert!(
+        events1.iter().any(|e| e["method"] == "chat:stream:done"),
+        "turn 1 unexpected events: {events1:#?}"
+    );
+    assert!(
+        !events1
+            .iter()
+            .any(|e| e["method"] == "chat:stream:permission-request")
+    );
+    let tr1 = events1
+        .iter()
+        .find(|e| e["method"] == "chat:stream:tool-result")
+        .unwrap();
+    let tr1_text = tr1["params"]["result"].as_str().unwrap();
+    assert!(tr1_text.contains("automation_capability_blocked"));
+    assert!(!workspace.path().join("blocked.txt").exists());
+
+    // 2. Run work_in_workspace automation in mode=goal (no GoalPlan): write_file allowed + evidenceRefs; sudo blocked.
+    let conv2 = client
+        .call(
+            7,
+            "classic.conversations.create",
+            json!({
+                "title": "Automation: Work",
+                "workspacePath": workspace.path().to_string_lossy(),
+                "mode": "goal",
+                "modelProviderId": "provider-auto-2"
+            }),
+        )
+        .await["result"]
+        .clone();
+    let conv2_id = conv2["id"].as_str().unwrap().to_owned();
+    let asst2 = "msg-auto-asst-2";
+    client
+        .call(
+            8,
+            "classic.conversations.appendMessage",
+            json!({
+                "id": conv2_id,
+                "message": { "id": "u-auto-2", "role": "user", "content": "Write allowed.txt" }
+            }),
+        )
+        .await;
+    client
+        .call(
+            9,
+            "classic.conversations.appendMessage",
+            json!({
+                "id": conv2_id,
+                "message": { "id": asst2, "role": "assistant", "content": "", "segments": [] }
+            }),
+        )
+        .await;
+
+    let send2 = client
+        .call(
+            10,
+            "classic.chat.send",
+            json!({
+                "conversationId": conv2_id,
+                "streamId": "stream-auto-2",
+                "assistantMessageId": asst2,
+                "workspacePath": workspace.path().to_string_lossy(),
+                "mode": "goal",
+                "runtimeReminders": ["Automation run run-2."],
+                "permissionPolicy": {
+                    "kind": "automation",
+                    "preset": "work_in_workspace",
+                    "allowedCapabilityIds": ["local.file.write", "local.shell.exec"],
+                    "askCapabilityIds": [],
+                    "blockedCapabilityIds": []
+                }
+            }),
+        )
+        .await;
+    assert_eq!(send2["result"]["accepted"], true);
+
+    let events2 = client
+        .drain_until(|msg| {
+            matches!(
+                msg.get("method").and_then(Value::as_str),
+                Some("chat:stream:done" | "chat:stream:error")
+            )
+        })
+        .await;
+    assert!(
+        events2.iter().any(|e| e["method"] == "chat:stream:done"),
+        "turn 2 unexpected events: {events2:#?}"
+    );
+    assert!(
+        !events2
+            .iter()
+            .any(|e| e["method"] == "chat:stream:permission-request")
+    );
+    let tool_results2: Vec<&Value> = events2
+        .iter()
+        .filter(|e| e["method"] == "chat:stream:tool-result")
+        .collect();
+    assert_eq!(tool_results2.len(), 2);
+    assert!(
+        tool_results2[0]["params"]["evidenceRefs"]
+            .as_array()
+            .is_some_and(|arr| !arr.is_empty())
+    );
+    assert!(
+        tool_results2[1]["params"]["result"]
+            .as_str()
+            .unwrap()
+            .contains("automation_high_risk_blocked")
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join("allowed.txt")).unwrap(),
+        "automation_ok"
+    );
+
+    let _ = client.call(99, "core.shutdown", json!({})).await;
+    drop(client);
+    rpc_task.await.unwrap().unwrap();
+    server_task.await.unwrap();
+}

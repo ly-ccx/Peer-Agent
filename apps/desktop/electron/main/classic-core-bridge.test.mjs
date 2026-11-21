@@ -7,6 +7,9 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { createPeerCoreClient } from './peer-core-client.mjs';
+import { createAutomationRunner } from './automation-runner.mjs';
+import { createAutomationStore } from './automation-store.mjs';
+import { createConversationStore } from './conversation-store.mjs';
 import {
   beginCompaction,
   endCompaction,
@@ -1082,6 +1085,148 @@ test('E2E: Node bridge <-> peer-native handles Desktop settings, configInstructi
     assert.equal(compacted.compacted, true);
     assert.equal(getCompaction(convId), null);
     assert.ok(broadcasts.some((e) => e.channel === 'chat:compaction' && e.payload?.stage === 'done'));
+  } finally {
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});
+
+test('E2E: automationRunner <-> peer-native core --stdio enforces Automation Grants under full_local', async () => {
+  const { dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+
+  let turn = 0;
+  const mockServer = await startMockSseServer(({ body, res }) => {
+    const lastTool = [...(body?.messages ?? [])].reverse().find((m) => m.role === 'tool');
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    if (turn === 0) {
+      turn += 1;
+      res.end(sseToolCall('auto-c1', 'write_file', { path: 'should-fail.txt', content: 'denied' }));
+      return;
+    }
+    if (turn === 1 && lastTool) {
+      turn += 1;
+      res.end(sseText('', 'Observe run blocked write attempt cleanly.'));
+      return;
+    }
+    if (turn === 2) {
+      turn += 1;
+      res.end(sseToolCall('auto-c2', 'write_file', { path: 'auto-created.txt', content: 'granted_ok' }));
+      return;
+    }
+    res.end(sseText('', 'Work run wrote auto-created.txt with evidence.'));
+  });
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-auto',
+      PEER_MODEL_ID: 'e2e-mock-gpt',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-auto-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    await bridge.setLocalAccessLevel('full_local');
+
+    const automationStore = createAutomationStore({ storeDir: path.join(dataHome, 'automations') });
+    const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+    const def = automationStore.createDefinition({
+      name: 'Rust Automation E2E',
+      prompt: 'Attempt write',
+      workspacePath: workspace,
+      schedule: { kind: 'daily', timezone: 'UTC', hour: 9, minute: 0 },
+      grant: {
+        preset: 'observe',
+        workspacePath: workspace,
+        allowedCapabilityIds: ['local.file.read'],
+        askCapabilityIds: [],
+        blockedCapabilityIds: [],
+        confirmedAt: '2026-11-21T00:00:00.000Z',
+        version: 1,
+      },
+      notifications: { needsAttention: 'system_and_badge', failed: true, succeeded: false },
+      budget: { timeoutMs: 60_000 },
+      missedRunPolicy: 'run_latest',
+      overlapPolicy: 'skip',
+      status: 'active',
+    }, { automationId: 'auto-e2e-1', now: '2026-11-21T00:00:00.000Z' });
+
+    const bgEvents = [];
+    const runner = createAutomationRunner({
+      store: automationStore,
+      conversationStore,
+      classicCoreBridge: bridge,
+      onBackgroundEvent: (evt) => bgEvents.push(evt),
+      logger: { info() {}, warn() {}, error() {} },
+    });
+
+    // 1. Observe preset blocks write_file even under full_local.
+    const observeRun = automationStore.createRun({
+      automationId: def.automationId,
+      idempotencyKey: 'auto-e2e-1:observe',
+      triggerSource: 'manual',
+      status: 'scheduled',
+      scheduledAt: '2026-11-21T00:01:00.000Z',
+      snapshot: {
+        definitionVersion: def.version,
+        name: def.name,
+        prompt: def.prompt,
+        workspacePath: def.workspacePath,
+        schedule: def.schedule,
+        grant: def.grant,
+        budget: def.budget,
+      },
+    }, { runId: 'run-observe-1', now: '2026-11-21T00:01:00.000Z' });
+    const res1 = await runner.run(observeRun);
+    assert.equal(res1.status, 'succeeded');
+    assert.equal(existsSync(path.join(workspace, 'should-fail.txt')), false);
+    assert.equal(res1.receipt.summary, 'Observe run blocked write attempt cleanly.');
+    assert.ok(bgEvents.some((e) => e.channel === 'chat:stream:tool-result' && String(e.payload?.result).includes('automation_observe_read_only')));
+
+    // 2. work_in_workspace preset permits local.file.write and records evidenceRefs in receipt.
+    const workRun = automationStore.createRun({
+      automationId: def.automationId,
+      idempotencyKey: 'auto-e2e-1:work',
+      triggerSource: 'manual',
+      status: 'scheduled',
+      scheduledAt: '2026-11-21T00:02:00.000Z',
+      snapshot: {
+        definitionVersion: def.version,
+        name: def.name,
+        prompt: def.prompt,
+        workspacePath: def.workspacePath,
+        schedule: def.schedule,
+        grant: {
+          preset: 'work_in_workspace',
+          workspacePath: workspace,
+          allowedCapabilityIds: ['local.file.write'],
+          askCapabilityIds: [],
+          blockedCapabilityIds: [],
+          confirmedAt: '2026-11-21T00:00:00.000Z',
+          version: 1,
+        },
+        budget: def.budget,
+      },
+    }, { runId: 'run-work-1', now: '2026-11-21T00:02:00.000Z' });
+    const res2 = await runner.run(workRun);
+    assert.equal(res2.status, 'succeeded');
+    assert.equal(readFileSync(path.join(workspace, 'auto-created.txt'), 'utf8'), 'granted_ok');
+    assert.equal(res2.receipt.summary, 'Work run wrote auto-created.txt with evidence.');
+    assert.ok(Array.isArray(res2.receipt.evidenceRefs) && res2.receipt.evidenceRefs.length > 0);
   } finally {
     await client.dispose();
     await mockServer.close();
