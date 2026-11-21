@@ -340,7 +340,16 @@ async fn init_client(client: &mut RpcGoalTestClient, next_id: &mut u64) {
         .await;
     assert_eq!(
         init["result"]["capabilities"]["domains"],
-        json!(["core", "classic.chat", "classic.goal"])
+        json!([
+            "core",
+            "classic.chat",
+            "classic.goal",
+            "classic.conversations",
+            "classic.usage",
+            "classic.skills",
+            "classic.mcp",
+            "classic.llm"
+        ])
     );
     *next_id += 1;
     let access = client

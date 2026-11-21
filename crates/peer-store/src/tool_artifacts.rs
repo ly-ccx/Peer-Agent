@@ -295,6 +295,27 @@ impl ToolArtifactStore {
         let verified = self.verify(&dir, conversation, reference, cancel)?;
         verified_window(&dir, reference, verified, (offset, length), cancel)
     }
+    /// Remove the tool-results directory for a deleted conversation.
+    pub fn remove_conversation(&self, conversation_id: &str) -> Result<bool, Error> {
+        if !valid_id(conversation_id, false) {
+            return Err(Error::Invalid);
+        }
+        let dir = self
+            .home
+            .join("conversations")
+            .join(format!("{conversation_id}.tool-results"));
+        match std::fs::symlink_metadata(&dir) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(_) => Err(Error::Unavailable),
+            Ok(meta) => {
+                if meta.file_type().is_symlink() || !meta.is_dir() {
+                    return Err(Error::Invalid);
+                }
+                std::fs::remove_dir_all(&dir).map_err(|_| Error::Unavailable)?;
+                Ok(true)
+            }
+        }
+    }
 }
 fn verified_window(
     dir: &storage::Directory,
@@ -404,5 +425,21 @@ mod verified_window_tests {
             verified_window(&dir, &reference, verified, (0, 8), &|| false).unwrap_err(),
             Error::Changed
         );
+    }
+
+    #[test]
+    fn remove_conversation_cleans_up_directory_and_rejects_invalid_ids() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join("conversations")).unwrap();
+        std::fs::write(home.path().join("conversations/conv-1.jsonl"), "{}").unwrap();
+        let store = ToolArtifactStore::new(home.path());
+        let reference = store.publish_utf8("conv-1", "payload", &|| false).unwrap();
+        let artifact_path = store.path("conv-1", &reference).unwrap();
+        assert!(artifact_path.exists());
+
+        assert_eq!(store.remove_conversation("conv-1"), Ok(true));
+        assert!(!artifact_path.parent().unwrap().exists());
+        assert_eq!(store.remove_conversation("conv-1"), Ok(false));
+        assert_eq!(store.remove_conversation("../escape"), Err(Error::Invalid));
     }
 }

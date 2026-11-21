@@ -610,6 +610,262 @@ export function createClassicCoreBridge({
     return client.request('classic.goal.getState', { planId });
   }
 
+  function requireClient() {
+    const client = activeClient();
+    if (!client) throw new Error('peer_core_not_ready');
+    return client;
+  }
+
+  async function listConversations(params = {}) {
+    const wantsPage = params?.paginated === true || params?.limit != null || params?.cursor != null;
+    return requireClient().request('classic.conversations.list', {
+      ...(params?.workspacePath !== undefined ? { workspacePath: params.workspacePath } : {}),
+      ...(params?.status !== undefined ? { status: params.status } : {}),
+      ...(Array.isArray(params?.roles) ? { roles: params.roles } : {}),
+      ...(params?.includeMessageCount !== undefined ? { includeMessageCount: params.includeMessageCount } : {}),
+      ...(params?.limit != null ? { limit: params.limit } : {}),
+      ...(params?.cursor != null ? { cursor: params.cursor } : {}),
+      paginated: wantsPage,
+    });
+  }
+
+  async function searchConversations(params = {}) {
+    return requireClient().request('classic.conversations.search', {
+      ...(params?.query !== undefined ? { query: params.query } : {}),
+      ...(params?.workspacePath !== undefined ? { workspacePath: params.workspacePath } : {}),
+      ...(params?.status !== undefined ? { status: params.status } : {}),
+      ...(Array.isArray(params?.roles) ? { roles: params.roles } : {}),
+      ...(params?.limit != null ? { limit: params.limit } : {}),
+      includeWorkspaceNameMatch: Boolean(params?.includeWorkspaceNameMatch),
+    });
+  }
+
+  async function createConversation(params = {}) {
+    return requireClient().request('classic.conversations.create', params || {});
+  }
+
+  async function getConversation({ id, limit, before, full } = {}) {
+    return requireClient().request('classic.conversations.get', {
+      id,
+      ...(limit != null ? { limit } : {}),
+      ...(typeof before === 'string' && before ? { before } : {}),
+      ...(full === true ? { full: true } : {}),
+    });
+  }
+
+  async function updateConversationTitle({ id, title, source } = {}) {
+    return requireClient().request('classic.conversations.updateTitle', {
+      id,
+      title,
+      ...(typeof source === 'string' ? { source } : {}),
+    });
+  }
+
+  async function updateConversationMode({ id, mode } = {}) {
+    return requireClient().request('classic.conversations.updateMode', { id, mode });
+  }
+
+  async function updateConversationFastMode({ id, fastMode } = {}) {
+    return requireClient().request('classic.conversations.updateFastMode', {
+      id,
+      fastMode: Boolean(fastMode),
+    });
+  }
+
+  async function updateConversationPreferredExecutionIsolation({ id, preferredExecutionIsolation } = {}) {
+    return requireClient().request('classic.conversations.updatePreferredExecutionIsolation', {
+      id,
+      preferredExecutionIsolation,
+    });
+  }
+
+  async function updateConversationModelEffort({ id, effort, modelProviderId, model } = {}) {
+    return requireClient().request('classic.conversations.updateModelEffort', {
+      id,
+      ...(effort !== undefined ? { effort } : {}),
+      ...(modelProviderId !== undefined ? { modelProviderId } : {}),
+      ...(model !== undefined ? { model } : {}),
+    });
+  }
+
+  async function appendConversationMessage({ id, message } = {}) {
+    return requireClient().request('classic.conversations.appendMessage', { id, message });
+  }
+
+  async function updateConversationLastMessage({ id, content } = {}) {
+    return requireClient().request('classic.conversations.updateLastMessage', { id, content });
+  }
+
+  async function replaceConversationMessages({ id, messages, allowEmpty = false } = {}) {
+    return requireClient().request('classic.conversations.replaceMessages', {
+      id,
+      messages,
+      allowEmpty: Boolean(allowEmpty),
+    });
+  }
+
+  async function archiveConversation({ id } = {}) {
+    return requireClient().request('classic.conversations.archive', { id });
+  }
+
+  async function restoreConversation({ id } = {}) {
+    return requireClient().request('classic.conversations.restore', { id });
+  }
+
+  async function pinConversation({ id } = {}) {
+    return requireClient().request('classic.conversations.pin', { id });
+  }
+
+  async function unpinConversation({ id } = {}) {
+    return requireClient().request('classic.conversations.unpin', { id });
+  }
+
+  async function reorderPinnedConversations({ ids } = {}) {
+    return requireClient().request('classic.conversations.reorderPinned', { ids: ids || [] });
+  }
+
+  async function autoArchiveConversations({ before, excludeIds = [] } = {}) {
+    return requireClient().request('classic.conversations.autoArchive', {
+      before: before || '',
+      excludeIds: Array.isArray(excludeIds) ? excludeIds : [],
+    });
+  }
+
+  async function deleteConversation(payload) {
+    const id = typeof payload === 'string' ? payload : payload?.id;
+    return requireClient().request('classic.conversations.delete', { id });
+  }
+
+  async function addConversationUsage({ id, usage } = {}) {
+    return requireClient().request('classic.conversations.addUsage', { id, usage: usage || {} });
+  }
+
+  async function getUsageStats(params = {}) {
+    return requireClient().request('classic.usage.stats', params || {});
+  }
+
+  async function getUsageDaily(params = {}) {
+    return requireClient().request('classic.usage.daily', {
+      ...(params?.range ? { range: params.range } : {}),
+      ...(params?.now ? { now: params.now } : {}),
+      localOffsetMinutes: params?.localOffsetMinutes ?? -new Date().getTimezoneOffset(),
+    });
+  }
+
+  async function getUsageDay(params = {}) {
+    return requireClient().request('classic.usage.day', {
+      ...(params?.date ? { date: params.date } : {}),
+      ...(params?.now ? { now: params.now } : {}),
+      localOffsetMinutes: params?.localOffsetMinutes ?? -new Date().getTimezoneOffset(),
+    });
+  }
+
+  async function getUsageCacheHitRate() {
+    return requireClient().request('classic.usage.cacheHitRate', {});
+  }
+
+  async function listSkills(workspacePaths, { activeWorkspace = null } = {}) {
+    return requireClient().request('classic.skills.list', {
+      ...(Array.isArray(workspacePaths) ? { workspacePaths } : {}),
+      ...(activeWorkspace ? { activeWorkspace } : {}),
+    });
+  }
+
+  async function getSkillDetail(skillId, workspacePath, { activeWorkspace = null } = {}) {
+    return requireClient().request('classic.skills.getDetail', {
+      skillId,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(activeWorkspace ? { activeWorkspace } : {}),
+    });
+  }
+
+  async function enableSkill(skillId, workspacePath, { activeWorkspace = null } = {}) {
+    return requireClient().request('classic.skills.enable', {
+      skillId,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(activeWorkspace ? { activeWorkspace } : {}),
+    });
+  }
+
+  async function disableSkill(skillId, workspacePath, { activeWorkspace = null } = {}) {
+    return requireClient().request('classic.skills.disable', {
+      skillId,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(activeWorkspace ? { activeWorkspace } : {}),
+    });
+  }
+
+  async function listAvailableSkills({ sourceRoots = [] } = {}) {
+    return requireClient().request('classic.skills.listAvailable', { sourceRoots });
+  }
+
+  async function linkSkill(skillId, { sourceRoots = [] } = {}) {
+    return requireClient().request('classic.skills.link', { skillId, sourceRoots });
+  }
+
+  async function unlinkSkill(skillId) {
+    return requireClient().request('classic.skills.unlink', { skillId });
+  }
+
+  async function uninstallSkill(skillId, workspacePath, { activeWorkspace = null } = {}) {
+    return requireClient().request('classic.skills.uninstall', {
+      skillId,
+      ...(workspacePath !== undefined ? { workspacePath } : {}),
+      ...(activeWorkspace ? { activeWorkspace } : {}),
+    });
+  }
+
+  async function listInstalledMcp() {
+    return requireClient().request('classic.mcp.listInstalled', {});
+  }
+
+  async function listMcpCapabilities() {
+    return requireClient().request('classic.mcp.listCapabilities', {});
+  }
+
+  async function listMcpCredentials() {
+    return requireClient().request('classic.mcp.listCredentials', {});
+  }
+
+  async function upsertMcpServer(item) {
+    return requireClient().request('classic.mcp.upsertServer', item || {});
+  }
+
+  async function installMcpServer(item) {
+    return requireClient().request('classic.mcp.install', item || {});
+  }
+
+  async function uninstallMcpServer(serverId) {
+    return requireClient().request('classic.mcp.uninstall', { serverId });
+  }
+
+  async function setMcpEnabled(serverId, enabled) {
+    return requireClient().request('classic.mcp.setEnabled', {
+      serverId,
+      enabled: Boolean(enabled),
+    });
+  }
+
+  async function setMcpToolVisibility(serverId, toolName, visible) {
+    return requireClient().request('classic.mcp.setToolVisibility', {
+      serverId,
+      toolName,
+      visible: Boolean(visible),
+    });
+  }
+
+  async function listLlmCatalog() {
+    return requireClient().request('classic.llm.catalog', {});
+  }
+
+  async function completeLlmPrompt(params = {}) {
+    return requireClient().request('classic.llm.complete', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function fetchLlmQuota(id) {
+    return requireClient().request('classic.llm.quota', { id }, { timeoutMs: 25_000 });
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
@@ -630,6 +886,49 @@ export function createClassicCoreBridge({
     pauseGoalRunner,
     clearGoalRunner,
     getGoalRunnerState,
+    listConversations,
+    searchConversations,
+    createConversation,
+    getConversation,
+    updateConversationTitle,
+    updateConversationMode,
+    updateConversationFastMode,
+    updateConversationPreferredExecutionIsolation,
+    updateConversationModelEffort,
+    appendConversationMessage,
+    updateConversationLastMessage,
+    replaceConversationMessages,
+    archiveConversation,
+    restoreConversation,
+    pinConversation,
+    unpinConversation,
+    reorderPinnedConversations,
+    autoArchiveConversations,
+    deleteConversation,
+    addConversationUsage,
+    getUsageStats,
+    getUsageDaily,
+    getUsageDay,
+    getUsageCacheHitRate,
+    listSkills,
+    getSkillDetail,
+    enableSkill,
+    disableSkill,
+    listAvailableSkills,
+    linkSkill,
+    unlinkSkill,
+    uninstallSkill,
+    listInstalledMcp,
+    listMcpCapabilities,
+    listMcpCredentials,
+    upsertMcpServer,
+    installMcpServer,
+    uninstallMcpServer,
+    setMcpEnabled,
+    setMcpToolVisibility,
+    listLlmCatalog,
+    completeLlmPrompt,
+    fetchLlmQuota,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

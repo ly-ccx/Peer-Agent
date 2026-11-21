@@ -2,7 +2,7 @@
 use crate::{StoreError, files};
 use std::path::{Path, PathBuf};
 pub struct McpRegistryStore {
-    file: PathBuf,
+    pub(crate) file: PathBuf,
 }
 pub struct McpRegistrySnapshot {
     pub source_revision: String,

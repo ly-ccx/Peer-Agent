@@ -688,3 +688,184 @@ test('E2E: Node bridge <-> peer-native core --stdio drives Goal Runner with work
     cleanup();
   }
 });
+
+test('E2E: Node bridge <-> peer-native core --stdio handles Classic peripheral domains (conversations, usage, skills, mcp, llm)', async () => {
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  const borrowRoot = path.join(root, 'borrow-skills');
+  mkdirSync(path.join(dataHome, 'usage'), { recursive: true });
+  mkdirSync(path.join(dataHome, 'skills', 'global-s'), { recursive: true });
+  mkdirSync(path.join(workspace, 'skills', 'ws-s'), { recursive: true });
+  mkdirSync(path.join(borrowRoot, 'borrowed-s'), { recursive: true });
+
+  writeFileSync(
+    path.join(dataHome, 'skills', 'global-s', 'SKILL.md'),
+    '---\ndescription: Global skill\n---\nGlobal skill body\n',
+    'utf8',
+  );
+  writeFileSync(
+    path.join(workspace, 'skills', 'ws-s', 'SKILL.md'),
+    '---\ndescription: Workspace skill\n---\nWorkspace skill body\n',
+    'utf8',
+  );
+  writeFileSync(
+    path.join(borrowRoot, 'borrowed-s', 'SKILL.md'),
+    '---\ndescription: Borrowed skill\n---\nBorrowed skill body\n',
+    'utf8',
+  );
+
+  writeFileSync(
+    path.join(dataHome, 'usage', 'requests.jsonl'),
+    `${JSON.stringify({
+      id: 'req-e2e-1',
+      at: '2026-11-21T02:00:00Z',
+      conversationId: 'conv-e2e-u',
+      modelProviderId: 'env-mock',
+      model: 'e2e-mock-gpt',
+      providerName: 'OpenAI',
+      inputTokens: 400,
+      outputTokens: 50,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      estimatedCostUsd: 0.04,
+      pricingSource: 'manual',
+    })}\n${JSON.stringify({
+      id: 'req-e2e-2',
+      at: '2026-11-21T02:02:00Z',
+      conversationId: 'conv-e2e-u',
+      modelProviderId: 'env-mock',
+      model: 'e2e-mock-gpt',
+      providerName: 'OpenAI',
+      inputTokens: 100,
+      outputTokens: 25,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 0,
+      estimatedCostUsd: 0.01,
+      pricingSource: 'manual',
+    })}\n`,
+    'utf8',
+  );
+
+  const mockServer = await startMockSseServer(({ res }) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(sseText('', 'Domain LLM completion ok.'));
+  });
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-domains',
+      PEER_MODEL_ID: 'e2e-mock-gpt',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-domains-e2e', version: '0.1.0-test' },
+    externalCapabilities: [],
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+
+    // 1. Conversations
+    const conv = await bridge.createConversation({
+      title: '',
+      workspacePath: workspace,
+      mode: 'chat',
+    });
+    assert.ok(conv?.id);
+    const appended = await bridge.appendConversationMessage({
+      id: conv.id,
+      message: { id: 'u-1', role: 'user', content: 'Review deployment configuration' },
+    });
+    assert.equal(appended.messageCount, 1);
+    assert.equal('messages' in appended, false);
+
+    const listed = await bridge.listConversations({ workspacePath: workspace });
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, conv.id);
+
+    const search = await bridge.searchConversations({ query: 'Review' });
+    assert.equal(search.length, 1);
+
+    const page = await bridge.getConversation({ id: conv.id, limit: 10 });
+    assert.equal(page.window.length, 1);
+    assert.equal(page.meta.id, conv.id);
+
+    const pinned = await bridge.pinConversation({ id: conv.id });
+    assert.ok(pinned.pinnedAt);
+    const archived = await bridge.archiveConversation({ id: conv.id });
+    assert.equal(archived.status, 'archived');
+    assert.equal(archived.pinnedAt, null);
+    await bridge.restoreConversation({ id: conv.id });
+    await bridge.addConversationUsage({ id: conv.id, usage: { inputTokens: 10, outputTokens: 5 } });
+    const remainingAfterDelete = await bridge.deleteConversation({ id: conv.id });
+    assert.deepEqual(remainingAfterDelete, []);
+
+    // 2. Usage
+    const stats = await bridge.getUsageStats();
+    assert.equal(stats.notes.scope, 'request_snapshot');
+    assert.equal(stats.totals.inputTokens, 500);
+    const daily = await bridge.getUsageDaily({ range: '7d', now: '2026-11-21T03:00:00Z', localOffsetMinutes: 0 });
+    assert.equal(daily.totals.activeDayCount, 1);
+    const day = await bridge.getUsageDay({ date: '2026-11-21', now: '2026-11-21T03:00:00Z', localOffsetMinutes: 0 });
+    assert.equal(day.hours[2].requestCount, 2);
+    const cache = await bridge.getUsageCacheHitRate();
+    assert.equal(cache.byForm.first.count, 1);
+    assert.equal(cache.byForm.steady.count, 1);
+
+    // 3. Skills
+    const skills = await bridge.listSkills(undefined, { activeWorkspace: workspace });
+    assert.equal(skills.length, 2);
+    const disabled = await bridge.disableSkill('ws-s', workspace, { activeWorkspace: workspace });
+    assert.equal(disabled.find((s) => s.skillId === 'ws-s').enabled, false);
+    const avail = await bridge.listAvailableSkills({ sourceRoots: [borrowRoot] });
+    assert.equal(avail.length, 1);
+    const linkRes = await bridge.linkSkill('borrowed-s', { sourceRoots: [borrowRoot] });
+    assert.equal(linkRes.ok, true);
+    const skillDetail = await bridge.getSkillDetail('borrowed-s', undefined, { activeWorkspace: workspace });
+    assert.equal(skillDetail.instructions, 'Borrowed skill body\n');
+    const unlinkRes = await bridge.unlinkSkill('borrowed-s');
+    assert.equal(unlinkRes.ok, true);
+
+    // 4. MCP
+    const server = await bridge.upsertMcpServer({
+      displayName: 'E2E MCP',
+      url: 'https://mcp.invalid/v1',
+      headers: { Authorization: 'Bearer secret-value' },
+      auth: { mode: 'http_bearer', credentialRef: 'e2e-cred' },
+      tools: [{ name: 'echo', description: 'Echo tool' }],
+    });
+    assert.equal('headers' in server, false);
+    const installed = await bridge.listInstalledMcp();
+    assert.equal(installed.length, 1);
+    const mcpCaps = await bridge.listMcpCapabilities();
+    assert.equal(mcpCaps.length, 1);
+    await bridge.setMcpToolVisibility(server.id, 'echo', false);
+    assert.deepEqual(await bridge.listMcpCapabilities(), []);
+    const uninstallRes = await bridge.uninstallMcpServer(server.id);
+    assert.deepEqual(uninstallRes.servers, []);
+    assert.equal(uninstallRes.boundCredentialRef, 'mcp-cred:e2e-cred');
+
+    // 5. LLM
+    const catalog = await bridge.listLlmCatalog();
+    assert.equal(catalog.length, 1);
+    assert.equal(catalog[0].modelId, 'e2e-mock-gpt');
+    const completion = await bridge.completeLlmPrompt({ prompt: 'Hello from Node E2E', maxTokens: 100 });
+    assert.equal(completion.success, true);
+    assert.equal(completion.text, 'Domain LLM completion ok.');
+  } finally {
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});

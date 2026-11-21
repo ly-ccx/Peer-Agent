@@ -38,14 +38,21 @@ pub use resources::{
 pub use shell_artifacts::ShellArtifacts;
 mod context_accounting;
 mod mcp_inventory;
+mod mcp_registry;
 pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
+pub use mcp_registry::{
+    normalize_auth_binding as normalize_mcp_auth_binding, slugify_mcp_id,
+    to_renderer_view as mcp_server_to_renderer_view,
+};
 mod mcp_credentials;
 pub use mcp_credentials::{McpCredentialBinding, McpCredentialStore, McpCredentialTransaction};
+mod conversation_crud;
 mod conversation_execution;
 mod conversation_preview;
 mod conversation_terminal;
 mod conversation_write;
 pub use context_accounting::context_model_key;
+pub use conversation_crud::{ConversationListQuery, ConversationSearchQuery};
 pub use conversation_execution::{
     ConversationClaimFailure, ConversationExecutionToken, ConversationHookRecord,
     ConversationMetadataPublication, ConversationRecovery, ConversationUsageReceipt,
@@ -76,11 +83,13 @@ mod lease;
 mod lock;
 mod policy;
 mod skill_catalog;
+pub mod skill_manage;
 pub use skill_catalog::{MountedSkill, SkillCatalog, SkillCatalogEntry, SkillScope};
 mod skill_manifest;
 pub use skill_manifest::SkillManifest;
 mod transcript;
 pub use transcript::{TranscriptError, TranscriptLimit, TranscriptLimits, TranscriptReader};
+pub mod usage_queries;
 
 pub(crate) use files::identity;
 pub use goal_source::{GoalSourceSnapshot, GoalSourceStore};

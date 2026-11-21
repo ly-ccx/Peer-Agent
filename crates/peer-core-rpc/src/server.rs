@@ -1,7 +1,10 @@
 use crate::{
     classic::{self, ModelLoader},
+    classic_conversations,
     classic_goal::{self, ClassicGoalRegistry},
+    classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
+    classic_usage,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -34,6 +37,19 @@ use tokio::{
 
 const MAX_INBOUND_STRING_BYTES: usize = 1024 * 1024;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn classic_domains() -> Vec<String> {
+    vec![
+        "core".into(),
+        "classic.chat".into(),
+        "classic.goal".into(),
+        "classic.conversations".into(),
+        "classic.usage".into(),
+        "classic.skills".into(),
+        "classic.mcp".into(),
+        "classic.llm".into(),
+    ]
+}
 
 #[derive(Clone)]
 pub struct CoreServerConfig {
@@ -347,7 +363,7 @@ impl ServerContext {
             },
             pid: std::process::id(),
             capabilities: CoreCapabilitiesSummary {
-                domains: vec!["core".into(), "classic.chat".into(), "classic.goal".into()],
+                domains: classic_domains(),
                 planned_domains: vec!["bot".into()],
                 bidirectional_host_calls: true,
                 registered_external_capabilities: aliases,
@@ -417,7 +433,7 @@ impl ServerContext {
                 .map_err(|err| RpcError::internal_error(err.to_string()))
             }
             "core.capabilities.list" => serde_json::to_value(CapabilitiesListResult {
-                domains: vec!["core".into(), "classic.chat".into(), "classic.goal".into()],
+                domains: classic_domains(),
                 external_capabilities,
             })
             .map_err(|err| RpcError::internal_error(err.to_string())),
@@ -433,6 +449,74 @@ impl ServerContext {
             "classic.goal.pause" => classic_goal::handle_pause(self, params).await,
             "classic.goal.clear" => classic_goal::handle_clear(self, params).await,
             "classic.goal.getState" => classic_goal::handle_get_state(self, params),
+            "classic.conversations.list" => classic_conversations::handle_list(self, params),
+            "classic.conversations.search" => classic_conversations::handle_search(self, params),
+            "classic.conversations.create" => classic_conversations::handle_create(self, params),
+            "classic.conversations.get" => classic_conversations::handle_get(self, params),
+            "classic.conversations.updateTitle" => {
+                classic_conversations::handle_update_title(self, params)
+            }
+            "classic.conversations.updateMode" => {
+                classic_conversations::handle_update_mode(self, params)
+            }
+            "classic.conversations.updateFastMode" => {
+                classic_conversations::handle_update_fast_mode(self, params)
+            }
+            "classic.conversations.updatePreferredExecutionIsolation" => {
+                classic_conversations::handle_update_preferred_execution_isolation(self, params)
+            }
+            "classic.conversations.updateModelEffort" => {
+                classic_conversations::handle_update_model_effort(self, params)
+            }
+            "classic.conversations.appendMessage" => {
+                classic_conversations::handle_append_message(self, params)
+            }
+            "classic.conversations.updateLastMessage" => {
+                classic_conversations::handle_update_last_message(self, params)
+            }
+            "classic.conversations.replaceMessages" => {
+                classic_conversations::handle_replace_messages(self, params)
+            }
+            "classic.conversations.archive" => classic_conversations::handle_archive(self, params),
+            "classic.conversations.restore" => classic_conversations::handle_restore(self, params),
+            "classic.conversations.pin" => classic_conversations::handle_pin(self, params),
+            "classic.conversations.unpin" => classic_conversations::handle_unpin(self, params),
+            "classic.conversations.reorderPinned" => {
+                classic_conversations::handle_reorder_pinned(self, params)
+            }
+            "classic.conversations.autoArchive" => {
+                classic_conversations::handle_auto_archive(self, params)
+            }
+            "classic.conversations.delete" => classic_conversations::handle_delete(self, params),
+            "classic.conversations.addUsage" => {
+                classic_conversations::handle_add_usage(self, params)
+            }
+            "classic.usage.stats" => classic_usage::handle_stats(self, params),
+            "classic.usage.daily" => classic_usage::handle_daily(self, params),
+            "classic.usage.day" => classic_usage::handle_day(self, params),
+            "classic.usage.cacheHitRate" => classic_usage::handle_cache_hit_rate(self),
+            "classic.skills.list" => classic_skills::handle_list(self, params),
+            "classic.skills.getDetail" => classic_skills::handle_get_detail(self, params),
+            "classic.skills.enable" => classic_skills::handle_set_enabled(self, params, true),
+            "classic.skills.disable" => classic_skills::handle_set_enabled(self, params, false),
+            "classic.skills.listAvailable" => classic_skills::handle_list_available(self, params),
+            "classic.skills.link" => classic_skills::handle_link(self, params),
+            "classic.skills.unlink" => classic_skills::handle_unlink(self, params),
+            "classic.skills.uninstall" => classic_skills::handle_uninstall(self, params),
+            "classic.mcp.listInstalled" => classic_mcp::handle_list_installed(self),
+            "classic.mcp.listCapabilities" => classic_mcp::handle_list_capabilities(self),
+            "classic.mcp.listCredentials" => classic_mcp::handle_list_credentials(self),
+            "classic.mcp.upsertServer" | "classic.mcp.install" => {
+                classic_mcp::handle_upsert_server(self, params)
+            }
+            "classic.mcp.uninstall" => classic_mcp::handle_uninstall(self, params),
+            "classic.mcp.setEnabled" => classic_mcp::handle_set_enabled(self, params),
+            "classic.mcp.setToolVisibility" => {
+                classic_mcp::handle_set_tool_visibility(self, params)
+            }
+            "classic.llm.catalog" => classic_llm::handle_catalog(self),
+            "classic.llm.complete" => classic_llm::handle_complete(self, params).await,
+            "classic.llm.quota" => classic_llm::handle_quota(self, params).await,
             _ => Err(RpcError::method_not_found(method)),
         }
     }

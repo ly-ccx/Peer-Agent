@@ -37,6 +37,15 @@ function asWindowPage(conversation, page = {}) {
 }
 
 /** Read-side presentation of frozen task identity and current context-window accounting. */
+export function projectConversationWindowPage(page, { goalPlanStore, llmConfigStore } = {}) {
+  if (!page) return null;
+  const projected = projectConversationView(
+    { ...(page.meta || {}), messages: page.window },
+    { goalPlanStore, llmConfigStore },
+  );
+  return asWindowPage(projected, page);
+}
+
 export function createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore, readWindow }) {
   const project = (conversation) => projectConversationView(conversation, { goalPlanStore, llmConfigStore });
   return (id, options = {}) => {
@@ -46,7 +55,6 @@ export function createConversationReadProjection({ conversationStore, goalPlanSt
     const page = typeof readWindow === 'function'
       ? readWindow(id, options)
       : conversationStore.readConversationWindow(id, options);
-    if (!page) return null;
-    return asWindowPage(project({ ...page.meta, messages: page.window }), page);
+    return projectConversationWindowPage(page, { goalPlanStore, llmConfigStore });
   };
 }

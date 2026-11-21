@@ -6,8 +6,13 @@
 //! keeping capability projection, permission gates, storage and Evidence local.
 
 pub mod classic;
+mod classic_conversations;
 mod classic_goal;
+mod classic_llm;
+mod classic_mcp;
+mod classic_skills;
 mod classic_streams;
+mod classic_usage;
 mod external_provider;
 pub mod protocol;
 pub mod server;
@@ -149,7 +154,16 @@ mod tests {
         assert_eq!(caps["id"], 3);
         assert_eq!(
             caps["result"]["domains"],
-            json!(["core", "classic.chat", "classic.goal"])
+            json!([
+                "core",
+                "classic.chat",
+                "classic.goal",
+                "classic.conversations",
+                "classic.usage",
+                "classic.skills",
+                "classic.mcp",
+                "classic.llm"
+            ])
         );
         assert_eq!(
             caps["result"]["externalCapabilities"]

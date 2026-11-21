@@ -45,6 +45,23 @@ impl McpCredentialStore {
     pub fn revision(&self) -> Result<String, StoreError> {
         self.source().map(|v| v.0)
     }
+    /// Return redacted metadata views matching desktop `mcp:list-credentials`.
+    /// Never exposes `vaultKey`, raw `secret`, or OAuth tokens/client secrets.
+    pub fn list_metadata(&self) -> Result<Vec<Value>, StoreError> {
+        let (_, value) = self.source()?;
+        let version = value["version"].as_u64().unwrap_or(0);
+        if version != 1 && version != 2 {
+            return Err(StoreError::McpCredentialInvalid);
+        }
+        if version == 2 {
+            validate(&value)?;
+        }
+        let rows = value["credentials"]
+            .as_array()
+            .filter(|v| v.len() <= 1024)
+            .ok_or(StoreError::McpCredentialInvalid)?;
+        Ok(rows.iter().map(redact_credential_metadata).collect())
+    }
     pub fn binding(
         &self,
         credential_ref: &str,
@@ -207,5 +224,96 @@ impl McpCredentialTransaction {
         )?;
         self.binding = committed.clone();
         Ok(committed)
+    }
+}
+
+fn redact_credential_metadata(entry: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for key in [
+        "id",
+        "credentialRef",
+        "label",
+        "kind",
+        "target",
+        "headerName",
+        "envName",
+        "createdAt",
+        "updatedAt",
+        "lastFour",
+    ] {
+        if let Some(val) = entry.get(key)
+            && !val.is_null()
+        {
+            out.insert(key.into(), val.clone());
+        }
+    }
+    if let Some(oauth_obj) = entry.get("oauth").and_then(Value::as_object) {
+        let mut safe_oauth = serde_json::Map::new();
+        for key in [
+            "authorizationServerUrl",
+            "clientId",
+            "clientSecretConfigured",
+            "scopes",
+            "redirectUrl",
+            "tokenStatus",
+            "expiresAt",
+        ] {
+            if let Some(val) = oauth_obj.get(key)
+                && !val.is_null()
+            {
+                safe_oauth.insert(key.into(), val.clone());
+            }
+        }
+        if !safe_oauth.is_empty() {
+            out.insert("oauth".into(), Value::Object(safe_oauth));
+        }
+    }
+    out.insert("storage".into(), json!("vault"));
+    Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_metadata_strips_vault_key_and_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = McpCredentialStore::new(dir.path());
+        assert!(store.list_metadata().unwrap().is_empty());
+
+        let cred_ref = "mcp-cred:c1";
+        let vault_key = format!(
+            "mcp/{:x}/{}",
+            Sha256::digest(cred_ref.as_bytes()),
+            uuid::Uuid::new_v4()
+        );
+        std::fs::write(
+            dir.path().join("mcp-credentials.json"),
+            serde_json::to_vec(&json!({
+                "version": 2,
+                "credentials": [{
+                    "id": "c1",
+                    "credentialRef": cred_ref,
+                    "kind": "http_bearer",
+                    "target": "header",
+                    "label": "API Bearer",
+                    "vaultKey": vault_key,
+                    "lastFour": "7890",
+                    "createdAt": "2026-11-21T00:00:00Z",
+                    "updatedAt": "2026-11-21T00:00:00Z",
+                    "storage": "vault"
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let listed = store.list_metadata().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["credentialRef"], cred_ref);
+        assert_eq!(listed[0]["lastFour"], "7890");
+        assert!(listed[0].get("vaultKey").is_none());
+        assert!(listed[0].get("secret").is_none());
     }
 }

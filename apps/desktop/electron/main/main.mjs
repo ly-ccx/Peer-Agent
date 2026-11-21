@@ -248,7 +248,10 @@ import { createBrowserFdaDragApplicationService } from './browser-fda-drag-appli
 import { createBrowserSessionImportApplicationService } from './browser-session-import-application-service.mjs';
 import { createChatStreamApplicationService } from './chat-stream-application-service.mjs';
 import { createConversationApplicationService } from './conversation-application-service.mjs';
-import { createConversationReadProjection } from './conversation-read-projection.mjs';
+import {
+  createConversationReadProjection,
+  projectConversationWindowPage,
+} from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
 import { readBoundedDirectoryEntries } from './workspace-file-search.mjs';
@@ -1609,7 +1612,11 @@ const providerConfigurationApplicationService = createProviderConfigurationAppli
   removeGroup: (groupId) => llmConfigStore.removeGroup(groupId),
   setDefault: (id) => llmConfigStore.setDefault(id),
   testConnection: (id) => llmConfigStore.testConnection(id),
-  completePrompt: (params) => llmConfigStore.completePrompt(params),
+  completePrompt: (params) => (
+    classicCoreBridge.isAvailable()
+      ? classicCoreBridge.completeLlmPrompt(params)
+      : llmConfigStore.completePrompt(params)
+  ),
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
   notifyOAuthRefreshed: ({ reason, refreshed }) => {
     console.info(`[llm] silent oauth refresh (${reason}): refreshed ${refreshed} credential(s)`);
@@ -2346,7 +2353,127 @@ function registerDesktopIpcHost() {
       authorizeWindow: trustedWindowRegistry.authorize,
     }),
     ...createDataIpcRegistrations({
-      conversations: conversationApplicationService,
+      conversations: {
+        list: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listConversations(payload)
+            : conversationApplicationService.list(payload)
+        ),
+        search: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.searchConversations(payload)
+            : conversationApplicationService.search(payload)
+        ),
+        create: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.createConversation(payload)
+            : conversationApplicationService.create(payload)
+        ),
+        get: async (payload) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.get(payload);
+          }
+          const page = await classicCoreBridge.getConversation(payload);
+          return projectConversationWindowPage(page, { goalPlanStore, llmConfigStore });
+        },
+        updateTitle: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationTitle(payload)
+            : conversationApplicationService.updateTitle(payload)
+        ),
+        updateMode: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationMode(payload)
+            : conversationApplicationService.updateMode(payload)
+        ),
+        updateFastMode: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationFastMode(payload)
+            : conversationApplicationService.updateFastMode(payload)
+        ),
+        updatePreferredExecutionIsolation: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationPreferredExecutionIsolation(payload)
+            : conversationApplicationService.updatePreferredExecutionIsolation(payload)
+        ),
+        updateModelEffort: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationModelEffort(payload)
+            : conversationApplicationService.updateModelEffort(payload)
+        ),
+        appendMessage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.appendConversationMessage(payload)
+            : conversationApplicationService.appendMessage(payload)
+        ),
+        updateLastMessage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationLastMessage(payload)
+            : conversationApplicationService.updateLastMessage(payload)
+        ),
+        replaceMessages: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.replaceConversationMessages(payload)
+            : conversationApplicationService.replaceMessages(payload)
+        ),
+        archive: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.archiveConversation(payload)
+            : conversationApplicationService.archive(payload)
+        ),
+        restore: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.restoreConversation(payload)
+            : conversationApplicationService.restore(payload)
+        ),
+        pin: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.pinConversation(payload)
+            : conversationApplicationService.pin(payload)
+        ),
+        unpin: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.unpinConversation(payload)
+            : conversationApplicationService.unpin(payload)
+        ),
+        reorderPinned: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.reorderPinnedConversations(payload)
+            : conversationApplicationService.reorderPinned(payload)
+        ),
+        autoArchive: (payload = {}) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.autoArchive(payload);
+          }
+          const excludeIds = [
+            ...new Set([
+              ...(Array.isArray(payload?.excludeIds) ? payload.excludeIds : []),
+              ...(llmChatService?.listActiveConversationIds?.() ?? []),
+            ]),
+          ];
+          return classicCoreBridge.autoArchiveConversations({
+            before: payload?.before,
+            excludeIds,
+          });
+        },
+        remove: async (payload = {}) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.remove(payload);
+          }
+          const remaining = await classicCoreBridge.deleteConversation(payload);
+          if (payload?.id) {
+            void disposeApplicationShellConversation(dataHome, payload.id).catch((error) => {
+              console.warn('[main] conversation shell cleanup failed:', error);
+            });
+          }
+          return remaining;
+        },
+        addUsage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.addConversationUsage(payload)
+            : conversationApplicationService.addUsage(payload)
+        ),
+      },
       promptSnapshots: {
         list: (params) => promptSnapshotStore.list(params),
         get: (id) => promptSnapshotStore.get(id),
@@ -2355,10 +2482,26 @@ function registerDesktopIpcHost() {
         getContextEpochChain: (params) => promptSnapshotStore.getContextEpochChain(params),
       },
       usage: {
-        stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
-        daily: (params) => collectUsageDaily(params),
-        day: (params) => collectUsageDay({ ...params, llmConfigStore }),
-        cacheHitRate: () => collectCacheHitRateMetrics(),
+        stats: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageStats()
+            : collectUsageStats({ conversationStore, llmConfigStore })
+        ),
+        daily: (params) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageDaily(params)
+            : collectUsageDaily(params)
+        ),
+        day: (params) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageDay(params)
+            : collectUsageDay({ ...params, llmConfigStore })
+        ),
+        cacheHitRate: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageCacheHitRate()
+            : collectCacheHitRateMetrics()
+        ),
       },
     }),
     ...createAutomationIpcRegistrations({
@@ -2408,38 +2551,91 @@ function registerDesktopIpcHost() {
     }),
     ...createSkillsIpcRegistrations({
       skills: {
-        list: (workspacePaths) => skillStore?.listSkills(workspacePaths) ?? [],
+        list: (workspacePaths) => {
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listSkills(workspacePaths, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
+          return skillStore?.listSkills(workspacePaths) ?? [];
+        },
         getDetail: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.getSkillDetail(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
           return skillStore.getSkillDetail(skillId, workspacePath);
         },
         refresh: (workspacePaths) => {
           skillStore?.refresh();
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listSkills(workspacePaths, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
           return skillStore?.listSkills(workspacePaths) ?? [];
         },
         upload: (zipBase64) => {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
         },
-        enable: (skillId, workspacePath) => {
+        enable: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const updated = await classicCoreBridge.enableSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return updated;
+          }
           return skillStore.enableSkill(skillId, workspacePath);
         },
-        disable: (skillId, workspacePath) => {
+        disable: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const updated = await classicCoreBridge.disableSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return updated;
+          }
           return skillStore.disableSkill(skillId, workspacePath);
         },
-        listAvailable: () => skillStore?.listAvailableSkills() ?? [],
-        link: (skillId) => {
+        listAvailable: () => {
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listAvailableSkills({ sourceRoots: skillSourceRoots });
+          }
+          return skillStore?.listAvailableSkills() ?? [];
+        },
+        link: async (skillId) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.linkSkill(skillId, { sourceRoots: skillSourceRoots });
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.linkSkill(skillId);
         },
-        unlink: (skillId) => {
+        unlink: async (skillId) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.unlinkSkill(skillId);
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.unlinkSkill(skillId);
         },
-        uninstall: (skillId, workspacePath) => {
+        uninstall: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.uninstallSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.uninstallSkill(skillId, workspacePath);
         },
         marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
@@ -2493,7 +2689,58 @@ function registerDesktopIpcHost() {
       pendingTask: pendingTaskApplicationService,
     }),
     ...createMcpIpcRegistrations({
-      mcp: mcpApplicationService,
+      mcp: {
+        ...mcpApplicationService,
+        listInstalled: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listInstalledMcp()
+            : mcpApplicationService.listInstalled()
+        ),
+        listCapabilities: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listMcpCapabilities()
+            : mcpApplicationService.listCapabilities()
+        ),
+        listCredentials: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listMcpCredentials()
+            : mcpApplicationService.listCredentials()
+        ),
+        install: (item) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.installMcpServer(item)
+            : mcpApplicationService.install(item)
+        ),
+        upsertServer: (item) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.upsertMcpServer(item)
+            : mcpApplicationService.upsertServer(item)
+        ),
+        setEnabled: (serverId, enabled) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.setMcpEnabled(serverId, enabled)
+            : mcpApplicationService.setEnabled(serverId, enabled)
+        ),
+        setToolVisibility: (serverId, toolName, visible) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.setMcpToolVisibility(serverId, toolName, visible)
+            : mcpApplicationService.setToolVisibility(serverId, toolName, visible)
+        ),
+        uninstall: async (serverId) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return mcpApplicationService.uninstall(serverId);
+          }
+          const result = await classicCoreBridge.uninstallMcpServer(serverId);
+          if (result?.boundCredentialRef) {
+            try {
+              mcpCredentialStore.deleteCredential(result.boundCredentialRef);
+            } catch (error) {
+              console.warn('[mcp] failed to remove bound credential:', error?.message ?? error);
+            }
+          }
+          return Array.isArray(result?.servers) ? result.servers : [];
+        },
+      },
     }),
     ...createPasswordVaultIpcRegistrations({
       passwordVault: {
