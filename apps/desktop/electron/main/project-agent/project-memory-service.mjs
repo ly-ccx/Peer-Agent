@@ -27,12 +27,17 @@ function markdown(items) {
 export function createProjectMemoryService({
   store,
   profileStore,
+  classicCoreBridge = null,
   getSettings = () => ({}),
   mergeSettings = () => {},
   showSaveDialog = async () => ({ canceled: true }),
   onChanged = null,
 } = {}) {
-  if (!store) throw new TypeError('store is required');
+  if (!store && !classicCoreBridge) throw new TypeError('store is required');
+
+  function useRustCore() {
+    return Boolean(classicCoreBridge?.isAvailable?.());
+  }
 
   function workspaceIdOf(payload) {
     const workspaceId = typeof payload?.workspaceId === 'string' ? payload.workspaceId.trim() : '';
@@ -48,11 +53,13 @@ export function createProjectMemoryService({
     };
   }
 
-  function switches(workspaceId) {
+  function switches(workspaceId, memoryEnabledOverride) {
     const memory = settingsMemory();
-    const profile = profileStore?.read?.(workspaceId);
+    const memoryEnabled = typeof memoryEnabledOverride === 'boolean'
+      ? memoryEnabledOverride
+      : profileStore?.read?.(workspaceId)?.memoryEnabled !== false;
     return {
-      memoryEnabled: profile?.memoryEnabled !== false,
+      memoryEnabled,
       useMemory: memory.enabled,
       learnPreferences: memory.learnPreferences,
     };
@@ -69,6 +76,19 @@ export function createProjectMemoryService({
   function list(payload = {}) {
     const workspaceId = workspaceIdOf(payload);
     if (!workspaceId) return fail('INVALID_WORKSPACE');
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemoryList({
+          workspaceId,
+          ...(typeof payload.kind === 'string' && payload.kind ? { kind: payload.kind } : {}),
+          ...(typeof payload.trust === 'string' && payload.trust ? { trust: payload.trust } : {}),
+          ...(typeof payload.status === 'string' && payload.status ? { status: payload.status } : {}),
+          ...(Array.isArray(payload.ids) && payload.ids.length ? { ids: payload.ids } : {}),
+        })
+        .then((res) => (res?.ok
+          ? { ok: true, items: res.items ?? [], switches: switches(workspaceId, res.memoryEnabled) }
+          : res ?? fail('INVALID_INPUT')));
+    }
     let items = store.list({ workspaceId });
     if (typeof payload.kind === 'string' && payload.kind) {
       items = items.filter((item) => item.kind === payload.kind);
@@ -89,6 +109,11 @@ export function createProjectMemoryService({
   function pin(payload = {}) {
     const workspaceId = workspaceIdOf(payload);
     if (!workspaceId) return fail('INVALID_WORKSPACE');
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemoryPin({ workspaceId, id: payload.id, pinned: payload.pinned })
+        .then((res) => changed(res ?? fail('INVALID_INPUT'), workspaceId));
+    }
     const saved = store.setPinned({
       id: payload.id,
       pinned: payload.pinned,
@@ -103,6 +128,11 @@ export function createProjectMemoryService({
     const reason = typeof payload.reason === 'string' && payload.reason.trim()
       ? payload.reason.trim()
       : '用户撤销';
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemoryForget({ workspaceId, id: payload.id, reason })
+        .then((res) => changed(res ?? fail('INVALID_INPUT'), workspaceId));
+    }
     const saved = store.forget({ id: payload.id, reason, workspaceId });
     return changed(saved.ok ? { ok: true, item: saved.item } : fromStore(saved), workspaceId);
   }
@@ -110,6 +140,15 @@ export function createProjectMemoryService({
   function restore(payload = {}) {
     const workspaceId = workspaceIdOf(payload);
     if (!workspaceId) return fail('INVALID_WORKSPACE');
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemoryRestore({
+          workspaceId,
+          id: payload.id,
+          resolveConflict: payload.resolveConflict === true,
+        })
+        .then((res) => changed(res ?? fail('INVALID_INPUT'), workspaceId));
+    }
     const saved = payload.resolveConflict === true
       ? store.resolveConflict({ id: payload.id, workspaceId })
       : store.restore({ id: payload.id, workspaceId });
@@ -119,6 +158,11 @@ export function createProjectMemoryService({
   function edit(payload = {}) {
     const workspaceId = workspaceIdOf(payload);
     if (!workspaceId) return fail('INVALID_WORKSPACE');
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemoryEdit({ workspaceId, id: payload.id, text: payload.text })
+        .then((res) => changed(res ?? fail('INVALID_INPUT'), workspaceId));
+    }
     const saved = store.reviseStated({
       id: payload.id,
       text: payload.text,
@@ -130,7 +174,7 @@ export function createProjectMemoryService({
   }
 
   async function exportMemory(payload = {}) {
-    const listed = list({ workspaceId: payload.workspaceId, status: 'active' });
+    const listed = await list({ workspaceId: payload.workspaceId, status: 'active' });
     if (!listed.ok) return listed;
     const format = payload.format === 'markdown' ? 'markdown' : 'json';
     const picked = await showSaveDialog({
@@ -147,15 +191,7 @@ export function createProjectMemoryService({
     return { ok: true, path: picked.filePath, format };
   }
 
-  function setSwitches(payload = {}) {
-    const workspaceId = workspaceIdOf(payload);
-    if (!workspaceId) return fail('INVALID_WORKSPACE');
-    if (typeof payload.memoryEnabled === 'boolean') {
-      const profile = profileStore?.read?.(workspaceId);
-      if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
-      const saved = profileStore.save({ ...profile, memoryEnabled: payload.memoryEnabled });
-      if (!saved?.ok) return fail(saved.code || 'SAVE_FAILED');
-    }
+  function applySettingsSwitches(payload) {
     if (typeof payload.useMemory === 'boolean' || typeof payload.learnPreferences === 'boolean') {
       const current = settingsMemory();
       mergeSettings({
@@ -167,6 +203,30 @@ export function createProjectMemoryService({
         },
       });
     }
+  }
+
+  function setSwitches(payload = {}) {
+    const workspaceId = workspaceIdOf(payload);
+    if (!workspaceId) return fail('INVALID_WORKSPACE');
+    if (useRustCore()) {
+      return classicCoreBridge
+        .projectMemorySetSwitches({
+          workspaceId,
+          ...(typeof payload.memoryEnabled === 'boolean' ? { memoryEnabled: payload.memoryEnabled } : {}),
+        })
+        .then((res) => {
+          if (!res?.ok) return res ?? fail('NOT_FOUND');
+          applySettingsSwitches(payload);
+          return { ok: true, switches: switches(workspaceId, res.memoryEnabled) };
+        });
+    }
+    if (typeof payload.memoryEnabled === 'boolean') {
+      const profile = profileStore?.read?.(workspaceId);
+      if (!profile || profile.status === 'archived') return fail('NOT_FOUND');
+      const saved = profileStore.save({ ...profile, memoryEnabled: payload.memoryEnabled });
+      if (!saved?.ok) return fail(saved.code || 'SAVE_FAILED');
+    }
+    applySettingsSwitches(payload);
     return { ok: true, switches: switches(workspaceId) };
   }
 

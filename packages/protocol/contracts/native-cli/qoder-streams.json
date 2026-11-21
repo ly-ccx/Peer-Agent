@@ -1,0 +1,1537 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "scope": "Actual shared TS consumeOpenAIStream parser over synthetic finite responses. Not authentication/HTTP/provider evidence. Native rejects unterminated/error/malformed streams even where legacy parser returns partial facts."
+  },
+  "cases": [
+    {
+      "name": "plain-labelled-chat",
+      "stream": "data: {\"type\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-labelled-tool",
+      "stream": "data: {\"type\":\"vendor.tool-delta\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-labelled-usage",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"type\":\"usage\",\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-unicode-fragments",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"你好，👩🏽‍💻\"},{\"output_text\":\" é\"}],\"thinking\":\"真实思考。\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "你好，👩🏽‍💻 é",
+        "thinking": "真实思考。",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "你好，👩🏽‍💻 é",
+        "thinking": "真实思考。",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-thinking-text-tool",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Inspecting.\",\"thinking\":\"Observed thought.\",\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Inspecting.",
+        "thinking": "Observed thought.",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Inspecting.",
+        "thinking": "Observed thought.",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-sparse-chat-text",
+      "stream": "data: {\"choices\":[{\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-sparse-chat-tool",
+      "stream": "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-reasoning_content",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"reasoning_content\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-reasoning",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"reasoning\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-reasoning_text",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"reasoning_text\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-thinking",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"thinking\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-thinking_content",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"thinking_content\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-reasoning_summary",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"Native \"},{\"content\":\"complete.\"}],\"reasoning_summary\":[{\"summary\":\"Observed \"},{\"output_text\":\"thought.\"}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-sparse-block-tool-done",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"upstream\",\"name\":\"write_file\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"str\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"eam.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-sparse-block-tool-stop",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"upstream\",\"name\":\"write_file\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"str\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"eam.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-block-text-thinking",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Observed thought.\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Native complete.\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-null-function-placeholder",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":null}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-provisional-tool-name",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"provisional\",\"arguments\":\"{\\\"path\\\":\\\"str\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":null,\"type\":null,\"function\":{\"name\":\"write_file\",\"arguments\":\"eam.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-stable-repeated-tool-identity",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"str\"}}]}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"eam.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-chat",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"chat.completion.chunk\\\",\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-tool",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"vendor.tool-delta\\\",\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"stream.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-usage",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"usage\\\",\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-unicode-fragments",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"你好，👩🏽‍💻\\\"},{\\\"output_text\\\":\\\" é\\\"}],\\\"thinking\\\":\\\"真实思考。\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "你好，👩🏽‍💻 é",
+        "thinking": "真实思考。",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "你好，👩🏽‍💻 é",
+        "thinking": "真实思考。",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-thinking-text-tool",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Inspecting.\\\",\\\"thinking\\\":\\\"Observed thought.\\\",\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"stream.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Inspecting.",
+        "thinking": "Observed thought.",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Inspecting.",
+        "thinking": "Observed thought.",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-sparse-chat-text",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-sparse-chat-tool",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"stream.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-reasoning_content",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"reasoning_content\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-reasoning",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"reasoning\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-reasoning_text",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"reasoning_text\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-thinking",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"thinking\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-thinking_content",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"thinking_content\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-reasoning_summary",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":[{\\\"text\\\":\\\"Native \\\"},{\\\"content\\\":\\\"complete.\\\"}],\\\"reasoning_summary\\\":[{\\\"summary\\\":\\\"Observed \\\"},{\\\"output_text\\\":\\\"thought.\\\"}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-sparse-block-tool-done",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"tool_use\\\",\\\"id\\\":\\\"upstream\\\",\\\"name\\\":\\\"write_file\\\",\\\"input\\\":{}}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"input_json_delta\\\",\\\"partial_json\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"str\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"input_json_delta\\\",\\\"partial_json\\\":\\\"eam.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-sparse-block-tool-stop",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"tool_use\\\",\\\"id\\\":\\\"upstream\\\",\\\"name\\\":\\\"write_file\\\",\\\"input\\\":{}}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"input_json_delta\\\",\\\"partial_json\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"str\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"input_json_delta\\\",\\\"partial_json\\\":\\\"eam.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-block-text-thinking",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"thinking\\\",\\\"thinking\\\":\\\"\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"thinking_delta\\\",\\\"thinking\\\":\\\"Observed thought.\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":1,\\\"content_block\\\":{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":1,\\\"delta\\\":{\\\"type\\\":\\\"text_delta\\\",\\\"text\\\":\\\"Native complete.\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":1}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_delta\\\",\\\"delta\\\":{\\\"stop_reason\\\":\\\"end_turn\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Observed thought.",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-null-function-placeholder",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":null}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"stream.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{},\\\"finish_reason\\\":\\\"tool_calls\\\"}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[],\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-provisional-tool-name",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"provisional\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"str\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":null,\\\"type\\\":null,\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"eam.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-stable-repeated-tool-identity",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"str\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"eam.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-initial-block-values",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"Initial thought.\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" More.\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Native \"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"complete.\"}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Initial thought. More.",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Initial thought. More.",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-initial-tool-input",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"initial-tool\",\"name\":\"write_file\",\"input\":{\"path\":\"stream.txt\",\"content\":\"native\"}}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-chat-message-stop",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-initial-block-values",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"thinking\\\",\\\"thinking\\\":\\\"Initial thought.\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":0,\\\"delta\\\":{\\\"type\\\":\\\"thinking_delta\\\",\\\"thinking\\\":\\\" More.\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":1,\\\"content_block\\\":{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Native \\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_delta\\\",\\\"index\\\":1,\\\"delta\\\":{\\\"type\\\":\\\"text_delta\\\",\\\"text\\\":\\\"complete.\\\"}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":1}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "Initial thought. More.",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "Initial thought. More.",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-initial-tool-input",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"tool_use\\\",\\\"id\\\":\\\"initial-tool\\\",\\\"name\\\":\\\"write_file\\\",\\\"input\\\":{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-chat-message-stop",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-repeated-usage",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-progressive-usage",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: {\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 25
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 5,
+          "cacheReadTokens": 0,
+          "totalTokens": 25
+        }
+      }
+    },
+    {
+      "name": "plain-partial-before-complete",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":3}}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-partial-after-complete",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: {\"usage\":{\"prompt_tokens\":40}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-partial-only",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "plain-input-output-usage-alias",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"input_tokens\":12,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":3}}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 9,
+          "outputTokens": 4,
+          "cacheReadTokens": 3,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-block-tool-with-chat-usage",
+      "stream": "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"usage-tool\",\"name\":\"write_file\",\"input\":{\"path\":\"stream.txt\",\"content\":\"native\"}}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-repeated-usage",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-progressive-usage",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":20,\\\"completion_tokens\\\":5}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 25
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 5,
+          "cacheReadTokens": 0,
+          "totalTokens": 25
+        }
+      }
+    },
+    {
+      "name": "envelope-partial-before-complete",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":3}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-partial-after-complete",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":40}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-partial-only",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": null
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": null
+      }
+    },
+    {
+      "name": "envelope-input-output-usage-alias",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"input_tokens\\\":12,\\\"output_tokens\\\":4,\\\"input_tokens_details\\\":{\\\"cached_tokens\\\":3}}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 9,
+          "outputTokens": 4,
+          "cacheReadTokens": 3,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-block-tool-with-chat-usage",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_start\\\",\\\"index\\\":0,\\\"content_block\\\":{\\\"type\\\":\\\"tool_use\\\",\\\"id\\\":\\\"usage-tool\\\",\\\"name\\\":\\\"write_file\\\",\\\"input\\\":{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"content_block_stop\\\",\\\"index\\\":0}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"message_stop\\\"}\"}\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "two-tools-with-real-terminal",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}},{\"index\":1,\"id\":\"upstream-2\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream-second.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          },
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream-second.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          },
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream-second.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    }
+  ]
+}

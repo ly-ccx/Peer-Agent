@@ -105,6 +105,14 @@ To package Linux Desktop x64 (the AppImage and `.deb` need libdbus-1-dev, fakero
     pnpm pack:linux    # unpacked directory for sandbox and smoke checks
     pnpm dist:linux    # AppImage + .deb
 
+### Native Rust CLI migration candidate
+
+Build the separate candidate with `cargo build --release --locked -p peer-cli -p peer-credential-helper`. `target/release/peer-native` runs natively without a Bun/Node sidecar; the installed/default `peer` has not switched yet.
+
+The first execution slice is `peer-native exec --plan <canonical-goal-id> [--max-turns N]`, using an explicitly isolated existing data root through `PEER_AGENT_HOME`. It accepts a fresh delegated worker admission, an existing plain OpenAI-compatible chat channel, and bounded file/foreground Shell tools. `recover --plan <id>` observes interrupted native execution and retains unknown effects without replaying tools. A reply pauses execution and leaves Goal acceptance pending. Other context/auth/wire adapters and full Bot/TUI parity remain in migration; unsupported paths fail explicitly.
+
+Development verification: `node scripts/native-cli/verify.mjs <temporary-output-directory>`. Node/Bun run the existing implementation as a test reference; they are not runtime children of the candidate.
+
 ## Local control and evidence
 
 Models provide cognition and may run with a cloud provider. Peer controls local capability execution, permission decisions and evidence. What a model receives depends on the configured provider and admitted context; local-first is not a claim that no content can leave the computer.

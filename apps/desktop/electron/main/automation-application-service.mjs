@@ -114,6 +114,9 @@ export function createAutomationApplicationService({
       const run = store.getRun(runId);
       if (!run) throw new Error('automation_run_not_found');
       if (!ACTIVE_RUN_STATUSES.has(run.status)) return run;
+      void Promise.resolve(getRunner?.()?.cancel?.(runId)).catch((error) => {
+        logger?.warn?.('[automation-application] cancel failed:', error);
+      });
       const finishedAt = now();
       return store.updateRun(runId, { status: 'cancelled', finishedAt, failureReason: 'cancelled_by_user' });
     },

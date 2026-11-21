@@ -182,4 +182,89 @@ describe('automation runner', () => {
     assert.equal(result.failureReason, 'workspace_missing');
     assert.equal(called, false);
   });
+
+  it('routes through classicCoreBridge when available, capturing evidenceRefs, summary, and cancel()', async () => {
+    const state = fixture();
+    const calls = [];
+    const aborted = [];
+    let settleSend;
+    const bridge = {
+      isAvailable: () => true,
+      async createConversation(input) {
+        calls.push({ op: 'createConversation', input });
+        return { id: 'rust-conv-1', ...input };
+      },
+      async appendConversationMessage(input) {
+        calls.push({ op: 'appendConversationMessage', input });
+        return { id: input.id };
+      },
+      send(input, sink) {
+        calls.push({ op: 'send', input, sink });
+        sink.send('chat:stream:delta', { streamId: input.streamId, content: 'Rust automation output.' });
+        return new Promise((resolve) => {
+          settleSend = resolve;
+        });
+      },
+      async abort(streamId) {
+        aborted.push(streamId);
+        settleSend?.({
+          ok: false,
+          terminalStatus: 'aborted',
+          text: 'Partial rust output.',
+          evidenceRefs: ['evidence://partial-1'],
+        });
+        return { aborted: true };
+      },
+    };
+    const bgEvents = [];
+    const runner = createAutomationRunner({
+      store: state.store,
+      conversationStore: state.conversationStore,
+      classicCoreBridge: bridge,
+      ensureWorkspace: async () => {},
+      createId: (() => { let id = 0; return () => `rid-${++id}`; })(),
+      now: (() => { const values = ['2026-08-04T00:00:01.000Z', '2026-08-04T00:00:04.000Z']; return () => values.shift(); })(),
+      onBackgroundEvent: (evt) => bgEvents.push(evt),
+    });
+
+    const runPromise = runner.run('run-1');
+    await new Promise((resolve) => setImmediate(resolve));
+    const sendCall = calls.find((c) => c.op === 'send');
+    assert.ok(sendCall);
+    assert.equal(sendCall.input.conversationId, 'rust-conv-1');
+    assert.equal(sendCall.input.permissionPolicy.kind, 'automation');
+    assert.equal(sendCall.input.permissionPolicy.preset, 'observe');
+    assert.equal(bgEvents.length, 1);
+
+    settleSend({
+      ok: true,
+      terminalStatus: 'done',
+      text: 'Rust automation output.',
+      evidenceRefs: ['evidence://rust-1'],
+      usage: { inputTokens: 15, outputTokens: 9 },
+    });
+    const result = await runPromise;
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.conversationId, 'rust-conv-1');
+    assert.equal(result.receipt.summary, 'Rust automation output.');
+    assert.deepEqual(result.receipt.evidenceRefs, ['evidence://rust-1']);
+    assert.equal(result.receipt.inputTokens, 15);
+    assert.equal(result.receipt.outputTokens, 9);
+    assert.deepEqual(state.conversations, []);
+
+    // Verify cancel() aborts an in-flight Rust run and preserves cancelled status.
+    state.runs.set('run-2', {
+      ...state.runs.get('run-1'),
+      runId: 'run-2',
+      status: 'queued',
+    });
+    const run2Promise = runner.run('run-2');
+    await new Promise((resolve) => setImmediate(resolve));
+    state.store.updateRun('run-2', { status: 'cancelled' });
+    const abortRes = await runner.cancel('run-2');
+    assert.equal(abortRes.aborted, true);
+    assert.equal(aborted.length, 1);
+    const cancelledResult = await run2Promise;
+    assert.equal(cancelledResult.status, 'cancelled');
+  });
 });

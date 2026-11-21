@@ -53,6 +53,7 @@ interface ConversationStore {
     params?: { status?: string; roles?: readonly string[] },
   ): readonly Record<string, unknown>[];
   getConversation(id: string): (Record<string, unknown> & { messages?: readonly Record<string, unknown>[] }) | null;
+  assertExecutionAvailable?(id: string): void;
   createConversation(input?: { title?: string; workspacePath?: string; mode?: TuiMode; fastMode?: boolean }): { id: string };
   appendMessage(id: string, message: ChatMessage & { timestamp: number }): unknown;
   replaceMessages?(id: string, messages: readonly Record<string, unknown>[], options?: { allowEmpty?: boolean }): unknown;
@@ -78,6 +79,7 @@ interface ConversationStore {
 export interface TuiConversationPersistence {
   getConversationId(): string | undefined;
   ensureConversation(): string;
+  assertExecutionAvailable(id: string): void;
   /**
    * Desktop tokenUsage analogue: durable conversation lifetime totals.
    * Does not include the in-flight turn until that turn is recorded.
@@ -613,6 +615,9 @@ export function createTuiConversationPersistence(options: {
       };
     },
     ensureConversation,
+    assertExecutionAvailable(id) {
+      store.assertExecutionAvailable?.(id);
+    },
     listResumable() {
       try {
         const conversations = store.listConversationsByWorkspace

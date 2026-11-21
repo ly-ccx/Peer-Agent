@@ -213,10 +213,22 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
         state.toolCalls.push({
           id: parsed.content_block.id || '',
           name: parsed.content_block.name || '',
-          arguments: '',
+          arguments: parsed.content_block.input && typeof parsed.content_block.input === 'object'
+            && !Array.isArray(parsed.content_block.input) && Object.keys(parsed.content_block.input).length
+            ? JSON.stringify(parsed.content_block.input) : '',
         });
       } else {
         state.currentAnthropicToolIndex = -1;
+        // A block can carry its first value before subsequent delta frames.
+        // Dropping it loses factual text or thinking on Qoder's sparse shape.
+        const block = parsed.content_block;
+        if (block?.type === 'text' && typeof block.text === 'string' && block.text) {
+          state.content += block.text;
+          if (!options.bufferTextDeltas) emitProviderEvent(webContents, 'chat:stream:delta', { streamId, content: block.text });
+        } else if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+          state.thinkingContent += block.thinking;
+          if (!options.bufferThinkingDeltas) emitProviderEvent(webContents, 'chat:stream:thinking', { streamId, content: block.thinking });
+        }
       }
       return;
     }
@@ -285,14 +297,18 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     }
     if (parsed.usage) {
       const u = parsed.usage;
+      // Missing dimensions are unknown, rather than provider-reported zeros.
+      // Later partial metadata must not erase a complete earlier observation.
+      const promptTokens = u.input_tokens ?? u.prompt_tokens;
+      const completionTokens = u.output_tokens ?? u.completion_tokens;
+      if (promptTokens == null || completionTokens == null) return;
       const cachedTokens = extractCachedPromptTokens(u);
       const cacheWriteTokens = extractCacheWritePromptTokens(u);
-      const promptTokens = u.prompt_tokens ?? 0;
       state.usage = {
         // OpenAI-compatible prompt_tokens 已包含 cached_tokens。内部账本约定
         // inputTokens 与 cacheReadTokens 互斥，避免显示层 input + cacheRead 重复计数。
         inputTokens: Math.max(0, promptTokens - cachedTokens),
-        outputTokens: u.completion_tokens ?? 0,
+        outputTokens: completionTokens,
         cacheReadTokens: cachedTokens,
         // 缓存写：上游无字段（Grok 等）时留空，区别于「真 0」；显示层渲染「—」。
         ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),

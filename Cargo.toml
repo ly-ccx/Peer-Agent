@@ -1,5 +1,25 @@
 [workspace]
 members = [
   "crates/peer-credential-helper",
+  "crates/peer-protocol",
+  "crates/peer-tui",
+  "crates/peer-cli",
+  "crates/peer-store",
+  "crates/peer-runtime",
+  "crates/peer-project-agent",
+  "crates/peer-core-rpc",
 ]
 resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.145", features = ["preserve_order", "raw_value"] }
+sha2 = "0.10.9"
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+# The bounded tty poll source returns on EOF/hangup; the default Mio source
+# can spin inside a read loop without returning to our cancellation flag.
+crossterm = { version = "=0.29.0", features = ["bracketed-paste", "use-dev-tty"] }

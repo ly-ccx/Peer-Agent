@@ -1,0 +1,637 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "new turn",
+      "steps": [],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": []
+    },
+    {
+      "name": "three request capacity versus billing",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 30,
+            "outputTokens": 2,
+            "cacheReadTokens": 5,
+            "totalTokens": 999999
+          },
+          "metadata": {
+            "requestFingerprint": "request-1"
+          }
+        },
+        {
+          "usage": {
+            "inputTokens": 40,
+            "outputTokens": 3,
+            "cacheReadTokens": 5,
+            "totalTokens": 999999
+          },
+          "metadata": {
+            "requestFingerprint": "request-2"
+          }
+        },
+        {
+          "usage": {
+            "inputTokens": 50,
+            "outputTokens": 4,
+            "cacheReadTokens": 5,
+            "totalTokens": 999999
+          },
+          "metadata": {
+            "requestFingerprint": "request-3"
+          }
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "requestFingerprint": "request-1",
+            "inputTokens": 30,
+            "outputTokens": 2,
+            "cacheReadTokens": 5,
+            "cacheWriteTokens": 0,
+            "totalTokens": 37
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 30,
+            "outputTokens": 2,
+            "cacheReadTokens": 5,
+            "cacheWriteTokens": 0,
+            "totalTokens": 37
+          }
+        },
+        {
+          "providerRequestCount": 2,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 2,
+            "requestPurpose": "agent",
+            "requestFingerprint": "request-2",
+            "inputTokens": 40,
+            "outputTokens": 3,
+            "cacheReadTokens": 5,
+            "cacheWriteTokens": 0,
+            "totalTokens": 48
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 2,
+            "inputTokens": 70,
+            "outputTokens": 5,
+            "cacheReadTokens": 10,
+            "cacheWriteTokens": 0,
+            "totalTokens": 85
+          }
+        },
+        {
+          "providerRequestCount": 3,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 3,
+            "requestPurpose": "agent",
+            "requestFingerprint": "request-3",
+            "inputTokens": 50,
+            "outputTokens": 4,
+            "cacheReadTokens": 5,
+            "cacheWriteTokens": 0,
+            "totalTokens": 59
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 3,
+            "inputTokens": 120,
+            "outputTokens": 9,
+            "cacheReadTokens": 15,
+            "cacheWriteTokens": 0,
+            "totalTokens": 144
+          }
+        }
+      ]
+    },
+    {
+      "name": "null failure and later observation",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 10
+          }
+        },
+        {
+          "usage": null
+        },
+        {
+          "usage": {
+            "outputTokens": 3
+          }
+        },
+        {
+          "usage": null
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 2,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 2,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 3,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 3,
+            "requestPurpose": "agent",
+            "inputTokens": 0,
+            "outputTokens": 3,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 3
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 3,
+            "inputTokens": 10,
+            "outputTokens": 3,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 13
+          }
+        },
+        {
+          "providerRequestCount": 4,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 3,
+            "requestPurpose": "agent",
+            "inputTokens": 0,
+            "outputTokens": 3,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 3
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 4,
+            "inputTokens": 10,
+            "outputTokens": 3,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 13
+          }
+        }
+      ]
+    },
+    {
+      "name": "auxiliary summaries and null summary failure",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 50
+          },
+          "metadata": {
+            "requestFingerprint": "agent-request"
+          }
+        },
+        {
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 5
+          },
+          "metadata": {
+            "requestPurpose": "compaction_summary",
+            "capacityBearing": false
+          }
+        },
+        {
+          "usage": null,
+          "metadata": {
+            "requestPurpose": "compaction_summary",
+            "capacityBearing": false
+          }
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "requestFingerprint": "agent-request",
+            "inputTokens": 50,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 50
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 50,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 50
+          }
+        },
+        {
+          "providerRequestCount": 2,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "requestFingerprint": "agent-request",
+            "inputTokens": 50,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 50
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 2,
+            "inputTokens": 70,
+            "outputTokens": 5,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 75
+          }
+        },
+        {
+          "providerRequestCount": 3,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "requestFingerprint": "agent-request",
+            "inputTokens": 50,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 50
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 3,
+            "inputTokens": 70,
+            "outputTokens": 5,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 75
+          }
+        }
+      ]
+    },
+    {
+      "name": "summary-only turn",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 5
+          },
+          "metadata": {
+            "requestPurpose": "compaction_summary",
+            "capacityBearing": false
+          }
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": null,
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 20,
+            "outputTokens": 5,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 25
+          }
+        }
+      ]
+    },
+    {
+      "name": "zero usage leaves last observation",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 10
+          }
+        },
+        {
+          "usage": {}
+        },
+        {
+          "usage": {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "totalTokens": 100
+          }
+        },
+        {
+          "usage": null
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 2,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 2,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 3,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 3,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 4,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 4,
+            "inputTokens": 10,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "totalTokens": 10
+          }
+        }
+      ]
+    },
+    {
+      "name": "cache writes and empty fingerprint",
+      "steps": [
+        {
+          "usage": {
+            "inputTokens": 1,
+            "outputTokens": 2,
+            "cacheReadTokens": 3,
+            "cacheWriteTokens": 4
+          },
+          "metadata": {
+            "requestFingerprint": ""
+          }
+        },
+        {
+          "usage": {
+            "cacheReadTokens": 7,
+            "cacheWriteTokens": 8
+          },
+          "metadata": {
+            "requestFingerprint": "  "
+          }
+        }
+      ],
+      "initial": {
+        "providerRequestCount": 0,
+        "lastRequest": null,
+        "turnTotal": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "totalTokens": 0
+        }
+      },
+      "expected": [
+        {
+          "providerRequestCount": 1,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 1,
+            "requestPurpose": "agent",
+            "inputTokens": 1,
+            "outputTokens": 2,
+            "cacheReadTokens": 3,
+            "cacheWriteTokens": 4,
+            "totalTokens": 10
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 1,
+            "inputTokens": 1,
+            "outputTokens": 2,
+            "cacheReadTokens": 3,
+            "cacheWriteTokens": 4,
+            "totalTokens": 10
+          }
+        },
+        {
+          "providerRequestCount": 2,
+          "lastRequest": {
+            "usageScope": "provider_request",
+            "requestIndex": 2,
+            "requestPurpose": "agent",
+            "requestFingerprint": "  ",
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 7,
+            "cacheWriteTokens": 8,
+            "totalTokens": 15
+          },
+          "turnTotal": {
+            "usageScope": "runtime_turn",
+            "providerRequestCount": 2,
+            "inputTokens": 1,
+            "outputTokens": 2,
+            "cacheReadTokens": 10,
+            "cacheWriteTokens": 12,
+            "totalTokens": 25
+          }
+        }
+      ]
+    }
+  ]
+}

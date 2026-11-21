@@ -1,0 +1,5198 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "capabilityId": "local.search.aggregate",
+    "displayName": "Batch search file contents",
+    "description": "Run multiple independent content searches in parallel and aggregate their results.",
+    "riskLevel": "L1_readonly",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "metadata": {
+      "modelToolName": "batch_search"
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "Independent content-search lanes to execute.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Optional stable lane identifier."
+              },
+              "label": {
+                "type": "string",
+                "description": "Optional human-readable lane label."
+              },
+              "query": {
+                "type": "string",
+                "description": "Non-empty substring to search for."
+              },
+              "path": {
+                "type": "string",
+                "description": "Optional absolute or workspace-relative path."
+              },
+              "case_sensitive": {
+                "type": "boolean",
+                "description": "Use case-sensitive matching."
+              },
+              "max_results": {
+                "type": "number",
+                "description": "Maximum results for this lane (1-200)."
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "max_concurrency": {
+          "type": "number",
+          "description": "Maximum concurrently running lanes (1-8, default 4)."
+        },
+        "dedupe": {
+          "type": "boolean",
+          "description": "Merge results that have the same path and line. Defaults to true."
+        }
+      },
+      "required": [
+        "queries"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "files": {
+    "src/shared.txt": "alpha beta\nalpha only\n",
+    "src/other.txt": "beta only\n",
+    "src/É.txt": "ALPHA\r\n中文针\n",
+    "../outside/other.txt": "alpha outside\n",
+    "cap.txt": "capneedle 1\ncapneedle 2\ncapneedle 3\ncapneedle 4\ncapneedle 5\ncapneedle 6\ncapneedle 7\ncapneedle 8\ncapneedle 9\ncapneedle 10\ncapneedle 11\ncapneedle 12\ncapneedle 13\ncapneedle 14\ncapneedle 15\ncapneedle 16\ncapneedle 17\ncapneedle 18\ncapneedle 19\ncapneedle 20\ncapneedle 21\ncapneedle 22\ncapneedle 23\ncapneedle 24\ncapneedle 25\ncapneedle 26\ncapneedle 27\ncapneedle 28\ncapneedle 29\ncapneedle 30\ncapneedle 31\ncapneedle 32\ncapneedle 33\ncapneedle 34\ncapneedle 35\ncapneedle 36\ncapneedle 37\ncapneedle 38\ncapneedle 39\ncapneedle 40\ncapneedle 41\ncapneedle 42\ncapneedle 43\ncapneedle 44\ncapneedle 45\ncapneedle 46\ncapneedle 47\ncapneedle 48\ncapneedle 49\ncapneedle 50\ncapneedle 51\ncapneedle 52\ncapneedle 53\ncapneedle 54\ncapneedle 55\ncapneedle 56\ncapneedle 57\ncapneedle 58\ncapneedle 59\ncapneedle 60\ncapneedle 61\ncapneedle 62\ncapneedle 63\ncapneedle 64\ncapneedle 65\ncapneedle 66\ncapneedle 67\ncapneedle 68\ncapneedle 69\ncapneedle 70\ncapneedle 71\ncapneedle 72\ncapneedle 73\ncapneedle 74\ncapneedle 75\ncapneedle 76\ncapneedle 77\ncapneedle 78\ncapneedle 79\ncapneedle 80\ncapneedle 81\ncapneedle 82\ncapneedle 83\ncapneedle 84\ncapneedle 85\ncapneedle 86\ncapneedle 87\ncapneedle 88\ncapneedle 89\ncapneedle 90\ncapneedle 91\ncapneedle 92\ncapneedle 93\ncapneedle 94\ncapneedle 95\ncapneedle 96\ncapneedle 97\ncapneedle 98\ncapneedle 99\ncapneedle 100\ncapneedle 101\ncapneedle 102\ncapneedle 103\ncapneedle 104\ncapneedle 105\ncapneedle 106\ncapneedle 107\ncapneedle 108\ncapneedle 109\ncapneedle 110\ncapneedle 111\ncapneedle 112\ncapneedle 113\ncapneedle 114\ncapneedle 115\ncapneedle 116\ncapneedle 117\ncapneedle 118\ncapneedle 119\ncapneedle 120\ncapneedle 121\ncapneedle 122\ncapneedle 123\ncapneedle 124\ncapneedle 125\ncapneedle 126\ncapneedle 127\ncapneedle 128\ncapneedle 129\ncapneedle 130\ncapneedle 131\ncapneedle 132\ncapneedle 133\ncapneedle 134\ncapneedle 135\ncapneedle 136\ncapneedle 137\ncapneedle 138\ncapneedle 139\ncapneedle 140\ncapneedle 141\ncapneedle 142\ncapneedle 143\ncapneedle 144\ncapneedle 145\ncapneedle 146\ncapneedle 147\ncapneedle 148\ncapneedle 149\ncapneedle 150\ncapneedle 151\ncapneedle 152\ncapneedle 153\ncapneedle 154\ncapneedle 155\ncapneedle 156\ncapneedle 157\ncapneedle 158\ncapneedle 159\ncapneedle 160\ncapneedle 161\ncapneedle 162\ncapneedle 163\ncapneedle 164\ncapneedle 165\ncapneedle 166\ncapneedle 167\ncapneedle 168\ncapneedle 169\ncapneedle 170\ncapneedle 171\ncapneedle 172\ncapneedle 173\ncapneedle 174\ncapneedle 175\ncapneedle 176\ncapneedle 177\ncapneedle 178\ncapneedle 179\ncapneedle 180\ncapneedle 181\ncapneedle 182\ncapneedle 183\ncapneedle 184\ncapneedle 185\ncapneedle 186\ncapneedle 187\ncapneedle 188\ncapneedle 189\ncapneedle 190\ncapneedle 191\ncapneedle 192\ncapneedle 193\ncapneedle 194\ncapneedle 195\ncapneedle 196\ncapneedle 197\ncapneedle 198\ncapneedle 199\ncapneedle 200\ncapneedle 201\ncapneedle 202\ncapneedle 203\ncapneedle 204\ncapneedle 205\ncapneedle 206\ncapneedle 207\ncapneedle 208\ncapneedle 209\ncapneedle 210\ncapneedle 211\ncapneedle 212\ncapneedle 213\ncapneedle 214\ncapneedle 215\ncapneedle 216\ncapneedle 217\ncapneedle 218\ncapneedle 219\ncapneedle 220\ncapneedle 221\ncapneedle 222\ncapneedle 223\ncapneedle 224\ncapneedle 225\ncapneedle 226\ncapneedle 227\ncapneedle 228\ncapneedle 229\ncapneedle 230\ncapneedle 231\ncapneedle 232\ncapneedle 233\ncapneedle 234\ncapneedle 235\ncapneedle 236\ncapneedle 237\ncapneedle 238\ncapneedle 239\ncapneedle 240\ncapneedle 241\ncapneedle 242\ncapneedle 243\ncapneedle 244\ncapneedle 245\ncapneedle 246\ncapneedle 247\ncapneedle 248\ncapneedle 249\ncapneedle 250\ncapneedle 251\ncapneedle 252\ncapneedle 253\ncapneedle 254\ncapneedle 255\ncapneedle 256\ncapneedle 257\ncapneedle 258\ncapneedle 259\ncapneedle 260\ncapneedle 261\ncapneedle 262\ncapneedle 263\ncapneedle 264\ncapneedle 265\ncapneedle 266\ncapneedle 267\ncapneedle 268\ncapneedle 269\ncapneedle 270\ncapneedle 271\ncapneedle 272\ncapneedle 273\ncapneedle 274\ncapneedle 275\ncapneedle 276\ncapneedle 277\ncapneedle 278\ncapneedle 279\ncapneedle 280\ncapneedle 281\ncapneedle 282\ncapneedle 283\ncapneedle 284\ncapneedle 285\ncapneedle 286\ncapneedle 287\ncapneedle 288\ncapneedle 289\ncapneedle 290\ncapneedle 291\ncapneedle 292\ncapneedle 293\ncapneedle 294\ncapneedle 295\ncapneedle 296\ncapneedle 297\ncapneedle 298\ncapneedle 299\ncapneedle 300\ncapneedle 301\ncapneedle 302\ncapneedle 303\ncapneedle 304\ncapneedle 305\ncapneedle 306\ncapneedle 307\ncapneedle 308\ncapneedle 309\ncapneedle 310\ncapneedle 311\ncapneedle 312\ncapneedle 313\ncapneedle 314\ncapneedle 315\ncapneedle 316\ncapneedle 317\ncapneedle 318\ncapneedle 319\ncapneedle 320\ncapneedle 321\ncapneedle 322\ncapneedle 323\ncapneedle 324\ncapneedle 325\ncapneedle 326\ncapneedle 327\ncapneedle 328\ncapneedle 329\ncapneedle 330\ncapneedle 331\ncapneedle 332\ncapneedle 333\ncapneedle 334\ncapneedle 335\ncapneedle 336\ncapneedle 337\ncapneedle 338\ncapneedle 339\ncapneedle 340\ncapneedle 341\ncapneedle 342\ncapneedle 343\ncapneedle 344\ncapneedle 345\ncapneedle 346\ncapneedle 347\ncapneedle 348\ncapneedle 349\ncapneedle 350\ncapneedle 351\ncapneedle 352\ncapneedle 353\ncapneedle 354\ncapneedle 355\ncapneedle 356\ncapneedle 357\ncapneedle 358\ncapneedle 359\ncapneedle 360\ncapneedle 361\ncapneedle 362\ncapneedle 363\ncapneedle 364\ncapneedle 365\ncapneedle 366\ncapneedle 367\ncapneedle 368\ncapneedle 369\ncapneedle 370\ncapneedle 371\ncapneedle 372\ncapneedle 373\ncapneedle 374\ncapneedle 375\ncapneedle 376\ncapneedle 377\ncapneedle 378\ncapneedle 379\ncapneedle 380\ncapneedle 381\ncapneedle 382\ncapneedle 383\ncapneedle 384\ncapneedle 385\ncapneedle 386\ncapneedle 387\ncapneedle 388\ncapneedle 389\ncapneedle 390\ncapneedle 391\ncapneedle 392\ncapneedle 393\ncapneedle 394\ncapneedle 395\ncapneedle 396\ncapneedle 397\ncapneedle 398\ncapneedle 399\ncapneedle 400\ncapneedle 401\ncapneedle 402\ncapneedle 403\ncapneedle 404\ncapneedle 405\ncapneedle 406\ncapneedle 407\ncapneedle 408\ncapneedle 409\ncapneedle 410\ncapneedle 411\ncapneedle 412\ncapneedle 413\ncapneedle 414\ncapneedle 415\ncapneedle 416\ncapneedle 417\ncapneedle 418\ncapneedle 419\ncapneedle 420\ncapneedle 421\ncapneedle 422\ncapneedle 423\ncapneedle 424\ncapneedle 425\ncapneedle 426\ncapneedle 427\ncapneedle 428\ncapneedle 429\ncapneedle 430\ncapneedle 431\ncapneedle 432\ncapneedle 433\ncapneedle 434\ncapneedle 435\ncapneedle 436\ncapneedle 437\ncapneedle 438\ncapneedle 439\ncapneedle 440\ncapneedle 441\ncapneedle 442\ncapneedle 443\ncapneedle 444\ncapneedle 445\ncapneedle 446\ncapneedle 447\ncapneedle 448\ncapneedle 449\ncapneedle 450\ncapneedle 451\ncapneedle 452\ncapneedle 453\ncapneedle 454\ncapneedle 455\ncapneedle 456\ncapneedle 457\ncapneedle 458\ncapneedle 459\ncapneedle 460\ncapneedle 461\ncapneedle 462\ncapneedle 463\ncapneedle 464\ncapneedle 465\ncapneedle 466\ncapneedle 467\ncapneedle 468\ncapneedle 469\ncapneedle 470\ncapneedle 471\ncapneedle 472\ncapneedle 473\ncapneedle 474\ncapneedle 475\ncapneedle 476\ncapneedle 477\ncapneedle 478\ncapneedle 479\ncapneedle 480\ncapneedle 481\ncapneedle 482\ncapneedle 483\ncapneedle 484\ncapneedle 485\ncapneedle 486\ncapneedle 487\ncapneedle 488\ncapneedle 489\ncapneedle 490\ncapneedle 491\ncapneedle 492\ncapneedle 493\ncapneedle 494\ncapneedle 495\ncapneedle 496\ncapneedle 497\ncapneedle 498\ncapneedle 499\ncapneedle 500\ncapneedle 501\ncapneedle 502\ncapneedle 503\ncapneedle 504\ncapneedle 505\ncapneedle 506\ncapneedle 507\ncapneedle 508\ncapneedle 509\ncapneedle 510\ncapneedle 511\ncapneedle 512\ncapneedle 513\ncapneedle 514\ncapneedle 515\ncapneedle 516\ncapneedle 517\ncapneedle 518\ncapneedle 519\ncapneedle 520\ncapneedle 521\ncapneedle 522\ncapneedle 523\ncapneedle 524\ncapneedle 525\ncapneedle 526\ncapneedle 527\ncapneedle 528\ncapneedle 529\ncapneedle 530\ncapneedle 531\ncapneedle 532\ncapneedle 533\ncapneedle 534\ncapneedle 535\ncapneedle 536\ncapneedle 537\ncapneedle 538\ncapneedle 539\ncapneedle 540\ncapneedle 541\ncapneedle 542\ncapneedle 543\ncapneedle 544\ncapneedle 545\ncapneedle 546\ncapneedle 547\ncapneedle 548\ncapneedle 549\ncapneedle 550\ncapneedle 551\ncapneedle 552\ncapneedle 553\ncapneedle 554\ncapneedle 555\ncapneedle 556\ncapneedle 557\ncapneedle 558\ncapneedle 559\ncapneedle 560\ncapneedle 561\ncapneedle 562\ncapneedle 563\ncapneedle 564\ncapneedle 565\ncapneedle 566\ncapneedle 567\ncapneedle 568\ncapneedle 569\ncapneedle 570\ncapneedle 571\ncapneedle 572\ncapneedle 573\ncapneedle 574\ncapneedle 575\ncapneedle 576\ncapneedle 577\ncapneedle 578\ncapneedle 579\ncapneedle 580\ncapneedle 581\ncapneedle 582\ncapneedle 583\ncapneedle 584\ncapneedle 585\ncapneedle 586\ncapneedle 587\ncapneedle 588\ncapneedle 589\ncapneedle 590\ncapneedle 591\ncapneedle 592\ncapneedle 593\ncapneedle 594\ncapneedle 595\ncapneedle 596\ncapneedle 597\ncapneedle 598\ncapneedle 599\ncapneedle 600\n"
+  },
+  "cases": [
+    {
+      "name": "overlap",
+      "input": {
+        "queries": [
+          {
+            "id": "alpha",
+            "query": "alpha",
+            "path": "src"
+          },
+          {
+            "id": "beta",
+            "query": "beta",
+            "path": "src"
+          }
+        ],
+        "max_concurrency": 2
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 2,
+        "completedCount": 2,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 2,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "alpha",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 3,
+            "truncated": false
+          },
+          {
+            "id": "beta",
+            "label": "beta",
+            "query": "beta",
+            "status": "completed",
+            "matchCount": 2,
+            "truncated": false
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 4,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "src/shared.txt",
+              "line": 1,
+              "text": "alpha beta",
+              "laneIds": [
+                "alpha",
+                "beta"
+              ],
+              "hitCount": 2
+            },
+            {
+              "path": "src/É.txt",
+              "line": 1,
+              "text": "ALPHA",
+              "laneIds": [
+                "alpha"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/other.txt",
+              "line": 1,
+              "text": "beta only",
+              "laneIds": [
+                "beta"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 2,
+              "text": "alpha only",
+              "laneIds": [
+                "alpha"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "duplicates",
+      "input": {
+        "queries": [
+          {
+            "query": "alpha",
+            "path": "src"
+          },
+          {
+            "query": "alpha",
+            "path": "src"
+          }
+        ],
+        "dedupe": false,
+        "max_concurrency": 8
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 2,
+        "completedCount": 2,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 8,
+        "dedupe": false,
+        "lanes": [
+          {
+            "id": "lane-1",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 3,
+            "truncated": false
+          },
+          {
+            "id": "lane-2",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 3,
+            "truncated": false
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 6,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "src/É.txt",
+              "line": 1,
+              "text": "ALPHA",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/É.txt",
+              "line": 1,
+              "text": "ALPHA",
+              "laneIds": [
+                "lane-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 1,
+              "text": "alpha beta",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 1,
+              "text": "alpha beta",
+              "laneIds": [
+                "lane-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 2,
+              "text": "alpha only",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 2,
+              "text": "alpha only",
+              "laneIds": [
+                "lane-2"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "trim",
+      "input": {
+        "queries": [
+          {
+            "id": " x ",
+            "label": " label ",
+            "query": " alpha ",
+            "path": " src ",
+            "max_results": 1.8
+          }
+        ],
+        "max_concurrency": 0
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 1,
+        "completedCount": 1,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 1,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "x",
+            "label": "label",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 1,
+            "truncated": true
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 1,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "src/shared.txt",
+              "line": 1,
+              "text": "alpha beta",
+              "laneIds": [
+                "x"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "unicode",
+      "input": {
+        "queries": [
+          {
+            "query": "中文针",
+            "path": "src"
+          },
+          {
+            "query": "ALPHA",
+            "path": "src",
+            "case_sensitive": true
+          }
+        ]
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 2,
+        "completedCount": 2,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 4,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "lane-1",
+            "label": "中文针",
+            "query": "中文针",
+            "status": "completed",
+            "matchCount": 1,
+            "truncated": false
+          },
+          {
+            "id": "lane-2",
+            "label": "ALPHA",
+            "query": "ALPHA",
+            "status": "completed",
+            "matchCount": 1,
+            "truncated": false
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 2,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "src/É.txt",
+              "line": 1,
+              "text": "ALPHA",
+              "laneIds": [
+                "lane-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/É.txt",
+              "line": 2,
+              "text": "中文针",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "outside",
+      "input": {
+        "queries": [
+          {
+            "query": "alpha",
+            "path": "../outside"
+          }
+        ]
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 1,
+        "completedCount": 1,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 4,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "lane-1",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 1,
+            "truncated": false
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 1,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "../outside/other.txt",
+              "line": 1,
+              "text": "alpha outside",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "partial",
+      "input": {
+        "queries": [
+          {
+            "query": "alpha",
+            "path": "src"
+          },
+          {
+            "query": "alpha",
+            "path": "missing"
+          }
+        ]
+      },
+      "status": "completed",
+      "output": {
+        "status": "partial",
+        "laneCount": 2,
+        "completedCount": 1,
+        "failedCount": 1,
+        "cancelledCount": 0,
+        "concurrency": 4,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "lane-1",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "completed",
+            "matchCount": 3,
+            "truncated": false
+          },
+          {
+            "id": "lane-2",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "failed",
+            "matchCount": 0,
+            "truncated": false,
+            "errorMessage": "ENOENT: no such file or directory, stat '<fixture>/workspace/missing'"
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 3,
+          "truncated": false,
+          "matches": [
+            {
+              "path": "src/É.txt",
+              "line": 1,
+              "text": "ALPHA",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 1,
+              "text": "alpha beta",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "src/shared.txt",
+              "line": 2,
+              "text": "alpha only",
+              "laneIds": [
+                "lane-1"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "all-failed",
+      "input": {
+        "queries": [
+          {
+            "query": "alpha",
+            "path": "missing"
+          }
+        ]
+      },
+      "status": "failed",
+      "output": {
+        "status": "partial",
+        "laneCount": 1,
+        "completedCount": 0,
+        "failedCount": 1,
+        "cancelledCount": 0,
+        "concurrency": 4,
+        "dedupe": true,
+        "lanes": [
+          {
+            "id": "lane-1",
+            "label": "alpha",
+            "query": "alpha",
+            "status": "failed",
+            "matchCount": 0,
+            "truncated": false,
+            "errorMessage": "ENOENT: no such file or directory, stat '<fixture>/workspace/missing'"
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 0,
+          "truncated": false,
+          "matches": []
+        }
+      },
+      "error": "all_search_lanes_failed",
+      "legacyGrantDecision": "deny"
+    },
+    {
+      "name": "cap",
+      "input": {
+        "queries": [
+          {
+            "id": "cap-0",
+            "query": "capneedle",
+            "path": "cap.txt",
+            "max_results": 200
+          },
+          {
+            "id": "cap-1",
+            "query": "capneedle",
+            "path": "cap.txt",
+            "max_results": 200
+          },
+          {
+            "id": "cap-2",
+            "query": "capneedle",
+            "path": "cap.txt",
+            "max_results": 200
+          }
+        ],
+        "dedupe": false
+      },
+      "status": "completed",
+      "output": {
+        "status": "success",
+        "laneCount": 3,
+        "completedCount": 3,
+        "failedCount": 0,
+        "cancelledCount": 0,
+        "concurrency": 4,
+        "dedupe": false,
+        "lanes": [
+          {
+            "id": "cap-0",
+            "label": "capneedle",
+            "query": "capneedle",
+            "status": "completed",
+            "matchCount": 200,
+            "truncated": true
+          },
+          {
+            "id": "cap-1",
+            "label": "capneedle",
+            "query": "capneedle",
+            "status": "completed",
+            "matchCount": 200,
+            "truncated": true
+          },
+          {
+            "id": "cap-2",
+            "label": "capneedle",
+            "query": "capneedle",
+            "status": "completed",
+            "matchCount": 200,
+            "truncated": true
+          }
+        ],
+        "aggregated": {
+          "totalUniqueMatches": 500,
+          "truncated": true,
+          "matches": [
+            {
+              "path": "cap.txt",
+              "line": 1,
+              "text": "capneedle 1",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 2,
+              "text": "capneedle 2",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 3,
+              "text": "capneedle 3",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 4,
+              "text": "capneedle 4",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 5,
+              "text": "capneedle 5",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 6,
+              "text": "capneedle 6",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 7,
+              "text": "capneedle 7",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 8,
+              "text": "capneedle 8",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 9,
+              "text": "capneedle 9",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 10,
+              "text": "capneedle 10",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 11,
+              "text": "capneedle 11",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 12,
+              "text": "capneedle 12",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 13,
+              "text": "capneedle 13",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 14,
+              "text": "capneedle 14",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 15,
+              "text": "capneedle 15",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 16,
+              "text": "capneedle 16",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 17,
+              "text": "capneedle 17",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 18,
+              "text": "capneedle 18",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 19,
+              "text": "capneedle 19",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 20,
+              "text": "capneedle 20",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 21,
+              "text": "capneedle 21",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 22,
+              "text": "capneedle 22",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 23,
+              "text": "capneedle 23",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 24,
+              "text": "capneedle 24",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 25,
+              "text": "capneedle 25",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 26,
+              "text": "capneedle 26",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 27,
+              "text": "capneedle 27",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 28,
+              "text": "capneedle 28",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 29,
+              "text": "capneedle 29",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 30,
+              "text": "capneedle 30",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 31,
+              "text": "capneedle 31",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 32,
+              "text": "capneedle 32",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 33,
+              "text": "capneedle 33",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 34,
+              "text": "capneedle 34",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 35,
+              "text": "capneedle 35",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 36,
+              "text": "capneedle 36",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 37,
+              "text": "capneedle 37",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 38,
+              "text": "capneedle 38",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 39,
+              "text": "capneedle 39",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 40,
+              "text": "capneedle 40",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 41,
+              "text": "capneedle 41",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 42,
+              "text": "capneedle 42",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 43,
+              "text": "capneedle 43",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 44,
+              "text": "capneedle 44",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 45,
+              "text": "capneedle 45",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 46,
+              "text": "capneedle 46",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 47,
+              "text": "capneedle 47",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 48,
+              "text": "capneedle 48",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 49,
+              "text": "capneedle 49",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 50,
+              "text": "capneedle 50",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 51,
+              "text": "capneedle 51",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 52,
+              "text": "capneedle 52",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 53,
+              "text": "capneedle 53",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 54,
+              "text": "capneedle 54",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 55,
+              "text": "capneedle 55",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 56,
+              "text": "capneedle 56",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 57,
+              "text": "capneedle 57",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 58,
+              "text": "capneedle 58",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 59,
+              "text": "capneedle 59",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 60,
+              "text": "capneedle 60",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 61,
+              "text": "capneedle 61",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 62,
+              "text": "capneedle 62",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 63,
+              "text": "capneedle 63",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 64,
+              "text": "capneedle 64",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 65,
+              "text": "capneedle 65",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 66,
+              "text": "capneedle 66",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 67,
+              "text": "capneedle 67",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 68,
+              "text": "capneedle 68",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 69,
+              "text": "capneedle 69",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 70,
+              "text": "capneedle 70",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 71,
+              "text": "capneedle 71",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 72,
+              "text": "capneedle 72",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 73,
+              "text": "capneedle 73",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 74,
+              "text": "capneedle 74",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 75,
+              "text": "capneedle 75",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 76,
+              "text": "capneedle 76",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 77,
+              "text": "capneedle 77",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 78,
+              "text": "capneedle 78",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 79,
+              "text": "capneedle 79",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 80,
+              "text": "capneedle 80",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 81,
+              "text": "capneedle 81",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 82,
+              "text": "capneedle 82",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 83,
+              "text": "capneedle 83",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 84,
+              "text": "capneedle 84",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 85,
+              "text": "capneedle 85",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 86,
+              "text": "capneedle 86",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 87,
+              "text": "capneedle 87",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 88,
+              "text": "capneedle 88",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 89,
+              "text": "capneedle 89",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 90,
+              "text": "capneedle 90",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 91,
+              "text": "capneedle 91",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 92,
+              "text": "capneedle 92",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 93,
+              "text": "capneedle 93",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 94,
+              "text": "capneedle 94",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 95,
+              "text": "capneedle 95",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 96,
+              "text": "capneedle 96",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 97,
+              "text": "capneedle 97",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 98,
+              "text": "capneedle 98",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 99,
+              "text": "capneedle 99",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 100,
+              "text": "capneedle 100",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 101,
+              "text": "capneedle 101",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 102,
+              "text": "capneedle 102",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 103,
+              "text": "capneedle 103",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 104,
+              "text": "capneedle 104",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 105,
+              "text": "capneedle 105",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 106,
+              "text": "capneedle 106",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 107,
+              "text": "capneedle 107",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 108,
+              "text": "capneedle 108",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 109,
+              "text": "capneedle 109",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 110,
+              "text": "capneedle 110",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 111,
+              "text": "capneedle 111",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 112,
+              "text": "capneedle 112",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 113,
+              "text": "capneedle 113",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 114,
+              "text": "capneedle 114",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 115,
+              "text": "capneedle 115",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 116,
+              "text": "capneedle 116",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 117,
+              "text": "capneedle 117",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 118,
+              "text": "capneedle 118",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 119,
+              "text": "capneedle 119",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 120,
+              "text": "capneedle 120",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 121,
+              "text": "capneedle 121",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 122,
+              "text": "capneedle 122",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 123,
+              "text": "capneedle 123",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 124,
+              "text": "capneedle 124",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 125,
+              "text": "capneedle 125",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 126,
+              "text": "capneedle 126",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 127,
+              "text": "capneedle 127",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 128,
+              "text": "capneedle 128",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 129,
+              "text": "capneedle 129",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 130,
+              "text": "capneedle 130",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 131,
+              "text": "capneedle 131",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 132,
+              "text": "capneedle 132",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 133,
+              "text": "capneedle 133",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 134,
+              "text": "capneedle 134",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 135,
+              "text": "capneedle 135",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 136,
+              "text": "capneedle 136",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 137,
+              "text": "capneedle 137",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 138,
+              "text": "capneedle 138",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 139,
+              "text": "capneedle 139",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 140,
+              "text": "capneedle 140",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 141,
+              "text": "capneedle 141",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 142,
+              "text": "capneedle 142",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 143,
+              "text": "capneedle 143",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 144,
+              "text": "capneedle 144",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 145,
+              "text": "capneedle 145",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 146,
+              "text": "capneedle 146",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 147,
+              "text": "capneedle 147",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 148,
+              "text": "capneedle 148",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 149,
+              "text": "capneedle 149",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 150,
+              "text": "capneedle 150",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 151,
+              "text": "capneedle 151",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 152,
+              "text": "capneedle 152",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 153,
+              "text": "capneedle 153",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 154,
+              "text": "capneedle 154",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 155,
+              "text": "capneedle 155",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 156,
+              "text": "capneedle 156",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 157,
+              "text": "capneedle 157",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 158,
+              "text": "capneedle 158",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 159,
+              "text": "capneedle 159",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 160,
+              "text": "capneedle 160",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 161,
+              "text": "capneedle 161",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 162,
+              "text": "capneedle 162",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 163,
+              "text": "capneedle 163",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 164,
+              "text": "capneedle 164",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 165,
+              "text": "capneedle 165",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 166,
+              "text": "capneedle 166",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 167,
+              "text": "capneedle 167",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 168,
+              "text": "capneedle 168",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 169,
+              "text": "capneedle 169",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 170,
+              "text": "capneedle 170",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 171,
+              "text": "capneedle 171",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 172,
+              "text": "capneedle 172",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 173,
+              "text": "capneedle 173",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 174,
+              "text": "capneedle 174",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 175,
+              "text": "capneedle 175",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 176,
+              "text": "capneedle 176",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 177,
+              "text": "capneedle 177",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 178,
+              "text": "capneedle 178",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 179,
+              "text": "capneedle 179",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 180,
+              "text": "capneedle 180",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 181,
+              "text": "capneedle 181",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 182,
+              "text": "capneedle 182",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 183,
+              "text": "capneedle 183",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 184,
+              "text": "capneedle 184",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 185,
+              "text": "capneedle 185",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 186,
+              "text": "capneedle 186",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 187,
+              "text": "capneedle 187",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 188,
+              "text": "capneedle 188",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 189,
+              "text": "capneedle 189",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 190,
+              "text": "capneedle 190",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 191,
+              "text": "capneedle 191",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 192,
+              "text": "capneedle 192",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 193,
+              "text": "capneedle 193",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 194,
+              "text": "capneedle 194",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 195,
+              "text": "capneedle 195",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 196,
+              "text": "capneedle 196",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 197,
+              "text": "capneedle 197",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 198,
+              "text": "capneedle 198",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 199,
+              "text": "capneedle 199",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 200,
+              "text": "capneedle 200",
+              "laneIds": [
+                "cap-0"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 1,
+              "text": "capneedle 1",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 2,
+              "text": "capneedle 2",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 3,
+              "text": "capneedle 3",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 4,
+              "text": "capneedle 4",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 5,
+              "text": "capneedle 5",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 6,
+              "text": "capneedle 6",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 7,
+              "text": "capneedle 7",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 8,
+              "text": "capneedle 8",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 9,
+              "text": "capneedle 9",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 10,
+              "text": "capneedle 10",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 11,
+              "text": "capneedle 11",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 12,
+              "text": "capneedle 12",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 13,
+              "text": "capneedle 13",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 14,
+              "text": "capneedle 14",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 15,
+              "text": "capneedle 15",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 16,
+              "text": "capneedle 16",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 17,
+              "text": "capneedle 17",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 18,
+              "text": "capneedle 18",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 19,
+              "text": "capneedle 19",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 20,
+              "text": "capneedle 20",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 21,
+              "text": "capneedle 21",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 22,
+              "text": "capneedle 22",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 23,
+              "text": "capneedle 23",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 24,
+              "text": "capneedle 24",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 25,
+              "text": "capneedle 25",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 26,
+              "text": "capneedle 26",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 27,
+              "text": "capneedle 27",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 28,
+              "text": "capneedle 28",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 29,
+              "text": "capneedle 29",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 30,
+              "text": "capneedle 30",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 31,
+              "text": "capneedle 31",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 32,
+              "text": "capneedle 32",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 33,
+              "text": "capneedle 33",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 34,
+              "text": "capneedle 34",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 35,
+              "text": "capneedle 35",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 36,
+              "text": "capneedle 36",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 37,
+              "text": "capneedle 37",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 38,
+              "text": "capneedle 38",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 39,
+              "text": "capneedle 39",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 40,
+              "text": "capneedle 40",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 41,
+              "text": "capneedle 41",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 42,
+              "text": "capneedle 42",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 43,
+              "text": "capneedle 43",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 44,
+              "text": "capneedle 44",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 45,
+              "text": "capneedle 45",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 46,
+              "text": "capneedle 46",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 47,
+              "text": "capneedle 47",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 48,
+              "text": "capneedle 48",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 49,
+              "text": "capneedle 49",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 50,
+              "text": "capneedle 50",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 51,
+              "text": "capneedle 51",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 52,
+              "text": "capneedle 52",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 53,
+              "text": "capneedle 53",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 54,
+              "text": "capneedle 54",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 55,
+              "text": "capneedle 55",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 56,
+              "text": "capneedle 56",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 57,
+              "text": "capneedle 57",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 58,
+              "text": "capneedle 58",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 59,
+              "text": "capneedle 59",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 60,
+              "text": "capneedle 60",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 61,
+              "text": "capneedle 61",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 62,
+              "text": "capneedle 62",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 63,
+              "text": "capneedle 63",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 64,
+              "text": "capneedle 64",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 65,
+              "text": "capneedle 65",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 66,
+              "text": "capneedle 66",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 67,
+              "text": "capneedle 67",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 68,
+              "text": "capneedle 68",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 69,
+              "text": "capneedle 69",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 70,
+              "text": "capneedle 70",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 71,
+              "text": "capneedle 71",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 72,
+              "text": "capneedle 72",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 73,
+              "text": "capneedle 73",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 74,
+              "text": "capneedle 74",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 75,
+              "text": "capneedle 75",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 76,
+              "text": "capneedle 76",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 77,
+              "text": "capneedle 77",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 78,
+              "text": "capneedle 78",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 79,
+              "text": "capneedle 79",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 80,
+              "text": "capneedle 80",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 81,
+              "text": "capneedle 81",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 82,
+              "text": "capneedle 82",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 83,
+              "text": "capneedle 83",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 84,
+              "text": "capneedle 84",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 85,
+              "text": "capneedle 85",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 86,
+              "text": "capneedle 86",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 87,
+              "text": "capneedle 87",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 88,
+              "text": "capneedle 88",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 89,
+              "text": "capneedle 89",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 90,
+              "text": "capneedle 90",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 91,
+              "text": "capneedle 91",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 92,
+              "text": "capneedle 92",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 93,
+              "text": "capneedle 93",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 94,
+              "text": "capneedle 94",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 95,
+              "text": "capneedle 95",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 96,
+              "text": "capneedle 96",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 97,
+              "text": "capneedle 97",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 98,
+              "text": "capneedle 98",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 99,
+              "text": "capneedle 99",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 100,
+              "text": "capneedle 100",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 101,
+              "text": "capneedle 101",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 102,
+              "text": "capneedle 102",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 103,
+              "text": "capneedle 103",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 104,
+              "text": "capneedle 104",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 105,
+              "text": "capneedle 105",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 106,
+              "text": "capneedle 106",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 107,
+              "text": "capneedle 107",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 108,
+              "text": "capneedle 108",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 109,
+              "text": "capneedle 109",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 110,
+              "text": "capneedle 110",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 111,
+              "text": "capneedle 111",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 112,
+              "text": "capneedle 112",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 113,
+              "text": "capneedle 113",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 114,
+              "text": "capneedle 114",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 115,
+              "text": "capneedle 115",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 116,
+              "text": "capneedle 116",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 117,
+              "text": "capneedle 117",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 118,
+              "text": "capneedle 118",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 119,
+              "text": "capneedle 119",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 120,
+              "text": "capneedle 120",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 121,
+              "text": "capneedle 121",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 122,
+              "text": "capneedle 122",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 123,
+              "text": "capneedle 123",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 124,
+              "text": "capneedle 124",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 125,
+              "text": "capneedle 125",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 126,
+              "text": "capneedle 126",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 127,
+              "text": "capneedle 127",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 128,
+              "text": "capneedle 128",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 129,
+              "text": "capneedle 129",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 130,
+              "text": "capneedle 130",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 131,
+              "text": "capneedle 131",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 132,
+              "text": "capneedle 132",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 133,
+              "text": "capneedle 133",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 134,
+              "text": "capneedle 134",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 135,
+              "text": "capneedle 135",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 136,
+              "text": "capneedle 136",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 137,
+              "text": "capneedle 137",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 138,
+              "text": "capneedle 138",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 139,
+              "text": "capneedle 139",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 140,
+              "text": "capneedle 140",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 141,
+              "text": "capneedle 141",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 142,
+              "text": "capneedle 142",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 143,
+              "text": "capneedle 143",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 144,
+              "text": "capneedle 144",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 145,
+              "text": "capneedle 145",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 146,
+              "text": "capneedle 146",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 147,
+              "text": "capneedle 147",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 148,
+              "text": "capneedle 148",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 149,
+              "text": "capneedle 149",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 150,
+              "text": "capneedle 150",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 151,
+              "text": "capneedle 151",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 152,
+              "text": "capneedle 152",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 153,
+              "text": "capneedle 153",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 154,
+              "text": "capneedle 154",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 155,
+              "text": "capneedle 155",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 156,
+              "text": "capneedle 156",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 157,
+              "text": "capneedle 157",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 158,
+              "text": "capneedle 158",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 159,
+              "text": "capneedle 159",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 160,
+              "text": "capneedle 160",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 161,
+              "text": "capneedle 161",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 162,
+              "text": "capneedle 162",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 163,
+              "text": "capneedle 163",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 164,
+              "text": "capneedle 164",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 165,
+              "text": "capneedle 165",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 166,
+              "text": "capneedle 166",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 167,
+              "text": "capneedle 167",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 168,
+              "text": "capneedle 168",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 169,
+              "text": "capneedle 169",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 170,
+              "text": "capneedle 170",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 171,
+              "text": "capneedle 171",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 172,
+              "text": "capneedle 172",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 173,
+              "text": "capneedle 173",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 174,
+              "text": "capneedle 174",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 175,
+              "text": "capneedle 175",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 176,
+              "text": "capneedle 176",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 177,
+              "text": "capneedle 177",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 178,
+              "text": "capneedle 178",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 179,
+              "text": "capneedle 179",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 180,
+              "text": "capneedle 180",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 181,
+              "text": "capneedle 181",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 182,
+              "text": "capneedle 182",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 183,
+              "text": "capneedle 183",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 184,
+              "text": "capneedle 184",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 185,
+              "text": "capneedle 185",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 186,
+              "text": "capneedle 186",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 187,
+              "text": "capneedle 187",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 188,
+              "text": "capneedle 188",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 189,
+              "text": "capneedle 189",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 190,
+              "text": "capneedle 190",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 191,
+              "text": "capneedle 191",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 192,
+              "text": "capneedle 192",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 193,
+              "text": "capneedle 193",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 194,
+              "text": "capneedle 194",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 195,
+              "text": "capneedle 195",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 196,
+              "text": "capneedle 196",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 197,
+              "text": "capneedle 197",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 198,
+              "text": "capneedle 198",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 199,
+              "text": "capneedle 199",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 200,
+              "text": "capneedle 200",
+              "laneIds": [
+                "cap-1"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 1,
+              "text": "capneedle 1",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 2,
+              "text": "capneedle 2",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 3,
+              "text": "capneedle 3",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 4,
+              "text": "capneedle 4",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 5,
+              "text": "capneedle 5",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 6,
+              "text": "capneedle 6",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 7,
+              "text": "capneedle 7",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 8,
+              "text": "capneedle 8",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 9,
+              "text": "capneedle 9",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 10,
+              "text": "capneedle 10",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 11,
+              "text": "capneedle 11",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 12,
+              "text": "capneedle 12",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 13,
+              "text": "capneedle 13",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 14,
+              "text": "capneedle 14",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 15,
+              "text": "capneedle 15",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 16,
+              "text": "capneedle 16",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 17,
+              "text": "capneedle 17",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 18,
+              "text": "capneedle 18",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 19,
+              "text": "capneedle 19",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 20,
+              "text": "capneedle 20",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 21,
+              "text": "capneedle 21",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 22,
+              "text": "capneedle 22",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 23,
+              "text": "capneedle 23",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 24,
+              "text": "capneedle 24",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 25,
+              "text": "capneedle 25",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 26,
+              "text": "capneedle 26",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 27,
+              "text": "capneedle 27",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 28,
+              "text": "capneedle 28",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 29,
+              "text": "capneedle 29",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 30,
+              "text": "capneedle 30",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 31,
+              "text": "capneedle 31",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 32,
+              "text": "capneedle 32",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 33,
+              "text": "capneedle 33",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 34,
+              "text": "capneedle 34",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 35,
+              "text": "capneedle 35",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 36,
+              "text": "capneedle 36",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 37,
+              "text": "capneedle 37",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 38,
+              "text": "capneedle 38",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 39,
+              "text": "capneedle 39",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 40,
+              "text": "capneedle 40",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 41,
+              "text": "capneedle 41",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 42,
+              "text": "capneedle 42",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 43,
+              "text": "capneedle 43",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 44,
+              "text": "capneedle 44",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 45,
+              "text": "capneedle 45",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 46,
+              "text": "capneedle 46",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 47,
+              "text": "capneedle 47",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 48,
+              "text": "capneedle 48",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 49,
+              "text": "capneedle 49",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 50,
+              "text": "capneedle 50",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 51,
+              "text": "capneedle 51",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 52,
+              "text": "capneedle 52",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 53,
+              "text": "capneedle 53",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 54,
+              "text": "capneedle 54",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 55,
+              "text": "capneedle 55",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 56,
+              "text": "capneedle 56",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 57,
+              "text": "capneedle 57",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 58,
+              "text": "capneedle 58",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 59,
+              "text": "capneedle 59",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 60,
+              "text": "capneedle 60",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 61,
+              "text": "capneedle 61",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 62,
+              "text": "capneedle 62",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 63,
+              "text": "capneedle 63",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 64,
+              "text": "capneedle 64",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 65,
+              "text": "capneedle 65",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 66,
+              "text": "capneedle 66",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 67,
+              "text": "capneedle 67",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 68,
+              "text": "capneedle 68",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 69,
+              "text": "capneedle 69",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 70,
+              "text": "capneedle 70",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 71,
+              "text": "capneedle 71",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 72,
+              "text": "capneedle 72",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 73,
+              "text": "capneedle 73",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 74,
+              "text": "capneedle 74",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 75,
+              "text": "capneedle 75",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 76,
+              "text": "capneedle 76",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 77,
+              "text": "capneedle 77",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 78,
+              "text": "capneedle 78",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 79,
+              "text": "capneedle 79",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 80,
+              "text": "capneedle 80",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 81,
+              "text": "capneedle 81",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 82,
+              "text": "capneedle 82",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 83,
+              "text": "capneedle 83",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 84,
+              "text": "capneedle 84",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 85,
+              "text": "capneedle 85",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 86,
+              "text": "capneedle 86",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 87,
+              "text": "capneedle 87",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 88,
+              "text": "capneedle 88",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 89,
+              "text": "capneedle 89",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 90,
+              "text": "capneedle 90",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 91,
+              "text": "capneedle 91",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 92,
+              "text": "capneedle 92",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 93,
+              "text": "capneedle 93",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 94,
+              "text": "capneedle 94",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 95,
+              "text": "capneedle 95",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 96,
+              "text": "capneedle 96",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 97,
+              "text": "capneedle 97",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 98,
+              "text": "capneedle 98",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 99,
+              "text": "capneedle 99",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            },
+            {
+              "path": "cap.txt",
+              "line": 100,
+              "text": "capneedle 100",
+              "laneIds": [
+                "cap-2"
+              ],
+              "hitCount": 1
+            }
+          ]
+        }
+      },
+      "error": null,
+      "legacyGrantDecision": "allow"
+    },
+    {
+      "name": "invalid-empty",
+      "input": {
+        "queries": []
+      },
+      "status": "failed",
+      "output": null,
+      "error": "invalid_queries",
+      "legacyGrantDecision": "deny"
+    },
+    {
+      "name": "duplicate-id",
+      "input": {
+        "queries": [
+          {
+            "id": "same",
+            "query": "alpha"
+          },
+          {
+            "id": "same",
+            "query": "beta"
+          }
+        ]
+      },
+      "status": "failed",
+      "output": null,
+      "error": "duplicate_query_id",
+      "legacyGrantDecision": "deny"
+    }
+  ],
+  "cap": {
+    "matches": 500,
+    "truncated": true,
+    "first": {
+      "path": "z-0",
+      "line": 1,
+      "text": "x",
+      "laneIds": [
+        "first"
+      ],
+      "hitCount": 1
+    },
+    "last": {
+      "path": "z-499",
+      "line": 1,
+      "text": "x",
+      "laneIds": [
+        "first"
+      ],
+      "hitCount": 1
+    }
+  },
+  "native": {
+    "workers": 2,
+    "lanes": 8,
+    "laneResultBytes": 262144,
+    "resultBytes": 4194304,
+    "errorDelta": "OS-specific missing-path errorMessage is preserved in TS observations; native uses stable file_unavailable/file_parent_unavailable codes. Original top-level statuses are mapped to native success/failed/cancelled. A failed read does not retroactively revoke an actually issued native Grant; the legacy grant decision is preserved separately."
+  }
+}

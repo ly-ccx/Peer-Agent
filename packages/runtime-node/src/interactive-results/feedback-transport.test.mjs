@@ -22,6 +22,7 @@ import { executionIdentity } from '../project-agent/session-control-kernel.mjs';
 import { createInputQueue as createLegacyQueue } from './test-fixtures/legacy-input-queue.mjs';
 import { createProjectInputDraftStore as createLegacyDrafts } from './test-fixtures/legacy-input-draft-store.mjs';
 import { normalizeResourceFeedbackList as normalizeLegacyFeedback } from './test-fixtures/legacy-resource-feedback.mjs';
+import { readJsonl as legacyReadJsonl, writeJsonl as legacyWriteJsonl } from './test-fixtures/legacy-conversation-jsonl.mjs';
 
 const upload = { id: 'user-file', name: 'brief.txt', mimeType: 'text/plain', size: 4, sourceKind: 'user_upload', kind: 'text', text: 'keep' };
 async function fixture(t) {
@@ -76,27 +77,84 @@ test('known attachments carry the complete selection through a real already-open
   assert.equal(message.resourceFeedback, undefined); assert.equal(message.attachments[1].text, carrier.text);
   f.conversations.updateMessageById(f.owner.conversationId, message.id, { content: 'Updated discussion text' });
   f.conversations.replaceMessages(f.owner.conversationId, f.conversations.getConversation(f.owner.conversationId).messages);
+  // Run the frozen old JSONL writer on the real canonical file, after the
+  // current Store has released its locks. This is a sequential compatibility
+  // proof, not permission to let a live old host bypass today's locks.
+  const conversationFile = path.join(f.rootDir, 'conversations', `${f.owner.conversationId}.jsonl`);
+  const oldRows = legacyReadJsonl(conversationFile);
+  const oldMessage = oldRows.find(row => row.id === message.id);
+  assert.equal(oldMessage.attachments[1].text, carrier.text);
+  const rewritten = oldRows.map(row => row.id === message.id ? { ...row, content: '旧版重写：固定条件' } : row);
+  legacyWriteJsonl(conversationFile, rewritten);
+  assert.deepEqual(legacyReadJsonl(conversationFile), rewritten);
   const reopened = createConversationStore({ storeDir: path.join(f.rootDir, 'conversations') });
-  const restored = reopened.getPersistedConversationHistory(f.owner.conversationId).messages.find(row => row.id === message.id);
+  let restored = reopened.getPersistedConversationHistory(f.owner.conversationId).messages.find(row => row.id === message.id);
+  assert.equal(restored.content, '旧版重写：固定条件');
+  assert.equal(restored.attachments[1].text, carrier.text);
+  reopened.updateMessageById(f.owner.conversationId, message.id, { content: 'Current writer after old rewrite' });
+  const finalReader = createConversationStore({ storeDir: path.join(f.rootDir, 'conversations') });
+  restored = finalReader.getPersistedConversationHistory(f.owner.conversationId).messages.find(row => row.id === message.id);
+  assert.equal(restored.content, 'Current writer after old rewrite');
   assert.equal(restored.attachments[1].text, carrier.text); assert.deepEqual(f.admission.restore(restored, f.owner.workspaceId), [f.feedback]);
   f.states.save({ reference: f.reference, identity: f.identity, writer: f.writer, expectedRevision: 1, requestId: 'save-2', values: { $x: 6, $name: 'Later edit' }, inputDrafts: {} }, () => true);
   assert.equal(queue.findSubmission(f.owner.workspaceId, 'selected').resourceFeedback[0].version.values.$x, 4);
   assert.deepEqual(queue.submitInput(f.input('selected')).resourceFeedback, [f.feedback]);
-  // These blocks are from 8b3ffbcf, whose complete Conversation source was pinned
-  // before the independent metadata and asynchronous terminal lock changes.
-  // The isEmptyUserMessage writer block now assigns the index preview in the same
-  // successful append/update/replace, and writes that index through writeIndex so
-  // the list cache drops. Message JSONL bytes are unchanged: the assertions above
-  // already require the attachment text to survive rewrite and reopen. The new
-  // digest covers that index preview, not a new message shape.
+  // Keep the original digest as the provenance check for the actually executed
+  // old primitives. The current block additionally syncs durable terminal writes;
+  // its separately reviewed digest is not evidence that the old source ran.
+  const oldCode = readFileSync(new URL('./test-fixtures/legacy-conversation-jsonl.mjs', import.meta.url), 'utf8');
+  const oldBegin = oldCode.indexOf('function readJsonl(');
+  const oldEnd = oldCode.indexOf('\n\nexport {', oldBegin);
+  assert.ok(oldBegin >= 0 && oldEnd > oldBegin);
+  assert.equal(createHash('sha256').update(oldCode.slice(oldBegin, oldEnd)).digest('hex'),
+    'f943550e04e210417ac7615ceb2facfcbe46757d58b6fe4b5743e8dd70cb65c0');
+  // The current append/rewrite wrappers have gained the Native execution fence.
+  // Confirm that an ordinary conversation carrying the same wire bytes is
+  // read-only to this Store during the other host's ownership, then can resume.
+  const protectedConversation = reopened.createConversation({ title: 'Protected feedback' });
+  const protectedMessage = { ...restored, id: 'protected-carrier' };
+  reopened.appendMessage(protectedConversation.id, protectedMessage);
+  const protectedBody = path.join(f.rootDir, 'conversations', `${protectedConversation.id}.jsonl`);
+  const indexFile = path.join(f.rootDir, 'conversations', 'index.jsonl');
+  const indexRows = readFileSync(indexFile, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const protectedRow = indexRows.find(row => row.id === protectedConversation.id);
+  const nativeRuns = JSON.parse(readFileSync(new URL('../../../protocol/contracts/native-cli/conversation-execution.json', import.meta.url), 'utf8'));
+  function setNativeExecution(phase) {
+    const run = structuredClone(nativeRuns.cases.find(entry => entry.name === phase).input);
+    run.identity.conversationId = protectedConversation.id;
+    protectedRow.runtimeExecution = run;
+    writeFileSync(indexFile, indexRows.map(JSON.stringify).join('\n') + '\n');
+  }
+  setNativeExecution('active');
+  const busyIndex = readFileSync(indexFile);
+  const busyBody = readFileSync(protectedBody);
+  const revision = { content: 'Concurrent overwrite' };
+  for (const write of [
+    () => reopened.appendMessage(protectedConversation.id, { id: 'foreign', role: 'user', ...revision }),
+    () => reopened.updateLastMessage(protectedConversation.id, revision.content),
+    () => reopened.updateMessageById(protectedConversation.id, protectedMessage.id, revision),
+    () => reopened.replaceMessages(protectedConversation.id, [{ ...protectedMessage, attachments: [] }]),
+  ]) {
+    assert.throws(write, { message: 'conversation_execution_busy' });
+  }
+  assert.deepEqual(readFileSync(indexFile), busyIndex);
+  assert.deepEqual(readFileSync(protectedBody), busyBody);
+  setNativeExecution('stopped');
+  reopened.updateMessageById(protectedConversation.id, protectedMessage.id, { content: 'Resumed after stop' });
+  const protectedRows = legacyReadJsonl(protectedBody);
+  assert.equal(protectedRows[0].content, 'Resumed after stop');
+  assert.deepEqual(readInteractiveFeedbackAttachment(protectedRows[0].attachments[1]), f.feedback);
+
+  // These hashes pin the reviewed current writer blocks; the frozen JSONL
+  // fixture above retains its original source digest and is still executed.
   const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
   const pinnedWriterBlocks = [
-    ['function readJsonl(', '\nfunction readJson(', 'f943550e04e210417ac7615ceb2facfcbe46757d58b6fe4b5743e8dd70cb65c0'],
+    ['function readJsonl(', '\nfunction readJson(', 'f949bb59a56320c71cbe26e4bee7672571fe2c8cf08c92894413b7620e3a94b7'],
     ['function normalizeMeta(', '\n// 一次性数据迁移', 'f6517a5371f61f887e3b58dc22292a5edfc33a27484e87adcea9f9024c955060'],
-    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', 'a361fd9fc24b51a70792f30424e56606f431826233c9b24ce02ca28fcd3ed768'],
-    ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '627b6d84b4d011357a67384253575c7a8b431870939ec233765c53f3ca9af693'],
-    ['    appendMessage: changed(', '\n    commitStreamingMessage:', 'a9b2e4fe91f3d89e7eb0ec8755502ac46e9b17cf90c9feb595b90e06050a5c98'],
-    ['    replaceMessages: changed(', '\n', 'af3abf6e886b6f8f9b449f80273d4a26554123f662087c934933ad279cb8ecb9'],
+    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', '88dcfdce6dfedd297c8574b69612650c601309113acf485175a51705bd037705'],
+    ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '047c361dbac5ac3964c25d8a34687c330e0b364ac1ae3154edbe5cba83deee86'],
+    ['    appendMessage: changed(', '\n    commitStreamingMessage:', '836027b6ca7558203fefa069f2a574dae2159e5f24339d9a4a456a09cebac5d1'],
+    ['    replaceMessages: changed(', '\n', '62bbcd9f9d2775b400c296a38520bb213c6cd90881439ed1f1714f8b9127871d'],
   ];
   for (const [begin, end, digest] of pinnedWriterBlocks) {
     const first = code.indexOf(begin);

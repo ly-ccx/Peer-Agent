@@ -1,4 +1,14 @@
 import type { ProjectRecoveryFailureKind } from './project-agent-failure.ts';
+import type { SessionExecutionIdentity, SessionControlOperation } from './session-control.ts';
+import type { NativeOwnedProcess } from './native-process.ts';
+
+/** ADR 131 native attempt metadata. Shape alone proves neither death nor effect. */
+export interface NativeEpisodeRecorder {
+  readonly schemaVersion: 1;
+  readonly runtime: 'peer-native';
+  readonly execution: SessionExecutionIdentity;
+  readonly recorder: NonNullable<SessionControlOperation['recorder']>;
+}
 
 export interface ProjectWorkBudgetLimits {
   readonly schemaVersion?: 2;
@@ -129,11 +139,18 @@ export interface ProjectWorkReceipt {
     readonly lastBoundary?: ProjectWorkBudgetBoundary;
     readonly attempts: Readonly<Record<string, { readonly role: string; readonly requests?: number; readonly modelProviderId?: string;
       readonly checkpointRef?: string;
-      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;
+      readonly nativeRecorder?: NativeEpisodeRecorder;
+      /** Unvalidated stored snapshot; admit v1 before consuming billing facts. */
+      readonly nativeUsage?: unknown;
+      /** Loop admission ended; this is not a stop receipt. */
+      readonly nativeLoopFinished?: true;
+      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder; readonly nativeProcess?: NativeOwnedProcess }[] }>>;
     readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
+    /** Keep unknown/future records intact until a compatible billing owner acts. */
+    readonly nativeUsagePending?: Readonly<Record<string, { readonly snapshot: unknown; readonly nativeRecorder: unknown }>>;
     readonly settledDispatches?: readonly SettledDelegationDispatch[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
-      readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[];
+      readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder; readonly nativeProcess?: NativeOwnedProcess }[];
   };
   readonly stopScope: 'reply' | 'work';
   readonly updatedAt: string;

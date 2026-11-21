@@ -8,6 +8,7 @@ import {
   startGrokOAuthLogin as startSharedGrokOAuthLogin,
 } from '@peer-agent/runtime-node';
 import { fetchGrokWithConnectionRecovery } from '../provider-transports/grok-fetch.mjs';
+import { createOAuthRefreshFetch } from '../provider-transports/oauth-refresh-fetch.mjs';
 
 export {
   GROK_CLI_CLIENT_ID,
@@ -28,7 +29,7 @@ export function startGrokOAuthLogin(options = {}) {
 export async function refreshGrokTokens(tokens, options = {}) {
   return refreshSharedGrokTokens(tokens, {
     ...options,
-    fetchImpl: options.fetchImpl ?? fetchGrokWithConnectionRecovery,
+    fetchImpl: options.fetchImpl ?? createOAuthRefreshFetch(fetchGrokWithConnectionRecovery),
   });
 }
 
@@ -36,6 +37,6 @@ export async function refreshGrokTokens(tokens, options = {}) {
 export async function ensureFreshGrokTokens(tokens, options = {}) {
   return ensureFreshSharedGrokTokens(tokens, {
     ...options,
-    fetchImpl: options.fetchImpl ?? fetchGrokWithConnectionRecovery,
+    fetchImpl: options.fetchImpl ?? createOAuthRefreshFetch(fetchGrokWithConnectionRecovery),
   });
 }

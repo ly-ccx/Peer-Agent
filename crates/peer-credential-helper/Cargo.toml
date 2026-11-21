@@ -4,6 +4,13 @@ version = "0.1.0-rc.40"
 edition = "2024"
 rust-version = "1.85"
 
+[features]
+test-fixtures = []
+
+[[example]]
+name = "vault-fixture"
+required-features = ["test-fixtures"]
+
 [dependencies]
 aes-gcm = { version = "0.10.3", features = ["zeroize"] }
 base64 = "0.22.1"

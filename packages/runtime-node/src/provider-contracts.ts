@@ -1,6 +1,7 @@
 import type {
   CapabilityManifest,
   CapabilityProvider,
+  PermissionGrant,
   RuntimeProjection,
   RuntimeToolDefinition,
 } from '@peer-agent/runtime-core';
@@ -11,6 +12,7 @@ import type {
   RuntimeSdkEvent,
   RuntimeSdkHookRunner,
   RuntimeSdkProviderExecution,
+  RuntimeSdkToolCall,
 } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -20,7 +22,7 @@ import type {
   NodeRuntimeSession,
 } from './contracts.ts';
 import type { NodeShellArtifactStore } from './shell-artifact-store.ts';
-import type { NodeShellSessionManager } from './shell-session.ts';
+import type { NodeShellCommandOwnership, NodeShellSessionManager } from './shell-session.ts';
 import type { NodeShellTaskManager } from './shell-task-manager.ts';
 
 export type NodeCapabilityApprovalKind = 'file-read' | 'file-write' | 'shell-exec' | 'web-fetch';
@@ -42,6 +44,8 @@ export interface NodeFileProviderOptions {
   readonly now?: () => string;
   readonly idFactory?: () => string;
   readonly maxReadBytes?: number;
+  /** Host-owned durable admission before the Provider uses the authorized file capability. */
+  readonly beforeFileEffect?: (call: RuntimeSdkToolCall, grant: PermissionGrant) => void;
 }
 
 export interface NodeShellProviderOptions {
@@ -59,6 +63,9 @@ export interface NodeShellProviderOptions {
   readonly taskManager?: NodeShellTaskManager;
   readonly sessionManager?: NodeShellSessionManager;
   readonly artifactStore?: NodeShellArtifactStore;
+  readonly ownForeground?: (call: RuntimeSdkToolCall, grant: PermissionGrant) => NodeShellCommandOwnership & {
+    authorize(cwd: string): void;
+  };
 }
 
 export interface CreateNodeProviderBundleOptions {

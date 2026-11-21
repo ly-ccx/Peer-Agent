@@ -10,7 +10,8 @@
  * - 不回填历史 null 绑定
  */
 
-import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
+import { appendAuxiliaryUsageRecord } from '@peer-agent/conversation-store';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { estimateUsageCostUsd } from './usage-pricing.mjs';
@@ -89,7 +90,7 @@ export function createUsageRequestLog({
     };
 
     ensureParent();
-    appendFileSync(logFile, `${JSON.stringify(record)}\n`, 'utf8');
+    appendAuxiliaryUsageRecord(logFile, record);
     return record;
   }
 

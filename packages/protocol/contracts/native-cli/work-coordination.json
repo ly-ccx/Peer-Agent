@@ -1,0 +1,2522 @@
+{
+  "schemaVersion": 1,
+  "source": "packages/runtime-node/src/project-agent/work-coordination.mjs",
+  "cases": [
+    {
+      "name": "transfer",
+      "previous": {
+        "revision": 0,
+        "events": {},
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "transfer",
+        "events": [
+          {
+            "eventId": "e1",
+            "sessionId": "s",
+            "payload": {
+              "future": "retained"
+            }
+          }
+        ],
+        "schemaVersion": 1,
+        "revision": 1
+      },
+      "expected": {
+        "revision": 1,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": false
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "duplicate transfer is immutable",
+      "previous": {
+        "revision": 1,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": false
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "transfer",
+        "events": [
+          {
+            "eventId": "e1",
+            "sessionId": "foreign"
+          }
+        ],
+        "schemaVersion": 1,
+        "revision": 2
+      },
+      "expected": {
+        "revision": 2,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": false
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "handle transfer",
+      "previous": {
+        "revision": 2,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": false
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "handled",
+        "eventIds": [
+          "e1"
+        ],
+        "schemaVersion": 1,
+        "revision": 3
+      },
+      "expected": {
+        "revision": 3,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "missing event",
+      "previous": {
+        "revision": 3,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "handled",
+        "eventIds": [
+          "missing"
+        ],
+        "schemaVersion": 1,
+        "revision": 4
+      },
+      "error": "event_not_transferred"
+    },
+    {
+      "name": "create work",
+      "previous": {
+        "revision": 3,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {},
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "work",
+        "work": {
+          "workId": "w",
+          "state": "active",
+          "progressFacts": [
+            "a"
+          ],
+          "budget": {
+            "tokens": 0,
+            "costUsd": 0,
+            "observations": {
+              "old": true
+            }
+          },
+          "future": {
+            "keep": true
+          }
+        },
+        "schemaVersion": 1,
+        "revision": 4
+      },
+      "expected": {
+        "revision": 4,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "active",
+            "progressFacts": [
+              "a"
+            ],
+            "budget": {
+              "tokens": 0,
+              "costUsd": 0,
+              "observations": {
+                "old": true
+              }
+            },
+            "future": {
+              "keep": true
+            }
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "delta preserves observations",
+      "previous": {
+        "revision": 4,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "active",
+            "progressFacts": [
+              "a"
+            ],
+            "budget": {
+              "tokens": 0,
+              "costUsd": 0,
+              "observations": {
+                "old": true
+              }
+            },
+            "future": {
+              "keep": true
+            }
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "work_updated",
+        "workId": "w",
+        "work": {
+          "state": "running",
+          "opaque": 1
+        },
+        "removed": [
+          "absent"
+        ],
+        "budget": {
+          "tokens": 5,
+          "costUsd": 0.25
+        },
+        "observations": [
+          "fresh"
+        ],
+        "progress": {
+          "add": [
+            "b",
+            "b"
+          ],
+          "remove": [
+            "a"
+          ]
+        },
+        "schemaVersion": 1,
+        "revision": 5
+      },
+      "expected": {
+        "revision": 5,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 5,
+              "costUsd": 0.25,
+              "observations": {
+                "old": true,
+                "fresh": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "invalid delta identity",
+      "previous": {
+        "revision": 5,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 5,
+              "costUsd": 0.25,
+              "observations": {
+                "old": true,
+                "fresh": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "work_updated",
+        "workId": "w",
+        "work": {
+          "workId": "foreign"
+        },
+        "schemaVersion": 1,
+        "revision": 6
+      },
+      "error": "coordination_work_update_invalid"
+    },
+    {
+      "name": "invalid delta fields",
+      "previous": {
+        "revision": 5,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 5,
+              "costUsd": 0.25,
+              "observations": {
+                "old": true,
+                "fresh": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "work_updated",
+        "workId": "w",
+        "work": {
+          "budget": {}
+        },
+        "schemaVersion": 1,
+        "revision": 6
+      },
+      "error": "coordination_work_update_invalid"
+    },
+    {
+      "name": "usage additive",
+      "previous": {
+        "revision": 5,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 5,
+              "costUsd": 0.25,
+              "observations": {
+                "old": true,
+                "fresh": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "usage_observed",
+        "workId": "w",
+        "observationId": "u",
+        "tokens": 3,
+        "costUsd": 0.5,
+        "schemaVersion": 1,
+        "revision": 6
+      },
+      "expected": {
+        "revision": 6,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "usage exact once",
+      "previous": {
+        "revision": 6,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "usage_observed",
+        "workId": "w",
+        "observationId": "u",
+        "tokens": 999,
+        "costUsd": 999,
+        "schemaVersion": 1,
+        "revision": 7
+      },
+      "expected": {
+        "revision": 7,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "unknown usage",
+      "previous": {
+        "revision": 7,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true
+              }
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "usage_observed",
+        "workId": "w",
+        "observationId": "unknown",
+        "schemaVersion": 1,
+        "revision": 8
+      },
+      "expected": {
+        "revision": 8,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true,
+                "unknown": true
+              },
+              "unknownUsage": true,
+              "unknownCost": true
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "usage requires work",
+      "previous": {
+        "revision": 8,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true,
+                "unknown": true
+              },
+              "unknownUsage": true,
+              "unknownCost": true
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "usage_observed",
+        "workId": "missing",
+        "observationId": "u",
+        "schemaVersion": 1,
+        "revision": 9
+      },
+      "error": "coordination_usage_invalid"
+    },
+    {
+      "name": "coalesce continuation",
+      "previous": {
+        "revision": 8,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "running",
+            "progressFacts": [
+              "b"
+            ],
+            "budget": {
+              "tokens": 8,
+              "costUsd": 0.75,
+              "observations": {
+                "old": true,
+                "fresh": true,
+                "u": true,
+                "unknown": true
+              },
+              "unknownUsage": true,
+              "unknownCost": true
+            },
+            "future": {
+              "keep": true
+            },
+            "opaque": 1
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "continuations_coalesced",
+        "owner": {
+          "workId": "w",
+          "state": "queued"
+        },
+        "retired": [
+          {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        ],
+        "schemaVersion": 1,
+        "revision": 9
+      },
+      "expected": {
+        "revision": 9,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "invalid continuation custody",
+      "previous": {
+        "revision": 9,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "continuations_coalesced",
+        "owner": {
+          "workId": "w"
+        },
+        "retired": [
+          {
+            "workId": "w",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        ],
+        "schemaVersion": 1,
+        "revision": 10
+      },
+      "error": "invalid_continuation_custody"
+    },
+    {
+      "name": "prepare reply",
+      "previous": {
+        "revision": 9,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {},
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_prepared",
+        "message": {
+          "id": "reply",
+          "content": "answer",
+          "meta": {
+            "digestReplyIds": [
+              "deferred"
+            ]
+          }
+        },
+        "schemaVersion": 1,
+        "revision": 10
+      },
+      "expected": {
+        "revision": 10,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "commit reply",
+      "previous": {
+        "revision": 10,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_committed",
+        "messageId": "reply",
+        "at": "2026-11-14T00:00:00.000Z",
+        "schemaVersion": 1,
+        "revision": 11
+      },
+      "expected": {
+        "revision": 11,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "cannot deliver unsettled",
+      "previous": {
+        "revision": 11,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_delivered",
+        "messageId": "reply",
+        "schemaVersion": 1,
+        "revision": 12
+      },
+      "error": "coordination_delivery_unsettled"
+    },
+    {
+      "name": "settlement attempt CAS",
+      "previous": {
+        "revision": 11,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_settlement_started",
+        "messageId": "reply",
+        "attempt": 2,
+        "schemaVersion": 1,
+        "revision": 12
+      },
+      "error": "coordination_delivery_attempt_conflict"
+    },
+    {
+      "name": "start settlement",
+      "previous": {
+        "revision": 11,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_settlement_started",
+        "messageId": "reply",
+        "attempt": 1,
+        "at": "2026-11-14T00:00:01.000Z",
+        "schemaVersion": 1,
+        "revision": 12
+      },
+      "expected": {
+        "revision": 12,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 1,
+              "status": "pending",
+              "updatedAt": "2026-11-14T00:00:01.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "failed settlement",
+      "previous": {
+        "revision": 12,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 1,
+              "status": "pending",
+              "updatedAt": "2026-11-14T00:00:01.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_settlement_failed",
+        "messageId": "reply",
+        "attempt": 1,
+        "error": "interrupted",
+        "phase": "evidence",
+        "retryAt": "2026-11-14T00:00:03.000Z",
+        "at": "2026-11-14T00:00:02.000Z",
+        "schemaVersion": 1,
+        "revision": 13
+      },
+      "expected": {
+        "revision": 13,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 1,
+              "status": "failed",
+              "updatedAt": "2026-11-14T00:00:02.000Z",
+              "error": "interrupted",
+              "phase": "evidence",
+              "retryAt": "2026-11-14T00:00:03.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "retry settlement",
+      "previous": {
+        "revision": 13,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 1,
+              "status": "failed",
+              "updatedAt": "2026-11-14T00:00:02.000Z",
+              "error": "interrupted",
+              "phase": "evidence",
+              "retryAt": "2026-11-14T00:00:03.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_settlement_started",
+        "messageId": "reply",
+        "attempt": 2,
+        "at": "2026-11-14T00:00:03.000Z",
+        "schemaVersion": 1,
+        "revision": 14
+      },
+      "expected": {
+        "revision": 14,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "pending",
+              "updatedAt": "2026-11-14T00:00:03.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "settle reply",
+      "previous": {
+        "revision": 14,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "pending",
+              "updatedAt": "2026-11-14T00:00:03.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_settled",
+        "messageId": "reply",
+        "attempt": 2,
+        "at": "2026-11-14T00:00:04.000Z",
+        "schemaVersion": 1,
+        "revision": 15
+      },
+      "expected": {
+        "revision": 15,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "deliver reply",
+      "previous": {
+        "revision": 15,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "prepared",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_delivered",
+        "messageId": "reply",
+        "schemaVersion": 1,
+        "revision": 16
+      },
+      "expected": {
+        "revision": 16,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "defer reply",
+      "previous": {
+        "revision": 16,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_deferred",
+        "message": {
+          "id": "deferred",
+          "content": "answer"
+        },
+        "schemaVersion": 1,
+        "revision": 17
+      },
+      "expected": {
+        "revision": 17,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "deferred"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "hold reply",
+      "previous": {
+        "revision": 17,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "deferred"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_held",
+        "messageId": "deferred",
+        "at": "2026-11-14T00:00:05.000Z",
+        "schemaVersion": 1,
+        "revision": 18
+      },
+      "expected": {
+        "revision": 18,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "deferred",
+            "heldAt": "2026-11-14T00:00:05.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "aggregate reply",
+      "previous": {
+        "revision": 18,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "deferred",
+            "heldAt": "2026-11-14T00:00:05.000Z"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_aggregated",
+        "messageId": "deferred",
+        "aggregateId": "reply",
+        "schemaVersion": 1,
+        "revision": 19
+      },
+      "expected": {
+        "revision": 19,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "missing preparation",
+      "previous": {
+        "revision": 19,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_delivered",
+        "messageId": "missing",
+        "schemaVersion": 1,
+        "revision": 20
+      },
+      "error": "reply_not_prepared"
+    },
+    {
+      "name": "invalidation",
+      "previous": {
+        "revision": 19,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "delivered",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            }
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "reply_invalidated",
+        "messageId": "reply",
+        "reason": "stale",
+        "schemaVersion": 1,
+        "revision": 20
+      },
+      "expected": {
+        "revision": 20,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "invalidated",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            },
+            "reason": "stale"
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      }
+    },
+    {
+      "name": "record recovery",
+      "previous": {
+        "revision": 20,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "invalidated",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            },
+            "reason": "stale"
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        }
+      },
+      "entry": {
+        "kind": "journal_recovered",
+        "at": "2026-11-14T00:00:06.000Z",
+        "backup": "coordination-v2/segments/backup.jsonl",
+        "schemaVersion": 1,
+        "revision": 21
+      },
+      "expected": {
+        "revision": 21,
+        "events": {
+          "e1": {
+            "event": {
+              "eventId": "e1",
+              "sessionId": "s",
+              "payload": {
+                "future": "retained"
+              }
+            },
+            "handled": true
+          }
+        },
+        "works": {
+          "w": {
+            "workId": "w",
+            "state": "queued"
+          },
+          "retired": {
+            "workId": "retired",
+            "state": "coalesced",
+            "continuationOwnerWorkId": "w"
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "message": {
+              "id": "reply",
+              "content": "answer",
+              "meta": {
+                "digestReplyIds": [
+                  "deferred"
+                ]
+              }
+            },
+            "state": "invalidated",
+            "canonicalCommittedAt": "2026-11-14T00:00:00.000Z",
+            "settlement": {
+              "operationId": "settlement:reply",
+              "attempts": 2,
+              "status": "applied",
+              "updatedAt": "2026-11-14T00:00:04.000Z"
+            },
+            "reason": "stale"
+          },
+          "deferred": {
+            "message": {
+              "id": "deferred",
+              "content": "answer"
+            },
+            "state": "aggregated",
+            "heldAt": "2026-11-14T00:00:05.000Z",
+            "deliveredBy": "reply"
+          }
+        },
+        "future": {
+          "keep": true
+        },
+        "lastRecovery": {
+          "at": "2026-11-14T00:00:06.000Z",
+          "backup": "coordination-v2/segments/backup.jsonl"
+        }
+      }
+    }
+  ]
+}

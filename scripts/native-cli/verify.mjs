@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+// Development verification uses TS as the conformance reference. The built
+// peer-native executable does not spawn this script, Node, or Bun.
+import { execFileSync } from 'node:child_process';
+import { copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join,resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const output = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-')));
+const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root, stdio: 'inherit',env:extraEnv?{...process.env,...extraEnv}:process.env });
+const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
+if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
+run('pnpm',['--filter','@peer-agent/credential-helper','build']);
+run('pnpm',['--filter','@peer-agent/runtime-node','build']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'model-config-conformance']);
+run('node', ['scripts/native-cli/model-config-store.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/model-config-file.test.mjs', 'packages/runtime-node/src/shared-model-config.test.ts', 'apps/desktop/electron/main/llm-config-store.test.mjs']);
+run('cargo',['build','--locked','-p','peer-credential-helper','--features','test-fixtures','--example','vault-fixture']);
+run('bun',['scripts/native-cli/credential-cas.ts']);
+run('bun',['scripts/native-cli/model-oauth-coordination.ts']);
+run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs','apps/desktop/electron/main/mcp-client.test.mjs','apps/desktop/electron/main/mcp-oauth-ownership.test.mjs','apps/desktop/electron/main/mcp-application-service.test.mjs']);
+run('bun', ['scripts/native-cli/contracts.ts']);
+run('bun', ['scripts/native-cli/control-contracts.ts']);
+run('bun', ['scripts/native-cli/projection-contracts.ts']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'terminal-conformance']);
+run('node', ['scripts/native-cli/terminal-store-conformance.mjs']);
+run('bun', ['scripts/native-cli/native-process-contracts.ts']);
+run('bun', ['scripts/native-cli/work-hook-contracts.ts']);
+run('bun', ['scripts/native-cli/conversation-execution-contracts.ts']);
+run('pnpm', ['--filter', '@peer-agent/protocol', 'build']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conversation-execution-conformance']);
+run('node', ['scripts/native-cli/conversation-execution-conformance.mjs', 'target/debug/examples/conversation-execution-conformance', join(output, 'conversation-execution-interop')]);
+run('bun', ['scripts/native-cli/work-contracts.ts']);
+run('bun', ['scripts/native-cli/kernel-contracts.ts']);
+run('bun', ['scripts/native-cli/goal-contracts.ts']);
+run('bun', ['scripts/native-cli/goal-read-contracts.ts']);
+run('bun', ['scripts/native-cli/admission-contracts.ts']);
+run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
+run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
+run('bun', ['scripts/native-cli/context-contracts.ts']);
+run('bun', ['scripts/native-cli/ordinary-context-contracts.ts']);
+run('bun', ['scripts/native-cli/ordinary-exec-contracts.ts']);
+run('node', ['scripts/native-cli/file-operation-contracts.mjs']);
+run('node', ['scripts/native-cli/file-parent-contracts.mjs']);
+run('node', ['scripts/native-cli/batch-search-contracts.mjs']);
+run('node', ['scripts/native-cli/web-fetch-contracts.mjs']);
+run('node', ['scripts/native-cli/git-query-contracts.mjs']);
+run('node', ['scripts/native-cli/tool-artifact-contracts.mjs']);
+run('node', ['scripts/native-cli/model-tool-result-contracts.mjs']);
+run('node', ['scripts/native-cli/attachment-contracts.mjs']);
+run('bun', ['scripts/native-cli/compaction-contracts.ts']);
+run('bun', ['scripts/native-cli/mcp-inventory-contracts.ts']);
+run('bun', ['scripts/native-cli/wire-contracts.ts']);
+run('node', ['scripts/native-cli/channel-contracts.mjs']);
+run('bun', ['scripts/native-cli/model-oauth-contracts.ts']);
+run('bun', ['scripts/native-cli/model-catalog-contracts.ts']);
+run('bun', ['scripts/native-cli/shell-contracts.ts']);
+run('bun', ['scripts/native-cli/session-shell-contracts.ts']);
+run('bun', ['scripts/native-cli/qoder-format-contracts.ts']);
+run('bun', ['scripts/native-cli/qoder-request-contracts.ts']);
+run('bun', ['scripts/native-cli/qoder-legacy-contracts.ts']);
+run('node', ['--experimental-test-module-mocks', 'scripts/native-cli/qoder-caller-contracts.mjs']);
+run('node', ['scripts/native-cli/qoder-stream-contracts.mjs']);
+run('bun', ['scripts/native-cli/qoder-retry-contracts.ts']);
+run('bun', ['scripts/native-cli/network-contracts.ts']);
+run('bun', ['scripts/native-cli/count-contracts.ts']);
+run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
+run('bun', ['scripts/native-cli/stream-contracts.ts']);
+run('bun', ['scripts/native-cli/instruction-contracts.ts']);
+run('bun', ['scripts/native-cli/usage-contracts.ts']);
+run('node', ['scripts/native-cli/usage-ledger-contract.mjs']);
+run('node', ['--test', 'packages/conversation-store/src/usage-ledger.test.mjs']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'usage-conformance']);
+run('node', ['scripts/native-cli/usage-ledger-conformance.mjs']);
+run('bun', ['scripts/native-cli/usage-ledger-conformance.mjs']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'instruction-conformance']);
+run('bun', ['scripts/native-cli/instruction-conformance.ts']);
+run('node', ['--test', 'packages/system-context/src/sources/project-instructions-unicode.test.mjs']);
+run('node', ['--test', 'apps/desktop/electron/main/provider-adapter.test.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/provider-adapters/gemini-usage.test.mjs']);
+run('node', ['scripts/native-cli/check-boundaries.mjs']);
+run('cargo', ['fmt', '--all', '--check']);
+run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '-p', 'peer-project-agent', '-p', 'peer-core-rpc', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
+// Cargo's shared target/debug name can be relinked by a featureless build while
+// the Host suite is running. Pin the fixture-enabled executable for that suite;
+// the later featureless release and its PTY checks remain separate artifacts.
+run('cargo', ['build', '--locked', '-p', 'peer-cli', '--bins', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures']);
+const fixtureBinary=join(output,'fixture-peer-native');
+copyFileSync(join(root,'target/debug/peer-native'),fixtureBinary);
+writeFileSync(join(output,'fixture-binary.json'),JSON.stringify({path:fixtureBinary,sha256:createHash('sha256').update(readFileSync(fixtureBinary)).digest('hex')},null,2)+'\n');
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes,PEER_NATIVE_TEST_BINARY:fixtureBinary,NO_PROXY:'*'});
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
+run('bun', ['scripts/native-cli/mcp-runtime-contracts.ts']);
+run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);
+run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
+run('cargo', ['build', '--release', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
+run('bun', ['test', 'apps/tui/src/cli-result.integration.test.ts'], {PEER_TEST_NATIVE_RESULT_BINARY:join(root,'target/release/peer-native')});
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
+run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
+run('bun', ['scripts/native-cli/policy-initialization.ts', 'target/debug/examples/conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'lease-conformance']);
+run('bun', ['scripts/native-cli/lease-conformance.ts', 'target/debug/examples/lease-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'transcript-conformance']);
+run('bun', ['scripts/native-cli/transcript-conformance.ts', 'target/debug/examples/transcript-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'fence-conformance']);
+run('bun', ['scripts/native-cli/fence-conformance.ts', 'target/debug/examples/fence-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'resource-conformance']);
+run('bun', ['scripts/native-cli/resource-conformance.ts', 'target/debug/examples/resource-conformance']);
+run('node', ['--test', 'packages/runtime-node/src/project-agent/execution-resources.test.mjs']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'durable-conformance']);
+run('bun', ['scripts/native-cli/durable-conformance.ts', 'target/debug/examples/durable-conformance']);
+run('node',['scripts/native-cli/context-store-conformance.mjs']);
+run('bun',['scripts/native-cli/context-store-conformance.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/project-agent/approval-store.test.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/goal-plan-evidence.native-lock.test.mjs', 'packages/runtime-node/src/goal-plan-store.desktop-preview-evidence.test.mjs', 'packages/runtime-node/src/goal-plan-store.ui-completion.test.mjs', 'packages/runtime-node/src/project-agent/tool-result-evidence-preview.test.mjs']);
+run('bun', ['scripts/native-cli/coordination-conformance.ts', 'target/debug/examples/coordination-conformance']);
+run('node', ['scripts/native-cli/native-process-conformance.mjs', 'target/debug/examples/coordination-conformance']);
+run('bun', ['scripts/native-cli/kernel-store-conformance.ts', 'target/debug/examples/coordination-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'goal-conformance']);
+run('bun', ['scripts/native-cli/goal-store-conformance.ts', 'target/debug/examples/goal-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'goal-mirror-conformance']);
+run('bun', ['scripts/native-cli/goal-mirror-conformance.ts', 'target/debug/examples/goal-mirror-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-project-agent', '--example', 'project-agent-conformance']);
+run('node', ['scripts/native-cli/project-agent-conformance.mjs', 'target/debug/examples/project-agent-conformance']);
+run('node', ['--test', 'packages/runtime-node/src/goal-plan-transactions.test.mjs', 'packages/runtime-node/src/goal-plan-closure-mirror.test.mjs']);
+run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
+execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {
+  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
+});
+execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/release/peer-credential-helper')], {
+  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
+});
+run('python3', ['scripts/native-cli/pty_checks.py', '--binary', 'target/release/peer-native',
+  '--fixture', 'target/release/examples/terminal-lifecycle', '--output', join(output, 'pty')]);
+run('python3', ['scripts/native-cli/resume_pty.py', '--binary', 'target/release/peer-native',
+  '--output', join(output, 'resume-pty')]);
+run('python3', ['scripts/native-cli/tui_e2e_pty.py', '--binary', 'target/release/peer-native',
+  '--output', join(output, 'tui-e2e-pty')]);
+process.stdout.write(`Native scoped verification passed; PTY evidence: ${output}\n`);

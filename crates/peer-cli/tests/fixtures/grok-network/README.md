@@ -1,0 +1,1 @@
+Synthetic TLS test identity for pinned Grok hosts routed only to owned loopback fixtures. The server key is public test material, never a credential or a production trust root. The CA signing key was ephemeral and is not retained. These assets are included only by Rust test harnesses; featureless CLI artifacts must not contain the server key.

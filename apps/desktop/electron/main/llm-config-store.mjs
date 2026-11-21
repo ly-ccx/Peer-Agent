@@ -1,21 +1,12 @@
 import electron from 'electron';
 import { createPredictionCredentialResolver } from './input-prediction/credential-resolver.mjs';
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import path from 'node:path';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from '@peer-agent/runtime-node/storage';
 import {
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
+  readModelOAuthTokens,
+  refreshModelOAuthTokens,
 } from '@peer-agent/credential-helper';
 import { getDataHome, pathOf } from './data-store.mjs';
 import { createDesktopModelCredentialClient } from './model-credential-client.mjs';
@@ -314,14 +305,26 @@ export function createLlmConfigStore({
   function readOAuthTokens(item) {
     const key = groupKey(item);
     if (!key) return null;
-    const raw = credentials().getSecret(modelOauthCredentialKey(key));
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
-      throw new Error('credential_oauth_tokens_invalid');
-    }
+    return readModelOAuthTokens(credentials(), modelOauthCredentialKey(key));
+  }
+
+  // Automatic renewal owns only its Vault generation. Configuration hints may
+  // lag; a metadata failure must never restore an already-consumed refresh token.
+  async function refreshOAuthTokens(id, tokens, refresh, options = {}) {
+    const item = readAll().find((entry) => entry.id === id);
+    if (!item || !isOAuthAuthMethod(item.authMethod)) throw new Error('credential_oauth_configuration_changed');
+    const original = modelConfigBinding(item);
+    const validate = () => {
+      const matches = readAll().filter((entry) => entry.id === id);
+      if (matches.length !== 1 || matches[0].enabled === false || modelConfigBinding(matches[0]) !== original) {
+        throw new Error('credential_oauth_configuration_changed');
+      }
+    };
+    return refreshModelOAuthTokens({
+      client: credentials(), key: modelOauthCredentialKey(groupKey(item)),
+      authMethod: item.authMethod, tokens, refresh, validate, force: options.force === true,
+      withConfiguration: action => withModelConfigLock(configFile, action),
+    });
   }
 
   function writeVerifiedSecret(key, secret) {
@@ -333,7 +336,8 @@ export function createLlmConfigStore({
       return;
     }
     credentials().setSecret(key, secret);
-    const verify = credentials().getSecret(key);
+    const verify = key.endsWith('/oauth-tokens') && hasRefreshIntent(secret)
+      ? rawOAuthSecret(key.slice('model/'.length, -'/oauth-tokens'.length)) : credentials().getSecret(key);
     if (!secretsEqual(secret, verify)) throw new Error('credential_migration_verify_failed');
   }
 
@@ -362,8 +366,23 @@ export function createLlmConfigStore({
   function snapshotGroupSecrets(groupId) {
     return {
       apiKey: credentials().getSecret(modelApiKeyCredentialKey(groupId)),
-      oauthTokens: credentials().getSecret(modelOauthCredentialKey(groupId)),
+      oauthTokens: rawOAuthSecret(groupId),
     };
+  }
+  function rawOAuthSecret(groupId) {
+    const client = credentials();
+    const key = modelOauthCredentialKey(groupId);
+    return typeof client.supportsModelOAuthCas === 'function' && client.supportsModelOAuthCas()
+      ? client.getSnapshot(key).secret : client.getSecret(key);
+  }
+  function hasRefreshIntent(raw) {
+    if (!raw) return false;
+    try {
+      const value = JSON.parse(raw);
+      return Boolean(value && typeof value === 'object' && Object.hasOwn(value, 'peerModelRefresh'));
+    } catch {
+      return false;
+    }
   }
 
   function restoreGroupSecrets(groupId, snapshot) {
@@ -371,14 +390,18 @@ export function createLlmConfigStore({
     writeVerifiedSecret(modelOauthCredentialKey(groupId), snapshot.oauthTokens || '');
   }
 
-  function withGroupSecretTransaction(groupId, mutateSecrets, writeMetadata) {
+  function withGroupSecretTransaction(groupId, mutateSecrets, writeMetadata, options = {}) {
     const snapshot = snapshotGroupSecrets(groupId);
+    if (options.denyPendingOAuth && hasRefreshIntent(snapshot.oauthTokens)) throw new Error('credential_oauth_refresh_pending');
     try {
       mutateSecrets();
       const next = snapshotGroupSecrets(groupId);
       if (snapshot.apiKey !== next.apiKey || snapshot.oauthTokens !== next.oauthTokens) accountUsageRevisions.invalidate(groupId);
       return writeMetadata();
     } catch (error) {
+      // Metadata may already be durable. Never restore older credentials on an
+      // uncertain configuration commit; reconcile the actual Store/Vault first.
+      if (error?.message === 'model_config_commit_unknown') throw error;
       try {
         restoreGroupSecrets(groupId, snapshot);
       } catch (rollbackError) {
@@ -822,23 +845,22 @@ export function createLlmConfigStore({
   }
 
   function readStoredState() {
-    if (!existsSync(configFile)) return { channels: [], models: [], legacy: false };
-    try {
-      const parsed = JSON.parse(readFileSync(configFile, 'utf8'));
-      if (Array.isArray(parsed)) {
-        const channels = [...new Map(parsed.map((item) => [groupKey(item), channelFromItem(item)])).values()];
-        return { channels, models: parsed, legacy: true };
-      }
-      if (parsed && Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
-        return { channels: parsed.channels, models: parsed.models, legacy: false };
-      }
-    } catch {
-      // Invalid configuration is treated as empty, matching the legacy behavior.
+    const snapshot = readModelConfigFile(configFile);
+    const parsed = snapshot.value;
+    if (Array.isArray(parsed)) {
+      const channels = [...new Map(parsed.map((item) => [groupKey(item), channelFromItem(item)])).values()];
+      return { channels, models: parsed, legacy: true, snapshot };
     }
-    return { channels: [], models: [], legacy: false };
+    if (parsed && Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
+      return { channels: parsed.channels, models: parsed.models, legacy: false, snapshot };
+    }
+    throw new Error('model_config_invalid');
   }
 
   function readAll() {
+    return withModelConfigLock(configFile, readAllUnlocked);
+  }
+  function readAllUnlocked() {
     const state = readStoredState();
     const channels = new Map(state.channels.map((channel) => [channel.id || channel.groupId, channel]));
     let legacyChannelValuesCleaned = false;
@@ -926,28 +948,9 @@ export function createLlmConfigStore({
       model.groupId = groupKey(item);
       return model;
     });
-    const stored = { version: 2, channels: [...channels.values()], models };
-    const directory = path.dirname(configFile);
-    mkdirSync(directory, { recursive: true });
-    const temporaryFile = path.join(
-      directory,
-      `.${path.basename(configFile)}.${process.pid}.${randomUUID()}.tmp`,
-    );
-    let descriptor;
-    try {
-      descriptor = openSync(temporaryFile, 'wx', 0o600);
-      writeFileSync(descriptor, JSON.stringify(stored, null, 2), 'utf8');
-      fsyncSync(descriptor);
-      closeSync(descriptor);
-      descriptor = undefined;
-      renameSync(temporaryFile, configFile);
-    } catch (error) {
-      if (descriptor !== undefined) {
-        try { closeSync(descriptor); } catch { /* best effort */ }
-      }
-      try { unlinkSync(temporaryFile); } catch { /* best effort */ }
-      throw error;
-    }
+    const root = Array.isArray(previous.snapshot.value) ? {} : previous.snapshot.value;
+    const stored = { ...root, version: 2, channels: [...channels.values()], models };
+    replaceModelConfigFile(configFile, previous.snapshot.revision, stored);
   }
 
   function toView(item) {
@@ -1633,7 +1636,7 @@ export function createLlmConfigStore({
 
   // 写入/刷新订阅 token 集合。秘密进入统一 Vault，配置文件只保存连接状态元数据。
   // tokens 形如 { access, refresh, expires, accountId }。
-  function setOAuthTokens(id, tokens) {
+  function setOAuthTokens(id, tokens, options = {}) {
     const items = readAll();
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) throw new Error(`Provider ${id} not found`);
@@ -1651,6 +1654,7 @@ export function createLlmConfigStore({
         writeAll(items);
         return toView(item);
       },
+      { denyPendingOAuth: options.allowPending !== true },
     );
   }
 
@@ -1725,19 +1729,21 @@ export function createLlmConfigStore({
     }
 
     // 把最近诊断结果写回连接，供服务详情/列表读取。
-    const nextItems = readAll();
-    const nextItem = nextItems.find((entry) => entry.id === id);
-    if (nextItem && result) {
-      const now = new Date().toISOString();
-      nextItem.lastCheckedAt = now;
-      nextItem.lastDiagnostic = result.diagnostic;
-      nextItem.lastErrorCategory = result.errorCategory;
-      nextItem.connectionState = result.connectionState || nextItem.connectionState;
-      nextItem.connectionStateReason = result.connectionStateReason || nextItem.connectionStateReason;
-      if (result.success) nextItem.lastSuccessAt = now;
-      nextItem.configVersion = Number(nextItem.configVersion || 0) || 1;
-      writeAll(nextItems);
-    }
+    withModelConfigLock(configFile, () => {
+      const nextItems = readAll();
+      const nextItem = nextItems.find((entry) => entry.id === id);
+      if (nextItem && result && JSON.stringify(nextItem) === JSON.stringify(item)) {
+        const now = new Date().toISOString();
+        nextItem.lastCheckedAt = now;
+        nextItem.lastDiagnostic = result.diagnostic;
+        nextItem.lastErrorCategory = result.errorCategory;
+        nextItem.connectionState = result.connectionState || nextItem.connectionState;
+        nextItem.connectionStateReason = result.connectionStateReason || nextItem.connectionStateReason;
+        if (result.success) nextItem.lastSuccessAt = now;
+        nextItem.configVersion = Number(nextItem.configVersion || 0) || 1;
+        writeAll(nextItems);
+      }
+    });
 
     return result;
   }
@@ -1757,16 +1763,18 @@ export function createLlmConfigStore({
       return { updated: 0, examined: 0, skipped: true };
     }
 
-    const items = readAll();
-    let updated = 0;
-    const nextItems = items.map((item) => {
-      const { item: filled, changed } = fillMissingPricingFromRegistry(item, registry);
-      if (changed) updated += 1;
-      return filled;
-    });
+    return withModelConfigLock(configFile, () => {
+      const items = readAll();
+      let updated = 0;
+      const nextItems = items.map((item) => {
+        const { item: filled, changed } = fillMissingPricingFromRegistry(item, registry);
+        if (changed) updated += 1;
+        return filled;
+      });
 
-    if (updated > 0) writeAll(nextItems);
-    return { updated, examined: items.length, skipped: false };
+      if (updated > 0) writeAll(nextItems);
+      return { updated, examined: items.length, skipped: false };
+    });
   }
 
 
@@ -1914,7 +1922,15 @@ export function createLlmConfigStore({
     }
   }
 
-  return { resolveCredentialAsync: createPredictionCredentialResolver({ configFile, dataHome: credentialDataHome || getDataHome() }), listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
+  const locked = method => (...args) => withModelConfigLock(configFile, () => method(...args));
+  return { resolveCredentialAsync: createPredictionCredentialResolver({ configFile, dataHome: credentialDataHome || getDataHome() }),
+    listProviders: locked(listProviders), listGroups: locked(listGroups), listChatProviders: locked(listChatProviders),
+    addProvider: locked(addProvider), addModel: locked(addModel), updateProvider: locked(updateProvider),
+    duplicateProvider: locked(duplicateProvider), duplicateModel: locked(duplicateModel),
+    removeProvider: locked(removeProvider), removeGroup: locked(removeGroup), setDefault: locked(setDefault),
+    getDecryptedApiKey: locked(getDecryptedApiKey), getCredential: locked(getCredential),
+    getApiKeyRequestConfig: locked(getApiKeyRequestConfig), setOAuthTokens: locked(setOAuthTokens),
+    refreshOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start, fetchImpl) {

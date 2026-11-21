@@ -8,15 +8,30 @@ type Saved = Awaited<ReturnType<ClientApi['projectAgentUpdateProfile']>>;
 /** Share only a pending read. Settled facts are never cached across notifications. */
 export function createBotDetailsReader<T>(read: (workspaceId: string) => Promise<T>) {
   const pending = new Map<string, Promise<T>>();
-  return (workspaceId: string): Promise<T> => {
+  const invalidated = new WeakSet<Promise<T>>();
+  const load = (workspaceId: string, superseded = 0): Promise<T> => {
     const existing = pending.get(workspaceId);
     if (existing) return existing;
-    const request = Promise.resolve().then(() => read(workspaceId)).finally(() => {
+    const current = (): Promise<T> => {
+      if (pending.get(workspaceId) === request) pending.delete(workspaceId);
+      if (superseded >= 3) return Promise.reject(Error('BOT_DETAILS_READ_SUPERSEDED'));
+      return load(workspaceId, superseded + 1);
+    };
+    const request: Promise<T> = Promise.resolve().then(() => read(workspaceId)).then(
+      result => invalidated.has(request) ? current() : result,
+      error => { if (invalidated.has(request)) return current(); throw error; },
+    ).finally(() => {
       if (pending.get(workspaceId) === request) pending.delete(workspaceId);
     });
     pending.set(workspaceId, request);
     return request;
   };
+  // A real save receipt supersedes reads issued before it, including consumers
+  // already awaiting the shared promise. Do not resurrect their stale profile.
+  return Object.assign((workspaceId: string) => load(workspaceId), { invalidate(workspaceId: string) {
+    const request = pending.get(workspaceId);
+    if (request) invalidated.add(request);
+  } });
 }
 
 export function botModelPolicyKey(policy: ProjectModelPolicy | null | undefined): string {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { callMcpTool } from './mcp-client.mjs';
+import { McpOAuthGuardError } from './mcp-oauth-io.mjs';
 import { createFailedClientToolResult, createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 
 const MCP_CAPABILITY_PREFIX = 'local.mcp.';
@@ -248,6 +249,15 @@ export function createLocalMcpProvider({ mcpRegistry, credentialResolver = null 
         },
       };
     } catch (error) {
+      // Only the owned transport's structured dispatch fact can create this hold.
+      // Remote content or an arbitrary error sentence cannot claim execution truth.
+      if (error instanceof McpOAuthGuardError && error.code === 'execution_outcome_unknown') {
+        const failure = createFailedClientToolResult({call,locale,reason:error.code,dataLevel:'D2_sensitive'});
+        return {
+          call, permissionGrant, terminal:true, terminalReason:error.code,
+          result:{...failure,error:error.code,outputPreview:{...failure.outputPreview,error:error.code}},
+        };
+      }
       return {
         call,
         permissionGrant,

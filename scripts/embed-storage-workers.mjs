@@ -17,12 +17,22 @@ const {realpathSync,linkSync,unlinkSync,writeFileSync,mkdirSync,readFileSync,ren
 const path=require('node:path');\n`;
 const resourceHintSource = transpileModule(readFileSync(path.join(root, 'packages/protocol/src/resource-reference-hints.ts'), 'utf8'),
   { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText;
+// Keep the actual protocol validator (and its identity normalizer) in the
+// embedded rebuild worker. Scope its private helpers to avoid collisions with
+// the existing concatenated reducers; do not copy a second shape validator.
+const childProtocolSource = 'const {nativeProcessesInWork,nativeWorkHasHookFacts,WORK_HOOK_SEMANTIC_FLOOR} = (() => {\n' + [
+  'packages/protocol/src/session-control.ts', 'packages/protocol/src/native-process.ts',
+  'packages/protocol/src/hook-observation.ts', 'packages/protocol/src/work-hook.ts',
+].map(file => transpileModule(readFileSync(path.join(root, file), 'utf8'),
+  { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022 } }).outputText
+  .replace(/^import\s+[\s\S]*?;\r?\n/gm, '').replace(/^export /gm, '')).join('\n')
+  + '\nreturn {nativeProcessesInWork,nativeWorkHasHookFacts,WORK_HOOK_SEMANTIC_FLOOR};\n})();\n';
 const targets = [
   { output: 'packages/runtime-node/src/project-agent/coordination-worker-source.generated.mjs', name: 'COORDINATION_WORKER_SOURCE', files: ['packages/runtime-node/src/fsync-path.mjs', 'packages/runtime-node/src/project-agent/session-control-kernel.mjs', 'packages/runtime-node/src/project-agent/execution-obligation-kernel.mjs', 'packages/runtime-node/src/project-agent/history-resumption.mjs', 'packages/runtime-node/src/project-agent/coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-delta.mjs', 'packages/runtime-node/src/project-agent/agent-supervision-state.mjs', 'packages/runtime-node/src/project-agent/intent-reply-bindings.mjs', 'packages/runtime-node/src/project-agent/intent-coordination-kernel.mjs', 'packages/runtime-node/src/project-agent/work-coordination.mjs', 'packages/runtime-node/src/project-agent/journal-lines.mjs', 'packages/runtime-node/src/project-agent/coordination-legacy-integrity.mjs', 'packages/runtime-node/src/project-agent/coordination-rebuild-queue.mjs', 'packages/runtime-node/src/project-agent/coordination-storage-v2.mjs'] },
   { output: 'packages/conversation-store/src/interaction-worker-source.generated.mjs', name: 'INTERACTION_WORKER_SOURCE', files: ['packages/conversation-store/src/interaction-reader.mjs'] },
 ];
 for (const target of targets) {
-  const source = builtins(target.name === 'COORDINATION_WORKER_SOURCE') + [sqliteSource, ...(target.name === 'INTERACTION_WORKER_SOURCE' ? [resourceHintSource] : []), ...target.files.map(file => readFileSync(path.join(root, file), 'utf8'))].map(source => source
+  const source = builtins(target.name === 'COORDINATION_WORKER_SOURCE') + [sqliteSource, ...(target.name === 'INTERACTION_WORKER_SOURCE' ? [resourceHintSource] : [childProtocolSource]), ...target.files.map(file => readFileSync(path.join(root, file), 'utf8'))].map(source => source
     .replace(/\r\n/g, '\n')
     .replace(/^import\s+[\s\S]*?;\r?\n/gm, '').replace(/^export /gm, '')
     .replaceAll('import.meta.url', "path.join(process.cwd(), 'embedded-storage-worker.mjs')")).join('\n');

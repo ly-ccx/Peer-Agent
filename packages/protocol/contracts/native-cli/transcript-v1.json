@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "scope": "Raw presentation JSONL pages only; not model history, authorization, Evidence, or streaming-sidecar admission.",
+  "cursor": "Exclusive byte start of the oldest inspected record, bound to conversationId and exact sourceRevision; external writes invalidate it.",
+  "corruption": "Return an invalid_json row with source byte range rather than silently dropping it.",
+  "limits": "Bound records, scanned bytes, single record bytes and aggregate decoded nodes/strings/bytes. Oversized records return an explicit error and scanned source range.",
+  "cases": [
+    { "name": "trailing-newline", "source": "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}\n", "records": 2 },
+    { "name": "no-trailing-newline", "source": "{\"id\":\"a\"}\n{\"id\":\"b\"}\n{\"id\":\"c\"}", "records": 2 },
+    { "name": "empty-lines", "source": "\n{\"id\":\"a\"}\n\n{\"id\":\"b\"}\n{\"id\":\"c\"}", "records": 2 },
+    { "name": "whitespace-counts", "source": "{\"id\":\"a\"}\n  \n{\"id\":\"b\"}\n", "records": 2 },
+    { "name": "bom-and-crlf", "source": "﻿{\"id\":\"中\",\"unknown\":{\"future\":true}}\r\n{\"id\":\"é👨‍👩‍👧\"}\r\n", "records": 1 },
+    { "name": "corrupt-line", "source": "{\"id\":\"a\"}\n{bad}\n{\"id\":\"b\"}\n", "records": 2 },
+    { "name": "primitive-values", "source": "null\n42\n[1,2]\n\"raw\"\n", "records": 2 },
+    { "name": "empty-file", "source": "", "records": 2 },
+    { "name": "only-empty-lines", "source": "\n\n\n", "records": 2 }
+  ]
+}

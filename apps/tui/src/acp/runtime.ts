@@ -22,6 +22,7 @@ return async (cwd, update, sessionId) => {
   const controller = createChatController({
     host: runtime.host, model: runtime.model, initialMode: 'chat',
     getConversationId: () => persistence.ensureConversation(),
+    assertConversationExecutionAvailable: persistence.assertExecutionAvailable,
     getContextWindow: () => runtime.contextSelection.getContextWindow(),
     getModelKey: () => {
       const selected = runtime.modelSelection.getSelection();

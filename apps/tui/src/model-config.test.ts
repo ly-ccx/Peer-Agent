@@ -58,7 +58,7 @@ describe('TUI model environment', () => {
         credentialStored: true,
         oauthTokens: { access: 'hidden' },
         configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
-        persistOAuthTokens() {},
+        persistOAuthTokens() {}, async refreshOAuthTokens() { throw new Error("unexpected_refresh"); },
       }),
     });
 
@@ -100,7 +100,7 @@ describe('TUI model environment', () => {
         credentialId: options?.credentialId ?? 'credential-a', displayName: 'Provider',
         model: options?.credentialId === 'credential-b' ? 'model-b' : 'model-a',
         baseUrl: 'https://example.test/v1', authMethod: 'api_key', credentialStored: true,
-        apiKey: 'hidden', configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', persistOAuthTokens() {},
+        apiKey: 'hidden', configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium', persistOAuthTokens() {}, async refreshOAuthTokens() { throw new Error("unexpected_refresh"); },
       }),
     });
 

@@ -13,6 +13,7 @@ import { resolveExecCatalogEntry } from './cli-model-ref.ts';
 import { resolveExecToolAllowlist } from './cli-tools.ts';
 import { createTuiConversationPersistence } from './conversation-persistence.ts';
 import { createTuiRuntime } from './tui-runtime.ts';
+import { createOrdinaryExecOwnership, supportsOwnedCapabilities } from './ordinary-exec-ownership.ts';
 
 const ACCESS_TO_LEVEL: Readonly<Record<PeerExecOptions['access'], LocalAccessLevel>> = {
   ask: 'ask_before_local',
@@ -71,6 +72,7 @@ export async function runPeerExec(
   const startedAt = Date.now();
   const stdinIsTTY = io.stdinIsTTY ?? io.stdin.isTTY === true;
   const env = io.env ?? process.env;
+  const ownedFixture = env.PEER_NATIVE_CLI_OWNED_FIXTURE === '1';
 
   if (options.access === 'ask' && !stdinIsTTY) {
     writeLine(io.stderr, 'peer exec: --access ask cannot wait for approval without a TTY');
@@ -110,6 +112,11 @@ export async function runPeerExec(
     return CLI_EXIT.usage;
   }
 
+  if (ownedFixture && (options.bot || options.mode !== 'chat'
+    || !supportsOwnedCapabilities(toolAllowlist))) {
+    writeLine(io.stderr, 'peer exec: isolated ownership requires chat mode and an explicit file or foreground Shell allowlist');
+    return CLI_EXIT.usage;
+  }
   if (options.bot) {
     const { runPeerBotExec } = await import('./cli-exec-bot.ts');
     const dataHome = env.PEER_AGENT_HOME ?? env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
@@ -117,6 +124,7 @@ export async function runPeerExec(
   }
 
   const userDataPath = env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
+  const owned = ownedFixture ? createOrdinaryExecOwnership(userDataPath, workspaceRoot) : undefined;
   const runtime = createTuiRuntime({
     workspaceRoot,
     userDataPath,
@@ -124,6 +132,8 @@ export async function runPeerExec(
     toolAllowlist,
     denyInteractiveTools: true,
     initialFastMode: options.fast,
+    ...(owned ? { ownedTool: owned.ownedTool, resolveOwnedCognition: owned.resolveOwnedCognition,
+      goalPlanStore: owned.evidenceIndex } : {}),
   });
 
   try {
@@ -179,6 +189,7 @@ export async function runPeerExec(
   }
 
   const persistence = createTuiConversationPersistence({
+    ...(owned ? { store: owned.store as NonNullable<Parameters<typeof createTuiConversationPersistence>[0]['store']> } : {}),
     workspacePath: workspaceRoot,
     initialMode: options.mode,
     initialFastMode: options.fast,
@@ -188,10 +199,12 @@ export async function runPeerExec(
     ))?.contextWindow,
   });
   const controller = createChatController({
-    host: runtime.host,
-    model: runtime.model,
+    host: owned ? owned.wrapHost(runtime.host) : runtime.host,
+    model: owned ? owned.wrapModel(runtime.model) : runtime.model,
+    ...(owned ? { sessionId: owned.sessionId } : {}),
     initialMode: options.mode,
     getConversationId: () => persistence.ensureConversation(),
+    assertConversationExecutionAvailable: owned ? undefined : persistence.assertExecutionAvailable,
     getContextWindow: () => {
       const selection = runtime.modelSelection.getSelection();
       return runtime.modelSelection.catalog.find((entry) => (
@@ -204,21 +217,26 @@ export async function runPeerExec(
     },
   });
 
+  let stopError: string | undefined;
   const onSignal = () => {
-    controller.cancel();
+    try { owned?.closeAdmission(); }
+    catch (error) { stopError = error instanceof Error ? error.message : String(error); }
+    finally { controller.cancel(); }
   };
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
 
   // Goal 自驱闭环：send() 前采集本会话计划基线，send() 后如有新计划则由
   // 共享 Goal Runner 驱动至终态（详见 cli-exec-goal.ts 模块注释）。
-  const goalBridge = runtime.host.goalBridge;
+  const goalBridge = owned ? undefined : runtime.host.goalBridge;
   const conversationIdForGoal = () => persistence.getConversationId() ?? undefined;
   const planIdsBefore = goalBridge
     ? collectPlanIds(goalBridge, conversationIdForGoal())
     : new Set<string>();
 
+  let triedOwnedFinish = false;
   try {
+    owned?.begin(persistence.ensureConversation(), runtime.modelSelection.getSelection(), prompt);
     const sendResult = await controller.send(prompt, {
       // Match Desktop / interactive TUI: unbounded unless `--max-turns` is set.
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
@@ -236,20 +254,25 @@ export async function runPeerExec(
       persistence.syncSnapshot(controller.getSnapshot());
     }
 
-    persistence.syncSnapshot(controller.getSnapshot());
+    if (!owned) persistence.syncSnapshot(controller.getSnapshot());
     const snapshot = controller.getSnapshot();
     const resultText = sendResult.output?.trim() || lastAssistantText(snapshot.messages);
+    if (owned) {
+      triedOwnedFinish = true;
+      try { await owned.finish(resultText); }
+      catch (error) { stopError ??= error instanceof Error ? error.message : String(error); }
+    }
     // Goal 完成时进程语义为成功：send 单轮的 exhausted/误差不应污染 ok/error 字段
     // （退出码已由 goal 分类决定，JSON 同步对齐）。
     const goalSucceeded = goalOutcome?.drove && goalOutcome.exitKind === 'ok';
-    const error = goalSucceeded
+    const error = stopError ?? (goalSucceeded
       ? null
       : sendResult.status === 'completed' || sendResult.status === 'stopped'
         ? null
-        : (sendResult.reason || snapshot.error || sendResult.status);
-    const ok = goalSucceeded
+        : (sendResult.reason || snapshot.error || sendResult.status));
+    const ok = !stopError && (goalSucceeded
       || sendResult.status === 'completed'
-      || sendResult.status === 'stopped';
+      || sendResult.status === 'stopped');
     const payload = {
       sessionId: persistence.getConversationId() ?? '',
       ok,
@@ -278,14 +301,18 @@ export async function runPeerExec(
       if (goalOutcome.exitKind === 'ok') return CLI_EXIT.ok;
       if (goalOutcome.exitKind === 'cancelled') return CLI_EXIT.cancelled;
     }
+    if (stopError) return CLI_EXIT.runtime;
     if (sendResult.status === 'exhausted') return CLI_EXIT.maxTurns;
     if (sendResult.status === 'cancelled') return CLI_EXIT.cancelled;
     if (ok) return CLI_EXIT.ok;
     if (isAuthFailureReason(error ?? undefined)) return CLI_EXIT.auth;
     return CLI_EXIT.runtime;
   } finally {
-    process.removeListener('SIGINT', onSignal);
-    process.removeListener('SIGTERM', onSignal);
+    try { if (owned && !triedOwnedFinish) await owned.finish(); }
+    finally {
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+    }
   }
   } finally {
     await runtime.dispose();

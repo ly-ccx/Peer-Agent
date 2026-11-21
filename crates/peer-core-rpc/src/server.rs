@@ -1,0 +1,853 @@
+use crate::{
+    classic::{self, ModelLoader},
+    classic_conversations,
+    classic_goal::{self, ClassicGoalRegistry},
+    classic_llm, classic_mcp, classic_skills,
+    classic_streams::ClassicStreamRegistry,
+    classic_usage, project, project_bot, project_bot_ops,
+    protocol::{
+        CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
+        ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
+        MAX_PENDING_HOST_CALLS, PROTOCOL_VERSION, PingParams, PingResult, RpcError, ServerInfo,
+        ShutdownResult,
+    },
+    transport::{BoundedLineReader, FrameWriter, FrameWriterHandle},
+};
+use peer_protocol::{JsonDecodeError, JsonLimits, LocalAccessLevel, decode_json_bounded};
+use peer_runtime::{
+    CancellationToken,
+    conversation_host::{ConversationAccess, NativeConversationRuntime},
+};
+use serde_json::{Value, json};
+use std::{
+    collections::HashMap,
+    fmt, io,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::{Notify, mpsc, oneshot},
+    task::JoinSet,
+};
+
+const MAX_INBOUND_STRING_BYTES: usize = 1024 * 1024;
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn classic_domains() -> Vec<String> {
+    vec![
+        "core".into(),
+        "classic.chat".into(),
+        "classic.goal".into(),
+        "classic.conversations".into(),
+        "classic.usage".into(),
+        "classic.skills".into(),
+        "classic.mcp".into(),
+        "classic.llm".into(),
+        "project.memory".into(),
+        "project.objectives".into(),
+        "project.profile".into(),
+        "project.access".into(),
+        "project.bot".into(),
+    ]
+}
+
+#[derive(Clone)]
+pub struct CoreServerConfig {
+    pub version: String,
+    pub data_home: PathBuf,
+    pub reverse_request_timeout: Duration,
+    pub model_loader: Option<ModelLoader>,
+}
+
+impl fmt::Debug for CoreServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CoreServerConfig")
+            .field("version", &self.version)
+            .field("data_home", &self.data_home)
+            .field("reverse_request_timeout", &self.reverse_request_timeout)
+            .field("has_model_loader", &self.model_loader.is_some())
+            .finish()
+    }
+}
+
+impl CoreServerConfig {
+    pub fn new(version: impl Into<String>, data_home: PathBuf) -> Self {
+        Self {
+            version: version.into(),
+            data_home,
+            reverse_request_timeout: DEFAULT_REVERSE_TIMEOUT,
+            model_loader: None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct CoreState {
+    initialized: bool,
+    draining: bool,
+    client: Option<crate::protocol::ClientInfo>,
+    external_capabilities: Vec<ExternalCapabilityManifest>,
+}
+
+type PendingMap = HashMap<String, oneshot::Sender<Result<Value, RpcError>>>;
+
+#[derive(Clone)]
+pub struct RpcPeer {
+    writer: FrameWriter,
+    next_id: Arc<AtomicU64>,
+    pending: Arc<Mutex<PendingMap>>,
+    shutdown: CancellationToken,
+    reverse_timeout: Duration,
+}
+
+impl RpcPeer {
+    fn new(writer: FrameWriter, shutdown: CancellationToken, reverse_timeout: Duration) -> Self {
+        Self {
+            writer,
+            next_id: Arc::new(AtomicU64::new(1)),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            shutdown,
+            reverse_timeout,
+        }
+    }
+
+    pub async fn notify(&self, method: &str, params: Value) -> io::Result<()> {
+        self.writer
+            .send_value(&json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params,
+            }))
+            .await
+    }
+
+    pub fn shutdown_child_token(&self) -> CancellationToken {
+        self.shutdown.child_token()
+    }
+
+    pub async fn call_host(
+        &self,
+        method: &str,
+        params: Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RpcError> {
+        self.call_host_with_timeout(method, params, self.reverse_timeout, cancel)
+            .await
+    }
+
+    pub async fn call_host_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RpcError> {
+        if self.shutdown.is_cancelled() || cancel.is_cancelled() {
+            return Err(RpcError::shutting_down());
+        }
+        let id = format!("core-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut guard = self
+                .pending
+                .lock()
+                .map_err(|_| RpcError::internal_error("pending host call lock poisoned"))?;
+            if guard.len() >= MAX_PENDING_HOST_CALLS {
+                return Err(RpcError::host_call_failed(
+                    "Too many concurrent host requests",
+                    None,
+                ));
+            }
+            guard.insert(id.clone(), tx);
+        }
+
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+        if let Err(err) = self.writer.send_value(&payload).await {
+            self.remove_pending(&id);
+            return Err(RpcError::host_call_failed(
+                format!("Failed to write host request: {err}"),
+                None,
+            ));
+        }
+
+        let sleep_timer = tokio::time::sleep(timeout);
+        tokio::pin!(sleep_timer);
+
+        let response = tokio::select! {
+            biased;
+            _ = self.shutdown.cancelled() => {
+                self.remove_pending(&id);
+                Err(RpcError::shutting_down())
+            }
+            _ = cancel.cancelled() => {
+                self.remove_pending(&id);
+                Err(RpcError::host_call_failed("Host request cancelled", None))
+            }
+            _ = &mut sleep_timer => {
+                self.remove_pending(&id);
+                Err(RpcError::host_call_failed(
+                    format!("Host request '{method}' timed out"),
+                    None,
+                ))
+            }
+            res = rx => match res {
+                Ok(inner) => inner,
+                Err(_) => Err(RpcError::host_call_failed(
+                    format!("Host request '{method}' closed before reply"),
+                    None,
+                )),
+            }
+        };
+        response
+    }
+
+    fn resolve_pending(&self, id: &str, message: &Value) {
+        let sender = self.pending.lock().ok().and_then(|mut map| map.remove(id));
+        let Some(tx) = sender else {
+            return;
+        };
+        let outcome = if let Some(error_obj) = message.get("error") {
+            let code = error_obj["code"].as_i64().unwrap_or(-32004) as i32;
+            let msg = error_obj["message"]
+                .as_str()
+                .unwrap_or("Host request failed")
+                .to_owned();
+            let data = error_obj.get("data").cloned();
+            Err(RpcError {
+                code,
+                message: msg,
+                data,
+            })
+        } else {
+            Ok(message.get("result").cloned().unwrap_or(Value::Null))
+        };
+        let _ = tx.send(outcome);
+    }
+
+    fn remove_pending(&self, id: &str) {
+        if let Ok(mut map) = self.pending.lock() {
+            map.remove(id);
+        }
+    }
+
+    fn fail_all_pending(&self, reason: &str) {
+        if let Ok(mut map) = self.pending.lock() {
+            for (_, tx) in map.drain() {
+                let _ = tx.send(Err(RpcError::host_call_failed(reason, None)));
+            }
+        }
+    }
+}
+
+type LocalJob = Box<dyn FnOnce() + Send + 'static>;
+
+pub struct BackgroundCounterGuard {
+    counter: Arc<AtomicUsize>,
+    notify: Arc<Notify>,
+}
+
+impl Drop for BackgroundCounterGuard {
+    fn drop(&mut self) {
+        if self.counter.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.notify.notify_waiters();
+        }
+    }
+}
+
+pub struct ServerContext {
+    pub config: CoreServerConfig,
+    pub started_at: Instant,
+    state: Mutex<CoreState>,
+    pub peer: RpcPeer,
+    pub access: ConversationAccess,
+    pub runtime: Arc<NativeConversationRuntime>,
+    pub streams: ClassicStreamRegistry,
+    pub goals: ClassicGoalRegistry,
+    local_tx: mpsc::UnboundedSender<LocalJob>,
+    active_background: Arc<AtomicUsize>,
+    background_done: Arc<Notify>,
+}
+
+impl ServerContext {
+    pub fn snapshot_external_capabilities(
+        &self,
+    ) -> Result<Vec<ExternalCapabilityManifest>, RpcError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
+        Ok(guard.external_capabilities.clone())
+    }
+
+    pub fn dispatch_local<F>(&self, job: F) -> Result<(), RpcError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.local_tx
+            .send(Box::new(job))
+            .map_err(|_| RpcError::shutting_down())
+    }
+
+    pub fn spawn_local_background<F>(&self, spawn_fn: F) -> Result<(), RpcError>
+    where
+        F: FnOnce(BackgroundCounterGuard) + Send + 'static,
+    {
+        let guard = BackgroundCounterGuard {
+            counter: Arc::clone(&self.active_background),
+            notify: Arc::clone(&self.background_done),
+        };
+        self.active_background.fetch_add(1, Ordering::SeqCst);
+        let res = self.local_tx.send(Box::new(move || {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
+        }));
+        if res.is_err() {
+            return Err(RpcError::shutting_down());
+        }
+        Ok(())
+    }
+
+    async fn drain_background(&self) {
+        while self.active_background.load(Ordering::SeqCst) > 0 {
+            self.background_done.notified().await;
+        }
+    }
+
+    fn snapshot_capabilities(
+        &self,
+    ) -> Result<(bool, bool, Vec<ExternalCapabilityManifest>), RpcError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
+        Ok((
+            guard.initialized,
+            guard.draining,
+            guard.external_capabilities.clone(),
+        ))
+    }
+
+    fn initialize(&self, params_value: Value) -> Result<Value, RpcError> {
+        let params: InitializeParams = serde_json::from_value(params_value)
+            .map_err(|err| RpcError::invalid_params(format!("Invalid initialize params: {err}")))?;
+        params.validate()?;
+
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
+        if guard.draining {
+            return Err(RpcError::shutting_down());
+        }
+        if guard.initialized {
+            return Err(RpcError::already_initialized());
+        }
+        let aliases = params
+            .external_capabilities
+            .iter()
+            .map(|c| c.alias.clone())
+            .collect();
+        guard.initialized = true;
+        guard.client = Some(params.client);
+        guard.external_capabilities = params.external_capabilities;
+
+        let result = InitializeResult {
+            protocol_version: PROTOCOL_VERSION,
+            server: ServerInfo {
+                name: "peer-core".into(),
+                version: self.config.version.clone(),
+            },
+            pid: std::process::id(),
+            capabilities: CoreCapabilitiesSummary {
+                domains: classic_domains(),
+                planned_domains: vec!["bot".into()],
+                bidirectional_host_calls: true,
+                registered_external_capabilities: aliases,
+            },
+        };
+        serde_json::to_value(result).map_err(|err| RpcError::internal_error(err.to_string()))
+    }
+
+    fn begin_shutdown(&self) -> Result<Value, RpcError> {
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
+        guard.draining = true;
+        serde_json::to_value(ShutdownResult {
+            ok: true,
+            draining: true,
+        })
+        .map_err(|err| RpcError::internal_error(err.to_string()))
+    }
+
+    async fn handle_request(
+        self: &Arc<Self>,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcError> {
+        let (initialized, draining, external_capabilities) = self.snapshot_capabilities()?;
+        if draining {
+            return Err(RpcError::shutting_down());
+        }
+        if !initialized {
+            return Err(RpcError::not_initialized());
+        }
+        match method {
+            "core.ping" => {
+                let parsed: PingParams = if params.is_null() {
+                    PingParams::default()
+                } else {
+                    serde_json::from_value(params).map_err(|err| {
+                        RpcError::invalid_params(format!("Invalid ping params: {err}"))
+                    })?
+                };
+                let host_probe = if parsed.probe_host {
+                    Some(
+                        self.peer
+                            .call_host("host.ping", json!({}), &self.peer.shutdown)
+                            .await
+                            .map_err(|err| {
+                                RpcError::host_call_failed(
+                                    format!("host.ping failed: {}", err.message),
+                                    Some(err.to_error_object()),
+                                )
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                let uptime_ms =
+                    u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+                serde_json::to_value(PingResult {
+                    ok: true,
+                    server_version: self.config.version.clone(),
+                    uptime_ms,
+                    pid: std::process::id(),
+                    host_probe,
+                })
+                .map_err(|err| RpcError::internal_error(err.to_string()))
+            }
+            "core.capabilities.list" => serde_json::to_value(CapabilitiesListResult {
+                domains: classic_domains(),
+                external_capabilities,
+            })
+            .map_err(|err| RpcError::internal_error(err.to_string())),
+            "classic.chat.send" => classic::handle_send(self, params).await,
+            "classic.chat.abort" => classic::handle_abort(self, params),
+            "classic.chat.reattach" => classic::handle_reattach(self, params),
+            "classic.chat.listActive" => classic::handle_list_active(self),
+            "classic.chat.compact" => classic::handle_compact(self, params).await,
+            "classic.permission.decide" => classic::handle_permission_decide(self, params),
+            "classic.access.set" => classic::handle_access_set(self, params),
+            "classic.goal.start" => classic_goal::handle_start(self, params).await,
+            "classic.goal.resume" => classic_goal::handle_resume(self, params).await,
+            "classic.goal.pause" => classic_goal::handle_pause(self, params).await,
+            "classic.goal.clear" => classic_goal::handle_clear(self, params).await,
+            "classic.goal.getState" => classic_goal::handle_get_state(self, params),
+            "classic.conversations.list" => classic_conversations::handle_list(self, params),
+            "classic.conversations.search" => classic_conversations::handle_search(self, params),
+            "classic.conversations.create" => classic_conversations::handle_create(self, params),
+            "classic.conversations.get" => classic_conversations::handle_get(self, params),
+            "classic.conversations.updateTitle" => {
+                classic_conversations::handle_update_title(self, params)
+            }
+            "classic.conversations.updateMode" => {
+                classic_conversations::handle_update_mode(self, params)
+            }
+            "classic.conversations.updateFastMode" => {
+                classic_conversations::handle_update_fast_mode(self, params)
+            }
+            "classic.conversations.updatePreferredExecutionIsolation" => {
+                classic_conversations::handle_update_preferred_execution_isolation(self, params)
+            }
+            "classic.conversations.updateModelEffort" => {
+                classic_conversations::handle_update_model_effort(self, params)
+            }
+            "classic.conversations.appendMessage" => {
+                classic_conversations::handle_append_message(self, params)
+            }
+            "classic.conversations.updateLastMessage" => {
+                classic_conversations::handle_update_last_message(self, params)
+            }
+            "classic.conversations.replaceMessages" => {
+                classic_conversations::handle_replace_messages(self, params)
+            }
+            "classic.conversations.archive" => classic_conversations::handle_archive(self, params),
+            "classic.conversations.restore" => classic_conversations::handle_restore(self, params),
+            "classic.conversations.pin" => classic_conversations::handle_pin(self, params),
+            "classic.conversations.unpin" => classic_conversations::handle_unpin(self, params),
+            "classic.conversations.reorderPinned" => {
+                classic_conversations::handle_reorder_pinned(self, params)
+            }
+            "classic.conversations.autoArchive" => {
+                classic_conversations::handle_auto_archive(self, params)
+            }
+            "classic.conversations.delete" => classic_conversations::handle_delete(self, params),
+            "classic.conversations.addUsage" => {
+                classic_conversations::handle_add_usage(self, params)
+            }
+            "classic.usage.stats" => classic_usage::handle_stats(self, params),
+            "classic.usage.daily" => classic_usage::handle_daily(self, params),
+            "classic.usage.day" => classic_usage::handle_day(self, params),
+            "classic.usage.cacheHitRate" => classic_usage::handle_cache_hit_rate(self),
+            "classic.skills.list" => classic_skills::handle_list(self, params),
+            "classic.skills.getDetail" => classic_skills::handle_get_detail(self, params),
+            "classic.skills.enable" => classic_skills::handle_set_enabled(self, params, true),
+            "classic.skills.disable" => classic_skills::handle_set_enabled(self, params, false),
+            "classic.skills.listAvailable" => classic_skills::handle_list_available(self, params),
+            "classic.skills.link" => classic_skills::handle_link(self, params),
+            "classic.skills.unlink" => classic_skills::handle_unlink(self, params),
+            "classic.skills.uninstall" => classic_skills::handle_uninstall(self, params),
+            "classic.mcp.listInstalled" => classic_mcp::handle_list_installed(self),
+            "classic.mcp.listCapabilities" => classic_mcp::handle_list_capabilities(self),
+            "classic.mcp.listCredentials" => classic_mcp::handle_list_credentials(self),
+            "classic.mcp.upsertServer" | "classic.mcp.install" => {
+                classic_mcp::handle_upsert_server(self, params)
+            }
+            "classic.mcp.uninstall" => classic_mcp::handle_uninstall(self, params),
+            "classic.mcp.setEnabled" => classic_mcp::handle_set_enabled(self, params),
+            "classic.mcp.setToolVisibility" => {
+                classic_mcp::handle_set_tool_visibility(self, params)
+            }
+            "classic.llm.catalog" => classic_llm::handle_catalog(self),
+            "classic.llm.complete" => classic_llm::handle_complete(self, params).await,
+            "classic.llm.quota" => classic_llm::handle_quota(self, params).await,
+            "project.memory.list" => project::handle_memory_list(self, params),
+            "project.memory.pin" => project::handle_memory_pin(self, params),
+            "project.memory.forget" => project::handle_memory_forget(self, params),
+            "project.memory.restore" => project::handle_memory_restore(self, params),
+            "project.memory.edit" => project::handle_memory_edit(self, params),
+            "project.memory.setSwitches" => project::handle_memory_set_switches(self, params),
+            "project.objectives.list" => project::handle_objectives_list(self, params),
+            "project.objectives.update" => {
+                project::handle_objectives_command(self, params, "update")
+            }
+            "project.objectives.pause" => project::handle_objectives_command(self, params, "pause"),
+            "project.objectives.resume" => {
+                project::handle_objectives_command(self, params, "resume")
+            }
+            "project.objectives.delete" => {
+                project::handle_objectives_command(self, params, "close")
+            }
+            "project.profile.readUnknownOutcomePolicy" => {
+                project::handle_profile_read_unknown_outcome_policy(self, params)
+            }
+            "project.profile.setUnknownOutcomePolicy" => {
+                project::handle_profile_set_unknown_outcome_policy(self, params)
+            }
+            "project.profile.readAvatar" => project_bot::handle_profile_read_avatar(self, params),
+            "project.profile.update" => project_bot::handle_profile_update(self, params),
+            "project.access.read" => project_bot::handle_access_read(self, params),
+            "project.access.update" => project_bot::handle_access_update(self, params),
+            "project.bot.markRead" => project_bot::handle_bot_mark_read(self, params),
+            "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
+            "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),
+            "project.bot.search" => project_bot::handle_bot_search(self, params),
+            "project.bot.diagnostics" => project_bot_ops::handle_bot_diagnostics(self, params),
+            "project.bot.continueHistory" => {
+                project_bot_ops::handle_bot_continue_history(self, params)
+            }
+            "project.bot.readInputDraft" => {
+                project_bot_ops::handle_bot_read_input_draft(self, params)
+            }
+            "project.bot.writeInputDraft" => {
+                project_bot_ops::handle_bot_write_input_draft(self, params)
+            }
+            "project.bot.readEvidence" => project_bot_ops::handle_bot_read_evidence(self, params),
+            _ => Err(RpcError::method_not_found(method)),
+        }
+    }
+}
+
+pub async fn serve_stdio(config: CoreServerConfig, shutdown: CancellationToken) -> io::Result<()> {
+    serve_io(tokio::io::stdin(), tokio::io::stdout(), config, shutdown).await
+}
+
+pub async fn serve_io<R, W>(
+    reader: R,
+    writer: W,
+    config: CoreServerConfig,
+    shutdown: CancellationToken,
+) -> io::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let mut line_reader = BoundedLineReader::new(reader);
+    let writer_handle = FrameWriterHandle::spawn(writer);
+    let peer = RpcPeer::new(
+        writer_handle.writer(),
+        shutdown.clone(),
+        config.reverse_request_timeout,
+    );
+    let (local_tx, mut local_rx) = mpsc::unbounded_channel::<LocalJob>();
+    let local_thread = std::thread::Builder::new()
+        .name("peer-core-local-rt".into())
+        .spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    while let Some(job) = local_rx.recv().await {
+                        job();
+                    }
+                }));
+            }
+        })?;
+
+    let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
+    let runtime = Arc::new(NativeConversationRuntime::new(
+        &config.data_home,
+        access.clone(),
+    ));
+    let context = Arc::new(ServerContext {
+        config,
+        started_at: Instant::now(),
+        state: Mutex::new(CoreState::default()),
+        peer: peer.clone(),
+        access,
+        runtime,
+        streams: ClassicStreamRegistry::new(),
+        goals: ClassicGoalRegistry::new(),
+        local_tx,
+        active_background: Arc::new(AtomicUsize::new(0)),
+        background_done: Arc::new(Notify::new()),
+    });
+    let mut tasks = JoinSet::new();
+
+    let loop_result: io::Result<()> = loop {
+        while tasks.try_join_next().is_some() {}
+
+        let next = line_reader.next_line(&shutdown).await;
+        let frame = match next {
+            Ok(Some(frame)) => frame,
+            Ok(None) => break Ok(()),
+            Err(err) => {
+                // Report frame limit errors cleanly before closing if the pipe is still open.
+                let _ = peer
+                    .writer
+                    .send_value(
+                        &RpcError::invalid_request(err.to_string()).to_response(Value::Null),
+                    )
+                    .await;
+                break Err(err);
+            }
+        };
+
+        if frame.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+
+        let decoded = match decode_json_bounded(
+            &frame,
+            JsonLimits {
+                bytes: MAX_FRAME_BYTES,
+                nodes: 32_768,
+                depth: 64,
+                string_bytes: MAX_INBOUND_STRING_BYTES,
+            },
+        ) {
+            Ok(doc) => doc.value,
+            Err(JsonDecodeError::LimitExceeded) => {
+                if let Err(write_err) = peer
+                    .writer
+                    .send_value(
+                        &RpcError::invalid_request("JSON frame limit exceeded")
+                            .to_response(Value::Null),
+                    )
+                    .await
+                {
+                    break Err(write_err);
+                }
+                continue;
+            }
+            Err(JsonDecodeError::InvalidJson) => {
+                if let Err(write_err) = peer
+                    .writer
+                    .send_value(&RpcError::parse_error("Invalid JSON").to_response(Value::Null))
+                    .await
+                {
+                    break Err(write_err);
+                }
+                continue;
+            }
+        };
+
+        let Some(obj) = decoded.as_object() else {
+            if let Err(write_err) = peer
+                .writer
+                .send_value(
+                    &RpcError::invalid_request("JSON-RPC payload must be an object")
+                        .to_response(Value::Null),
+                )
+                .await
+            {
+                break Err(write_err);
+            }
+            continue;
+        };
+
+        let reply_id = extract_valid_id(obj.get("id"));
+        if obj.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            let err_id = reply_id.flatten().unwrap_or(Value::Null);
+            if let Err(write_err) = peer
+                .writer
+                .send_value(
+                    &RpcError::invalid_request("jsonrpc version must be '2.0'").to_response(err_id),
+                )
+                .await
+            {
+                break Err(write_err);
+            }
+            continue;
+        }
+
+        // Handle responses to core -> host reverse requests directly on the read loop
+        // so concurrent in-flight request tasks never deadlock awaiting host responses.
+        if !obj.contains_key("method") {
+            let has_result = obj.contains_key("result");
+            let has_error = obj.contains_key("error");
+            if (has_result ^ has_error)
+                && let Some(id_str) = obj.get("id").and_then(Value::as_str)
+            {
+                peer.resolve_pending(id_str, &decoded);
+                continue;
+            }
+            let err_id = reply_id.flatten().unwrap_or(Value::Null);
+            if let Err(write_err) = peer
+                .writer
+                .send_value(
+                    &RpcError::invalid_request("Malformed JSON-RPC message").to_response(err_id),
+                )
+                .await
+            {
+                break Err(write_err);
+            }
+            continue;
+        }
+
+        let Some(method) = obj.get("method").and_then(Value::as_str) else {
+            let err_id = reply_id.flatten().unwrap_or(Value::Null);
+            if let Err(write_err) = peer
+                .writer
+                .send_value(
+                    &RpcError::invalid_request("JSON-RPC method must be a string")
+                        .to_response(err_id),
+                )
+                .await
+            {
+                break Err(write_err);
+            }
+            continue;
+        };
+
+        let params = obj.get("params").cloned().unwrap_or(Value::Null);
+        match reply_id {
+            // Invalid `id` type present on a request.
+            None if obj.contains_key("id") => {
+                if let Err(write_err) = peer
+                    .writer
+                    .send_value(
+                        &RpcError::invalid_request("Invalid JSON-RPC request id")
+                            .to_response(Value::Null),
+                    )
+                    .await
+                {
+                    break Err(write_err);
+                }
+            }
+            // Notification (no `"id"` field).
+            None => {
+                if method == "core.shutdown" {
+                    let _ = context.begin_shutdown();
+                    break Ok(());
+                }
+            }
+            // Request with valid `"id"`.
+            Some(Some(id)) => match method {
+                "core.initialize" => {
+                    let response = format_reply(id, context.initialize(params));
+                    if let Err(write_err) = peer.writer.send_value(&response).await {
+                        break Err(write_err);
+                    }
+                }
+                "core.shutdown" => {
+                    let response = format_reply(id, context.begin_shutdown());
+                    let send_res = peer.writer.send_value(&response).await;
+                    break send_res;
+                }
+                _ => {
+                    let ctx = Arc::clone(&context);
+                    let method_owned = method.to_owned();
+                    tasks.spawn(async move {
+                        let res = ctx.handle_request(&method_owned, params).await;
+                        let response = format_reply(id, res);
+                        let _ = ctx.peer.writer.send_value(&response).await;
+                    });
+                }
+            },
+            // Unreachable because reply_id == Some(None) doesn't happen, satisfy exhaustiveness.
+            Some(None) => unreachable!(),
+        }
+    };
+
+    drop(line_reader);
+    shutdown.cancel();
+    context.goals.cancel_all();
+    context.streams.cancel_all();
+    peer.fail_all_pending("Core server shutting down");
+    if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, async {
+        while tasks.join_next().await.is_some() {}
+        context.drain_background().await;
+    })
+    .await
+    .is_err()
+    {
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
+    drop(context);
+    drop(peer);
+    let _ = local_thread.join();
+    let flush_result = writer_handle.finish().await;
+
+    match (loop_result, flush_result) {
+        (Err(err), _) => Err(err),
+        (Ok(()), Err(flush_err)) => Err(flush_err),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn format_reply(id: Value, result: Result<Value, RpcError>) -> Value {
+    match result {
+        Ok(value) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": value,
+        }),
+        Err(err) => err.to_response(id),
+    }
+}
+
+/// Returns `Some(Some(id))` if `"id"` key is present and valid (`String | Number | Null`),
+/// `None` if `"id"` is absent OR invalid (callers check `obj.contains_key("id")`).
+fn extract_valid_id(id: Option<&Value>) -> Option<Option<Value>> {
+    let val = id?;
+    if val.is_string() || val.is_i64() || val.is_u64() || val.is_null() {
+        Some(Some(val.clone()))
+    } else {
+        None
+    }
+}

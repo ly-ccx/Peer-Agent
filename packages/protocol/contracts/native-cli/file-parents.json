@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Actual current TS FileProvider recursive write over owned synthetic roots. Native Grant/Resource/unknown behavior is separately verified.",
+  "nativeLimits": {
+    "missingParentDirectories": 128,
+    "scopePathBytes": 8192
+  },
+  "nativeErrors": [
+    "file_parent_limit",
+    "file_parent_unavailable",
+    "file_parent_changed",
+    "execution_outcome_unknown"
+  ],
+  "cases": [
+    {
+      "name": "nested Unicode",
+      "args": {
+        "path": "new/deep/事实.txt",
+        "content": "saved 🦀\n"
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "new/deep/事实.txt",
+          "bytes": 11,
+          "contentHash": "5d6a76bbdac6714486eef0f43d4408732d4291350d7b8e6acca5897da09456bf"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": "saved 🦀\n"
+      }
+    },
+    {
+      "name": "empty file",
+      "args": {
+        "path": "empty/child.txt",
+        "content": ""
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "empty/child.txt",
+          "bytes": 0,
+          "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": ""
+      }
+    },
+    {
+      "name": "normalized relative path",
+      "args": {
+        "path": "unused/../normalized/deep/file.txt",
+        "content": "normalized"
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "normalized/deep/file.txt",
+          "bytes": 10,
+          "contentHash": "b32b577d63a2a22e3a6b63b830d8b421e5f628091bfd3d9b9391b27c802fe23a"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": "normalized"
+      }
+    },
+    {
+      "name": "existing parent",
+      "directories": [
+        "workspace/exists"
+      ],
+      "args": {
+        "path": "exists/new/file.txt",
+        "content": "new"
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "exists/new/file.txt",
+          "bytes": 3,
+          "contentHash": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": "new"
+      }
+    },
+    {
+      "name": "outside workspace keeps existing path policy",
+      "args": {
+        "path": "../outside/deep/file.txt",
+        "content": "explicit external file"
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "../outside/deep/file.txt",
+          "bytes": 22,
+          "contentHash": "2b761e1ab1b52006ee219402882373d336b7adfd355fb5836147736190861b90"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": "explicit external file"
+      }
+    },
+    {
+      "name": "existing directory alias",
+      "directories": [
+        "elsewhere"
+      ],
+      "alias": {
+        "path": "workspace/link",
+        "target": "elsewhere"
+      },
+      "args": {
+        "path": "link/new/file.txt",
+        "content": "resolved alias"
+      },
+      "expected": {
+        "status": "completed",
+        "output": {
+          "path": "link/new/file.txt",
+          "bytes": 14,
+          "contentHash": "f78188c0566d3c76f5a1ff15b8795ecb06e7244fb24eec26dfdc19d895d35e8a"
+        },
+        "error": null,
+        "targetExists": true,
+        "targetContent": "resolved alias"
+      },
+      "nativeOutputPath": "../elsewhere/new/file.txt",
+      "nativeDelta": "The existing native Provider reports canonical workspace-relative output paths; TS retains the requested alias. Content/hash and actual target identity are unchanged (ADR51 host output shapes)."
+    },
+    {
+      "name": "denied write creates no parents",
+      "denied": true,
+      "args": {
+        "path": "denied/deep/file.txt",
+        "content": "never"
+      },
+      "expected": {
+        "status": "denied",
+        "output": null,
+        "error": "synthetic",
+        "targetExists": false,
+        "targetContent": null
+      }
+    }
+  ]
+}

@@ -10,6 +10,8 @@ import { createSessionSupervisor } from './session-supervisor.mjs';
 
 const MODEL = { providerId: 'p', modelId: 'm', modelProviderId: 'mp', family: 'f' };
 
+// The package runner executes this wall-clock benchmark after its parallel
+// behavioral files finish. Keep the original elapsed/read-count gates below.
 test('reconcile settles many completed plans without rereading the whole catalog each time', async () => {
   const count = 48;
   const dir = mkdtempSync(path.join(tmpdir(), 'reconcile-scale-'));

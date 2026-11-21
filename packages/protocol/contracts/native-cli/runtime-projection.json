@@ -1,0 +1,755 @@
+{
+  "schemaVersion": 1,
+  "modes": [
+    "chat",
+    "plan",
+    "goal",
+    "explorer",
+    "project_agent",
+    "memory_curator",
+    "compact",
+    "system"
+  ],
+  "cases": [
+    {
+      "name": "unscoped",
+      "manifest": {},
+      "expected": [
+        {
+          "mode": "chat",
+          "available": true
+        },
+        {
+          "mode": "plan",
+          "available": true
+        },
+        {
+          "mode": "goal",
+          "available": true
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "empty-scopes",
+      "manifest": {
+        "modeScopes": []
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": true
+        },
+        {
+          "mode": "plan",
+          "available": true
+        },
+        {
+          "mode": "goal",
+          "available": true
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "ordinary-only",
+      "manifest": {
+        "modeScopes": [
+          "chat",
+          "goal"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": true
+        },
+        {
+          "mode": "plan",
+          "available": false
+        },
+        {
+          "mode": "goal",
+          "available": true
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "readonly",
+      "manifest": {
+        "modeScopes": [
+          "chat",
+          "plan",
+          "goal",
+          "explorer",
+          "project_agent"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": true
+        },
+        {
+          "mode": "plan",
+          "available": true
+        },
+        {
+          "mode": "goal",
+          "available": true
+        },
+        {
+          "mode": "explorer",
+          "available": true
+        },
+        {
+          "mode": "project_agent",
+          "available": true
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "internal-only",
+      "manifest": {
+        "modeScopes": [
+          "compact",
+          "system",
+          "memory_curator"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": false
+        },
+        {
+          "mode": "plan",
+          "available": false
+        },
+        {
+          "mode": "goal",
+          "available": false
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": true
+        },
+        {
+          "mode": "compact",
+          "available": true
+        },
+        {
+          "mode": "system",
+          "available": true
+        }
+      ]
+    },
+    {
+      "name": "future-scope",
+      "manifest": {
+        "modeScopes": [
+          "future"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": false
+        },
+        {
+          "mode": "plan",
+          "available": false
+        },
+        {
+          "mode": "goal",
+          "available": false
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "no-trim-identity",
+      "manifest": {
+        "modeScopes": [
+          " chat "
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": false
+        },
+        {
+          "mode": "plan",
+          "available": false
+        },
+        {
+          "mode": "goal",
+          "available": false
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "duplicate-scopes",
+      "manifest": {
+        "modeScopes": [
+          "chat",
+          "chat"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "available": true
+        },
+        {
+          "mode": "plan",
+          "available": false
+        },
+        {
+          "mode": "goal",
+          "available": false
+        },
+        {
+          "mode": "explorer",
+          "available": false
+        },
+        {
+          "mode": "project_agent",
+          "available": false
+        },
+        {
+          "mode": "memory_curator",
+          "available": false
+        },
+        {
+          "mode": "compact",
+          "available": false
+        },
+        {
+          "mode": "system",
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "invalid-null",
+      "manifest": {
+        "modeScopes": null
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-string",
+      "manifest": {
+        "modeScopes": "chat"
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-boolean",
+      "manifest": {
+        "modeScopes": true
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-number",
+      "manifest": {
+        "modeScopes": 1
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-member",
+      "manifest": {
+        "modeScopes": [
+          "chat",
+          null
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-empty",
+      "manifest": {
+        "modeScopes": [
+          ""
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-blank",
+      "manifest": {
+        "modeScopes": [
+          " \t\n"
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    },
+    {
+      "name": "invalid-js-blank",
+      "manifest": {
+        "modeScopes": [
+          "﻿ "
+        ]
+      },
+      "expected": [
+        {
+          "mode": "chat",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "plan",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "goal",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "explorer",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "project_agent",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "memory_curator",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "compact",
+          "error": "manifest_invalid"
+        },
+        {
+          "mode": "system",
+          "error": "manifest_invalid"
+        }
+      ]
+    }
+  ],
+  "localMembership": [
+    {
+      "mode": "chat",
+      "capabilities": [
+        "local.file.edit",
+        "local.file.list",
+        "local.file.read",
+        "local.file.search",
+        "local.file.write",
+        "local.git.query",
+        "local.search.aggregate",
+        "local.shell.exec",
+        "local.web.fetch"
+      ]
+    },
+    {
+      "mode": "plan",
+      "capabilities": [
+        "local.file.list",
+        "local.file.read",
+        "local.file.search",
+        "local.git.query",
+        "local.search.aggregate",
+        "local.web.fetch"
+      ]
+    },
+    {
+      "mode": "goal",
+      "capabilities": [
+        "local.file.edit",
+        "local.file.list",
+        "local.file.read",
+        "local.file.search",
+        "local.file.write",
+        "local.git.query",
+        "local.search.aggregate",
+        "local.shell.exec",
+        "local.web.fetch"
+      ]
+    },
+    {
+      "mode": "explorer",
+      "capabilities": [
+        "local.file.list",
+        "local.file.read",
+        "local.file.search",
+        "local.git.query",
+        "local.search.aggregate"
+      ]
+    },
+    {
+      "mode": "project_agent",
+      "capabilities": [
+        "local.file.list",
+        "local.file.read",
+        "local.file.search",
+        "local.git.query",
+        "local.search.aggregate"
+      ]
+    },
+    {
+      "mode": "memory_curator",
+      "capabilities": []
+    },
+    {
+      "mode": "compact",
+      "capabilities": []
+    },
+    {
+      "mode": "system",
+      "capabilities": []
+    }
+  ]
+}

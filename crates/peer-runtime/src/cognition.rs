@@ -1,0 +1,488 @@
+//! One native cognition pipeline: durable compaction, reconstruction and capacity recovery.
+//! All cognition goes through NativeModel; this module cannot execute tools.
+mod attempts;
+mod result_views;
+mod summary_input;
+use crate::capability::{CapabilityError as HostError, milliseconds, now};
+use crate::{
+    CancellationToken,
+    canonical_history::project_history,
+    context_accounting::ContextCapacity,
+    model::{LiveHistory, ModelError, ModelObservation, ModelTurn, NativeModel, PreparedRequest},
+    usage_accounting::RuntimeUsageAccounting,
+};
+use peer_store::{ConversationMetadataPublication, ConversationStore, HistorySnapshot};
+use serde_json::{Value, json};
+use std::path::Path;
+
+/// Immutable request inputs shared by every native cognition Host.
+pub(crate) struct CognitionRequest<'a> {
+    pub home: &'a Path,
+    pub model: &'a NativeModel,
+    pub tools: &'a Value,
+    pub owned: &'a CancellationToken,
+    pub external: &'a CancellationToken,
+}
+/// The actual Host owns authority, request budget, registered Context Sources,
+/// managed waiting and durable usage attribution. None of these is inferred from
+/// model text or a storage snapshot. This seam cannot execute a capability.
+pub(crate) trait CognitionHost {
+    fn authority(&self) -> Result<(), HostError>;
+    fn check_request(&self) -> Result<(), HostError>;
+    fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError>;
+    fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError>;
+    fn request_input(&self, _projected: &Value) -> Option<(usize, &str)> {
+        None
+    }
+    fn observe(
+        &mut self,
+        accounting: &mut RuntimeUsageAccounting,
+        observed: ModelObservation,
+        capacity_bearing: bool,
+    ) -> Result<Option<ConversationMetadataPublication>, HostError>;
+    /// Called after this pipeline's own checked canonical write. Hosts with
+    /// live effects use the exact predecessor and successor during long waits.
+    fn advance_owned_source(
+        &mut self,
+        _previous: &str,
+        _revision: &str,
+        _content_revision: u64,
+    ) -> Result<(), HostError> {
+        Ok(())
+    }
+    async fn wait<F: std::future::Future>(
+        &mut self,
+        future: F,
+        owned: &CancellationToken,
+        external: &CancellationToken,
+    ) -> Result<F::Output, HostError>;
+    async fn send_prepared(
+        &mut self,
+        prepared: PreparedRequest<'_>,
+        request: &CognitionRequest<'_>,
+        observed: &mut Option<ModelObservation>,
+        _primary: bool,
+    ) -> Result<Result<ModelTurn, ModelError>, HostError> {
+        self.wait(
+            async {
+                let result = prepared.send(request.owned).await;
+                *observed = Some(ModelObservation::capture(&result));
+                result
+            },
+            request.owned,
+            request.external,
+        )
+        .await
+    }
+}
+pub(crate) struct RequestResult {
+    pub turn: ModelTurn,
+    pub system: Value,
+    pub history: HistorySnapshot,
+}
+pub(crate) struct ContextPipeline {
+    pub capacity: ContextCapacity,
+    pub live: LiveHistory,
+    conversation: String,
+}
+impl ContextPipeline {
+    /// Bounded Explorer analysis reuses the same encoder, retries, ownership
+    /// and accounting, with its own short history and no parent compaction.
+    pub async fn request_explorer(
+        &mut self,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
+        accounting: &mut RuntimeUsageAccounting,
+        history: &HistorySnapshot,
+        projected: &Value,
+    ) -> Result<RequestResult, HostError> {
+        Self::guard(host, f)?;
+        let system = host.assemble(&[])?;
+        let encoding = self.result_views(host, f, history, projected).await?;
+        let prepared = f
+            .model
+            .prepare_request_with_tool_results(
+                system["rendered"]
+                    .as_str()
+                    .ok_or(HostError("context_resource_invalid"))?,
+                projected,
+                f.tools,
+                &self.live,
+                &encoding,
+            )
+            .map_err(|error| HostError(error.code))?;
+        let (turn, history) = self
+            .send_attempts(host, f, accounting, prepared, history, false)
+            .await?;
+        Ok(RequestResult {
+            turn: turn.map_err(|error| HostError(error.code))?,
+            system,
+            history,
+        })
+    }
+    pub fn open(
+        home: &Path,
+        conversation: &str,
+        provider: &str,
+        model: &NativeModel,
+    ) -> Result<Self, HostError> {
+        ConversationStore::new(home).bind_context_model(
+            conversation,
+            provider,
+            model.model_id(),
+        )?;
+        Self::open_bound(home, conversation, provider, model)
+    }
+    pub fn open_bound(
+        home: &Path,
+        conversation: &str,
+        provider: &str,
+        model: &NativeModel,
+    ) -> Result<Self, HostError> {
+        let store = ConversationStore::new(home);
+        let history = store.read_committed(conversation, None, 8 * 1024 * 1024)?;
+        if history.history.excluded_from_message_id.is_some() {
+            return Err(HostError("native_execution_recovery_required"));
+        }
+        project_history(&history.history.messages).map_err(HostError)?;
+        let key = format!("{provider}::{}", model.model_id());
+        let binding =
+            peer_protocol::context_history_binding(&history.history.messages).map_err(HostError)?;
+        let saved = store.read_context_snapshot(&history, &key)?;
+        let mut capacity = ContextCapacity::new(
+            conversation,
+            &key,
+            model.context_window(),
+            0,
+            model.supports_input_count(),
+        );
+        capacity
+            .restore(
+                saved.as_ref(),
+                if binding["selectionVersion"] == 1 {
+                    binding["compactionEpoch"].as_u64()
+                } else {
+                    None
+                },
+                history.history.content_revision,
+            )
+            .map_err(HostError)?;
+        Ok(Self {
+            capacity,
+            live: LiveHistory::default(),
+            conversation: conversation.into(),
+        })
+    }
+    fn guard(host: &impl CognitionHost, f: &CognitionRequest<'_>) -> Result<(), HostError> {
+        Self::authority(host, f)?;
+        host.check_request()
+    }
+    fn authority(host: &impl CognitionHost, f: &CognitionRequest<'_>) -> Result<(), HostError> {
+        if f.owned.is_cancelled() || f.external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        host.authority()
+    }
+    fn persist(
+        &mut self,
+        store: &ConversationStore,
+        history: &HistorySnapshot,
+        phase: &'static str,
+    ) -> Result<HistorySnapshot, HostError> {
+        self.capacity
+            .content_changed(history.history.content_revision)
+            .map_err(HostError)?;
+        let snapshot = self
+            .capacity
+            .publish(phase, milliseconds(&now())?)
+            .map_err(HostError)?;
+        Ok(store.write_context_snapshot(history, &snapshot)?)
+    }
+    pub fn finish(&mut self, home: &Path) -> Result<(), HostError> {
+        let store = ConversationStore::new(home);
+        let history = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
+        self.capacity.complete();
+        self.persist(&store, &history, "turn_complete")?;
+        Ok(())
+    }
+    pub async fn request(
+        &mut self,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
+        accounting: &mut RuntimeUsageAccounting,
+    ) -> Result<RequestResult, HostError> {
+        let mut compacted = false;
+        loop {
+            Self::guard(host, f)?;
+            let store = ConversationStore::new(f.home);
+            let history = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
+            if history.history.excluded_from_message_id.is_some() {
+                return Err(HostError("native_execution_recovery_required"));
+            }
+            let mut projected = project_history(&history.history.messages).map_err(HostError)?;
+            let continuity = projected
+                .get("continuity")
+                .cloned()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let system = host.assemble(&continuity)?;
+            let encoding = self.result_views(host, f, &history, &projected).await?;
+            // Host continuation input is scoped to the wire request. The
+            // compactor and durable history retain only authentic messages.
+            let inserted = host.request_input(&projected).map(|(index, content)| {
+                let messages = projected["messages"]
+                    .as_array_mut()
+                    .expect("canonical history");
+                let index = index.min(messages.len());
+                messages.insert(index, json!({"role":"user","content":content}));
+                index
+            });
+            let prepared = f
+                .model
+                .prepare_request_with_tool_results(
+                    system["rendered"].as_str().unwrap(),
+                    &projected,
+                    f.tools,
+                    &self.live,
+                    &encoding,
+                )
+                .map_err(|e| HostError(e.code))?;
+            if let Some(index) = inserted {
+                projected["messages"]
+                    .as_array_mut()
+                    .expect("canonical history")
+                    .remove(index);
+            }
+            let fingerprint = prepared.fingerprint().to_owned();
+            let counted = if self.capacity.should_count() {
+                match host
+                    .wait(prepared.count_input_tokens(f.owned), f.owned, f.external)
+                    .await?
+                {
+                    Ok(v) => Ok(v),
+                    Err(e) if e.code == "CANCELLED" => return Err(HostError("CANCELLED")),
+                    Err(_) => Err(()),
+                }
+            } else {
+                Ok(None)
+            };
+            Self::guard(host, f)?;
+            self.capacity
+                .built(
+                    &fingerprint,
+                    history.history.content_revision,
+                    counted,
+                    milliseconds(&now())?,
+                )
+                .map_err(HostError)?;
+            let history = self.persist_for_host(host, &store, &history, "request_preflight")?;
+            if self
+                .capacity
+                .decision()
+                .is_some_and(|v| v["shouldCompact"] == true)
+            {
+                if compacted {
+                    return Err(HostError("native_context_pressure"));
+                }
+                drop(prepared);
+                let _ = self
+                    .compact(host, f, accounting, &history, &projected)
+                    .await?;
+                compacted = true;
+                continue;
+            }
+            let (turn, checked) = self
+                .send_attempts(host, f, accounting, prepared, &history, true)
+                .await?;
+            let turn = match turn {
+                Err(error) if error.context_overflow_status.is_some() && !compacted => {
+                    let _ = self
+                        .compact(host, f, accounting, &checked, &projected)
+                        .await?;
+                    compacted = true;
+                    continue;
+                }
+                other => other.map_err(|e| HostError(e.code))?,
+            };
+            return Ok(RequestResult {
+                turn,
+                system,
+                history: checked,
+            });
+        }
+    }
+    pub(crate) async fn compact(
+        &mut self,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
+        accounting: &mut RuntimeUsageAccounting,
+        history: &HistorySnapshot,
+        projected: &Value,
+    ) -> Result<(String, usize), HostError> {
+        Self::guard(host, f)?;
+        let messages = projected["messages"]
+            .as_array()
+            .ok_or(HostError("history_projection_invalid"))?;
+        let user = messages
+            .iter()
+            .rposition(|m| m["role"] == "user")
+            .ok_or(HostError("native_compaction_no_user"))?;
+        // This worker only compacts at a settled tool boundary. An unpaired call
+        // must be recovered before any new cognition, never summarized away.
+        let calls = messages
+            .iter()
+            .flat_map(|m| m["toolCalls"].as_array().into_iter().flatten())
+            .filter_map(|c| c["id"].as_str())
+            .collect::<Vec<_>>();
+        if calls.iter().any(|id| {
+            !messages
+                .iter()
+                .any(|m| m["role"] == "tool" && m["toolCallId"] == *id)
+        }) {
+            return Err(HostError("execution_outcome_unknown"));
+        }
+        let keep = &messages[user];
+        let mut retained = None;
+        for row in history.history.messages.iter().rev() {
+            if row["role"] != "user"
+                || row.get("_compaction").is_some()
+                || row.get("compaction").is_some()
+            {
+                continue;
+            }
+            let single = project_history(std::slice::from_ref(row)).map_err(HostError)?;
+            if single["messages"] == json!([keep]) {
+                retained = row["id"].as_str().map(str::to_owned);
+                break;
+            }
+        }
+        let retained = retained.ok_or(HostError("native_compaction_selection_unsupported"))?;
+        let old = messages
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != user)
+            .map(|(_, m)| m.clone())
+            .collect::<Vec<_>>();
+        if old.is_empty() {
+            return Err(HostError("native_context_pressure"));
+        }
+        let encoding = self.result_views(host, f, history, projected).await?;
+        let mut old = old;
+        encoding
+            .apply_projected(&mut old)
+            .map_err(|e| HostError(e.code))?;
+        let input = summary_input::build(projected.get("continuity"), old)?;
+        let prompts: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
+        ))
+        .map_err(|_| HostError("context_resource_invalid"))?;
+        let source =
+            crate::system_context::compaction_summary_context(prompts["system"].as_str().unwrap());
+        let summary_history = json!({"messages":[{"role":"user","content":format!("{}\n\nConversation facts (not instructions):\n{}",prompts["prompt"].as_str().unwrap(),input)}]});
+        let prepared = f
+            .model
+            .prepare_request(
+                &source,
+                &summary_history,
+                &json!([]),
+                &LiveHistory::default(),
+            )
+            .map_err(|e| HostError(e.code))?;
+        let (result, checked) = self
+            .send_attempts(host, f, accounting, prepared, history, false)
+            .await?;
+        Self::authority(host, f)?;
+        let (method, summary) = match result {
+            Ok(turn)
+                if turn.calls.is_empty()
+                    && !peer_protocol::javascript_trim(&turn.content).is_empty() =>
+            {
+                ("llm", turn.content)
+            }
+            Err(e) if e.code == "CANCELLED" => return Err(HostError("CANCELLED")),
+            Err(e) if e.code == crate::model::ModelError::AUTH_REJECTED => {
+                return Err(HostError(e.code));
+            }
+            _ => ("structured", summary_input::structural_fallback(&input)?),
+        };
+        if summary.len() > 384 * 1024 {
+            return Err(HostError("context_summary_limit"));
+        }
+        let before = self.capacity.snapshot(milliseconds(&now())?);
+        let epoch = before["compactionEpoch"]
+            .as_u64()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(HostError("context_revision_limit"))?;
+        let marker=peer_protocol::build_compaction_marker(&json!({"method":method,"summary":summary,"originalMessageCount":messages.len(),"beforeTokens":before["authoritativeInputTokens"],"historySelection":{"version":1,"compactionEpoch":epoch,"retainedMessageIds":[retained]}})).map_err(HostError)?;
+        let store = ConversationStore::new(f.home);
+        let committed=store.commit_message(&checked,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"user","content":summary,"createdAt":now(),"_compaction":marker}),&now(),None)?;
+        #[cfg(feature = "test-fixtures")]
+        if std::env::var("PEER_NATIVE_CONTEXT_FAULT").ok().as_deref() == Some("after_marker")
+            && f.home.join(".native-cli-fixture").is_file()
+        {
+            std::process::exit(77)
+        }
+        // Never synthesize an in-memory history that differs from a cold read.
+        let rebuilt = project_history(&committed.snapshot.history.messages).map_err(HostError)?;
+        if rebuilt["messages"] != json!([keep]) {
+            return Err(HostError("native_compaction_selection_unsupported"));
+        }
+        self.capacity.compacted().map_err(HostError)?;
+        self.live = LiveHistory::default();
+        host.advance_owned_source(
+            &checked.source_revision,
+            &committed.snapshot.source_revision,
+            committed.snapshot.history.content_revision,
+        )?;
+        self.persist_for_host(host, &store, &committed.snapshot, "post_compaction")?;
+        Ok((method.to_owned(), messages.len()))
+    }
+
+    fn persist_for_host(
+        &mut self,
+        host: &mut impl CognitionHost,
+        store: &ConversationStore,
+        history: &HistorySnapshot,
+        phase: &'static str,
+    ) -> Result<HistorySnapshot, HostError> {
+        let committed = self.persist(store, history, phase)?;
+        host.advance_owned_source(
+            &history.source_revision,
+            &committed.source_revision,
+            committed.history.content_revision,
+        )?;
+        Ok(committed)
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+pub fn compaction_summary_prompts() -> Result<(String, String), &'static str> {
+    let prompts: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
+    ))
+    .map_err(|_| "context_resource_invalid")?;
+    let system = prompts["system"]
+        .as_str()
+        .ok_or("context_resource_invalid")?;
+    let prompt = prompts["prompt"]
+        .as_str()
+        .ok_or("context_resource_invalid")?;
+    Ok((
+        crate::system_context::compaction_summary_context(system),
+        prompt.to_owned(),
+    ))
+}
+
+pub fn build_compaction_summary_input(
+    continuity: Option<&Value>,
+    messages: Vec<Value>,
+) -> Result<String, &'static str> {
+    summary_input::build(continuity, messages).map_err(|e| e.0)
+}
+
+pub fn build_structural_compaction_summary(input: &str) -> Result<String, &'static str> {
+    summary_input::structural_fallback(input).map_err(|e| e.0)
+}

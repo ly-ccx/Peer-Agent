@@ -2,13 +2,32 @@ import { createHash } from 'node:crypto';
 import { isMemoryWorkspaceId, validateObjectiveToolInput } from '@peer-agent/runtime-node';
 
 /** A settings click is a real user action. Persist its canonical fact before changing objective authority. */
-export function createProjectObjectivesService({service,store,profileStore,conversationStore,enabled=()=>true,holdsLease=()=>true,onAppendedMessage=null}={}) {
+export function createProjectObjectivesService({service,store,profileStore,conversationStore,classicCoreBridge=null,enabled=()=>true,holdsLease=()=>true,onAppendedMessage=null,onChanged=null}={}) {
+  function useRustCore(){return Boolean(classicCoreBridge?.isAvailable?.());}
   function view(workspaceId){return {workspaceId,conversationId:profileStore.read(workspaceId)?.agentConversationId,currentInputAnchors:[]};}
-  function list(payload){if(!isMemoryWorkspaceId(payload?.workspaceId))return {ok:false,code:'INVALID_WORKSPACE'};return service.list({},view(payload.workspaceId));}
+  function list(payload){
+    if(!isMemoryWorkspaceId(payload?.workspaceId))return {ok:false,code:'INVALID_WORKSPACE'};
+    if(useRustCore())return classicCoreBridge.projectObjectivesList({workspaceId:payload.workspaceId});
+    return service.list({},view(payload.workspaceId));
+  }
   function command(method,payload={}){
     const {workspaceId,objectiveId,requestId}=payload;
     if(!isMemoryWorkspaceId(workspaceId)||typeof objectiveId!=='string'||typeof requestId!=='string'||!requestId||requestId.length>200)return {ok:false,code:'INVALID_INPUT'};
-    if(!enabled()||profileStore.read(workspaceId)?.status!=='active')return {ok:false,code:'PROJECT_AGENT_DISABLED'};
+    if(!enabled())return {ok:false,code:'PROJECT_AGENT_DISABLED'};
+    if(useRustCore()){
+      if(!holdsLease(workspaceId))return {ok:false,code:'NOT_HOST'};
+      const call=method==='update'?classicCoreBridge.projectObjectivesUpdate
+        :method==='pause'?classicCoreBridge.projectObjectivesPause
+        :method==='resume'?classicCoreBridge.projectObjectivesResume
+        :classicCoreBridge.projectObjectivesDelete;
+      return call(payload).then((res)=>{
+        if(!res?.ok)return res ?? {ok:false,code:'INVALID_INPUT'};
+        if(res.appendedMessage&&res.conversationId)onAppendedMessage?.({conversationId:res.conversationId,message:res.appendedMessage});
+        onChanged?.(workspaceId);
+        return {ok:true,item:res.item,...(res.replayed?{replayed:true}:{})};
+      });
+    }
+    if(profileStore.read(workspaceId)?.status!=='active')return {ok:false,code:'PROJECT_AGENT_DISABLED'};
     if(!holdsLease(workspaceId))return {ok:false,code:'NOT_HOST'};
     const item=store.get(workspaceId,objectiveId);if(!item)return {ok:false,code:'NOT_FOUND'};
     const patch=payload.patch || {};

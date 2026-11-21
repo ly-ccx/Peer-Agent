@@ -3,6 +3,7 @@ import {
   refreshGoogleAccessToken as refreshSharedGoogleAccessToken,
   startGoogleBrowserLogin as startSharedGoogleBrowserLogin,
 } from '@peer-agent/runtime-node';
+import { createOAuthRefreshFetch } from '../provider-transports/oauth-refresh-fetch.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 
 async function openInBrowser(url) {
@@ -14,7 +15,7 @@ async function openInBrowser(url) {
 export async function refreshGoogleAccessToken(tokens, options = {}) {
   return refreshSharedGoogleAccessToken(tokens, {
     ...options,
-    fetchImpl: options.fetchImpl ?? fetchWithConnectionRecovery,
+    fetchImpl: options.fetchImpl ?? createOAuthRefreshFetch(fetchWithConnectionRecovery),
   });
 }
 
@@ -22,7 +23,7 @@ export async function refreshGoogleAccessToken(tokens, options = {}) {
 export async function ensureFreshGoogleTokens(tokens, options = {}) {
   return ensureFreshSharedGoogleTokens(tokens, {
     ...options,
-    fetchImpl: options.fetchImpl ?? fetchWithConnectionRecovery,
+    fetchImpl: options.fetchImpl ?? createOAuthRefreshFetch(fetchWithConnectionRecovery),
   });
 }
 

@@ -107,6 +107,7 @@ export function createProjectAgentApplicationService({
   requestTakeover = null,
   diagnostics = null,
   accessAuthority = null,
+  classicCoreBridge = null,
 } = {}) {
   const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
@@ -116,7 +117,13 @@ export function createProjectAgentApplicationService({
   } });
   const pendingChanged = new Set();
   const pendingConversation = new Set();
-  const accessPolicy = createBotAccessPolicyService({ authority: accessAuthority, enabled, changed: queueChanged, approvals });
+  const accessPolicy = createBotAccessPolicyService({
+    authority: accessAuthority,
+    enabled,
+    changed: queueChanged,
+    approvals,
+    classicCoreBridge,
+  });
   let changedTimer = null;
   let conversationTimer = null;
 
@@ -192,6 +199,9 @@ export function createProjectAgentApplicationService({
 
   function readAvatar(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectProfileReadAvatar({ workspaceId: payload.workspaceId });
+    }
     const result = profileStore?.readAvatar?.(payload.workspaceId);
     if (!result?.ok) return { ok: false, code: result?.code || 'INVALID_IMAGE' };
     return { ok: true, dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}` };
@@ -233,6 +243,33 @@ export function createProjectAgentApplicationService({
   async function updateProfile(payload = {}, sender = null) {
     if (!open()) return disabled();
     const workspaceId = payload?.workspaceId;
+    if (classicCoreBridge?.isAvailable?.()) {
+      if (profileStore) {
+        const current = profileStore.read?.(workspaceId);
+        if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
+      }
+      const policy = profilePolicyPatch(payload, listModels());
+      if (!policy.ok) return policy;
+      let avatarSourcePath;
+      if (payload.chooseAvatar === true) {
+        if (typeof chooseAvatar !== 'function') return { ok: false, code: 'AVATAR_UNAVAILABLE' };
+        const sourcePath = await chooseAvatar(sender);
+        if (!sourcePath) return { ok: false, code: 'CANCELLED' };
+        avatarSourcePath = sourcePath;
+      }
+      const rpcParams = {
+        workspaceId,
+        ...(typeof payload.displayName === 'string' ? { displayName: payload.displayName } : {}),
+        ...(payload.regenerateAvatar === true ? { regenerateAvatar: true } : {}),
+        ...(payload.avatarColor !== undefined ? { avatarColor: payload.avatarColor } : {}),
+        ...(typeof payload.proactivity === 'string' ? { proactivity: payload.proactivity } : {}),
+        ...(avatarSourcePath ? { avatarSourcePath } : {}),
+        ...policy.patch,
+      };
+      const result = await classicCoreBridge.projectProfileUpdate(rpcParams);
+      if (result?.ok) queueChanged(workspaceId);
+      return result;
+    }
     const current = profileStore?.read?.(workspaceId);
     if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
     const policy = profilePolicyPatch(payload, listModels());
@@ -283,6 +320,17 @@ export function createProjectAgentApplicationService({
 
   function draftRequest(payload, operation) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface)) return { ok: false, code: 'NOT_FOUND' };
+      const rpc = operation === 'read'
+        ? classicCoreBridge.projectBotReadInputDraft(payload)
+        : classicCoreBridge.projectBotWriteInputDraft(payload);
+      return rpc.then(res => (
+        res?.code === 'RESOURCE_FEEDBACK_HOST_REQUIRED'
+          ? ((!directory || directory.hasActiveBot(payload?.workspaceId)) ? inputDrafts[operation](payload) : { ok: false, code: 'NOT_FOUND' })
+          : res
+      ));
+    }
     if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface) || !directory.hasActiveBot(payload?.workspaceId)) return { ok: false, code: 'NOT_FOUND' };
     return inputDrafts[operation](payload);
   }
@@ -474,7 +522,11 @@ export function createProjectAgentApplicationService({
   function readUnknownOutcomePolicy(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
-    if (!workspaceId || typeof profileStore?.readUnknownOutcomePolicy !== 'function') return { ok: false, code: 'invalid_input' };
+    if (!workspaceId) return { ok: false, code: 'invalid_input' };
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectProfileReadUnknownOutcomePolicy({ workspaceId });
+    }
+    if (typeof profileStore?.readUnknownOutcomePolicy !== 'function') return { ok: false, code: 'invalid_input' };
     const result = profileStore.readUnknownOutcomePolicy(workspaceId);
     if (result.ok) return { ok: true, policy: result.policy };
     return result.code === 'NOT_FOUND' ? { ok: false, code: 'workspace_not_found' } : { ok: false, code: 'unknown_outcome_policy_unsupported' };
@@ -484,7 +536,28 @@ export function createProjectAgentApplicationService({
   function setUnknownOutcomePolicy(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
-    if (!workspaceId || !['ask', 'bot_verified'].includes(payload.tier) || typeof profileStore?.setUnknownOutcomePolicy !== 'function') {
+    if (!workspaceId || !['ask', 'bot_verified'].includes(payload.tier)) {
+      return { ok: false, code: 'invalid_input' };
+    }
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectProfileSetUnknownOutcomePolicy({ workspaceId, tier: payload.tier })
+        .then((result) => {
+          appendObligationLog({
+            event: 'set_unknown_outcome_policy',
+            workspaceId,
+            tier: payload.tier,
+            ok: result?.ok === true,
+            code: result?.ok === true ? null : result?.code || 'failed',
+            policyId: result?.policy?.policyId || null,
+            revision: result?.policy?.revision ?? null,
+          });
+          return result?.ok === true
+            ? { ok: true, policy: result.policy }
+            : { ok: false, code: result?.code || 'failed' };
+        });
+    }
+    if (typeof profileStore?.setUnknownOutcomePolicy !== 'function') {
       return { ok: false, code: 'invalid_input' };
     }
     const result = profileStore.setUnknownOutcomePolicy(workspaceId, { tier: payload.tier });
@@ -604,6 +677,9 @@ export function createProjectAgentApplicationService({
 
   function listApprovals(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotListApprovals(payload || {});
+    }
     return { ok: true, approvals: approvals.list(payload) };
   }
 
@@ -732,26 +808,41 @@ export function createProjectAgentApplicationService({
     return { ok: true, approval: saved, ...(resumed ? { resumed } : {}) };
   }
 
-  function markRead(payload = {}) {
-    if (!open()) return disabled();
-    if (payload?.viewing === false) {
-      if (typeof onViewing === 'function') onViewing(null);
-      return { ok: true, viewing: false };
-    }
-    const marked = directory.markRead(payload.workspaceId);
+  function finishMarkRead(workspaceId, marked) {
     if (marked?.ok) {
-      if (marked.changed !== false) queueChanged(payload.workspaceId);
-      if (typeof onViewing === 'function') onViewing(payload.workspaceId);
+      if (marked.changed !== false) queueChanged(workspaceId);
+      if (typeof onViewing === 'function') onViewing(workspaceId);
       const { changed, ...result } = marked;
       return result;
     }
     return marked;
   }
 
+  function markRead(payload = {}) {
+    if (!open()) return disabled();
+    if (payload?.viewing === false) {
+      if (typeof onViewing === 'function') onViewing(null);
+      return { ok: true, viewing: false };
+    }
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotMarkRead({ workspaceId: payload.workspaceId })
+        .then(marked => finishMarkRead(payload.workspaceId, marked));
+    }
+    return finishMarkRead(payload.workspaceId, directory.markRead(payload.workspaceId));
+  }
+
   function search(payload = {}) {
     if (!open()) return disabled();
     const snapshot = typeof directory?.query === 'function' ? directory.query(payload.query) : null;
     const items = snapshot?.items ?? (typeof directory?.search === 'function' ? directory.search(payload.query) : []);
+    if (classicCoreBridge?.isAvailable?.()) {
+      const query = typeof payload?.query === 'string' ? payload.query : '';
+      return classicCoreBridge.projectBotSearch({ query }).then(
+        res => ({ ok: true, items, hits: Array.isArray(res?.hits) ? res.hits : [] }),
+        () => ({ ok: true, items, hits: [] }),
+      );
+    }
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {
@@ -770,6 +861,9 @@ export function createProjectAgentApplicationService({
 
   function listHistory(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotListHistory(payload || {});
+    }
     if (!conversationStore || typeof conversationStore.listConversations !== 'function') {
       return { ok: false, code: 'CONVERSATION_REQUIRED' };
     }
@@ -807,6 +901,18 @@ export function createProjectAgentApplicationService({
     const conversationId = typeof payload?.conversationId === 'string' ? payload.conversationId.trim() : '';
     const workspaceId = typeof payload?.workspaceId === 'string' ? payload.workspaceId.trim() : '';
     if (!conversationId || !workspaceId) return { ok: false, code: 'INVALID_INPUT' };
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotContinueHistory(payload).then(res => {
+        if (res?.ok) {
+          if (typeof wake === 'function') {
+            try { wake(workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
+          }
+          queueConversation(workspaceId);
+          queueChanged(workspaceId);
+        }
+        return res;
+      });
+    }
     if (!conversationStore
       || typeof conversationStore.getConversation !== 'function'
       || typeof conversationStore.getPersistedConversationHistory !== 'function'
@@ -911,8 +1017,7 @@ export function createProjectAgentApplicationService({
     return result;
   }
 
-  function readEvidence(payload = {}) {
-    if (!open()) return disabled();
+  function readEvidenceLocal(payload = {}) {
     if (Array.isArray(payload.evidenceRefs)) {
       if (payload.evidenceRef !== undefined || payload.evidenceRefs.length > 100
         || !payload.evidenceRefs.every(evidenceRefAllowed)) return { ok: false, code: 'INVALID_REF' };
@@ -932,6 +1037,16 @@ export function createProjectAgentApplicationService({
         ...(body.code ? { code: body.code } : {}),
       } : {}) };
     } catch { return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' }; }
+  }
+
+  function readEvidence(payload = {}) {
+    if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotReadEvidence(payload)
+        .then(res => (res?.code === 'INTERACTIVE_EVIDENCE_HOST_REQUIRED' ? readEvidenceLocal(payload) : res));
+    }
+    return readEvidenceLocal(payload);
   }
 
   async function takeoverHost(payload = {}) {

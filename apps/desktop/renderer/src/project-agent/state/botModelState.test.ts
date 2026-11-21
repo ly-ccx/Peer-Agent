@@ -43,6 +43,35 @@ test('a failed detail request can be retried and does not stay cached', async ()
   assert.equal(await read('a'), 2);
 });
 
+test('a profile commit invalidates an earlier shared read for every awaiting consumer', async () => {
+  const stale=deferred<number>(), fresh=deferred<number>();let calls=0;
+  const read=createBotDetailsReader(async()=>++calls===1?stale.promise:fresh.promise);
+  const list=read('a'),controls=read('a');await Promise.resolve();
+  // Optional invocation lets the unchanged original reader exhibit the stale
+  // value in the sealed baseline; assertions require the committed fresh fact.
+  read.invalidate?.('a');
+  const afterCommit=read('a');await Promise.resolve();
+  stale.resolve(0);fresh.resolve(1);
+  assert.deepEqual(await Promise.all([list,controls,afterCommit]),[1,1,1]);
+  assert.equal(calls,2);
+});
+
+test('a superseded read failure cannot defeat the read after a profile receipt', async () => {
+  const stale=deferred<number>(),fresh=deferred<number>();let calls=0;
+  const read=createBotDetailsReader(async()=>++calls===1?stale.promise:fresh.promise);
+  const first=read('a');await Promise.resolve();read.invalidate?.('a');
+  const second=read('a');await Promise.resolve();stale.reject(Error('old read failed'));fresh.resolve(2);
+  assert.deepEqual(await Promise.all([first,second]),[2,2]);
+});
+
+test('repeated profile changes bound revalidation and a subsequent read can recover', async () => {
+  let calls=0, changing=true;
+  const read=createBotDetailsReader(async()=>{ calls++; if(changing) read.invalidate('a'); return calls; });
+  await assert.rejects(read('a'),/BOT_DETAILS_READ_SUPERSEDED/);
+  assert.equal(calls,4);
+  changing=false;assert.equal(await read('a'),5);
+});
+
 test('committed model releases the controls before a slow catalogue read finishes', async () => {
   const f = fixture();
   const saving = f.state.save(next);

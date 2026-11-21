@@ -1,6 +1,8 @@
+export { WORK_HOOK_SEMANTIC_FLOOR, nativeWorkHasHookFacts } from './work-hook.ts';
 export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
 export type {
   ProjectWorkBudgetLimits,
+  NativeEpisodeRecorder,
   ProjectWorkBudgetBoundary,
   ProjectReplyRecoveryAction,
   ProjectWorkReceipt,
@@ -76,6 +78,8 @@ export type {
   ConversationLifetimeUsage,
   ProviderRequestUsage,
   RuntimeTurnUsage,
+  NativeRuntimeUsageSnapshot,
+  NativeUsageRecoveryProgress,
   UsageAmounts,
   UsageScope,
 } from './usage-accounting.ts';
@@ -245,7 +249,7 @@ export interface McpCredentialMetadataView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly lastFour?: string;
-  readonly storage?: 'safeStorage' | 'file-fallback';
+  readonly storage?: 'safeStorage' | 'file-fallback' | 'vault';
 }
 
 export interface McpCredentialPutRequest {
@@ -1014,7 +1018,7 @@ export interface PermissionGrant {
   readonly toolCallId: string;
   readonly granted: boolean;
   readonly duration: PermissionDuration;
-  readonly scope?: string | import('./local-image.ts').LocalImagePermissionScope;
+  readonly scope?: string | import('./local-image.ts').LocalImagePermissionScope | import('./local-read.ts').LocalReadPermissionScope;
   readonly decidedAt: string;
 }
 
@@ -1106,6 +1110,22 @@ export interface Evidence {
   readonly dataLevel: DataLevel;
   readonly redactions: readonly string[];
   readonly artifactRefs: readonly string[];
+  /** Host/Provider observation before tools/call; never read from server output. */
+  readonly dispatchOutcome?: 'not_dispatched';
+}
+
+/** Native MCP attempt metadata, including denials and failed initialization. */
+export interface NativeMcpToolEvidenceMetadata {
+  readonly evidenceKind: 'local_mcp_tool_call';
+  readonly serverId: string;
+  readonly providerId: string;
+  readonly transport: 'stdio' | 'streamable_http' | 'sse';
+  readonly toolName: string;
+  readonly projectionId: string;
+  readonly permissionGrantId: string;
+  readonly status: 'success' | 'denied' | 'failed' | 'cancelled';
+  readonly startedAt: string;
+  readonly endedAt: string;
 }
 
 export interface ClientToolResult {
@@ -1163,6 +1183,8 @@ export * from './remote-access-settings.ts';
 
 export type { BotModelSelectionUpdateRequest, BotModelSelectionUpdateResult } from './bot-model-selection.ts';
 export * from './local-image.ts';
+export * from './local-read.ts';
+export * from './native-process.ts';
 export * from './bot-conversation-read.ts';
 export * from './project-recovery.ts';
 export * from './local-git.ts';
@@ -1190,3 +1212,6 @@ export { controlPhasesForOrigin, normalizeSessionExecutionIdentity, normalizeExe
 export * from './input-prediction.ts';
 export * from './interactive-result.ts';
 export * from './interactive-verification.ts';
+
+export { normalizeConversationExecution, conversationExecutionPermitsNewRun } from './conversation-execution.ts';
+export type { ConversationExecutionIdentity, ConversationExecution } from './conversation-execution.ts';

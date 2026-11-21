@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   createTuiProviderFetch,
+  createTuiOAuthRefreshFetch,
   mergeTrustedCertificates,
   proxyForUrl,
   resolveExtraCaPath,
@@ -17,6 +18,24 @@ function connectionError(message: string, code?: string): Error {
 }
 
 describe('TUI provider transport', () => {
+  test('OAuth refresh is one bounded attempt with the same proxy/trust policy', async () => {
+    let attempts = 0;
+    let captured: RequestInit & { proxy?: string } = {};
+    const caller = new AbortController();
+    const refresh = createTuiOAuthRefreshFetch({ env: { HTTPS_PROXY: 'http://proxy.example:8080' },
+      systemRootCertificates: ['fixture-ca'], macosTrustedCertificates: [], systemProxy: {},
+      fetch: Object.assign(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        attempts++; captured = init ?? {};
+        throw connectionError('socket lost after request', 'ECONNRESET');
+      }, { preconnect() {} }),
+    });
+    await expect(refresh('https://auth.example/token', { method: 'POST', signal: caller.signal })).rejects.toThrow();
+    expect(attempts).toBe(1);
+    expect(captured.proxy).toBe('http://proxy.example:8080');
+    expect(captured.redirect).toBe('error');
+    expect(captured.signal?.aborted).toBe(false);
+    caller.abort(); expect(captured.signal?.aborted).toBe(true);
+  });
   test('Grok discovery and inference share the host proxy and trust configuration', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetch = createTuiProviderFetch({ env: { HTTPS_PROXY: 'http://host-proxy:8080' },

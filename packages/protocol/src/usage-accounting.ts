@@ -2,6 +2,8 @@
  * Usage scopes are deliberately explicit because the same token fields have
  * different meanings at each runtime boundary.
  */
+import type { SessionExecutionIdentity } from './session-control.ts';
+
 export type UsageScope =
   | 'provider_request'
   | 'runtime_turn'
@@ -27,6 +29,29 @@ export interface ProviderRequestUsage extends UsageAmounts {
 export interface RuntimeTurnUsage extends UsageAmounts {
   readonly usageScope: 'runtime_turn';
   readonly providerRequestCount: number;
+}
+
+/** ADR131 canonical billing snapshot. It never seeds context or proves execution. */
+export interface NativeRuntimeUsageSnapshot {
+  readonly schemaVersion: 1;
+  readonly knownAmountsOnly: true;
+  readonly workId: string;
+  readonly execution: SessionExecutionIdentity;
+  readonly conversationId: string;
+  readonly usage: RuntimeTurnUsage;
+  readonly attribution: {
+    readonly id: string; readonly streamId: string; readonly at: string;
+    readonly modelProviderId: string; readonly model: string; readonly groupId?: string | null;
+    readonly role: 'work_session'; readonly workspaceId: string;
+    readonly providerName?: string | null; readonly estimatedCostUsd?: number | null; readonly pricingSource?: string | null;
+  };
+}
+
+/** One bounded native recovery batch; remaining records retain their identity. */
+export interface NativeUsageRecoveryProgress {
+  readonly schemaVersion: 1;
+  readonly settled: number;
+  readonly remaining: number;
 }
 
 /** Durable billable sum for one provider/model key inside a conversation ledger. */

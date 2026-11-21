@@ -60,6 +60,12 @@ function createHarness(overrides = {}) {
       credentialById.set(id, { authMethod: provider?.authMethod, tokens });
       calls.push(['tokens', id]);
     },
+    refreshOAuthTokens: async (id, tokens, refresh) => {
+      const result = await refresh(tokens);
+      if (result.refreshed) credentialById.set(id, { ...credentialById.get(id), tokens: result.tokens });
+      calls.push(['refresh', id]);
+      return result;
+    },
     getApiKeyRequestConfig: (id) => ({ id, baseUrl: 'https://example.test', apiKey: 'secret' }),
     fetchWithRecovery: async () => ({ ok: true }),
     openExternal: async (url) => calls.push(['open', url]),

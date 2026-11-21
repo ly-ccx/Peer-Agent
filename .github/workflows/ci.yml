@@ -23,7 +23,9 @@ jobs:
   test:
     name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Native conformance now shares this job with the full JS and Electron gates.
+    # Keep their assertions and per-step/action limits; budget for all gates.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +79,17 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Native CLI scoped validation
+        run: node scripts/native-cli/verify.mjs "$RUNNER_TEMP/native-cli"
+
+      - name: Preserve native CLI terminal checks
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-cli-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-cli
+          if-no-files-found: ignore
 
       - name: Check packaged main-process imports
         run: |

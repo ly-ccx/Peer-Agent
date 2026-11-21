@@ -722,6 +722,7 @@ describe('Provider adapters', () => {
             promptTokenCount: 11,
             candidatesTokenCount: 7,
             cachedContentTokenCount: 3,
+            totalTokenCount: 18,
           },
         },
       ]), { status: 200 });
@@ -750,9 +751,12 @@ describe('Provider adapters', () => {
       assert.equal(result.content, 'hello');
       assert.equal(result.toolCalls[0].name, 'bash');
       assert.equal(result.toolCalls[0].arguments, '{"command":"pwd"}');
-      assert.equal(result.streamUsage.inputTokens, 11);
+      assert.equal(result.streamUsage.inputTokens, 8);
+      assert.equal(result.streamUsage.inputTokens + result.streamUsage.cacheReadTokens, 11);
       assert.equal(result.streamUsage.outputTokens, 7);
       assert.equal(result.streamUsage.cacheReadTokens, 3);
+      assert.equal(result.streamUsage.inputTokens + result.streamUsage.cacheReadTokens + result.streamUsage.outputTokens, 18);
+      assert.equal(Object.hasOwn(result.streamUsage, 'cacheWriteTokens'), false);
       assert.equal(events.find((event) => event.channel === 'chat:stream:delta').payload.content, 'hello');
     } finally {
       globalThis.fetch = previousFetch;

@@ -1,0 +1,1747 @@
+{
+  "schemaVersion": 1,
+  "source": "actual TS planHistoryResumption/historyCheckpointBindings over explicit synthetic Host ports",
+  "cases": [
+    {
+      "name": "verified retry checkpoint",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "resume",
+          "reason": "checkpoint_verified"
+        }
+      ]
+    },
+    {
+      "name": "terminal retained",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "delivered",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "running without recovery held",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "running",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "3b09ad311b999cac779e85fef6720aebdabee9b777b962d492a35a411f8598db",
+          "disposition": "held",
+          "reason": "checkpoint_unavailable"
+        }
+      ]
+    },
+    {
+      "name": "non-work identity conflict",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": [
+          {
+            "bucket": "events",
+            "id": "event"
+          }
+        ]
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "error": "coordination_recovery_identity_conflict"
+    },
+    {
+      "name": "work identity conflict",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": [
+          {
+            "bucket": "works",
+            "id": "work",
+            "baseline": {
+              "workId": "work",
+              "state": "retry_wait",
+              "anchorInputIds": [
+                "input"
+              ],
+              "sessionIds": [],
+              "checkpointRef": "checkpoint",
+              "budget": {},
+              "recovery": {
+                "retryable": true
+              }
+            }
+          }
+        ]
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "history_conflict"
+        }
+      ]
+    },
+    {
+      "name": "anchor shared by old work",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          },
+          "other": {
+            "workId": "other",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "input_ownership"
+        },
+        {
+          "workId": "other",
+          "workHash": "8f3a12a63a201d58dcb659cf5a3145ee9d732e5e5f88f34db0b8b6bd78b5d4a1",
+          "disposition": "held",
+          "reason": "input_ownership"
+        }
+      ]
+    },
+    {
+      "name": "prepared delivery pending",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "state": "prepared",
+            "message": {
+              "meta": {
+                "workId": "work"
+              }
+            }
+          }
+        },
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "delivery_pending"
+        }
+      ]
+    },
+    {
+      "name": "unbound prepared delivery",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {
+          "reply": {
+            "state": "prepared",
+            "message": {
+              "meta": {}
+            }
+          }
+        },
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "error": "coordination_recovery_unbound_delivery"
+    },
+    {
+      "name": "transition pending",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {
+          "control": {
+            "workId": "work",
+            "phase": "stopping"
+          }
+        }
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "coordination_pending"
+        }
+      ]
+    },
+    {
+      "name": "uncertain dispatch",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {
+              "uncertainDispatches": [
+                {
+                  "toolCallId": "unknown"
+                }
+              ]
+            },
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "7a238f2a8b32484b136879c9baf2b28ae4bef73acc00f0b9fe5282bad3ac4ef8",
+          "disposition": "held",
+          "reason": "execution_unknown"
+        }
+      ]
+    },
+    {
+      "name": "pending attempt",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {
+              "attempts": {
+                "a": {
+                  "pendingTools": [
+                    {
+                      "toolCallId": "unknown"
+                    }
+                  ],
+                  "checkpointRef": "attempt"
+                }
+              }
+            },
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        },
+        {
+          "ref": "attempt",
+          "owner": "work:a"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "9840047e30bd658303a0254d456173bfda9cdc4245c83b39cfdfdc65a7f842e6",
+          "disposition": "held",
+          "reason": "execution_unknown"
+        }
+      ]
+    },
+    {
+      "name": "previous unknown recovery",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            },
+            "historyRecovery": {
+              "previousRecovery": {
+                "failureKind": "execution_outcome_unknown"
+              },
+              "previousState": "retry_wait"
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "77f942fc70f29330ccb3981490aef37090263135d9eba457c4f5999b3560d098",
+          "disposition": "held",
+          "reason": "execution_unknown"
+        }
+      ]
+    },
+    {
+      "name": "unconfirmed budget",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {
+              "unconfirmedUsd": 0.1
+            },
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "08f17cde18d6337d5b68a8654551eccd69b3e47ff7428cdffa1a3ea8d55a188a",
+          "disposition": "held",
+          "reason": "budget_unconfirmed"
+        }
+      ]
+    },
+    {
+      "name": "work paused",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            },
+            "stopScope": "work"
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "08f1ced5cd373b40df9982f05d358e25bf4399a775e4a5d5d72f0d59d7668000",
+          "disposition": "held",
+          "reason": "paused"
+        }
+      ]
+    },
+    {
+      "name": "waiting user",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "waiting_user",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "63f6c50f6357081746e4be6a24b8213628c702a7df3cbe30a194dbad59227939",
+          "disposition": "held",
+          "reason": "waiting_user"
+        }
+      ]
+    },
+    {
+      "name": "unsafe child",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [
+              "child"
+            ],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "471f973fe201451e04aa1da85271a5fa603cbbeaca34399c947653c10ee4aa8a",
+          "disposition": "held",
+          "reason": "child_execution"
+        }
+      ]
+    },
+    {
+      "name": "safe child",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [
+              "child"
+            ],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [
+        "child"
+      ],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "471f973fe201451e04aa1da85271a5fa603cbbeaca34399c947653c10ee4aa8a",
+          "disposition": "resume",
+          "reason": "checkpoint_verified"
+        }
+      ]
+    },
+    {
+      "name": "checkpoint missing",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {},
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "input_ownership"
+        }
+      ]
+    },
+    {
+      "name": "checkpoint wrong inputs",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": []
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "input_ownership"
+        }
+      ]
+    },
+    {
+      "name": "checkpoint unknown result",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": [
+              {
+                "toolCalls": [
+                  {
+                    "result": null
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "execution_unknown"
+        }
+      ]
+    },
+    {
+      "name": "checkpoint unknown error",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": [
+              {
+                "toolCalls": [
+                  {
+                    "result": {
+                      "error": "shell_outcome_unknown"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "execution_unknown"
+        }
+      ]
+    },
+    {
+      "name": "completed call needs provider checkpoint",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": [
+              {
+                "toolCalls": [
+                  {
+                    "result": {
+                      "status": "succeeded"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "checkpoint_unavailable"
+        }
+      ]
+    },
+    {
+      "name": "provider checkpoint present",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "providerCheckpoint": {
+              "format": "fixture-only"
+            },
+            "rounds": [
+              {
+                "toolCalls": [
+                  {
+                    "result": {
+                      "status": "succeeded"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "resume",
+          "reason": "checkpoint_verified"
+        }
+      ]
+    },
+    {
+      "name": "native checkpoint reference",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {
+              "toolCalls": 1
+            },
+            "recovery": {
+              "retryable": true
+            },
+            "nativeCheckpointRef": "native"
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        },
+        "native": {
+          "format": "fixture-only"
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        },
+        {
+          "ref": "native",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "cc8dc28296b1a55ff629543af7cee2cb87ce4c42f4369398b3090b73328fabdc",
+          "disposition": "resume",
+          "reason": "checkpoint_verified"
+        }
+      ]
+    },
+    {
+      "name": "failed not retryable",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": false
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "failed": true,
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "c7e2c16277a43667196e04eff413d2169599c904b88b4ddf15c5d1657d32d18b",
+          "disposition": "held",
+          "reason": "paused"
+        }
+      ]
+    },
+    {
+      "name": "stopped checkpoint",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "stopped": true,
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "b596d1aa042d5a9c13220619bb697e3be6e9d65e48fd1c7b39ea045772b2df2b",
+          "disposition": "held",
+          "reason": "paused"
+        }
+      ]
+    },
+    {
+      "name": "reply stop",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            },
+            "stopScope": "reply"
+          }
+        },
+        "deliveries": {},
+        "transitions": {}
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "da02a5f7b9b6be386dd6c69a47acb6a983f7610e95068a4e4bc3bcb936f2e5ed",
+          "disposition": "held",
+          "reason": "paused"
+        }
+      ]
+    },
+    {
+      "name": "already resumed work omitted",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {},
+        "lastRecovery": {
+          "executionBlocked": false
+        }
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "previously held work revisited",
+      "state": {
+        "revision": 1,
+        "works": {
+          "work": {
+            "workId": "work",
+            "state": "retry_wait",
+            "anchorInputIds": [
+              "input"
+            ],
+            "sessionIds": [],
+            "checkpointRef": "checkpoint",
+            "budget": {},
+            "recovery": {
+              "retryable": true
+            },
+            "historyRecovery": {
+              "disposition": "held",
+              "previousState": "retry_wait"
+            }
+          }
+        },
+        "deliveries": {},
+        "transitions": {},
+        "lastRecovery": {
+          "executionBlocked": false
+        }
+      },
+      "inspection": {
+        "conflicts": []
+      },
+      "checkpoints": {
+        "checkpoint": {
+          "job": {
+            "workId": "work",
+            "userInputs": [
+              {
+                "inputId": "input"
+              }
+            ]
+          },
+          "outcome": {
+            "rounds": []
+          }
+        }
+      },
+      "safeSessions": [],
+      "bindings": [
+        {
+          "ref": "checkpoint",
+          "owner": "work"
+        }
+      ],
+      "expected": [
+        {
+          "workId": "work",
+          "workHash": "cec2a0d45fba44ac684f83324c8906e941634a6776eea7c0f4ae8245ba348bf1",
+          "disposition": "resume",
+          "reason": "checkpoint_verified"
+        }
+      ]
+    }
+  ]
+}

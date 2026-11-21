@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/embed-storage-workers.mjs && node scripts/embed-project-tool-prompts.mjs && node scripts/embed-interactive-worker.mjs && tsc -p tsconfig.build.json && node scripts/emit-declared-modules.mjs",
-    "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/memory/*.test.mjs src/project-agent/*.test.mjs src/project-agent/probes/*.test.mjs src/testing/*.test.mjs src/interactive-results/*.test.mjs",
+    "test": "node scripts/test-runtime.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

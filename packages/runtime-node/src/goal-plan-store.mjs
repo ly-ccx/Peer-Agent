@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { createGoalPlanTransactions } from './goal-plan-transactions.mjs';
 import { createGoalPlanCheckpoints } from "./goal-plan-checkpoints.mjs";
 import { createGoalPlanEvidence } from "./goal-plan-evidence.mjs";
 import { createGoalPlanEvents } from "./goal-plan-events.mjs";
@@ -419,7 +420,8 @@ export function createGoalPlanStore({
 
   const { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible } = createGoalPlanEvidence({ storeDir, getActivePlanByConversation });
 
-  const { subscribeChanges, notifyChanged, publishPersistedChange, setOnChange } = createGoalPlanEvents({ storeDir, onChange });
+  const transactions = createGoalPlanTransactions(storeDir);
+  const { subscribeChanges, notifyChanged, publishPersistedChange, setOnChange } = createGoalPlanEvents({ storeDir, onChange, afterCommit: transactions.afterCommit });
 
   // Intake 期 UI 交付判定（B-level seam）：goal 契约建立/修订/intake 升级时对
   // 契约文本跑纯函数分类（goal-intake-ui-delivery），命中则回调宿主。Desktop 把
@@ -469,8 +471,10 @@ export function createGoalPlanStore({
     listPlansCache = null;
   }
   function writeIndex(items) {
-    writeJsonl(indexFile, items);
-    invalidateListPlansCache();
+    return transactions.run(() => {
+      writeJsonl(indexFile, items);
+      invalidateListPlansCache();
+    });
   }
 
   /** Runner 高频进度字段：仅计数/阶段跳动时走 runner-progress，避免无关会话全量 list。 */
@@ -605,7 +609,10 @@ export function createGoalPlanStore({
     }
   }
 
-  function flushRunnerProgressPersist(planId, { notify = false } = {}) {
+  function flushRunnerProgressPersist(planId, options = {}) {
+    return transactions.run(() => flushRunnerProgressPersistLocked(planId, options));
+  }
+  function flushRunnerProgressPersistLocked(planId, { notify = false } = {}) {
     const timer = runnerProgressTimers.get(planId);
     if (timer) {
       clearTimeout(timer);
@@ -666,7 +673,13 @@ export function createGoalPlanStore({
     if (runnerProgressTimers.has(planId)) return;
     const timer = setTimeout(() => {
       runnerProgressTimers.delete(planId);
-      flushRunnerProgressPersist(planId, { notify: false });
+      try { flushRunnerProgressPersist(planId, { notify: false }); }
+      catch (error) {
+        // A different Host/UI transaction can hold the shared root briefly.
+        // Retain the overlay and retry; never crash the Host or claim persistence.
+        if (error?.code === 'STORE_LOCK_BUSY') scheduleRunnerProgressPersist(planId);
+        else console.warn('[goal-plan-store] runner progress persist failed:', error?.code || error?.message);
+      }
     }, RUNNER_PROGRESS_PERSIST_MS);
     runnerProgressTimers.set(planId, timer);
   }
@@ -827,6 +840,9 @@ export function createGoalPlanStore({
   }
 
   function persist(plan, options = {}) {
+    return transactions.run(() => persistLocked(plan, options));
+  }
+  function persistLocked(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     // timing 在 status 实际迁移时推进；同状态写入仅规范化，不重复开关 segment。
     // 调用方通常传入 { ...plan, status: next }，所以 prevStatus 必须取磁盘旧值
@@ -942,9 +958,10 @@ export function createGoalPlanStore({
     // 完成迁移（非 completed → completed）一次性通知宿主：desktop 据此落盘
     // 验收报告（goal-reports）。回调异常绝不影响已写盘的完成态。
     if (nextStatus === TERMINAL_OK && prevStatus !== TERMINAL_OK && typeof onPlanCompleted === 'function') {
-      try {
-        onPlanCompleted(next, { prevStatus });
-      } catch { /* 报告失败不影响完成态 */ }
+      transactions.afterCommit(() => {
+        try { onPlanCompleted(next, { prevStatus }); }
+        catch { /* 报告失败不影响完成态 */ }
+      });
     }
     return next;
   }
@@ -2808,7 +2825,7 @@ export function createGoalPlanStore({
     return listPlans();
   }
 
-  return {
+  return transactions.bind({
     getStoreDir: () => storeDir,
     listPlans,
     listPlanMetadata,
@@ -2862,5 +2879,39 @@ export function createGoalPlanStore({
     appendIntakeConvergenceAudit,
     setOnChange,
     subscribeChanges,
-  };
+  }, [
+    'createPlan',
+    'createGoalContract',
+    'createIntakeContract',
+    'promoteIntakeToGoal',
+    'upsertGoalContract',
+    'revisePlan',
+    'recordApproval',
+    'setPlanStatus',
+    'resumeRunner',
+    'markRequestedUserInput',
+    'consumeRequestedUserInput',
+    'setRunnerState',
+    'prepareContextCheckpoint',
+    'commitContextCheckpoint',
+    'markContextCompactionPersisted',
+    'markContextCheckpointConsumed',
+    'supersedeContextCheckpoint',
+    'appendRunEvent',
+    'dispatchExplorer',
+    'reportExplorer',
+    'recordVerifierRun',
+    'recordEvidenceRefs',
+    'recordTaskEvidence',
+    'cancelOpenTasks',
+    'recordCriterionResults',
+    'recordModelReviews',
+    'recordQualityReview',
+    'recordDeliveryHandoff',
+    'recordDeliveryIsolation',
+    'recordManualConfirmation',
+    'deletePlan',
+    'deletePlanByConversation',
+    'appendIntakeConvergenceAudit',
+  ]);
 }

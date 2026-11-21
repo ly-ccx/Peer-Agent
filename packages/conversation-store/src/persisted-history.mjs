@@ -9,7 +9,7 @@ function fail(code, cause) {
   throw Object.assign(new Error(code, { cause }), { code });
 }
 
-function readText(file, missingAllowed, maxBytes, readBudget) {
+export function readPersistedText(file, missingAllowed, maxBytes, readBudget, preserveBom = false) {
   try {
     if (maxBytes === undefined) return readFileSync(file, 'utf8');
     const revision = lstatSync(file, { bigint: true });
@@ -30,7 +30,7 @@ function readText(file, missingAllowed, maxBytes, readBudget) {
         bytes += count;
       }
       if (bytes !== body.length - 1 || fileRevision(lstatSync(file, { bigint: true })) !== fileRevision(revision)) fail('BACKGROUND_VERSION_CHANGED');
-      return new TextDecoder('utf-8', { fatal: true }).decode(body.subarray(0, bytes));
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: preserveBom }).decode(body.subarray(0, bytes));
     } finally { closeSync(fd); }
   } catch (error) {
     if (error.code === 'ENOENT' && missingAllowed) return null;
@@ -42,7 +42,7 @@ function readText(file, missingAllowed, maxBytes, readBudget) {
 /** Strict snapshot input, separate from tolerant UI history recovery. */
 export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes, readBudget }) {
   // New conversations legitimately have no JSONL until their first message.
-  const text = readText(historyFile, contentRevision === 0, maxBytes, readBudget);
+  const text = readPersistedText(historyFile, contentRevision === 0, maxBytes, readBudget);
   let messages;
   try {
     messages = (text ?? '').split('\n').filter((line) => line.trim()).map((line) => {
@@ -52,7 +52,7 @@ export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversati
     });
     if (contentRevision > 0 && messages.length === 0) throw new Error('Empty history with nonzero revision');
   } catch (error) { fail('BACKGROUND_HISTORY_CORRUPT', error); }
-  const sidecarText = readText(sidecarFile, true, maxBytes, readBudget);
+  const sidecarText = readPersistedText(sidecarFile, true, maxBytes, readBudget);
   let activeMessageId = null;
   if (sidecarText !== null) {
     try {
@@ -88,7 +88,7 @@ export function readStoredWorkHistory(storeDir, { workspaceId, parentConversatio
   };
   const files = [indexFile, historyFile, sidecarFile];
   const before = files.map(revision);
-  const index = readText(indexFile, true, PORTABLE_HISTORY_BYTES, readBudget);
+  const index = readPersistedText(indexFile, true, PORTABLE_HISTORY_BYTES, readBudget);
   if (!index) return null;
   const rows = index.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
   const parent = rows.filter(row => row?.id === parentConversationId), work = rows.filter(row => row?.id === conversationId);

@@ -101,7 +101,15 @@ export async function runPeerSessions(
       return CLI_EXIT.ok;
     }
   }
-  store.deleteConversation(action.id);
+  try {
+    store.deleteConversation(action.id);
+  } catch (error) {
+    if (!(error instanceof Error) || !['conversation_execution_busy', 'conversation_execution_invalid'].includes(error.message)) {
+      throw error;
+    }
+    writeErr(`peer sessions: ${error.message}`);
+    return CLI_EXIT.runtime;
+  }
   try {
     const plans = hooks.plans ?? await openPlanCleaner(hooks.env);
     plans.deletePlanByConversation(action.id);

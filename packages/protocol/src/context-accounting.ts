@@ -159,6 +159,9 @@ export function normalizeContextUsageBreakdown(
  */
 export interface ContextAccountingSnapshot {
   readonly version: 1;
+  /** Durable occupancy binding; required for append-only historySelection. */
+  readonly projectorVersion?: 3;
+  readonly compactionBoundaryId?: string | null;
   readonly conversationId: string;
   readonly contentRevision: number;
   readonly modelKey: string;

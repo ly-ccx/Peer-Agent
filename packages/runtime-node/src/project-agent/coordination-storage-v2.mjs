@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { nativeProcessesInWork, nativeWorkHasHookFacts, WORK_HOOK_SEMANTIC_FLOOR } from '@peer-agent/protocol';
 import { performance } from 'node:perf_hooks';
 import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { syncDirectory, syncFile } from '../fsync-path.mjs';
@@ -10,7 +11,7 @@ import path from 'node:path';
 import { prepareLegacyIntegrity, acceptsLegacyIntegrity, explainLegacyIntegrity } from './coordination-legacy-integrity.mjs';
 import { journalLines } from './journal-lines.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
-import { encodeWorkUpdate } from './work-delta.mjs';
+import { applyWorkUpdate, encodeWorkUpdate } from './work-delta.mjs';
 import { COORDINATION_WORKER_SOURCE } from './coordination-worker-source.generated.mjs';
 import { withCoordinationRebuild } from './coordination-rebuild-queue.mjs';
 import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
@@ -178,7 +179,12 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
   const intent = record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1
     || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(record.kind);
-  const semanticFloor = record.kind === 'obligation_grant' || record.kind === 'execution_obligation' ? 11
+  const hasNativeProcesses = record.kind === 'work' && nativeProcessesInWork(record.work).length
+    || record.kind === 'history_reconciled' && Object.values(next.works || {}).some(work => nativeProcessesInWork(work).length);
+  const hasNativeHooks = ['work', 'work_updated', 'history_reconciled', 'continuations_coalesced'].includes(record.kind)
+    && Object.values(next.works || {}).some(nativeWorkHasHookFacts);
+  const semanticFloor = hasNativeHooks ? WORK_HOOK_SEMANTIC_FLOOR : hasNativeProcesses ? 13
+    : record.kind === 'obligation_grant' || record.kind === 'execution_obligation' ? 11
     : record.kind === 'session_control' ? (record.minimumExecutorVersion >= 9 ? 9 : 7)
     : intent ? (record.minimumExecutorVersion >= 9 ? 9 : 8) : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2;
   putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, semanticFloor));
@@ -308,7 +314,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = readMetadata(manifestFile);
     // 12 is reserved for ADR 127 unknown-outcome policy/reconciliation journal semantics; its writers arrive with UO-03/UO-04.
-    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7, 8, 9, 11, 12].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, WORK_HOOK_SEMANTIC_FLOOR].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -442,7 +448,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         let floor;
         try { floor = Math.max(current.minimumWriterVersion, priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2); }
         finally { candidate.close(); }
-        if (![2,3,4,5,6,7,8,9,11].includes(floor)) throw fail('coordination_schema_unsupported');
+        if (![2,3,4,5,6,7,8,9,11,12,13,WORK_HOOK_SEMANTIC_FLOOR].includes(floor)) throw fail('coordination_schema_unsupported');
         if (floor > current.minimumWriterVersion) {
           durable(headFile, JSON.stringify({ ...readHead(headFile, generation), minimumWriterVersion: floor }));
           durable(manifestFile, JSON.stringify({ ...current, minimumReaderVersion: floor, minimumWriterVersion: floor }));
@@ -461,9 +467,26 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       }
   }
   function active() { return existsSync(dir); }
+  function raiseMinimumVersion(minimumVersion) {
+    assertOwner(); load();
+    if (![5,6,7,8,9,11,13,WORK_HOOK_SEMANTIC_FLOOR].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
+    if (manifest.minimumWriterVersion >= minimumVersion) return;
+    if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
+    const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
+    durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: minimumVersion }));
+    durable(manifestFile, JSON.stringify(next)); manifest = next;
+  }
   function write(entry, { returnState = true } = {}) {
     assertOwner(); load();
     const raw = typeof entry === 'function' ? entry() : entry;
+    // Fence older executors before any canonical child-ownership bytes become
+    // reachable, including when a later payload/index publication is interrupted.
+    const affectedWorks = raw.kind === 'work' ? [raw.work]
+      : raw.kind === 'work_updated' ? [applyWorkUpdate(head(db, raw.workId), raw)]
+      : raw.kind === 'history_reconciled' ? Object.values(raw.state.works)
+      : raw.kind === 'continuations_coalesced' ? [raw.owner, ...raw.retired] : [];
+    if (affectedWorks.some(nativeWorkHasHookFacts)) raiseMinimumVersion(WORK_HOOK_SEMANTIC_FLOOR);
+    else if (raw.kind === 'work' && nativeProcessesInWork(raw.work).length) raiseMinimumVersion(13);
     const encoded = raw.kind === 'work' ? { ...raw, ...encodeWorkUpdate(head(db, raw.work.workId), raw.work) } : raw;
     let payload = encoded;
     const encodedBytes = Buffer.from(JSON.stringify(encoded));
@@ -515,15 +538,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
   }
   return { active, prepare,
     supportsProtectedReceipts() { load(); return manifest.minimumWriterVersion >= 3 && manifest.frozenLegacyFile === 'baseline.jsonl'; },
-    enableSupervision(minimumVersion = 5) {
-      assertOwner(); load();
-      if (![5,6,7,8,9,11].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
-      if (manifest.minimumWriterVersion >= minimumVersion) return;
-      if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
-      const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
-      durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: minimumVersion }));
-      durable(manifestFile, JSON.stringify(next)); manifest = next;
-    },
+    enableSupervision(minimumVersion = 5) { raiseMinimumVersion(minimumVersion); },
     readSessionControl(sessionId) { if (typeof sessionId !== 'string' || !sessionId) return undefined; load(); const head = get(db, 'sessionControlHeads', sessionId); return head ? get(db, 'sessionControls', head.operationId) : undefined; },
     readStoppedExecution(execution) {
       load();
