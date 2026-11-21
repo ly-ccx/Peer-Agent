@@ -26,10 +26,14 @@ fn map_coord_err(err: CoordinationError) -> ProjectError {
     ProjectError::new(err.code(), err.to_string())
 }
 
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 pub fn sha256_json(value: &Value) -> String {
     let encoded = peer_protocol::javascript_json_string(value)
         .unwrap_or_else(|_| serde_json::to_string(value).unwrap_or_default());
-    format!("{:x}", Sha256::digest(encoded.as_bytes()))
+    sha256_hex(encoded.as_bytes())
 }
 
 pub fn coordination_work_id(conversation_id: &str, keys: &[String]) -> String {

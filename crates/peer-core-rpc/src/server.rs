@@ -4,7 +4,7 @@ use crate::{
     classic_goal::{self, ClassicGoalRegistry},
     classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
-    classic_usage,
+    classic_usage, project,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -48,6 +48,9 @@ fn classic_domains() -> Vec<String> {
         "classic.skills".into(),
         "classic.mcp".into(),
         "classic.llm".into(),
+        "project.memory".into(),
+        "project.objectives".into(),
+        "project.profile".into(),
     ]
 }
 
@@ -517,6 +520,29 @@ impl ServerContext {
             "classic.llm.catalog" => classic_llm::handle_catalog(self),
             "classic.llm.complete" => classic_llm::handle_complete(self, params).await,
             "classic.llm.quota" => classic_llm::handle_quota(self, params).await,
+            "project.memory.list" => project::handle_memory_list(self, params),
+            "project.memory.pin" => project::handle_memory_pin(self, params),
+            "project.memory.forget" => project::handle_memory_forget(self, params),
+            "project.memory.restore" => project::handle_memory_restore(self, params),
+            "project.memory.edit" => project::handle_memory_edit(self, params),
+            "project.memory.setSwitches" => project::handle_memory_set_switches(self, params),
+            "project.objectives.list" => project::handle_objectives_list(self, params),
+            "project.objectives.update" => {
+                project::handle_objectives_command(self, params, "update")
+            }
+            "project.objectives.pause" => project::handle_objectives_command(self, params, "pause"),
+            "project.objectives.resume" => {
+                project::handle_objectives_command(self, params, "resume")
+            }
+            "project.objectives.delete" => {
+                project::handle_objectives_command(self, params, "close")
+            }
+            "project.profile.readUnknownOutcomePolicy" => {
+                project::handle_profile_read_unknown_outcome_policy(self, params)
+            }
+            "project.profile.setUnknownOutcomePolicy" => {
+                project::handle_profile_set_unknown_outcome_policy(self, params)
+            }
             _ => Err(RpcError::method_not_found(method)),
         }
     }

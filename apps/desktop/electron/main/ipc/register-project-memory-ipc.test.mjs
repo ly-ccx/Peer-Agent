@@ -179,3 +179,62 @@ test('existing restore IPC resolves conflicting memory, guards project scope and
     assert.deepEqual(changed,['ws-1']);assert.equal(store.get(a.id).status,'forgotten');assert.equal(store.get(b.id).status,'active');
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test('classicCoreBridge 可用时 project-memory 经 Rust RPC 代理并触发 onChanged', async () => {
+  const calls = [];
+  const changed = [];
+  const bridge = {
+    isAvailable: () => true,
+    async projectMemoryList(p) {
+      calls.push(['list', p]);
+      return { ok: true, items: [{ id: 'm1', text: 'rust mem' }], memoryEnabled: false };
+    },
+    async projectMemoryPin(p) {
+      calls.push(['pin', p]);
+      return { ok: true, item: { id: p.id, pinned: p.pinned } };
+    },
+    async projectMemoryForget(p) {
+      calls.push(['forget', p]);
+      return { ok: true, item: { id: p.id, status: 'forgotten' } };
+    },
+    async projectMemoryRestore(p) {
+      calls.push(['restore', p]);
+      return { ok: true, item: { id: p.id, status: 'active' } };
+    },
+    async projectMemoryEdit(p) {
+      calls.push(['edit', p]);
+      return { ok: true, item: { id: p.id, text: p.text }, revokedId: p.id };
+    },
+    async projectMemorySetSwitches(p) {
+      calls.push(['setSwitches', p]);
+      return { ok: true, memoryEnabled: p.memoryEnabled };
+    },
+  };
+  let settings = { memory: { enabled: true, learnPreferences: true } };
+  const memory = createProjectMemoryService({
+    classicCoreBridge: bridge,
+    getSettings: () => settings,
+    mergeSettings(partial) {
+      settings.memory = { ...settings.memory, ...partial.memory };
+    },
+    onChanged: (ws) => changed.push(ws),
+  });
+  const [registration] = createProjectMemoryIpcRegistrations({ memory });
+  const handlers = new Map();
+  registration.register({ handle(c, fn) { handlers.set(c, fn); } });
+
+  const listed = await handlers.get('project-memory:list')({}, { workspaceId: 'ws-1', status: 'active' });
+  assert.equal(listed.ok, true);
+  assert.deepEqual(listed.items, [{ id: 'm1', text: 'rust mem' }]);
+  assert.deepEqual(listed.switches, { memoryEnabled: false, useMemory: true, learnPreferences: true });
+
+  const pinned = await handlers.get('project-memory:pin')({}, { workspaceId: 'ws-1', id: 'm1', pinned: true });
+  assert.equal(pinned.ok, true);
+  await handlers.get('project-memory:forget')({}, { workspaceId: 'ws-1', id: 'm1' });
+  await handlers.get('project-memory:restore')({}, { workspaceId: 'ws-1', id: 'm1', resolveConflict: true });
+  await handlers.get('project-memory:edit')({}, { workspaceId: 'ws-1', id: 'm1', text: 'updated' });
+  const sw = await handlers.get('project-memory:set-switches')({}, { workspaceId: 'ws-1', memoryEnabled: true, useMemory: false });
+  assert.deepEqual(sw.switches, { memoryEnabled: true, useMemory: false, learnPreferences: true });
+  assert.deepEqual(changed, ['ws-1', 'ws-1', 'ws-1', 'ws-1']);
+  assert.equal(calls.length, 6);
+});

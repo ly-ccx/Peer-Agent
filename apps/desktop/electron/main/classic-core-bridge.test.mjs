@@ -11,6 +11,14 @@ import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationStore } from './automation-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import {
+  createBotProfileStore,
+  createMemoryStore,
+  createObjectiveStore,
+} from '@peer-agent/runtime-node';
+import { createProjectMemoryService } from './project-agent/project-memory-service.mjs';
+import { createProjectObjectivesService } from './project-agent/project-objectives-service.mjs';
+import { createProjectAgentApplicationService } from './project-agent/project-agent-application-service.mjs';
+import {
   beginCompaction,
   endCompaction,
   failCompaction,
@@ -1230,6 +1238,240 @@ test('E2E: automationRunner <-> peer-native core --stdio enforces Automation Gra
   } finally {
     await client.dispose();
     await mockServer.close();
+    cleanup();
+  }
+});
+
+test('E2E: project-memory, project-objectives, and unknown-outcome policy run through peer-native core --stdio', async () => {
+  const binaryPath = resolveTestBinary();
+  const { root, dataHome, cleanup } = makeTempDirs();
+  const workspaceId = 'ws-project-e2e';
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const conv = conversationStore.createConversation({
+    title: '项目助理',
+    role: 'project_agent',
+    workspaceId,
+    mode: 'chat',
+  });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  profileStore.create({
+    workspaceId,
+    displayName: '登录助手',
+    agentConversationId: conv.id,
+  });
+
+  // Seed a stated memory and a TS-conflicted pair on disk.
+  const seedMemoryStore = createMemoryStore({
+    rootDir: dataHome,
+    now: () => new Date('2026-10-01T00:00:00.000Z'),
+  });
+  const stated = seedMemoryStore.rememberStated({
+    workspaceId,
+    kind: 'fact',
+    text: '登录页在 src/login.tsx',
+    anchorMessageId: 'u-mem-1',
+    messages: [{ id: 'u-mem-1', kind: 'user_input', content: '记住' }],
+  }).item;
+  const confA = seedMemoryStore.writeVerified({
+    workspaceId,
+    kind: 'fact',
+    text: 'Choice A',
+    sourceRefs: ['ev-a'],
+    topicKey: 'choice',
+    topicValue: 'a',
+  }).item;
+  const confB = seedMemoryStore.writeVerified({
+    workspaceId,
+    kind: 'fact',
+    text: 'Choice B',
+    sourceRefs: ['ev-b'],
+    topicKey: 'choice',
+    topicValue: 'b',
+  }).item;
+
+  // Seed an active objective on disk.
+  const seedObjectiveStore = createObjectiveStore({ rootDir: dataHome });
+  const createdObjective = seedObjectiveStore.create({
+    workspaceId,
+    projectAgentConversationId: conv.id,
+    originMessageId: 'u-obj-0',
+    title: '守护登录回归',
+    outcome: '保持 auth 测试全部通过',
+    autonomy: 'propose',
+    createdBy: 'user_request',
+  });
+  assert.equal(createdObjective.ok, true);
+  const objectiveId = createdObjective.item.objectiveId;
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-project-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+
+    // 1. project-memory service via Rust core RPC
+    let settings = { memory: { enabled: true, learnPreferences: true } };
+    const memChanged = [];
+    const exportPath = path.join(root, 'exported-memory.json');
+    const memoryService = createProjectMemoryService({
+      classicCoreBridge: bridge,
+      getSettings: () => settings,
+      mergeSettings(patch) {
+        settings.memory = { ...settings.memory, ...patch.memory };
+      },
+      showSaveDialog: async () => ({ canceled: false, filePath: exportPath }),
+      onChanged: (ws) => memChanged.push(ws),
+    });
+
+    const memList = await memoryService.list({ workspaceId });
+    assert.equal(memList.ok, true);
+    assert.equal(memList.switches.memoryEnabled, true);
+    assert.ok(memList.items.some((item) => item.id === stated.id));
+
+    const pinned = await memoryService.pin({ workspaceId, id: stated.id, pinned: true });
+    assert.equal(pinned.ok, true);
+    assert.equal(pinned.item.pinned, true);
+
+    const forgot = await memoryService.forget({ workspaceId, id: stated.id, reason: '暂不需要' });
+    assert.equal(forgot.ok, true);
+    assert.equal(forgot.item.status, 'forgotten');
+
+    const restored = await memoryService.restore({ workspaceId, id: stated.id });
+    assert.equal(restored.ok, true);
+    assert.equal(restored.item.status, 'active');
+
+    const needChoice = await memoryService.restore({ workspaceId, id: confA.id });
+    assert.equal(needChoice.ok, false);
+    assert.equal(needChoice.code, 'CONFLICT_CHOICE_REQUIRED');
+
+    const resolved = await memoryService.restore({ workspaceId, id: confB.id, resolveConflict: true });
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.item.status, 'active');
+    assert.equal(seedMemoryStore.get(confA.id).status, 'forgotten');
+
+    const edited = await memoryService.edit({ workspaceId, id: stated.id, text: '登录页在 src/auth/login.tsx' });
+    assert.equal(edited.ok, true);
+    assert.equal(edited.revokedId, stated.id);
+    assert.equal(edited.item.text, '登录页在 src/auth/login.tsx');
+
+    const exported = await memoryService.exportMemory({ workspaceId, format: 'json' });
+    assert.equal(exported.ok, true);
+    assert.match(readFileSync(exportPath, 'utf8'), /src\/auth\/login\.tsx/);
+
+    const sw = await memoryService.setSwitches({
+      workspaceId,
+      memoryEnabled: false,
+      useMemory: false,
+    });
+    assert.equal(sw.ok, true);
+    assert.deepEqual(sw.switches, {
+      memoryEnabled: false,
+      useMemory: false,
+      learnPreferences: true,
+    });
+    assert.equal(profileStore.read(workspaceId).memoryEnabled, false);
+    assert.ok(memChanged.length >= 5);
+
+    // 2. project-objectives service via Rust core RPC
+    const objAppended = [];
+    const objChanged = [];
+    const objectivesService = createProjectObjectivesService({
+      classicCoreBridge: bridge,
+      enabled: () => true,
+      holdsLease: () => true,
+      onAppendedMessage: (ev) => objAppended.push(ev),
+      onChanged: (ws) => objChanged.push(ws),
+    });
+
+    const objListed = await objectivesService.list({ workspaceId });
+    assert.equal(objListed.ok, true);
+    assert.equal(objListed.items.length, 1);
+    assert.equal(objListed.items[0].objectiveId, objectiveId);
+
+    const updated = await objectivesService.update({
+      workspaceId,
+      objectiveId,
+      requestId: 'req-e2e-upd',
+      expectedVersion: 1,
+      patch: { autonomy: 'act', autoAccept: true },
+    });
+    assert.equal(updated.ok, true);
+    assert.equal(updated.item.autonomy, 'act');
+    assert.equal(updated.item.autoAccept, true);
+    assert.equal(updated.item.version, 2);
+    assert.equal(objAppended.length, 1);
+    assert.equal(objAppended[0].conversationId, conv.id);
+
+    const replayed = await objectivesService.update({
+      workspaceId,
+      objectiveId,
+      requestId: 'req-e2e-upd',
+      patch: { autonomy: 'act', autoAccept: true },
+    });
+    assert.equal(replayed.ok, true);
+    assert.equal(replayed.replayed, true);
+    assert.equal(replayed.item.version, 2);
+
+    const reused = await objectivesService.update({
+      workspaceId,
+      objectiveId,
+      requestId: 'req-e2e-upd',
+      patch: { autonomy: 'report_only' },
+    });
+    assert.equal(reused.ok, false);
+    assert.equal(reused.code, 'REQUEST_ID_REUSED');
+
+    const paused = await objectivesService.pause({ workspaceId, objectiveId, requestId: 'req-e2e-pause' });
+    assert.equal(paused.ok, true);
+    assert.equal(paused.item.status, 'paused');
+
+    const resumed = await objectivesService.resume({ workspaceId, objectiveId, requestId: 'req-e2e-resume' });
+    assert.equal(resumed.ok, true);
+    assert.equal(resumed.item.status, 'active');
+
+    const closed = await objectivesService.delete({ workspaceId, objectiveId, requestId: 'req-e2e-del' });
+    assert.equal(closed.ok, true);
+    assert.equal(closed.item.status, 'abandoned');
+    assert.equal(objChanged.length, 5);
+
+    // 3. Bot unknown-outcome policy via Rust core RPC
+    const appService = createProjectAgentApplicationService({
+      enabled: () => true,
+      classicCoreBridge: bridge,
+    });
+    const pol1 = await appService.readUnknownOutcomePolicy({ workspaceId });
+    assert.equal(pol1.ok, true);
+    assert.equal(pol1.policy.tier, 'ask');
+
+    const pol2 = await appService.setUnknownOutcomePolicy({ workspaceId, tier: 'bot_verified' });
+    assert.equal(pol2.ok, true);
+    assert.equal(pol2.policy.tier, 'bot_verified');
+    assert.equal(pol2.policy.revision, 1);
+
+    const pol3 = await appService.readUnknownOutcomePolicy({ workspaceId });
+    assert.equal(pol3.ok, true);
+    assert.equal(pol3.policy.tier, 'bot_verified');
+    assert.equal(pol3.policy.revision, 1);
+
+    const pol4 = await appService.setUnknownOutcomePolicy({ workspaceId, tier: 'ask' });
+    assert.equal(pol4.ok, true);
+    assert.equal(pol4.policy.tier, 'ask');
+    assert.equal(pol4.policy.revision, 2);
+  } finally {
+    await client.dispose();
     cleanup();
   }
 });

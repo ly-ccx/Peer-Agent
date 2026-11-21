@@ -364,6 +364,127 @@ impl BotProfileStore {
         profile.status = "archived".to_owned();
         self.save(profile)
     }
+
+    /// Read per-bot unknown-outcome policy (`ask` by default); reject corrupt/unsupported tiers.
+    pub fn read_unknown_outcome_policy(&self, workspace_id: &str) -> Result<Value, ProjectError> {
+        let profile = self
+            .read(workspace_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let binding_conv = profile
+            .agent_conversation_id
+            .as_deref()
+            .map(|c| serde_json::json!(c))
+            .unwrap_or(Value::Null);
+        match profile.unknown_outcome_policy.as_ref() {
+            None | Some(Value::Null) => Ok(serde_json::json!({
+                "workspaceId": workspace_id,
+                "agentConversationId": binding_conv,
+                "tier": "ask",
+            })),
+            Some(stored) => {
+                let tier = stored["tier"]
+                    .as_str()
+                    .filter(|t| matches!(*t, "ask" | "bot_verified"))
+                    .ok_or_else(|| ProjectError::code("UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"))?;
+                let policy_id = stored["policyId"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| ProjectError::code("UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"))?;
+                let revision = stored["revision"]
+                    .as_u64()
+                    .filter(|r| *r >= 1)
+                    .ok_or_else(|| ProjectError::code("UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"))?;
+                let updated_at = stored["updatedAt"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| ProjectError::code("UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"))?;
+                let mut out = serde_json::json!({
+                    "workspaceId": workspace_id,
+                    "agentConversationId": binding_conv,
+                    "tier": tier,
+                    "policyId": policy_id,
+                    "revision": revision,
+                    "updatedAt": updated_at,
+                });
+                if let Some(delegated_at) = stored["delegatedAt"].as_str().filter(|s| !s.is_empty())
+                {
+                    out["delegatedAt"] = Value::String(delegated_at.to_owned());
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    /// Update per-bot unknown-outcome policy (`ask` | `bot_verified`). Stamps `delegatedAt`
+    /// when delegating (`ask` -> `bot_verified`) and preserves `policyId` across revisions.
+    pub fn set_unknown_outcome_policy(
+        &self,
+        workspace_id: &str,
+        tier: &str,
+    ) -> Result<Value, ProjectError> {
+        if !matches!(tier, "ask" | "bot_verified") {
+            return Err(ProjectError::code("INVALID_UNKNOWN_OUTCOME_TIER"));
+        }
+        let mut current = self
+            .read(workspace_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let stored = current
+            .unknown_outcome_policy
+            .as_ref()
+            .filter(|v| !v.is_null());
+        if let Some(existing) = stored
+            && !existing["tier"]
+                .as_str()
+                .is_some_and(|t| matches!(t, "ask" | "bot_verified"))
+        {
+            return Err(ProjectError::code("UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"));
+        }
+        let stored_tier = stored.and_then(|v| v["tier"].as_str());
+        let at = now_iso();
+        let delegated_at = if stored_tier != Some("bot_verified") && tier == "bot_verified" {
+            Some(at.clone())
+        } else {
+            stored
+                .and_then(|v| v["delegatedAt"].as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        };
+        let policy_id = stored
+            .and_then(|v| v["policyId"].as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("policy-{}", uuid::Uuid::new_v4()));
+        let revision = stored.and_then(|v| v["revision"].as_u64()).unwrap_or(0) + 1;
+        let mut policy = serde_json::json!({
+            "tier": tier,
+            "policyId": policy_id,
+            "revision": revision,
+            "updatedAt": at,
+        });
+        if let Some(ref d) = delegated_at {
+            policy["delegatedAt"] = Value::String(d.clone());
+        }
+        let binding_conv = current
+            .agent_conversation_id
+            .as_deref()
+            .map(|c| serde_json::json!(c))
+            .unwrap_or(Value::Null);
+        current.unknown_outcome_policy = Some(policy);
+        self.save(current)?;
+
+        let mut out = serde_json::json!({
+            "workspaceId": workspace_id,
+            "agentConversationId": binding_conv,
+            "tier": tier,
+            "policyId": policy_id,
+            "revision": revision,
+            "updatedAt": at,
+        });
+        if let Some(d) = delegated_at {
+            out["delegatedAt"] = Value::String(d);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -406,5 +527,79 @@ mod tests {
             .unwrap();
         assert!(!is_new2);
         assert_eq!(again.display_name, "Peer Bot");
+    }
+
+    #[test]
+    fn unknown_outcome_policy_delegates_revokes_and_rejects_unsupported() {
+        let dir = tempdir().unwrap();
+        let store = BotProfileStore::new(dir.path());
+        store
+            .create(&CreateBotProfile {
+                workspace_id: "ws-1",
+                display_name: "Policy Bot",
+                managed: false,
+                agent_conversation_id: "conv-1",
+                avatar_salt: "",
+            })
+            .unwrap();
+
+        let initial = store.read_unknown_outcome_policy("ws-1").unwrap();
+        assert_eq!(initial["tier"], "ask");
+        assert_eq!(initial["agentConversationId"], "conv-1");
+
+        let delegated = store
+            .set_unknown_outcome_policy("ws-1", "bot_verified")
+            .unwrap();
+        assert_eq!(delegated["tier"], "bot_verified");
+        assert_eq!(delegated["revision"], 1);
+        let first_delegated_at = delegated["delegatedAt"].as_str().unwrap().to_owned();
+        let policy_id = delegated["policyId"].as_str().unwrap().to_owned();
+
+        let revoked = store.set_unknown_outcome_policy("ws-1", "ask").unwrap();
+        assert_eq!(revoked["tier"], "ask");
+        assert_eq!(revoked["revision"], 2);
+        assert_eq!(revoked["policyId"], policy_id);
+        assert_eq!(revoked["delegatedAt"], first_delegated_at);
+
+        let again = store
+            .set_unknown_outcome_policy("ws-1", "bot_verified")
+            .unwrap();
+        assert_eq!(again["revision"], 3);
+        assert_eq!(again["policyId"], policy_id);
+
+        assert_eq!(
+            store
+                .set_unknown_outcome_policy("ws-1", "auto")
+                .unwrap_err()
+                .code,
+            "INVALID_UNKNOWN_OUTCOME_TIER"
+        );
+        assert_eq!(
+            store
+                .read_unknown_outcome_policy("missing")
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+
+        let mut profile = store.read("ws-1").unwrap();
+        profile.unknown_outcome_policy = Some(serde_json::json!({
+            "tier": "auto",
+            "policyId": "bad",
+            "revision": 1,
+            "updatedAt": "2026-11-09T00:00:00.000Z",
+        }));
+        store.save(profile).unwrap();
+        assert_eq!(
+            store.read_unknown_outcome_policy("ws-1").unwrap_err().code,
+            "UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"
+        );
+        assert_eq!(
+            store
+                .set_unknown_outcome_policy("ws-1", "ask")
+                .unwrap_err()
+                .code,
+            "UNKNOWN_OUTCOME_POLICY_UNSUPPORTED"
+        );
     }
 }

@@ -107,6 +107,7 @@ export function createProjectAgentApplicationService({
   requestTakeover = null,
   diagnostics = null,
   accessAuthority = null,
+  classicCoreBridge = null,
 } = {}) {
   const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
@@ -474,7 +475,11 @@ export function createProjectAgentApplicationService({
   function readUnknownOutcomePolicy(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
-    if (!workspaceId || typeof profileStore?.readUnknownOutcomePolicy !== 'function') return { ok: false, code: 'invalid_input' };
+    if (!workspaceId) return { ok: false, code: 'invalid_input' };
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectProfileReadUnknownOutcomePolicy({ workspaceId });
+    }
+    if (typeof profileStore?.readUnknownOutcomePolicy !== 'function') return { ok: false, code: 'invalid_input' };
     const result = profileStore.readUnknownOutcomePolicy(workspaceId);
     if (result.ok) return { ok: true, policy: result.policy };
     return result.code === 'NOT_FOUND' ? { ok: false, code: 'workspace_not_found' } : { ok: false, code: 'unknown_outcome_policy_unsupported' };
@@ -484,7 +489,28 @@ export function createProjectAgentApplicationService({
   function setUnknownOutcomePolicy(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
-    if (!workspaceId || !['ask', 'bot_verified'].includes(payload.tier) || typeof profileStore?.setUnknownOutcomePolicy !== 'function') {
+    if (!workspaceId || !['ask', 'bot_verified'].includes(payload.tier)) {
+      return { ok: false, code: 'invalid_input' };
+    }
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectProfileSetUnknownOutcomePolicy({ workspaceId, tier: payload.tier })
+        .then((result) => {
+          appendObligationLog({
+            event: 'set_unknown_outcome_policy',
+            workspaceId,
+            tier: payload.tier,
+            ok: result?.ok === true,
+            code: result?.ok === true ? null : result?.code || 'failed',
+            policyId: result?.policy?.policyId || null,
+            revision: result?.policy?.revision ?? null,
+          });
+          return result?.ok === true
+            ? { ok: true, policy: result.policy }
+            : { ok: false, code: result?.code || 'failed' };
+        });
+    }
+    if (typeof profileStore?.setUnknownOutcomePolicy !== 'function') {
       return { ok: false, code: 'invalid_input' };
     }
     const result = profileStore.setUnknownOutcomePolicy(workspaceId, { tier: payload.tier });

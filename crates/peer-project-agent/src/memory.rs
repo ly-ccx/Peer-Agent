@@ -721,6 +721,224 @@ impl MemoryStore {
             .filter_map(|hit| by_id.get(&hit.id).cloned())
             .collect())
     }
+
+    fn find_visible(
+        &self,
+        workspace_id: &str,
+        id: &str,
+    ) -> Result<(PathBuf, MemoryItem), ProjectError> {
+        if !is_valid_workspace_id(workspace_id) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let id = id.trim();
+        if id.is_empty() || id.len() > 200 {
+            return Err(ProjectError::code("INVALID_INPUT"));
+        }
+        let user_path = self.user_file();
+        if let Some(item) = self
+            .fold_file(&user_path)
+            .into_iter()
+            .find(|item| item.id == id && item.scope == "user")
+        {
+            return Ok((user_path, item));
+        }
+        let project_path = self.project_file(workspace_id)?;
+        if let Some(item) = self.fold_file(&project_path).into_iter().find(|item| {
+            item.id == id
+                && item.scope == "project"
+                && item.workspace_id.as_deref() == Some(workspace_id)
+        }) {
+            return Ok((project_path, item));
+        }
+        Err(ProjectError::code("NOT_FOUND"))
+    }
+
+    fn sync_index_item(&self, workspace_id: Option<&str>, item: &MemoryItem) {
+        if let Ok(idx_path) = self.index_file(workspace_id)
+            && let Ok(idx) = MemoryIndex::open(&idx_path)
+        {
+            if item.status == "active" && item.needs_reverify != Some(true) {
+                let _ = idx.upsert(item);
+            } else {
+                let _ = idx.remove(&item.id);
+            }
+        }
+    }
+
+    /// Toggle `pinned` on an active memory item visible to `workspace_id`.
+    pub fn set_pinned(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        pinned: bool,
+    ) -> Result<MemoryItem, ProjectError> {
+        let (file, mut current) = self.find_visible(workspace_id, id)?;
+        if current.status != "active" {
+            return Err(ProjectError::code("NOT_FOUND"));
+        }
+        if current.pinned == pinned {
+            return Ok(current);
+        }
+        current.pinned = pinned;
+        current.updated_at = now_iso();
+        self.append_item(&file, &current)?;
+        self.sync_index_item(Some(workspace_id), &current);
+        Ok(current)
+    }
+
+    /// Tombstone any visible (`user` or matching `project`) memory item. Returns `(item, already_forgotten)`.
+    pub fn forget_visible(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        reason: &str,
+    ) -> Result<(MemoryItem, bool), ProjectError> {
+        let trimmed: String = reason.trim().chars().take(REASON_MAX).collect();
+        if trimmed.is_empty() {
+            return Err(ProjectError::code("INVALID_INPUT"));
+        }
+        if memory_secret_reason(&trimmed).is_some() {
+            return Err(ProjectError::code("sensitive"));
+        }
+        let (file, mut current) = self.find_visible(workspace_id, id)?;
+        if current.status == "forgotten" {
+            return Ok((current, true));
+        }
+        current.status = "forgotten".to_owned();
+        current.forget_reason = Some(trimmed);
+        current.updated_at = now_iso();
+        self.append_item(&file, &current)?;
+        self.sync_index_item(Some(workspace_id), &current);
+        Ok((current, false))
+    }
+
+    /// Restore a non-conflicted memory item to active status (re-running conflict checks).
+    /// Returns `(item, already_active)`.
+    pub fn restore(
+        &self,
+        workspace_id: &str,
+        id: &str,
+    ) -> Result<(MemoryItem, bool), ProjectError> {
+        let (file, mut current) = self.find_visible(workspace_id, id)?;
+        if current.status == "conflicted" {
+            return Err(ProjectError::code("CONFLICT_CHOICE_REQUIRED"));
+        }
+        if current.status == "active" {
+            return Ok((current, true));
+        }
+        let at = now_iso();
+        current.status = "active".to_owned();
+        current.forget_reason = None;
+        current.updated_at = at.clone();
+        let existing = self.fold_file(&file);
+        self.apply_conflict_decision(&file, &existing, &mut current, &at);
+        self.append_item(&file, &current)?;
+        self.sync_index_item(Some(workspace_id), &current);
+        Ok((current, false))
+    }
+
+    /// Resolve a memory conflict group in favor of `id`, superseding sibling conflicted items.
+    /// Returns `(item, already_resolved)`.
+    pub fn resolve_conflict(
+        &self,
+        workspace_id: &str,
+        id: &str,
+    ) -> Result<(MemoryItem, bool), ProjectError> {
+        let (file, mut current) = self.find_visible(workspace_id, id)?;
+        if current.status == "active" {
+            return Ok((current, true));
+        }
+        if current.status != "conflicted" {
+            return Err(ProjectError::code("NOT_CONFLICTED"));
+        }
+        let Some(ref conflict_id) = current.conflict_id else {
+            return Err(ProjectError::code("NOT_CONFLICTED"));
+        };
+        let conflict_id = conflict_id.clone();
+        let at = now_iso();
+        let existing = self.fold_file(&file);
+        for other in existing {
+            if other.id != current.id
+                && other.status == "conflicted"
+                && other.conflict_id.as_deref() == Some(conflict_id.as_str())
+            {
+                let mut superseded = other;
+                superseded.status = "forgotten".to_owned();
+                superseded.forget_reason = Some("conflict_choice".to_owned());
+                superseded.superseded_by = Some(current.id.clone());
+                superseded.updated_at = at.clone();
+                self.append_item(&file, &superseded)?;
+                self.sync_index_item(Some(workspace_id), &superseded);
+            }
+        }
+        current.status = "active".to_owned();
+        current.conflict_id = None;
+        current.conflicts_with = None;
+        current.updated_at = at;
+        self.append_item(&file, &current)?;
+        self.sync_index_item(Some(workspace_id), &current);
+        Ok((current, false))
+    }
+
+    /// Replace an active visible memory with a newly created `stated` item referencing `edit:<id>`.
+    /// Returns `(new_item, revoked_id)`.
+    pub fn revise_stated(
+        &self,
+        workspace_id: &str,
+        id: &str,
+        text: &str,
+    ) -> Result<(MemoryItem, String), ProjectError> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed.chars().count() > TEXT_MAX {
+            return Err(ProjectError::code("INVALID_INPUT"));
+        }
+        if memory_secret_reason(trimmed).is_some() {
+            return Err(ProjectError::code("sensitive"));
+        }
+        let (file, current) = self.find_visible(workspace_id, id)?;
+        if current.status != "active" {
+            return Err(ProjectError::code("NOT_FOUND"));
+        }
+        let at = now_iso();
+        let revoked_id = current.id.clone();
+        let mut forgotten = current.clone();
+        forgotten.status = "forgotten".to_owned();
+        forgotten.forget_reason = Some("edited".to_owned());
+        forgotten.updated_at = at.clone();
+        self.append_item(&file, &forgotten)?;
+        self.sync_index_item(Some(workspace_id), &forgotten);
+
+        let record = MemoryItem {
+            id: format!("mem-{}", uuid::Uuid::new_v4()),
+            scope: current.scope,
+            kind: current.kind,
+            text: trimmed.to_owned(),
+            trust: "stated".to_owned(),
+            source_refs: vec![format!("edit:{revoked_id}")],
+            pinned: current.pinned,
+            status: "active".to_owned(),
+            confirmed_count: 1,
+            created_at: at.clone(),
+            updated_at: at,
+            last_used_at: None,
+            workspace_id: current.workspace_id,
+            anchor_message_id: None,
+            forget_reason: None,
+            expires_at: None,
+            topic_key: None,
+            topic_value: None,
+            file_anchors: None,
+            needs_reverify: None,
+            conflict_id: None,
+            superseded_by: None,
+            maintenance_reason: None,
+            conflicts_with: None,
+            extra: Map::new(),
+        };
+        self.append_item(&file, &record)?;
+        self.sync_index_item(Some(workspace_id), &record);
+        Ok((record, revoked_id))
+    }
 }
 
 #[cfg(test)]
@@ -786,6 +1004,132 @@ mod tests {
                 .search(Some("ws-1"), "有界内存", 10)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn desktop_parity_pin_forget_restore_conflict_resolve_and_revise_stated() {
+        let dir = tempdir().unwrap();
+        let store = MemoryStore::new(dir.path());
+
+        let item = store
+            .write(&WriteMemoryRequest {
+                scope: "project",
+                workspace_id: Some("ws-1"),
+                kind: "fact",
+                text: "登录页在 src/login.tsx",
+                trust: "stated",
+                source_refs: vec!["m-user".into()],
+                pinned: false,
+                anchor_message_id: Some("m-user"),
+                expires_at: None,
+                topic_key: None,
+                topic_value: None,
+                file_anchors: None,
+            })
+            .unwrap();
+
+        // Workspace isolation blocks cross-workspace mutations.
+        assert_eq!(
+            store.set_pinned("ws-2", &item.id, true).unwrap_err().code,
+            "NOT_FOUND"
+        );
+
+        let pinned = store.set_pinned("ws-1", &item.id, true).unwrap();
+        assert!(pinned.pinned);
+        let unpinned = store.set_pinned("ws-1", &item.id, false).unwrap();
+        assert!(!unpinned.pinned);
+
+        assert_eq!(
+            store
+                .forget_visible("ws-1", &item.id, "api_key=sk-1234567890abcdef")
+                .unwrap_err()
+                .code,
+            "sensitive"
+        );
+        let (forgotten, already) = store.forget_visible("ws-1", &item.id, "用户撤销").unwrap();
+        assert!(!already);
+        assert_eq!(forgotten.status, "forgotten");
+        assert_eq!(forgotten.forget_reason.as_deref(), Some("用户撤销"));
+        let (_, already2) = store.forget_visible("ws-1", &item.id, "用户撤销").unwrap();
+        assert!(already2);
+
+        let (restored, already_active) = store.restore("ws-1", &item.id).unwrap();
+        assert!(!already_active);
+        assert_eq!(restored.status, "active");
+        assert!(restored.forget_reason.is_none());
+
+        let (revised, revoked_id) = store
+            .revise_stated("ws-1", &item.id, "登录页在 src/auth/login.tsx")
+            .unwrap();
+        assert_eq!(revoked_id, item.id);
+        assert_eq!(revised.trust, "stated");
+        assert_eq!(revised.source_refs, vec![format!("edit:{}", item.id)]);
+        assert_eq!(
+            store.get(Some("ws-1"), &item.id).unwrap().status,
+            "forgotten"
+        );
+
+        // Seed a TS-shaped conflict pair (same timestamp -> conflicted) and resolve it.
+        let project_file = store.project_file("ws-1").unwrap();
+        let conflicted_a = serde_json::json!({
+            "id": "mem-a",
+            "scope": "project",
+            "kind": "fact",
+            "text": "A",
+            "trust": "verified",
+            "sourceRefs": ["ev1"],
+            "pinned": false,
+            "status": "conflicted",
+            "confirmedCount": 1,
+            "createdAt": "2026-10-01T00:00:00.000Z",
+            "updatedAt": "2026-10-01T00:00:00.000Z",
+            "workspaceId": "ws-1",
+            "topicKey": "choice",
+            "topicValue": "a",
+            "conflictId": "memory:mem-a",
+            "conflictsWith": ["mem-b"]
+        });
+        let conflicted_b = serde_json::json!({
+            "id": "mem-b",
+            "scope": "project",
+            "kind": "fact",
+            "text": "B",
+            "trust": "verified",
+            "sourceRefs": ["ev2"],
+            "pinned": false,
+            "status": "conflicted",
+            "confirmedCount": 1,
+            "createdAt": "2026-10-01T00:00:00.000Z",
+            "updatedAt": "2026-10-01T00:00:00.000Z",
+            "workspaceId": "ws-1",
+            "topicKey": "choice",
+            "topicValue": "b",
+            "conflictId": "memory:mem-a",
+            "conflictsWith": ["mem-a"]
+        });
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&project_file)
+            .and_then(|mut f| writeln!(f, "{conflicted_a}\n{conflicted_b}"))
+            .unwrap();
+
+        assert_eq!(
+            store.restore("ws-1", "mem-a").unwrap_err().code,
+            "CONFLICT_CHOICE_REQUIRED"
+        );
+        assert_eq!(
+            store.resolve_conflict("ws-2", "mem-b").unwrap_err().code,
+            "NOT_FOUND"
+        );
+        let (winner, already_resolved) = store.resolve_conflict("ws-1", "mem-b").unwrap();
+        assert!(!already_resolved);
+        assert_eq!(winner.status, "active");
+        assert!(winner.conflict_id.is_none());
+        assert_eq!(
+            store.get(Some("ws-1"), "mem-a").unwrap().status,
+            "forgotten"
         );
     }
 }

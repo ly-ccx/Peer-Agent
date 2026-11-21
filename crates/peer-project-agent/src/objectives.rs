@@ -160,6 +160,26 @@ pub struct UpdateObjectiveRequest<'a> {
     pub expected_version: Option<u64>,
 }
 
+/// Canonical command patch for Desktop/CLI objective actions with idempotent replay (`doc.commands`).
+#[derive(Debug, Default)]
+pub struct ObjectiveCommandPatch<'a> {
+    pub title: Option<&'a str>,
+    pub outcome: Option<&'a str>,
+    pub autonomy: Option<&'a str>,
+    pub watches: Option<Vec<Value>>,
+    pub milestones: Option<Vec<ObjectiveMilestone>>,
+    pub success_signals: Option<Vec<Value>>,
+    pub budget: Option<ObjectiveBudget>,
+    pub deadline: Option<Option<&'a str>>,
+    pub auto_accept: Option<bool>,
+    pub auto_accept_approved_by: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub pending_confirmation: Option<bool>,
+    pub expected_version: Option<u64>,
+    pub command_id: Option<&'a str>,
+    pub command_fingerprint: Option<&'a str>,
+}
+
 fn valid_obj_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     !bytes.is_empty()
@@ -208,6 +228,65 @@ fn validate_probe(probe: &Value) -> bool {
     }
 }
 
+fn validate_milestones(milestones: &[ObjectiveMilestone]) -> Result<(), ProjectError> {
+    if milestones.len() > 32 {
+        return Err(ProjectError::code("INVALID_OBJECTIVE"));
+    }
+    let mut ids = HashSet::new();
+    for m in milestones {
+        if !valid_obj_id(&m.id)
+            || !ids.insert(m.id.as_str())
+            || m.title.trim().is_empty()
+            || m.title.chars().count() > 200
+            || !matches!(m.status.as_str(), "pending" | "active" | "done" | "dropped")
+            || m.session_ids.len() > 100
+            || m.session_ids.iter().any(|s| !valid_obj_id(s))
+        {
+            return Err(ProjectError::code("INVALID_MILESTONE"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_signals(signals: &[Value], watches: &[Value]) -> Result<(), ProjectError> {
+    if signals.len() > 16 {
+        return Err(ProjectError::code("INVALID_OBJECTIVE"));
+    }
+    let watch_ids: HashSet<&str> = watches
+        .iter()
+        .filter_map(|w| w["watchId"].as_str())
+        .collect();
+    let mut ids = HashSet::new();
+    for sig in signals {
+        let Some(sid) = sig["signalId"].as_str().filter(|s| valid_obj_id(s)) else {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        };
+        if !ids.insert(sid) {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        }
+        let Some(wid) = sig["watchId"].as_str() else {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        };
+        if !watch_ids.contains(wid) {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        }
+        let Some(op) = sig["operator"].as_str() else {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        };
+        if !matches!(op, "equals" | "contains" | "succeeded") {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        }
+        if op != "succeeded"
+            && !sig["value"]
+                .as_str()
+                .is_some_and(|v| !v.trim().is_empty() && v.chars().count() <= 500)
+        {
+            return Err(ProjectError::code("INVALID_SIGNAL"));
+        }
+    }
+    Ok(())
+}
+
 fn validate_watches(watches: &[Value]) -> Result<(), ProjectError> {
     if watches.len() > 16 {
         return Err(ProjectError::code("INVALID_OBJECTIVE"));
@@ -218,6 +297,12 @@ fn validate_watches(watches: &[Value]) -> Result<(), ProjectError> {
             return Err(ProjectError::code("INVALID_WATCH"));
         };
         if !ids.insert(wid) {
+            return Err(ProjectError::code("INVALID_WATCH"));
+        }
+        if let Some(policy) = watch.get("notificationPolicy")
+            && !policy.is_null()
+            && !matches!(policy.as_str(), Some("changes" | "failure_only"))
+        {
             return Err(ProjectError::code("INVALID_WATCH"));
         }
         match watch["kind"].as_str() {
@@ -255,6 +340,9 @@ fn validate_watches(watches: &[Value]) -> Result<(), ProjectError> {
                             || paths
                                 .iter()
                                 .any(|p| !p.as_str().is_some_and(safe_relative_path))
+                            || source
+                                .get("debounceMs")
+                                .is_some_and(|d| !d.is_null() && d.as_u64() != Some(5000))
                         {
                             return Err(ProjectError::code("INVALID_WATCH"));
                         }
@@ -454,6 +542,31 @@ impl ObjectiveStore {
         objective_id: &str,
         patch: &UpdateObjectiveRequest<'_>,
     ) -> Result<ObjectiveItem, ProjectError> {
+        let cmd = ObjectiveCommandPatch {
+            title: patch.title,
+            outcome: patch.outcome,
+            autonomy: patch.autonomy,
+            watches: patch.watches.clone(),
+            milestones: patch.milestones.clone(),
+            success_signals: patch.success_signals.clone(),
+            budget: patch.budget.clone(),
+            deadline: patch.deadline,
+            auto_accept: patch.auto_accept,
+            expected_version: patch.expected_version,
+            ..Default::default()
+        };
+        let (item, _) = self.apply_command(workspace_id, objective_id, &cmd)?;
+        Ok(item)
+    }
+
+    /// Apply a command patch with optional CAS `expected_version` and idempotent `command_id`
+    /// deduplication (`doc.commands`). Returns `(updated_item, replayed)`.
+    pub fn apply_command(
+        &self,
+        workspace_id: &str,
+        objective_id: &str,
+        patch: &ObjectiveCommandPatch<'_>,
+    ) -> Result<(ObjectiveItem, bool), ProjectError> {
         if let Some(t) = patch.title
             && (t.trim().is_empty() || t.chars().count() > 120)
         {
@@ -468,6 +581,11 @@ impl ObjectiveStore {
             && !matches!(a, "report_only" | "propose" | "act")
         {
             return Err(ProjectError::code("INVALID_OBJECTIVE"));
+        }
+        if let Some(s) = patch.status
+            && !matches!(s, "active" | "paused" | "achieved" | "abandoned")
+        {
+            return Err(ProjectError::code("INVALID_STATUS"));
         }
         if let Some(ref b) = patch.budget
             && (b.max_auto_sessions_per_day > MAX_AUTO_SESSIONS_PER_DAY
@@ -484,13 +602,38 @@ impl ObjectiveStore {
         if let Some(ref w) = patch.watches {
             validate_watches(w)?;
         }
+        if let Some(ref m) = patch.milestones {
+            validate_milestones(m)?;
+        }
 
         let mut doc = self.read_doc(workspace_id)?;
-        let item = doc
+        if let Some(cmd_id) = patch.command_id
+            && let Some(saved) = doc.commands.get(cmd_id)
+        {
+            let expected_fp = patch.command_fingerprint.unwrap_or("");
+            if saved.get("fingerprint").and_then(Value::as_str) == Some(expected_fp)
+                && let Ok(replayed_item) =
+                    serde_json::from_value::<ObjectiveItem>(saved["item"].clone())
+            {
+                return Ok((replayed_item, true));
+            }
+            return Err(ProjectError::code("REQUEST_ID_REUSED"));
+        }
+
+        let idx = doc
             .items
-            .iter_mut()
-            .find(|i| i.objective_id == objective_id)
+            .iter()
+            .position(|i| i.objective_id == objective_id)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+
+        let final_watches = patch.watches.as_deref().unwrap_or(&doc.items[idx].watches);
+        if let Some(ref s) = patch.success_signals {
+            validate_signals(s, final_watches)?;
+        } else if patch.watches.is_some() {
+            validate_signals(&doc.items[idx].success_signals, final_watches)?;
+        }
+
+        let item = &mut doc.items[idx];
         if let Some(ev) = patch.expected_version
             && item.version != ev
         {
@@ -520,14 +663,41 @@ impl ObjectiveStore {
         if let Some(dl) = patch.deadline {
             item.deadline = dl.map(str::to_owned);
         }
-        if let Some(aa) = patch.auto_accept {
-            item.auto_accept = Some(aa);
+        match patch.auto_accept {
+            Some(true) => {
+                item.auto_accept = Some(true);
+                if let Some(by) = patch.auto_accept_approved_by {
+                    item.auto_accept_approved_by = Some(by.to_owned());
+                }
+            }
+            Some(false) => {
+                item.auto_accept = None;
+                item.auto_accept_approved_by = None;
+            }
+            None => {}
+        }
+        if let Some(s) = patch.status {
+            item.status = s.to_owned();
+        }
+        if let Some(pc) = patch.pending_confirmation {
+            item.pending_confirmation = pc.then_some(true);
         }
         item.version += 1;
         item.updated_at = now_iso();
         let out = item.clone();
+        if let Some(cmd_id) = patch.command_id {
+            let item_val = serde_json::to_value(&out)
+                .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
+            doc.commands.insert(
+                cmd_id.to_owned(),
+                json!({
+                    "fingerprint": patch.command_fingerprint.unwrap_or(""),
+                    "item": item_val,
+                }),
+            );
+        }
         self.save_doc(workspace_id, &doc)?;
-        Ok(out)
+        Ok((out, false))
     }
 
     pub fn close(
@@ -1027,5 +1197,131 @@ mod tests {
             })
             .unwrap();
         assert!(!obs2.changed);
+    }
+
+    #[test]
+    fn apply_command_handles_cas_idempotency_reuse_and_status_transitions() {
+        let dir = tempdir().unwrap();
+        let store = ObjectiveStore::new(dir.path());
+        let (obj, _) = store
+            .create(&CreateObjectiveRequest {
+                workspace_id: "ws-1",
+                project_agent_conversation_id: "conv-1",
+                origin_message_id: "input-1",
+                title: "Keep CI green",
+                outcome: "Monitor CI",
+                autonomy: "propose",
+                created_by: "agent_proposal",
+                watches: vec![],
+                milestones: vec![],
+                success_signals: vec![],
+                budget: None,
+                deadline: None,
+                request_id: None,
+            })
+            .unwrap();
+        assert_eq!(obj.status, "paused");
+        assert_eq!(obj.pending_confirmation, Some(true));
+
+        let (resumed, replayed) = store
+            .apply_command(
+                "ws-1",
+                &obj.objective_id,
+                &ObjectiveCommandPatch {
+                    status: Some("active"),
+                    pending_confirmation: Some(false),
+                    expected_version: Some(1),
+                    command_id: Some("cmd-resume-1"),
+                    command_fingerprint: Some("fp-resume"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(!replayed);
+        assert_eq!(resumed.status, "active");
+        assert_eq!(resumed.pending_confirmation, None);
+        assert_eq!(resumed.version, 2);
+
+        // Same command_id + same fingerprint replays without bumping version.
+        let (replayed_item, is_replayed) = store
+            .apply_command(
+                "ws-1",
+                &obj.objective_id,
+                &ObjectiveCommandPatch {
+                    status: Some("paused"),
+                    command_id: Some("cmd-resume-1"),
+                    command_fingerprint: Some("fp-resume"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(is_replayed);
+        assert_eq!(replayed_item.version, 2);
+
+        // Same command_id + different fingerprint is rejected.
+        assert_eq!(
+            store
+                .apply_command(
+                    "ws-1",
+                    &obj.objective_id,
+                    &ObjectiveCommandPatch {
+                        status: Some("paused"),
+                        command_id: Some("cmd-resume-1"),
+                        command_fingerprint: Some("fp-other"),
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err()
+                .code,
+            "REQUEST_ID_REUSED"
+        );
+
+        // Stale expected_version conflicts.
+        assert_eq!(
+            store
+                .apply_command(
+                    "ws-1",
+                    &obj.objective_id,
+                    &ObjectiveCommandPatch {
+                        auto_accept: Some(true),
+                        auto_accept_approved_by: Some("u-1"),
+                        expected_version: Some(1),
+                        ..Default::default()
+                    },
+                )
+                .unwrap_err()
+                .code,
+            "VERSION_CONFLICT"
+        );
+
+        // Enable then disable autoAccept clears auto_accept_approved_by.
+        let (with_auto, _) = store
+            .apply_command(
+                "ws-1",
+                &obj.objective_id,
+                &ObjectiveCommandPatch {
+                    auto_accept: Some(true),
+                    auto_accept_approved_by: Some("u-1"),
+                    expected_version: Some(2),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(with_auto.auto_accept, Some(true));
+        assert_eq!(with_auto.auto_accept_approved_by.as_deref(), Some("u-1"));
+
+        let (without_auto, _) = store
+            .apply_command(
+                "ws-1",
+                &obj.objective_id,
+                &ObjectiveCommandPatch {
+                    auto_accept: Some(false),
+                    expected_version: Some(3),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(without_auto.auto_accept, None);
+        assert_eq!(without_auto.auto_accept_approved_by, None);
     }
 }

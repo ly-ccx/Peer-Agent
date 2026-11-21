@@ -14,6 +14,7 @@ mod classic_skills;
 mod classic_streams;
 mod classic_usage;
 mod external_provider;
+mod project;
 pub mod protocol;
 pub mod server;
 mod transport;
@@ -162,7 +163,10 @@ mod tests {
                 "classic.usage",
                 "classic.skills",
                 "classic.mcp",
-                "classic.llm"
+                "classic.llm",
+                "project.memory",
+                "project.objectives",
+                "project.profile"
             ])
         );
         assert_eq!(

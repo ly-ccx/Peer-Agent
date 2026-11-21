@@ -55,7 +55,7 @@ pub use circuit_breaker::{
     CircuitBreakerStore, FailureOutcome,
 };
 pub use coordination_bridge::{
-    CommitAgentMessageRequest, CoordinationHub, coordination_work_id, sha256_json,
+    CommitAgentMessageRequest, CoordinationHub, coordination_work_id, sha256_hex, sha256_json,
 };
 pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
@@ -96,9 +96,9 @@ pub use memory::{
 };
 pub use objectives::{
     AppendObservationRequest, CreateObjectiveRequest, ObjectiveActionItem, ObjectiveActions,
-    ObjectiveBudget, ObjectiveItem, ObjectiveMilestone, ObjectiveStore, ProbeOutcome,
-    UpdateObjectiveRequest, WatchCursorState, WatchHost, WatchObservation, WatchReconcileReport,
-    objective_action_card_id,
+    ObjectiveBudget, ObjectiveCommandPatch, ObjectiveItem, ObjectiveMilestone, ObjectiveStore,
+    ProbeOutcome, UpdateObjectiveRequest, WatchCursorState, WatchHost, WatchObservation,
+    WatchReconcileReport, objective_action_card_id,
 };
 pub use obligation::{
     ExecutionObligationService, OBLIGATION_FORMAT_VERSION, OBLIGATION_GRANT_TTL_MS,

@@ -142,6 +142,7 @@ export function registerDesktopProjectAgent({
   onViewing = null,
   configurePermissions = null,
   acquireInteractiveRetentionCompatibility = null,
+  classicCoreBridge = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
@@ -279,8 +280,8 @@ export function registerDesktopProjectAgent({
   objectiveWatches=createDesktopObjectiveWatchHost({rootDir:runtimeRoot,store:objectiveStore,ownsProject,isReady:workspaceId=>host?.isReady(workspaceId)===true,
     resolveWorkspacePath:workspaceId=>registry.get(workspaceId)?.path,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId).map(row=>({...row,verdict:supervisor.acceptance(row.sessionId)?.verdict})),agentTurnExecutor,projectPolicy:workspaceId=>profileStore.read(workspaceId)?.modelPolicy,inbox,
     wake:workspaceId=>{void host?.sync([workspaceId]).catch(()=>{});},onChanged:workspaceId=>broadcast?.('project-agent:changed',{workspaceIds:[workspaceId]})});
-  const objectives = createProjectObjectivesService({service:objectiveService,store:objectiveStore,profileStore,conversationStore,
-    enabled:runtimeEnabled,holdsLease,onAppendedMessage,
+  const objectives = createProjectObjectivesService({service:objectiveService,store:objectiveStore,profileStore,conversationStore,classicCoreBridge,
+    enabled:runtimeEnabled,holdsLease,onAppendedMessage,onChanged:workspaceId=>{if(typeof broadcast==='function')broadcast('project-agent:changed',{workspaceIds:[workspaceId]});objectiveWatches?.changed(workspaceId);},
   });
   const uninstallDelegation = installDelegation({ supervisor, objectives:objectiveService, storeDir: runtimeRoot });
   const uninstallVerification = installSessionVerification(verification);
@@ -560,6 +561,7 @@ export function registerDesktopProjectAgent({
     inputDrafts,
     recoveryControl,
     accessAuthority,
+    classicCoreBridge,
     diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,
     requestTakeover: workspaceId => {
@@ -727,6 +729,7 @@ export function registerDesktopProjectAgent({
   }
   const memory = createProjectMemoryService({
     store: memoryStore,
+    classicCoreBridge,
     onChanged: memoryChanged,
     profileStore,
     getSettings: typeof getSettings === 'function' ? getSettings : () => ({}),

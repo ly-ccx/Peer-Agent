@@ -348,7 +348,10 @@ async fn init_client(client: &mut RpcGoalTestClient, next_id: &mut u64) {
             "classic.usage",
             "classic.skills",
             "classic.mcp",
-            "classic.llm"
+            "classic.llm",
+            "project.memory",
+            "project.objectives",
+            "project.profile"
         ])
     );
     *next_id += 1;

@@ -956,6 +956,58 @@ export function createClassicCoreBridge({
     return requireClient().request('classic.llm.quota', { id }, { timeoutMs: 25_000 });
   }
 
+  async function projectMemoryList(params = {}) {
+    return requireClient().request('project.memory.list', params || {});
+  }
+
+  async function projectMemoryPin(params = {}) {
+    return requireClient().request('project.memory.pin', params || {});
+  }
+
+  async function projectMemoryForget(params = {}) {
+    return requireClient().request('project.memory.forget', params || {});
+  }
+
+  async function projectMemoryRestore(params = {}) {
+    return requireClient().request('project.memory.restore', params || {});
+  }
+
+  async function projectMemoryEdit(params = {}) {
+    return requireClient().request('project.memory.edit', params || {});
+  }
+
+  async function projectMemorySetSwitches(params = {}) {
+    return requireClient().request('project.memory.setSwitches', params || {});
+  }
+
+  async function projectObjectivesList(params = {}) {
+    return requireClient().request('project.objectives.list', params || {});
+  }
+
+  async function projectObjectivesUpdate(params = {}) {
+    return requireClient().request('project.objectives.update', params || {});
+  }
+
+  async function projectObjectivesPause(params = {}) {
+    return requireClient().request('project.objectives.pause', params || {});
+  }
+
+  async function projectObjectivesResume(params = {}) {
+    return requireClient().request('project.objectives.resume', params || {});
+  }
+
+  async function projectObjectivesDelete(params = {}) {
+    return requireClient().request('project.objectives.delete', params || {});
+  }
+
+  async function projectProfileReadUnknownOutcomePolicy(params = {}) {
+    return requireClient().request('project.profile.readUnknownOutcomePolicy', params || {});
+  }
+
+  async function projectProfileSetUnknownOutcomePolicy(params = {}) {
+    return requireClient().request('project.profile.setUnknownOutcomePolicy', params || {});
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
@@ -1020,6 +1072,19 @@ export function createClassicCoreBridge({
     listLlmCatalog,
     completeLlmPrompt,
     fetchLlmQuota,
+    projectMemoryList,
+    projectMemoryPin,
+    projectMemoryForget,
+    projectMemoryRestore,
+    projectMemoryEdit,
+    projectMemorySetSwitches,
+    projectObjectivesList,
+    projectObjectivesUpdate,
+    projectObjectivesPause,
+    projectObjectivesResume,
+    projectObjectivesDelete,
+    projectProfileReadUnknownOutcomePolicy,
+    projectProfileSetUnknownOutcomePolicy,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

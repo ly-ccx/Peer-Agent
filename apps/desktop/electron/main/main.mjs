@@ -2809,6 +2809,7 @@ function registerDesktopIpcHost() {
     ...registerDesktopProjectAgent({
       configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
       enabled: () => true,
+      classicCoreBridge,
       dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
       hostLeases, holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
