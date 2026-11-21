@@ -189,7 +189,13 @@ import {
 } from './conversation-compaction-persistence.mjs';
 import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
 import { applyMicrocompaction } from './chat-runtime/compaction-coordinator.mjs';
-import { getCompaction } from './chat-runtime/compaction-registry.mjs';
+import {
+  beginCompaction,
+  endCompaction,
+  failCompaction,
+  getCompaction,
+  updateCompactionProgress,
+} from './chat-runtime/compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
   bindDesktopAppLifecycle,
@@ -435,6 +441,12 @@ const classicCoreBridge = createClassicCoreBridge({
   onGoalPlanChanged: (payload) => handleGoalPlanChanged(payload),
   prepareGoalWorkspace: (params) => prepareClassicGoalWorkspace(params),
   runVisualVerification: (params) => runClassicVisualVerification(params),
+  compactionRegistry: {
+    beginCompaction,
+    updateCompactionProgress,
+    failCompaction,
+    endCompaction,
+  },
   logger: console,
 });
 let automationRunner = null;
@@ -561,8 +573,12 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
-  // llmChatService 在本聚合器之后才创建；list 时惰性读取，避免启动环依赖。
-  listActiveStreams: () => llmChatService?.listActiveStreams?.() ?? [],
+  // chatStreamApplicationService 合并 Rust Core 与 TS 活跃流，惰性读取避免启动环依赖。
+  listActiveStreams: () => (
+    typeof chatStreamApplicationService?.listActive === 'function'
+      ? (chatStreamApplicationService.listActive().streams ?? [])
+      : (llmChatService?.listActiveStreams?.() ?? [])
+  ),
   artifactRoots: {
     shell: path.join(dataHome, 'shell-artifacts'),
     browser: path.join(dataHome, 'browser-artifacts'),
@@ -1042,9 +1058,15 @@ const hostLeases = createHostLease({
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
-  forceComplete: (conversationId) => llmChatService.forceCompleteConversationStreams(conversationId, {
-    reason: 'goal-visual-completion-handoff',
-  }),
+  forceComplete: (conversationId) => (
+    typeof forceCompleteActiveConversationStreams === 'function'
+      ? forceCompleteActiveConversationStreams(conversationId, {
+        reason: 'goal-visual-completion-handoff',
+      })
+      : llmChatService.forceCompleteConversationStreams(conversationId, {
+        reason: 'goal-visual-completion-handoff',
+      })
+  ),
   startRunner: (planId) => goalRunner.start(planId),
 });
 goalRunner = createDesktopGoalRunnerHost({
@@ -1554,6 +1576,12 @@ const settingsApplicationService = createSettingsApplicationService({
     resourcesRoot,
     workspaceRoot,
     loadedEnvKeys,
+    classicCore: {
+      enabled: isPeerCoreClassicEnabled(),
+      active: classicCoreBridge.isAvailable(),
+      engine: classicCoreBridge.isAvailable() ? 'rust' : 'ts',
+      status: peerCoreClient?.status?.() ?? null,
+    },
   }),
   setSessionLocale: (locale) => sessionStore.setLocale(locale),
   rebuildAppMenu: () => rebuildAppMenu(),
@@ -1745,7 +1773,7 @@ const conversationApplicationService = createConversationApplicationService({
     return result;
   },
   addUsage: (id, usage) => conversationStore.addUsage(id, usage),
-  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
+  listActiveConversationIds: () => chatStreamApplicationService.listActive().conversationIds,
   deletePlanByConversation: (id) => goalPlanStore.deletePlanByConversation(id),
   removeConversationToolArtifacts: (params) => removeConversationToolArtifacts(params),
   reportCascadeFailure: (operation, error) => {
@@ -2207,7 +2235,7 @@ function registerDesktopIpcHost() {
   const inputPrediction = createDesktopInputPrediction({ getSettings: () => settingsStore.getAll(),
     listModels: llmConfigStore.listProviders, llmConfigStore, conversationStore,
     getProjectAgent: () => projectAgentDirectory, trustedWindows: trustedWindowRegistry,
-    isBusy: id => llmChatService.listActiveConversationIds().includes(id), fetchImpl: (...args) => net.fetch(...args) });
+    isBusy: id => chatStreamApplicationService.listActive().conversationIds.includes(id), fetchImpl: (...args) => net.fetch(...args) });
   const productLinkService = createProductLinkService({
     openExternal: (url) => shell.openExternal(url),
   });
@@ -2349,7 +2377,20 @@ function registerDesktopIpcHost() {
     }),
     ...createSelectionIpcRegistrations({
       store: conversationStore,
-      resolveRuntimeState: (id) => llmChatService.getSelectionRuntimeState(id),
+      resolveRuntimeState: (id) => {
+        const coreRecords = classicCoreBridge.getActiveStreamsForConversation(id);
+        if (coreRecords.length > 0) {
+          const history = conversationStore?.getPersistedConversationHistory?.(id);
+          if (!history) return { conversationId: id, contentRevision: null, status: 'unknown' };
+          const base = { conversationId: id, contentRevision: history.contentRevision };
+          if (coreRecords.length > 1) return { ...base, status: 'unknown' };
+          const activeMessageId = coreRecords[0]?.assistantMessageId;
+          return typeof activeMessageId === 'string' && activeMessageId
+            ? { ...base, status: 'running', activeMessageId }
+            : { ...base, status: 'unknown' };
+        }
+        return llmChatService.getSelectionRuntimeState(id);
+      },
       authorizeWindow: trustedWindowRegistry.authorize,
     }),
     ...createDataIpcRegistrations({
@@ -3199,9 +3240,16 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   // Both failed and interrupted re-arms use resume() to consume suspension.
   // Recheck after the foreground stream releases, rather than capture stale state.
   void serializeAcceptedGoalRunnerHandoff({
-    forceComplete: () => forceCompleteActiveConversationStreams(
-      plan.conversationId,
-      { reason: 'goal_handoff' },
+    forceComplete: () => (
+      typeof forceCompleteActiveConversationStreams === 'function'
+        ? forceCompleteActiveConversationStreams(
+          plan.conversationId,
+          { reason: 'goal_handoff' },
+        )
+        : (llmChatService?.forceCompleteConversationStreams?.(
+          plan.conversationId,
+          { reason: 'goal_handoff' },
+        ) ?? { released: Promise.resolve() })
     ),
     isStillAccepted: () => (
       shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
@@ -3299,37 +3347,70 @@ async function handleChatStartTask({
   if (!boundWorkspacePath) {
     throw new Error('workspace_required');
   }
-  const conversation = conversationStore.createConversation({
-    title: String(title ?? normalizedText).slice(0, 48) || '新任务',
-    workspacePath: boundWorkspacePath,
-    mode,
-    fastMode,
-    preferredExecutionIsolation,
-  });
-  if (effort !== undefined || modelProviderId !== undefined) {
-    conversationStore.updateModelEffort(conversation.id, {
-      effort,
-      modelProviderId,
+  let conversation;
+  if (classicCoreBridge.isAvailable()) {
+    conversation = await classicCoreBridge.createConversation({
+      title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+      workspacePath: boundWorkspacePath,
+      mode,
+      fastMode,
+      preferredExecutionIsolation,
     });
+    if (effort !== undefined || modelProviderId !== undefined) {
+      await classicCoreBridge.updateConversationModelEffort({
+        id: conversation.id,
+        effort,
+        modelProviderId,
+      });
+    }
+  } else {
+    conversation = conversationStore.createConversation({
+      title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+      workspacePath: boundWorkspacePath,
+      mode,
+      fastMode,
+      preferredExecutionIsolation,
+    });
+    if (effort !== undefined || modelProviderId !== undefined) {
+      conversationStore.updateModelEffort(conversation.id, {
+        effort,
+        modelProviderId,
+      });
+    }
   }
   const now = new Date().toISOString();
   const userMessageId = randomUUID();
   const assistantMessageId = randomUUID();
   const streamId = randomUUID();
-  conversationStore.appendMessage(conversation.id, {
+  const userMessagePayload = {
     id: userMessageId,
     role: 'user',
     content: normalizedText,
     timestamp: now,
     ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
-  }, { returnMessages: false });
-  conversationStore.appendMessage(conversation.id, {
+  };
+  const assistantMessagePayload = {
     id: assistantMessageId,
     role: 'assistant',
     content: '',
     timestamp: now,
     segments: [],
-  }, { returnMessages: false });
+  };
+  if (classicCoreBridge.isAvailable()) {
+    await classicCoreBridge.appendConversationMessage({
+      id: conversation.id,
+      message: userMessagePayload,
+      returnMessages: false,
+    });
+    await classicCoreBridge.appendConversationMessage({
+      id: conversation.id,
+      message: assistantMessagePayload,
+      returnMessages: false,
+    });
+  } else {
+    conversationStore.appendMessage(conversation.id, userMessagePayload, { returnMessages: false });
+    conversationStore.appendMessage(conversation.id, assistantMessagePayload, { returnMessages: false });
+  }
   void Promise.resolve(handleChatSend({
     streamId,
     assistantMessageId,
@@ -3501,10 +3582,19 @@ function handleChatSend({
         },
       ]
     : runtimeReminders;
+  const hasResourceFeedback = Boolean(
+    Array.isArray(persistedConversation?.messages)
+    && persistedConversation.messages.some((msg) => (
+      (Array.isArray(msg?.resourceFeedback) && msg.resourceFeedback.length > 0)
+      || (Array.isArray(msg?.attachments) && msg.attachments.some((att) => (
+        att?.kind === 'interactive-feedback' || Boolean(att?.resourceFeedback)
+      )))
+    )),
+  );
   const useClassicCoreBridge = Boolean(
     conversationId
     && assistantMessageId
-    && classicCoreBridge.canHandleChatSend({ mode: mode || 'chat' }),
+    && classicCoreBridge.canHandleChatSend({ mode: mode || 'chat', hasResourceFeedback }),
   );
   if (useClassicCoreBridge) {
     const classicActivePlan = conversationId ? goalPlanStore.getActivePlanByConversation(conversationId) : null;
@@ -3524,6 +3614,10 @@ function handleChatSend({
       persistModelSelection: Boolean(modelProviderId),
       resumeInterruptedReply,
       runtimeReminders: effectiveRuntimeReminders,
+      configInstructions,
+      contextAttachments,
+      attachmentContext,
+      contextExtensions,
     }, sender);
     return finalizeClassicGoalTurnOutcome(classicOutcomePromise, {
       conversationId,

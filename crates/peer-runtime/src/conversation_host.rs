@@ -146,6 +146,9 @@ pub struct PreparedConversationOptions<'a> {
     pub persist_model_selection: bool,
     pub resume_interrupted_reply: bool,
     pub runtime_reminders: &'a [(String, String)],
+    pub config_instructions: Option<&'a [crate::system_context::instructions::ConfigInstruction]>,
+    pub context_attachments: &'a [Value],
+    pub context_extensions: &'a [Value],
     pub allowlist: Option<&'a [String]>,
     pub max_turns: Option<usize>,
     pub extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
@@ -172,6 +175,7 @@ pub struct CompactOptions<'a> {
     pub provider_id: &'a str,
     pub mode: RuntimeMode,
     pub effort: &'a str,
+    pub desktop_host: bool,
 }
 /// Presentation events from the ordinary Host. Assistant deltas are provisional
 /// display text; AssistantText is published after the complete text is committed.
@@ -398,15 +402,33 @@ impl NativeConversationRuntime {
         let at = now();
         let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
-        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
-            .map_err(HostError)?;
+        let instructions = if options.desktop_host {
+            ProjectInstructions::observe_desktop_host(&workspace, &self.home, None, external)
+        } else {
+            ProjectInstructions::observe_host(&workspace, &self.home, external)
+        }
+        .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
         let store = ConversationStore::new(&self.home);
         let meta = store
             .read_metadata(conversation_id)?
             .metadata
             .ok_or(HostError("conversation_unavailable"))?;
-        if meta["workspacePath"].as_str() != workspace.to_str() || meta["mode"] != mode.as_str() {
+        if options.desktop_host {
+            if let Some(bound_ws) = meta["workspacePath"].as_str().filter(|s| !s.is_empty()) {
+                let bound_canon = std::fs::canonicalize(bound_ws).ok();
+                if bound_ws != workspace.to_str().unwrap_or("")
+                    && bound_canon.as_deref() != Some(workspace.as_path())
+                {
+                    return Err(HostError("conversation_scope_changed"));
+                }
+            }
+            if meta["mode"].as_str().is_some_and(|m| m != mode.as_str()) {
+                return Err(HostError("conversation_scope_changed"));
+            }
+        } else if meta["workspacePath"].as_str() != workspace.to_str()
+            || meta["mode"] != mode.as_str()
+        {
             return Err(HostError("conversation_scope_changed"));
         }
         if meta
@@ -556,6 +578,8 @@ impl NativeConversationRuntime {
             prepared_assistant: None,
             goal_hooks: None,
             runtime_reminders: Vec::new(),
+            context_attachments: Vec::new(),
+            context_extensions: Vec::new(),
         };
         let result = async {
             host.source_current()?;
@@ -907,6 +931,8 @@ impl NativeConversationRuntime {
             prepared_assistant: None,
             goal_hooks: None,
             runtime_reminders: Vec::new(),
+            context_attachments: Vec::new(),
+            context_extensions: Vec::new(),
         };
         let mut runner_stop = None;
         let result = async {
@@ -1015,8 +1041,13 @@ impl NativeConversationRuntime {
         let at = now();
         let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
-        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
-            .map_err(HostError)?;
+        let instructions = ProjectInstructions::observe_desktop_host(
+            &workspace,
+            &self.home,
+            options.config_instructions,
+            external,
+        )
+        .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
         let stream = options.stream_id.to_owned();
         let owner = crate::recorder::local_recorder(
@@ -1296,6 +1327,8 @@ impl NativeConversationRuntime {
             prepared_assistant: Some(prepared_assistant),
             goal_hooks: None,
             runtime_reminders: reminders,
+            context_attachments: options.context_attachments.to_vec(),
+            context_extensions: options.context_extensions.to_vec(),
         };
 
         let mut explorer_error = None;
@@ -1410,8 +1443,9 @@ impl NativeConversationRuntime {
 
         let hooks_cfg = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
-        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
-            .map_err(HostError)?;
+        let instructions =
+            ProjectInstructions::observe_desktop_host(&workspace, &self.home, None, external)
+                .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
         let stream = options.stream_id.to_owned();
         let owner = crate::recorder::local_recorder(
@@ -1572,6 +1606,8 @@ impl NativeConversationRuntime {
             prepared_assistant: None,
             goal_hooks: hooks.take(),
             runtime_reminders: Vec::new(),
+            context_attachments: Vec::new(),
+            context_extensions: Vec::new(),
         };
 
         let admission = goal_store.begin_ordinary_runner_with_resume(
@@ -1747,6 +1783,8 @@ struct Host<'a> {
     prepared_assistant: Option<PreparedAssistant>,
     goal_hooks: Option<&'a mut dyn GoalHostHooks>,
     runtime_reminders: Vec<(String, String)>,
+    context_attachments: Vec<Value>,
+    context_extensions: Vec<Value>,
 }
 struct PreparedAssistant {
     message_id: String,
@@ -2136,6 +2174,8 @@ impl CognitionHost for Host<'_> {
                     .as_ref()
                     .and_then(|runner| runner.frame.as_ref().map(|(_, plan)| plan)),
                 runtime_reminders: &self.runtime_reminders,
+                context_attachments: &self.context_attachments,
+                context_extensions: &self.context_extensions,
             },
             continuity,
             &now(),

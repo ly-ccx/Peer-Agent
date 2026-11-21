@@ -11,7 +11,12 @@ const DEFAULT_MAX_RESTARTS = 3;
 const MAX_STDERR_LINE_BYTES = 16 * 1024;
 
 export function isPeerCoreClassicEnabled(env = process.env) {
-  return env?.PEER_CORE_CLASSIC === '1' || env?.PEER_CORE_ENGINE === 'rust';
+  const flag = env?.PEER_CORE_CLASSIC?.trim?.().toLowerCase?.();
+  const engine = env?.PEER_CORE_ENGINE?.trim?.().toLowerCase?.();
+  if (flag === '0' || flag === 'false' || flag === 'off') return false;
+  if (engine === 'ts' || engine === 'node' || engine === 'legacy') return false;
+  if (flag === '1' || flag === 'true' || flag === 'on' || engine === 'rust') return true;
+  return true;
 }
 
 export function peerCoreBinaryFilename(platform = process.platform) {

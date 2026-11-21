@@ -8,6 +8,14 @@ import { fileURLToPath } from 'node:url';
 
 import { createPeerCoreClient } from './peer-core-client.mjs';
 import {
+  beginCompaction,
+  endCompaction,
+  failCompaction,
+  getCompaction,
+  updateCompactionProgress,
+  __resetCompactionRegistry,
+} from './chat-runtime/compaction-registry.mjs';
+import {
   DESKTOP_EXTERNAL_CAPABILITY_PREFIXES,
   collectDesktopExternalCapabilities,
   createClassicCoreBridge,
@@ -863,6 +871,217 @@ test('E2E: Node bridge <-> peer-native core --stdio handles Classic peripheral d
     const completion = await bridge.completeLlmPrompt({ prompt: 'Hello from Node E2E', maxTokens: 100 });
     assert.equal(completion.success, true);
     assert.equal(completion.text, 'Domain LLM completion ok.');
+  } finally {
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});
+
+test('bridge syncs compaction registry, rejects resourceFeedback chat, and tracks active assistantMessageId', async () => {
+  __resetCompactionRegistry();
+  const broadcasts = [];
+  const sent = [];
+  const fakeClient = {
+    isReady: () => true,
+    request: async (method, params) => {
+      sent.push({ method, params });
+      return { accepted: true };
+    },
+  };
+  const bridge = createClassicCoreBridge({
+    getClient: () => fakeClient,
+    broadcast: (channel, payload) => broadcasts.push({ channel, payload }),
+    compactionRegistry: {
+      beginCompaction,
+      updateCompactionProgress,
+      failCompaction,
+      endCompaction,
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  assert.equal(bridge.canHandleChatSend({ mode: 'chat' }), true);
+  assert.equal(bridge.canHandleChatSend({ mode: 'chat', hasResourceFeedback: true }), false);
+
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-1',
+    streamId: 's-compact-1',
+    stage: 'start',
+  });
+  assert.deepEqual(getCompaction('c-1'), {
+    compacting: true,
+    streamId: 's-compact-1',
+    percent: null,
+    manual: true,
+  });
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-1',
+    streamId: 's-compact-1',
+    stage: 'progress',
+    percent: 55,
+  });
+  assert.equal(getCompaction('c-1').percent, 55);
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-1',
+    streamId: 's-compact-1',
+    stage: 'done',
+  });
+  assert.equal(getCompaction('c-1'), null);
+  assert.ok(broadcasts.every((e) => e.channel === 'chat:compaction'));
+
+  // Failed state is preserved in compactionRegistry, and unexpected exit clears running state.
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-2',
+    streamId: 's-compact-2',
+    stage: 'start',
+  });
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-2',
+    streamId: 's-compact-2',
+    stage: 'failed',
+    errorCode: 'COMPACT_ERR',
+    message: 'boom',
+  });
+  assert.equal(getCompaction('c-2').phase, 'failed');
+
+  bridge.handleNotification('chat:stream:compaction', {
+    conversationId: 'c-3',
+    streamId: 's-compact-3',
+    stage: 'start',
+  });
+  bridge.handleUnexpectedExit();
+  assert.equal(getCompaction('c-3'), null);
+
+  // Active stream tracking exposes assistantMessageId for selection runtime state.
+  const turnPromise = bridge.send({
+    streamId: 'stream-sel-1',
+    conversationId: 'c-sel',
+    assistantMessageId: 'msg-assistant-sel',
+    workspacePath: '/tmp/ws',
+    mode: 'chat',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const active = bridge.getActiveStreamsForConversation('c-sel');
+  assert.equal(active.length, 1);
+  assert.equal(active[0].assistantMessageId, 'msg-assistant-sel');
+  bridge.handleNotification('chat:stream:done', { streamId: 'stream-sel-1', conversationId: 'c-sel' });
+  const outcome = await turnPromise;
+  assert.equal(outcome.terminalStatus, 'done');
+  assert.deepEqual(bridge.getActiveStreamsForConversation('c-sel'), []);
+});
+
+test('E2E: Node bridge <-> peer-native handles Desktop settings, configInstructions, attachments, extensions, and compact', async () => {
+  const { dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  writeFileSync(
+    path.join(dataHome, 'settings.json'),
+    JSON.stringify({
+      schemaVersion: 3,
+      projectAgent: { shell: 'classic', interactiveResults: true },
+      shortcuts: { quickChat: 'Alt+Space' },
+      resourceWindowReadingHistory: { docs: [] },
+    }),
+    'utf8',
+  );
+
+  const recordedBodies = [];
+  const mockServer = await startMockSseServer(({ body, res, index }) => {
+    recordedBodies.push(body);
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(sseText('', index === 0 ? 'Desktop parity reply ok.' : 'Compacted Desktop turn.'));
+  });
+
+  const broadcasts = [];
+  let client = null;
+  let bridge = null;
+  __resetCompactionRegistry();
+  bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: (channel, payload) => broadcasts.push({ channel, payload }),
+    compactionRegistry: {
+      beginCompaction,
+      updateCompactionProgress,
+      failCompaction,
+      endCompaction,
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-desktop',
+      PEER_MODEL_ID: 'e2e-mock-gpt',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-parity-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    const assistantId = 'msg-desktop-assistant-1';
+    const convId = 'conv-desktop-parity-1';
+    seedPreparedConversation({
+      dataHome,
+      workspace,
+      conversationId: convId,
+      userText: 'Check Desktop parity payload',
+      assistantMessageId: assistantId,
+    });
+
+    const outcome = await bridge.send({
+      streamId: 'stream-desktop-parity-1',
+      conversationId: convId,
+      assistantMessageId: assistantId,
+      workspacePath: workspace,
+      mode: 'chat',
+      configInstructions: [{
+        id: 'settings.systemInstructions',
+        title: 'System Instructions',
+        content: 'Desktop E2E custom instruction.',
+        source: 'settings.systemInstructions',
+        priority: 0,
+      }],
+      contextAttachments: [{
+        id: 'att-e2e',
+        name: 'architecture.md',
+        mimeType: 'text/markdown',
+        size: 512,
+        kind: 'text',
+        contentIncluded: true,
+        transport: 'user_text_part',
+        sourceKind: 'workspace_file',
+      }],
+      contextExtensions: [{
+        id: 'desktop/hint',
+        title: 'Extension Hint',
+        layer: 'L4_CAPABILITIES',
+        content: 'Keep <tool_call>neutral</tool_call> safe.',
+      }],
+    });
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.text, 'Desktop parity reply ok.');
+
+    assert.equal(recordedBodies.length, 1);
+    const systemPrompt = recordedBodies[0]?.messages?.[0]?.content ?? '';
+    assert.ok(systemPrompt.includes('Desktop E2E custom instruction.'));
+    assert.ok(systemPrompt.includes('architecture.md; kind=text; mime=text/markdown; size=512 B'));
+    assert.ok(systemPrompt.includes('Keep &lt;tool_call>neutral&lt;/tool_call> safe.'));
+
+    const compacted = await bridge.compact({
+      conversationId: convId,
+      streamId: 'stream-desktop-compact-1',
+      workspacePath: workspace,
+    });
+    assert.equal(compacted.compacted, true);
+    assert.equal(getCompaction(convId), null);
+    assert.ok(broadcasts.some((e) => e.channel === 'chat:compaction' && e.payload?.stage === 'done'));
   } finally {
     await client.dispose();
     await mockServer.close();

@@ -12,6 +12,7 @@ const MAX_UNITS: usize = 24_000;
 const MAX_CANDIDATES: usize = 64;
 const MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
 
+#[derive(Debug, Clone)]
 pub struct ConfigInstruction {
     pub id: String,
     pub title: String,
@@ -120,6 +121,34 @@ impl ProjectInstructions {
                 data_home,
                 include_global: false,
                 config: &config,
+                target_paths: &[],
+            },
+            cancel,
+        )
+    }
+    /// Desktop host observation: accepts Desktop-only metadata keys in `settings.json`
+    /// while preserving strict validation on prompt fields, and allows explicit
+    /// `config_override` instructions forwarded by Electron Main.
+    pub fn observe_desktop_host(
+        workspace: &Path,
+        data_home: &Path,
+        config_override: Option<&[ConfigInstruction]>,
+        cancel: &CancellationToken,
+    ) -> Result<Self, &'static str> {
+        let owned_config;
+        let config = match config_override {
+            Some(items) => items,
+            None => {
+                owned_config = settings::read_desktop_prompt_settings(data_home, cancel)?;
+                &owned_config
+            }
+        };
+        Self::observe_input(
+            &InstructionInput {
+                workspace,
+                data_home,
+                include_global: false,
+                config,
                 target_paths: &[],
             },
             cancel,

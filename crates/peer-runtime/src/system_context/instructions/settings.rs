@@ -14,6 +14,13 @@ pub(super) fn read_host_prompt_settings(
     project(&read_host_settings(home, cancel)?)
 }
 
+pub(super) fn read_desktop_prompt_settings(
+    home: &Path,
+    cancel: &CancellationToken,
+) -> Result<Vec<ConfigInstruction>, &'static str> {
+    project_desktop(&read_host_settings(home, cancel)?)
+}
+
 pub(super) fn presentation_locale(
     home: &Path,
     cancel: &CancellationToken,
@@ -182,6 +189,19 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
     // Both execution hosts already receive their effective permission policy
     // from the active authority. These settings remain read-only metadata.
     validate_legacy_metadata(settings)?;
+    validate_prompt_fields(settings)?;
+    Ok(build_prompt_instructions(settings))
+}
+
+pub(super) fn project_desktop(settings: &Value) -> Result<Vec<ConfigInstruction>, &'static str> {
+    if !settings.is_object() {
+        return Err("context_settings_invalid");
+    }
+    validate_prompt_fields(settings)?;
+    Ok(build_prompt_instructions(settings))
+}
+
+fn validate_prompt_fields(settings: &Value) -> Result<(), &'static str> {
     for field in [
         "locale",
         "replyLanguage",
@@ -195,6 +215,10 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
             return Err("context_settings_invalid");
         }
     }
+    Ok(())
+}
+
+fn build_prompt_instructions(settings: &Value) -> Vec<ConfigInstruction> {
     let mut config = Vec::new();
     if let Some(content) = settings["systemInstructions"]
         .as_str()
@@ -235,5 +259,5 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
         .filter(|s| !s.is_empty())
         .unwrap_or("PeerAgent/");
     config.push(item("settings.gitBranchPrefix","Git Branch Prefix",format!("When you create a new git branch (e.g. via `git checkout -b` or `git switch -c`), always name it with the prefix \"{prefix}\". For example, a feature branch should be named like \"{prefix}my-feature\". Do not apply this prefix to existing branches you only check out.")));
-    Ok(config)
+    config
 }

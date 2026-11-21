@@ -102,11 +102,13 @@ export function createClassicCoreBridge({
   onGoalPlanChanged = null,
   prepareGoalWorkspace = null,
   runVisualVerification = null,
+  compactionRegistry = null,
   logger = console,
 } = {}) {
   const activeStreams = new Map();
   const pendingPermissions = new Map();
   const activeGoals = new Set();
+  const activeCompactions = new Map();
 
   function activeClient() {
     const client = typeof getClient === 'function' ? getClient() : null;
@@ -121,8 +123,8 @@ export function createClassicCoreBridge({
     return activeClient() !== null;
   }
 
-  function canHandleChatSend({ mode = 'chat' } = {}) {
-    if (!isAvailable()) return false;
+  function canHandleChatSend({ mode = 'chat', hasResourceFeedback = false } = {}) {
+    if (!isAvailable() || hasResourceFeedback) return false;
     const normalized = mode || 'chat';
     return normalized === 'chat' || normalized === 'plan' || normalized === 'goal';
   }
@@ -221,8 +223,44 @@ export function createClassicCoreBridge({
       return;
     }
 
-    if (method === 'chat:stream:active-changed' || method === 'chat:stream:compaction') {
+    if (method === 'chat:stream:active-changed') {
       broadcast?.(method, params);
+      return;
+    }
+
+    if (method === 'chat:stream:compaction' || method === 'chat:compaction') {
+      const conversationId = typeof params?.conversationId === 'string' ? params.conversationId : '';
+      const streamId = typeof params?.streamId === 'string' ? params.streamId : '';
+      const manual = params?.manual ?? true;
+      const normalizedPayload = {
+        ...(params && typeof params === 'object' ? params : {}),
+        manual,
+      };
+      if (conversationId && streamId) {
+        if (params?.stage === 'start') {
+          activeCompactions.set(conversationId, streamId);
+          compactionRegistry?.beginCompaction?.({ conversationId, streamId, manual });
+        } else if (params?.stage === 'progress') {
+          compactionRegistry?.updateCompactionProgress?.({
+            conversationId,
+            streamId,
+            percent: params?.percent ?? null,
+          });
+        } else if (params?.stage === 'failed') {
+          activeCompactions.delete(conversationId);
+          compactionRegistry?.failCompaction?.({
+            conversationId,
+            streamId,
+            errorCode: params?.errorCode,
+            message: params?.message,
+            budget: params?.budget ?? null,
+          });
+        } else if (params?.stage === 'done' || params?.stage === 'idle') {
+          activeCompactions.delete(conversationId);
+          compactionRegistry?.endCompaction?.({ conversationId, streamId });
+        }
+      }
+      broadcast?.('chat:compaction', normalizedPayload);
       return;
     }
 
@@ -295,6 +333,10 @@ export function createClassicCoreBridge({
 
   function handleUnexpectedExit() {
     activeGoals.clear();
+    for (const [conversationId, streamId] of activeCompactions.entries()) {
+      compactionRegistry?.endCompaction?.({ conversationId, streamId });
+    }
+    activeCompactions.clear();
     if (activeStreams.size === 0) return;
     const entries = [...activeStreams.entries()];
     activeStreams.clear();
@@ -411,6 +453,7 @@ export function createClassicCoreBridge({
     const record = {
       streamId,
       conversationId,
+      assistantMessageId: params.assistantMessageId ?? null,
       webContents,
       startedAt: Date.now(),
       accumulatedText: '',
@@ -437,6 +480,16 @@ export function createClassicCoreBridge({
         persistModelSelection: Boolean(params.persistModelSelection),
         resumeInterruptedReply: Boolean(params.resumeInterruptedReply),
         ...(reminders.length > 0 ? { runtimeReminders: reminders } : {}),
+        ...(Array.isArray(params.configInstructions) ? { configInstructions: params.configInstructions } : {}),
+        ...(Array.isArray(params.contextAttachments) && params.contextAttachments.length > 0
+          ? { contextAttachments: params.contextAttachments }
+          : {}),
+        ...(Array.isArray(params.attachmentContext) && params.attachmentContext.length > 0
+          ? { attachmentContext: params.attachmentContext }
+          : {}),
+        ...(Array.isArray(params.contextExtensions) && params.contextExtensions.length > 0
+          ? { contextExtensions: params.contextExtensions }
+          : {}),
         ...(Array.isArray(params.allowlist) ? { allowlist: params.allowlist } : {}),
         ...(Number.isInteger(params.maxTurns) ? { maxTurns: params.maxTurns } : {}),
       });
@@ -508,6 +561,22 @@ export function createClassicCoreBridge({
       });
     }
     return { conversationIds, streams };
+  }
+
+  function getActiveStreamsForConversation(conversationId) {
+    if (typeof conversationId !== 'string' || !conversationId) return [];
+    const matching = [];
+    for (const [streamId, record] of activeStreams.entries()) {
+      if (record.conversationId === conversationId) {
+        matching.push({
+          streamId,
+          conversationId: record.conversationId,
+          assistantMessageId: record.assistantMessageId ?? null,
+          startedAt: record.startedAt,
+        });
+      }
+    }
+    return matching;
   }
 
   async function compact(params = {}) {
@@ -877,6 +946,7 @@ export function createClassicCoreBridge({
     abort,
     reattach,
     listActiveSync,
+    getActiveStreamsForConversation,
     forceCompleteConversationStreams,
     compact,
     resolvePermissionGrant,

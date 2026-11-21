@@ -34,9 +34,14 @@ function makeTempDataHome() {
   };
 }
 
-test('isPeerCoreClassicEnabled respects default-off and explicit rollout env vars', () => {
-  assert.equal(isPeerCoreClassicEnabled({}), false);
+test('isPeerCoreClassicEnabled defaults on and respects explicit kill-switch env vars', () => {
+  assert.equal(isPeerCoreClassicEnabled({}), true);
   assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_CLASSIC: '0' }), false);
+  assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_CLASSIC: 'false' }), false);
+  assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_CLASSIC: 'off' }), false);
+  assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_ENGINE: 'ts' }), false);
+  assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_ENGINE: 'node' }), false);
+  assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_ENGINE: 'legacy' }), false);
   assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_CLASSIC: '1' }), true);
   assert.equal(isPeerCoreClassicEnabled({ PEER_CORE_ENGINE: 'rust' }), true);
   assert.throws(

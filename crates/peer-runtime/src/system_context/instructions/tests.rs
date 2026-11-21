@@ -220,3 +220,87 @@ fn settings_are_read_only_and_unsupported_values_do_not_become_defaults() {
         Err("context_settings_unavailable")
     ));
 }
+
+#[test]
+fn desktop_host_tolerates_desktop_settings_and_respects_config_override() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("settings.json");
+    std::fs::write(
+        &file,
+        serde_json::to_string(&serde_json::json!({
+            "schemaVersion": 3,
+            "locale": "zh-CN",
+            "replyLanguage": "auto",
+            "gitBranchPrefix": "Custom/",
+            "projectAgent": {
+                "shell": "classic",
+                "interactiveResults": true,
+            },
+            "shortcuts": { "quickChat": "Alt+Space" },
+            "resourceWindowReadingHistory": { "a": 1 },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Strict CLI host still rejects unported Desktop keys.
+    assert!(matches!(
+        ProjectInstructions::observe_host(root.path(), root.path(), &CancellationToken::new()),
+        Err("native_capability_inventory_unsupported")
+    ));
+
+    // Desktop host accepts them, omits replyLanguage when "auto", and preserves gitBranchPrefix.
+    let desktop = ProjectInstructions::observe_desktop_host(
+        root.path(),
+        root.path(),
+        None,
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    assert_eq!(desktop.sections().len(), 1);
+    let rendered = serde_json::to_string(&desktop.sections()).unwrap();
+    assert!(rendered.contains("Custom/"));
+    assert!(!rendered.contains("Reply Language"));
+
+    // Explicit config_override takes precedence.
+    let override_items = [ConfigInstruction {
+        id: "settings.custom".into(),
+        title: "Custom Rule".into(),
+        content: "Follow desktop override.".into(),
+        source: Some("settings.custom".into()),
+        priority: 0,
+    }];
+    let overridden = ProjectInstructions::observe_desktop_host(
+        root.path(),
+        root.path(),
+        Some(&override_items),
+        &CancellationToken::new(),
+    )
+    .unwrap();
+    let rendered_override = serde_json::to_string(&overridden.sections()).unwrap();
+    assert!(rendered_override.contains("Follow desktop override."));
+    assert!(!rendered_override.contains("Custom/"));
+
+    // Corrupt JSON and directory settings.json still fail cleanly.
+    std::fs::write(&file, "{broken").unwrap();
+    assert!(matches!(
+        ProjectInstructions::observe_desktop_host(
+            root.path(),
+            root.path(),
+            None,
+            &CancellationToken::new(),
+        ),
+        Err("context_settings_invalid")
+    ));
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    assert!(matches!(
+        ProjectInstructions::observe_desktop_host(
+            root.path(),
+            root.path(),
+            None,
+            &CancellationToken::new(),
+        ),
+        Err("context_settings_unavailable")
+    ));
+}

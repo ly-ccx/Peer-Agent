@@ -79,6 +79,21 @@ pub struct RuntimeReminderParam {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ConfigInstructionParam {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub priority: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClassicChatSendParams {
     pub conversation_id: String,
     pub stream_id: String,
@@ -98,6 +113,14 @@ pub struct ClassicChatSendParams {
     pub resume_interrupted_reply: bool,
     #[serde(default)]
     pub runtime_reminders: Vec<RuntimeReminderParam>,
+    #[serde(default)]
+    pub config_instructions: Option<Vec<ConfigInstructionParam>>,
+    #[serde(default)]
+    pub context_attachments: Vec<Value>,
+    #[serde(default)]
+    pub attachment_context: Vec<Value>,
+    #[serde(default)]
+    pub context_extensions: Vec<Value>,
     #[serde(default)]
     pub allowlist: Option<Vec<String>>,
     #[serde(default)]
@@ -346,6 +369,27 @@ async fn run_classic_turn(
         .iter()
         .map(|r| (r.id.clone(), r.content.clone()))
         .collect();
+    let config_instructions: Option<
+        Vec<peer_runtime::system_context::instructions::ConfigInstruction>,
+    > = params.config_instructions.as_ref().map(|items| {
+        items
+            .iter()
+            .map(
+                |item| peer_runtime::system_context::instructions::ConfigInstruction {
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    content: item.content.clone(),
+                    source: item.source.clone(),
+                    priority: item.priority,
+                },
+            )
+            .collect()
+    });
+    let context_attachments = if !params.context_attachments.is_empty() {
+        params.context_attachments.as_slice()
+    } else {
+        params.attachment_context.as_slice()
+    };
 
     let mut permission = RpcPermissionInput {
         stream_id: StreamIdRef::Fixed(stream_id.clone()),
@@ -373,6 +417,9 @@ async fn run_classic_turn(
                 persist_model_selection: params.persist_model_selection,
                 resume_interrupted_reply: params.resume_interrupted_reply,
                 runtime_reminders: &reminders,
+                config_instructions: config_instructions.as_deref(),
+                context_attachments,
+                context_extensions: &params.context_extensions,
                 allowlist: params.allowlist.as_deref(),
                 max_turns: params.max_turns,
                 extra_providers,
@@ -667,6 +714,7 @@ pub async fn handle_compact(
                         provider_id: &provider_id_owned,
                         mode,
                         effort: &effort_owned,
+                        desktop_host: true,
                     },
                     &model_owned,
                     &cancel_owned,

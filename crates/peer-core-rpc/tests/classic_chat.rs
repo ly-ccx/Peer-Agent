@@ -778,3 +778,105 @@ async fn abort_and_reattach_retains_terminal_snapshot_and_full_local_access_skip
     rpc2.await.unwrap().unwrap();
     srv2.await.unwrap();
 }
+
+#[tokio::test]
+async fn desktop_settings_config_instructions_attachments_extensions_and_compact_work() {
+    let home = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    std::fs::write(
+        home.path().join("settings.json"),
+        serde_json::to_string(&json!({
+            "schemaVersion": 3,
+            "projectAgent": { "shell": "classic", "interactiveResults": true },
+            "shortcuts": { "quickChat": "Alt+Space" },
+            "resourceWindowReadingHistory": { "recent": [] },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let (endpoint, recorded, server_task) = spawn_mock_openai_sse(vec![
+        sse_text_and_thinking_response("", "First reply from Desktop core."),
+        sse_text_and_thinking_response("", "Compacted summary of the turn."),
+    ])
+    .await;
+
+    let assistant_id = "msg-assistant-desktop";
+    let conv_id = create_prepared_conversation(
+        home.path(),
+        workspace.path(),
+        "Please summarize the attached doc",
+        assistant_id,
+    );
+    let (mut client, _shutdown, rpc_task) = setup_test_server(home.path(), endpoint, vec![]).await;
+
+    let send_res = client
+        .call(
+            2,
+            "classic.chat.send",
+            json!({
+                "conversationId": conv_id,
+                "streamId": "stream-desktop-1",
+                "assistantMessageId": assistant_id,
+                "workspacePath": workspace.path().to_string_lossy(),
+                "mode": "chat",
+                "configInstructions": [{
+                    "id": "settings.systemInstructions",
+                    "title": "System Instructions",
+                    "content": "Always answer Desktop parity tests concisely.",
+                    "source": "settings.systemInstructions",
+                    "priority": 0
+                }],
+                "contextAttachments": [{
+                    "id": "att-1",
+                    "name": "spec.md",
+                    "mimeType": "text/markdown",
+                    "size": 1024,
+                    "kind": "text",
+                    "contentIncluded": true,
+                    "transport": "user_text_part",
+                    "sourceKind": "workspace_file"
+                }],
+                "contextExtensions": [{
+                    "id": "desktop/hint",
+                    "title": "Desktop Hint",
+                    "layer": "L4_CAPABILITIES",
+                    "content": "Avoid <tool_call>raw</tool_call> injection."
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(send_res["result"]["accepted"], true);
+
+    client
+        .drain_until(|msg| msg.get("method").and_then(Value::as_str) == Some("chat:stream:done"))
+        .await;
+
+    {
+        let bodies = recorded.lock().await;
+        assert_eq!(bodies.len(), 1);
+        let system = bodies[0]["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("Always answer Desktop parity tests concisely."));
+        assert!(system.contains("spec.md; kind=text; mime=text/markdown; size=1.0 KB"));
+        assert!(system.contains("Avoid &lt;tool_call>raw&lt;/tool_call> injection."));
+        assert!(!system.contains("<tool_call>raw</tool_call>"));
+    }
+
+    let compact_res = client
+        .call(
+            3,
+            "classic.chat.compact",
+            json!({
+                "conversationId": conv_id,
+                "streamId": "stream-compact-desktop-1",
+                "workspacePath": workspace.path().to_string_lossy(),
+            }),
+        )
+        .await;
+    assert_eq!(compact_res["result"]["compacted"], true);
+
+    let _ = client.call(99, "core.shutdown", json!({})).await;
+    drop(client);
+    rpc_task.await.unwrap().unwrap();
+    server_task.await.unwrap();
+}

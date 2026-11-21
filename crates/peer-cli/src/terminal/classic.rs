@@ -1214,6 +1214,7 @@ impl<'a> ClassicSession<'a> {
                         provider_id: &provider_id,
                         mode,
                         effort: &effort,
+                        desktop_host: false,
                     },
                     &model,
                     &task_cancel,
