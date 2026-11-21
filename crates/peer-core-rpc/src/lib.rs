@@ -5,10 +5,14 @@
 //! Exposes the local Rust runtime to thin UI shells (`peer core --stdio`) while
 //! keeping capability projection, permission gates, storage and Evidence local.
 
+pub mod classic;
+mod classic_streams;
+mod external_provider;
 pub mod protocol;
 pub mod server;
 mod transport;
 
+pub use classic::{ModelLoader, ResolvedTurnModel};
 pub use protocol::{
     ClientInfo, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT, ExternalCapabilityManifest,
     InitializeParams, InitializeResult, MAX_EXTERNAL_CAPABILITIES, MAX_FRAME_BYTES,
@@ -64,9 +68,8 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client_stream);
         let shutdown = CancellationToken::new();
         let config = CoreServerConfig {
-            version: "0.1.0-test".into(),
-            data_home: tempfile::tempdir().expect("tempdir").keep(),
             reverse_request_timeout: timeout,
+            ..CoreServerConfig::new("0.1.0-test", tempfile::tempdir().expect("tempdir").keep())
         };
         let handle = tokio::spawn(serve_io(
             server_read,
@@ -143,7 +146,7 @@ mod tests {
             .await;
         let caps = client.recv().await.expect("caps reply");
         assert_eq!(caps["id"], 3);
-        assert_eq!(caps["result"]["domains"], json!(["core"]));
+        assert_eq!(caps["result"]["domains"], json!(["core", "classic.chat"]));
         assert_eq!(
             caps["result"]["externalCapabilities"]
                 .as_array()

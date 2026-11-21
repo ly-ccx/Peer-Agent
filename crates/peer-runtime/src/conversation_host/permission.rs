@@ -27,6 +27,7 @@ pub(super) struct ToolGrant {
     readonly_worker_id: Option<String>,
     goal_intake: GoalIntake,
     pub goal_denial: Option<&'static str>,
+    pub prompted: bool,
 }
 struct DecisionContext<'a> {
     risk_level: &'a str,
@@ -38,7 +39,9 @@ fn risk_label(permission: ProviderPermission, risk: Option<ShellRisk>) -> &'stat
     match permission {
         ProviderPermission::Read => "L1_local_read",
         ProviderPermission::FileWrite => "L2_local_write",
-        ProviderPermission::Shell => risk.map_or("L3_external_write", ShellRisk::as_str),
+        ProviderPermission::Shell | ProviderPermission::External => {
+            risk.map_or("L3_external_write", ShellRisk::as_str)
+        }
         ProviderPermission::Mcp => "L3_external_write",
         _ => "runtime_governed",
     }
@@ -70,6 +73,21 @@ fn automatic(
     }
     if permission == ProviderPermission::Read {
         return inside != Some(false);
+    }
+    if permission == ProviderPermission::External {
+        if level == LocalAccessLevel::AskBeforeLocal {
+            return matches!(risk, Some(ShellRisk::Inert));
+        }
+        return level == LocalAccessLevel::SessionLocal
+            && matches!(
+                risk,
+                Some(
+                    ShellRisk::Inert
+                        | ShellRisk::LocalRead
+                        | ShellRisk::LocalWrite
+                        | ShellRisk::ExternalWrite
+                )
+            );
     }
     level == LocalAccessLevel::SessionLocal
         && (permission == ProviderPermission::FileWrite
@@ -200,22 +218,32 @@ impl Host<'_> {
             .unwrap_or_else(|| json!(capability));
         let permitted = automatic(level, permission, risk, inside);
         let mut goal_denial = goal_intake.denial(&self.home);
-        let (mut granted, mut reason, terminal) = if self.worker.is_some()
+        let (mut granted, mut reason, terminal, prompted) = if self.worker.is_some()
             && (permission != ProviderPermission::Read || inside == Some(false))
         {
-            (false, "explorer_scope_denied", None)
+            (false, "explorer_scope_denied", None, false)
         } else if permission == ProviderPermission::UserInput {
             if self.interactive_user_input {
-                (true, crate::providers::interaction::SELF_GRANT_REASON, None)
+                (
+                    true,
+                    crate::providers::interaction::SELF_GRANT_REASON,
+                    None,
+                    false,
+                )
             } else {
-                (false, crate::providers::interaction::UNAVAILABLE, None)
+                (
+                    false,
+                    crate::providers::interaction::UNAVAILABLE,
+                    None,
+                    false,
+                )
             }
         } else if let Some(interruption) = hook_interrupted {
-            (false, "hook_interrupted", Some(interruption))
+            (false, "hook_interrupted", Some(interruption), false)
         } else if let Some(reason) = goal_denial {
-            (false, reason, None)
+            (false, reason, None, false)
         } else if hook == HookDecision::Deny {
-            (false, "hook_denied", None)
+            (false, "hook_denied", None, false)
         } else if permitted && hook == HookDecision::Allow {
             (
                 true,
@@ -231,6 +259,7 @@ impl Host<'_> {
                     "local_access_level_session"
                 },
                 None,
+                false,
             )
         } else {
             let session_key = (self.worker.is_none() && hook == HookDecision::Allow)
@@ -239,7 +268,7 @@ impl Host<'_> {
             if let Some(key) = session_key.as_deref()
                 && self.access.has_session_approval(revision, key)?
             {
-                (true, "approved_for_tui_session", None)
+                (true, "approved_for_tui_session", None, false)
             } else {
                 let reason_hint = if hook == HookDecision::Ask {
                     "Hook policy requires approval before local execution."
@@ -248,18 +277,20 @@ impl Host<'_> {
                 } else {
                     "This action needs your approval before local execution."
                 };
-                self.decide(
-                    operation,
-                    &digest,
-                    &scope_value,
-                    revision,
-                    DecisionContext {
-                        risk_level: risk_label(permission, risk),
-                        reason: reason_hint,
-                        session_key,
-                    },
-                )
-                .await?
+                let decided = self
+                    .decide(
+                        operation,
+                        &digest,
+                        &scope_value,
+                        revision,
+                        DecisionContext {
+                            risk_level: risk_label(permission, risk),
+                            reason: reason_hint,
+                            session_key,
+                        },
+                    )
+                    .await?;
+                (decided.0, decided.1, decided.2, true)
             }
         };
         if granted && let Some(changed) = goal_intake.denial(&self.home) {
@@ -292,6 +323,7 @@ impl Host<'_> {
                 .map(|worker| worker.lease.id().to_owned()),
             goal_intake,
             goal_denial,
+            prompted,
         };
         if let Some(worker) = &self.worker {
             grant.facts["metadata"]["readonlyWorkerId"] = json!(worker.lease.id());

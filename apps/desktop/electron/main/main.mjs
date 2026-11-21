@@ -199,6 +199,10 @@ import {
   isPeerCoreClassicEnabled,
   resolvePeerCoreBinaryPath,
 } from './peer-core-client.mjs';
+import {
+  collectDesktopExternalCapabilities,
+  createClassicCoreBridge,
+} from './classic-core-bridge.mjs';
 import { createCatalogIpcMain } from './ipc/catalog-ipc-main.mjs';
 import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
 import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
@@ -420,6 +424,12 @@ const automationStore = createAutomationStore({
 });
 let automationRuntimeOwner = null;
 let peerCoreClient = null;
+const classicCoreBridge = createClassicCoreBridge({
+  getClient: () => peerCoreClient,
+  getLocalToolHost: () => localToolHost,
+  broadcast: broadcastToAllWindows,
+  logger: console,
+});
 let automationRunner = null;
 const automationApplicationService = createAutomationApplicationService({
   store: automationStore,
@@ -968,10 +978,31 @@ const llmChatService = createLlmChatService({
 llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
 
 const chatStreamApplicationService = createChatStreamApplicationService({
-  abortStream: (streamId) => llmChatService.abort(streamId),
-  reattachStream: (input) => llmChatService.reattach(input),
-  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
-  listActiveStreams: () => llmChatService.listActiveStreams(),
+  abortStream: (streamId) => (
+    classicCoreBridge.ownsStream(streamId)
+      ? classicCoreBridge.abort(streamId)
+      : llmChatService.abort(streamId)
+  ),
+  reattachStream: async (input) => {
+    if (classicCoreBridge.isAvailable()) {
+      const coreSnap = await classicCoreBridge.reattach(input);
+      if (coreSnap) return coreSnap;
+    }
+    return llmChatService.reattach(input);
+  },
+  listActiveConversationIds: () => {
+    const merged = new Set([
+      ...(classicCoreBridge.listActiveSync().conversationIds ?? []),
+      ...(llmChatService.listActiveConversationIds() ?? []),
+    ]);
+    return [...merged];
+  },
+  listActiveStreams: () => {
+    const coreStreams = classicCoreBridge.listActiveSync().streams ?? [];
+    const seen = new Set(coreStreams.map((s) => s.streamId));
+    const tsStreams = (llmChatService.listActiveStreams() ?? []).filter((s) => !seen.has(s.streamId));
+    return [...coreStreams, ...tsStreams];
+  },
 });
 
 desktopPreviewProvider = !isPackaged && !isManagedPreview
@@ -1264,7 +1295,10 @@ const settingsApplicationService = createSettingsApplicationService({
   recordInstructionBaseline,
   resolveLocalAccessLevel,
   setSessionAccessLevel: (accessLevel) => sessionStore.setAccessLevel(accessLevel),
-  setRuntimeAccessLevel: (accessLevel) => llmChatService.setLocalAccessLevel(accessLevel),
+  setRuntimeAccessLevel: (accessLevel) => {
+    llmChatService.setLocalAccessLevel(accessLevel);
+    void classicCoreBridge.setLocalAccessLevel(accessLevel);
+  },
   chooseExportDirectory: async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: '选择导出目录',
@@ -1297,7 +1331,11 @@ const settingsApplicationService = createSettingsApplicationService({
 const permissionGrantService = createPermissionGrantService({
   createId: () => randomUUID(),
   now: () => new Date(),
-  resolveGrant: (toolCallId, grant) => llmChatService.resolvePermissionGrant(toolCallId, grant),
+  resolveGrant: (toolCallId, grant) => (
+    classicCoreBridge.ownsPermission(toolCallId)
+      ? classicCoreBridge.resolvePermissionGrant(toolCallId, grant)
+      : llmChatService.resolvePermissionGrant(toolCallId, grant)
+  ),
 });
 
 const hostRestarter = createHostRestarter({ workspaceRoot });
@@ -2988,8 +3026,38 @@ function handleChatSend({
       ]
     : runtimeReminders;
   // Bind the foreground contract before it can complete or be superseded.
-  const visualCompletionPlanId = goalPlanStore.getActivePlanByConversation(conversationId)?.planId;
-  const outcomePromise = llmChatService.sendMessage({
+  const currentActivePlan = conversationId ? goalPlanStore.getActivePlanByConversation(conversationId) : null;
+  const visualCompletionPlanId = currentActivePlan?.planId;
+  const hasActiveAcceptedGoal = Boolean(
+    currentActivePlan
+    && goalPlanIsSelfDriven(currentActivePlan)
+    && currentActivePlan?.activation?.kind === 'accepted_goal',
+  );
+  const useClassicCoreBridge = Boolean(
+    !answeredRequestedUserInputPlanId
+    && conversationId
+    && assistantMessageId
+    && classicCoreBridge.canHandleChatSend({ mode: mode || 'chat', hasActiveGoal: hasActiveAcceptedGoal }),
+  );
+  const outcomePromise = useClassicCoreBridge
+    ? classicCoreBridge.send({
+        streamId,
+        conversationId,
+        assistantMessageId,
+        workspacePath:
+          persistedConversation?.workspacePath
+          ?? workspacePath
+          ?? settingsStore.getAll().activeWorkspace
+          ?? workspaceRoot,
+        mode: mode || 'chat',
+        modelProviderId: resolvedModelProviderId,
+        effort,
+        fastMode,
+        persistModelSelection: Boolean(modelProviderId),
+        resumeInterruptedReply,
+        runtimeReminders: effectiveRuntimeReminders,
+      }, sender)
+    : llmChatService.sendMessage({
     messages,
     webContents: sender,
     streamId,
@@ -3071,6 +3139,19 @@ function handleChatSend({
 async function handleChatCompact({ conversationId, streamId }, sender) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return { compacted: false };
+  if (
+    classicCoreBridge.isAvailable()
+    && conversationId
+    && (!conv.mode || conv.mode === 'chat' || conv.mode === 'plan')
+  ) {
+    return classicCoreBridge.compact({
+      conversationId,
+      streamId,
+      workspacePath: conv.workspacePath || settingsStore.getAll().activeWorkspace || workspaceRoot,
+      modelProviderId: conv.modelProviderId || null,
+      effort: conv.effort || null,
+    });
+  }
 
   const filteredMessages = conv.messages.filter(
     (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.trim() === '/compact'),
@@ -3866,17 +3947,24 @@ async function startPeerCoreBridge() {
     repositoryRoot: isPackaged ? undefined : workspaceRoot,
     buildProfile: isPackaged ? 'release' : 'debug',
   });
+  const externalCapabilities = collectDesktopExternalCapabilities();
   const client = createPeerCoreClient({
     binaryPath,
     dataHome,
     clientInfo: { name: 'peer-desktop', version: app.getVersion() },
+    externalCapabilities,
+    onNotification: classicCoreBridge.handleNotification,
+    hostHandlers: classicCoreBridge.createHostHandlers(),
+    onUnexpectedExit: classicCoreBridge.handleUnexpectedExit,
     logger: console,
   });
   peerCoreClient = client;
   try {
     const initialized = await client.start();
+    const initialAccessLevel = resolveLocalAccessLevel(settingsStore.getAll());
+    await classicCoreBridge.setLocalAccessLevel(initialAccessLevel);
     console.info(
-      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'})`,
+      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel})`,
     );
     return {
       name: 'peer-core-bridge',

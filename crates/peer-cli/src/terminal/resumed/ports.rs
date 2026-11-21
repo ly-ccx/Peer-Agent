@@ -100,6 +100,7 @@ impl ConversationOutput for OutputPort {
                 ConversationEvent::ToolSettled { .. } => {
                     display.revision += 1;
                 }
+                ConversationEvent::PermissionSettled { .. } | ConversationEvent::Usage(_) => {}
             });
             Ok(())
         })

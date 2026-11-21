@@ -34,7 +34,13 @@ impl Host<'_> {
             .to_owned();
         let call_id = format!("call-{}", uuid::Uuid::new_v4());
         let dispatch = format!("dispatch-{}", uuid::Uuid::new_v4());
-        let message_id = format!("message-{}", uuid::Uuid::new_v4());
+        let started_at_ms = crate::capability::milliseconds(&now()).unwrap_or(0);
+        let prepared_mode = self.prepared_assistant.is_some();
+        let message_id = if let Some(pa) = &self.prepared_assistant {
+            pa.message_id.clone()
+        } else {
+            format!("message-{}", uuid::Uuid::new_v4())
+        };
         let args = effect.args().clone();
         let scopes = effect.scopes()?;
         let evidence = effect.evidence();
@@ -50,7 +56,36 @@ impl Host<'_> {
             effect.read_scope()?
         }
         .map(Path::to_owned);
-        self.append(&json!({"id":message_id,"role":"assistant","content":"","createdAt":now(),"streamId":self.identity.stream_id,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args}],"permissionGrants":[]}))?;
+        if prepared_mode {
+            let tool_segment = json!({
+                "type": "tool-call",
+                "tool": call.name,
+                "toolCallId": call_id,
+                "args": args,
+                "startedAtMs": started_at_ms,
+            });
+            let segments_value = {
+                let pa = self
+                    .prepared_assistant
+                    .as_mut()
+                    .ok_or(HostError("prepared_assistant_unavailable"))?;
+                pa.segments.push(tool_segment);
+                json!(pa.segments)
+            };
+            self.source_current()?;
+            self.expected = self
+                .store
+                .commit_terminal_message(
+                    &self.expected,
+                    &message_id,
+                    &json!({"segments": segments_value, "streamId": self.identity.stream_id}),
+                    &now(),
+                    None,
+                )?
+                .snapshot;
+        } else {
+            self.append(&json!({"id":message_id,"role":"assistant","content":"","createdAt":now(),"streamId":self.identity.stream_id,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args}],"permissionGrants":[]}))?;
+        }
         let receipt = self.store.prepare_conversation_tool(
             &mut self.run,
             &ConversationPendingTool {
@@ -114,18 +149,26 @@ impl Host<'_> {
                 goal_intake,
             )
             .await?;
+        if grant.prompted {
+            self.publish(ConversationEvent::PermissionSettled {
+                call_id: &call_id,
+                granted: grant.facts["granted"] == true,
+                reason: grant.facts["reason"].as_str().unwrap_or(""),
+            })
+            .await?;
+        }
         // A real permission fact is canonical before dispatch can be confirmed.
         if grant.facts["granted"] == true {
             self.source_current()?;
+            let grants_patch = if let Some(pa) = &mut self.prepared_assistant {
+                pa.permission_grants.push(grant.facts.clone());
+                json!({"permissionGrants": pa.permission_grants})
+            } else {
+                json!({"permissionGrants":[grant.facts]})
+            };
             self.expected = self
                 .store
-                .commit_terminal_message(
-                    &self.expected,
-                    &message_id,
-                    &json!({"permissionGrants":[grant.facts]}),
-                    &now(),
-                    None,
-                )?
+                .commit_terminal_message(&self.expected, &message_id, &grants_patch, &now(), None)?
                 .snapshot;
         }
         #[cfg(feature = "test-fixtures")]
@@ -403,35 +446,68 @@ impl Host<'_> {
         {
             return Err(HostError("conversation_tool_intent_changed"));
         }
-        let expected_grants = if grants.first().is_some_and(|g| g["granted"] == true) {
-            json!([grants[0]])
-        } else {
-            json!([])
-        };
-        // Late outcomes may finish the exact intent whose Grant was persisted
-        // before dispatch. Foreign authorization edits cannot be overwritten.
-        if row["permissionGrants"] != expected_grants
-            && !(original.get("result") == Some(result) && row["permissionGrants"] == json!(grants))
-        {
-            return Err(HostError("conversation_tool_intent_changed"));
+        let prepared_mode = self.prepared_assistant.is_some();
+        if !prepared_mode {
+            let expected_grants = if grants.first().is_some_and(|g| g["granted"] == true) {
+                json!([grants[0]])
+            } else {
+                json!([])
+            };
+            // Late outcomes may finish the exact intent whose Grant was persisted
+            // before dispatch. Foreign authorization edits cannot be overwritten.
+            if row["permissionGrants"] != expected_grants
+                && !(original.get("result") == Some(result)
+                    && row["permissionGrants"] == json!(grants))
+            {
+                return Err(HostError("conversation_tool_intent_changed"));
+            }
         }
         let mut segments = row["segments"].as_array().unwrap().clone();
+        let ended_at_ms = crate::capability::milliseconds(&now()).unwrap_or(0);
         let mut matched = 0;
         for segment in &mut segments {
             if segment["type"] == "tool-call" && segment["toolCallId"] == call {
                 matched += 1;
                 segment["result"] = result.clone();
+                if prepared_mode {
+                    segment["endedAtMs"] = json!(ended_at_ms);
+                    if let Some(started) = segment["startedAtMs"].as_i64() {
+                        segment["durationMs"] = json!((ended_at_ms - started).max(0));
+                    }
+                }
             }
         }
         if matched != 1 {
             return Err(HostError("conversation_tool_intent_changed"));
         }
+        let merged_grants = if let Some(pa) = &mut self.prepared_assistant {
+            let mut merged = row["permissionGrants"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            for grant in grants {
+                let gid = grant.get("grantId").and_then(Value::as_str);
+                let already = gid.is_some_and(|id| {
+                    merged
+                        .iter()
+                        .any(|g| g.get("grantId").and_then(Value::as_str) == Some(id))
+                });
+                if !already {
+                    merged.push(grant.clone());
+                }
+            }
+            pa.segments = segments.clone();
+            pa.permission_grants = merged.clone();
+            Value::Array(merged)
+        } else {
+            json!(grants)
+        };
         self.expected = self
             .store
             .commit_terminal_message(
                 &fresh,
                 message_id,
-                &json!({"segments":segments,"permissionGrants":grants}),
+                &json!({"segments":segments,"permissionGrants":merged_grants}),
                 &now(),
                 None,
             )?

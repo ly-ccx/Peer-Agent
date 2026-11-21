@@ -45,7 +45,7 @@ pub struct EffectOutcome {
     pub not_dispatched: bool,
 }
 impl EffectOutcome {
-    pub(crate) fn not_dispatched(code: &'static str) -> Self {
+    pub fn not_dispatched(code: &'static str) -> Self {
         let mut result = Self::failed(code);
         result.not_dispatched = true;
         if code == "CANCELLED" {

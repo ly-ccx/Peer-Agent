@@ -38,6 +38,7 @@ pub enum ProviderPermission {
     Shell,
     ShellStop,
     Mcp,
+    External,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ShellRisk {
@@ -57,6 +58,18 @@ impl ShellRisk {
             Self::ExternalWrite => "L3_external_write",
             Self::Privileged => "L4_privileged",
             Self::Destructive => "L5_destructive",
+        }
+    }
+
+    pub fn from_level_str(level: &str) -> Option<Self> {
+        match level {
+            "L0_inert" => Some(Self::Inert),
+            "L1_local_read" => Some(Self::LocalRead),
+            "L2_local_write" => Some(Self::LocalWrite),
+            "L3_external_write" => Some(Self::ExternalWrite),
+            "L4_privileged" => Some(Self::Privileged),
+            "L5_destructive" => Some(Self::Destructive),
+            _ => None,
         }
     }
 }

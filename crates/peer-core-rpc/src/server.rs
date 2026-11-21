@@ -1,4 +1,6 @@
 use crate::{
+    classic::{self, ModelLoader},
+    classic_streams::ClassicStreamRegistry,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -7,33 +9,48 @@ use crate::{
     },
     transport::{BoundedLineReader, FrameWriter, FrameWriterHandle},
 };
-use peer_protocol::{JsonDecodeError, JsonLimits, decode_json_bounded};
-use peer_runtime::CancellationToken;
+use peer_protocol::{JsonDecodeError, JsonLimits, LocalAccessLevel, decode_json_bounded};
+use peer_runtime::{
+    CancellationToken,
+    conversation_host::{ConversationAccess, NativeConversationRuntime},
+};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    io,
+    fmt, io,
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::oneshot,
+    sync::{Notify, mpsc, oneshot},
     task::JoinSet,
 };
 
 const MAX_INBOUND_STRING_BYTES: usize = 1024 * 1024;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CoreServerConfig {
     pub version: String,
     pub data_home: PathBuf,
     pub reverse_request_timeout: Duration,
+    pub model_loader: Option<ModelLoader>,
+}
+
+impl fmt::Debug for CoreServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CoreServerConfig")
+            .field("version", &self.version)
+            .field("data_home", &self.data_home)
+            .field("reverse_request_timeout", &self.reverse_request_timeout)
+            .field("has_model_loader", &self.model_loader.is_some())
+            .finish()
+    }
 }
 
 impl CoreServerConfig {
@@ -42,6 +59,7 @@ impl CoreServerConfig {
             version: version.into(),
             data_home,
             reverse_request_timeout: DEFAULT_REVERSE_TIMEOUT,
+            model_loader: None,
         }
     }
 }
@@ -86,10 +104,25 @@ impl RpcPeer {
             .await
     }
 
+    pub fn shutdown_child_token(&self) -> CancellationToken {
+        self.shutdown.child_token()
+    }
+
     pub async fn call_host(
         &self,
         method: &str,
         params: Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value, RpcError> {
+        self.call_host_with_timeout(method, params, self.reverse_timeout, cancel)
+            .await
+    }
+
+    pub async fn call_host_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
         cancel: &CancellationToken,
     ) -> Result<Value, RpcError> {
         if self.shutdown.is_cancelled() || cancel.is_cancelled() {
@@ -125,8 +158,8 @@ impl RpcPeer {
             ));
         }
 
-        let timeout = tokio::time::sleep(self.reverse_timeout);
-        tokio::pin!(timeout);
+        let sleep_timer = tokio::time::sleep(timeout);
+        tokio::pin!(sleep_timer);
 
         let response = tokio::select! {
             biased;
@@ -138,7 +171,7 @@ impl RpcPeer {
                 self.remove_pending(&id);
                 Err(RpcError::host_call_failed("Host request cancelled", None))
             }
-            _ = &mut timeout => {
+            _ = &mut sleep_timer => {
                 self.remove_pending(&id);
                 Err(RpcError::host_call_failed(
                     format!("Host request '{method}' timed out"),
@@ -194,14 +227,78 @@ impl RpcPeer {
     }
 }
 
-struct ServerContext {
-    config: CoreServerConfig,
-    started_at: Instant,
+type LocalJob = Box<dyn FnOnce() + Send + 'static>;
+
+pub struct BackgroundCounterGuard {
+    counter: Arc<AtomicUsize>,
+    notify: Arc<Notify>,
+}
+
+impl Drop for BackgroundCounterGuard {
+    fn drop(&mut self) {
+        if self.counter.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.notify.notify_waiters();
+        }
+    }
+}
+
+pub struct ServerContext {
+    pub config: CoreServerConfig,
+    pub started_at: Instant,
     state: Mutex<CoreState>,
-    peer: RpcPeer,
+    pub peer: RpcPeer,
+    pub access: ConversationAccess,
+    pub runtime: Arc<NativeConversationRuntime>,
+    pub streams: ClassicStreamRegistry,
+    local_tx: mpsc::UnboundedSender<LocalJob>,
+    active_background: Arc<AtomicUsize>,
+    background_done: Arc<Notify>,
 }
 
 impl ServerContext {
+    pub fn snapshot_external_capabilities(
+        &self,
+    ) -> Result<Vec<ExternalCapabilityManifest>, RpcError> {
+        let guard = self
+            .state
+            .lock()
+            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
+        Ok(guard.external_capabilities.clone())
+    }
+
+    pub fn dispatch_local<F>(&self, job: F) -> Result<(), RpcError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.local_tx
+            .send(Box::new(job))
+            .map_err(|_| RpcError::shutting_down())
+    }
+
+    pub fn spawn_local_background<F>(&self, spawn_fn: F) -> Result<(), RpcError>
+    where
+        F: FnOnce(BackgroundCounterGuard) + Send + 'static,
+    {
+        let guard = BackgroundCounterGuard {
+            counter: Arc::clone(&self.active_background),
+            notify: Arc::clone(&self.background_done),
+        };
+        self.active_background.fetch_add(1, Ordering::SeqCst);
+        let res = self.local_tx.send(Box::new(move || {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
+        }));
+        if res.is_err() {
+            return Err(RpcError::shutting_down());
+        }
+        Ok(())
+    }
+
+    async fn drain_background(&self) {
+        while self.active_background.load(Ordering::SeqCst) > 0 {
+            self.background_done.notified().await;
+        }
+    }
+
     fn snapshot_capabilities(
         &self,
     ) -> Result<(bool, bool, Vec<ExternalCapabilityManifest>), RpcError> {
@@ -248,8 +345,8 @@ impl ServerContext {
             },
             pid: std::process::id(),
             capabilities: CoreCapabilitiesSummary {
-                domains: vec!["core".into()],
-                planned_domains: vec!["classic.chat".into(), "classic.goal".into(), "bot".into()],
+                domains: vec!["core".into(), "classic.chat".into()],
+                planned_domains: vec!["classic.goal".into(), "bot".into()],
                 bidirectional_host_calls: true,
                 registered_external_capabilities: aliases,
             },
@@ -270,7 +367,11 @@ impl ServerContext {
         .map_err(|err| RpcError::internal_error(err.to_string()))
     }
 
-    async fn handle_request(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+    async fn handle_request(
+        self: &Arc<Self>,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, RpcError> {
         let (initialized, draining, external_capabilities) = self.snapshot_capabilities()?;
         if draining {
             return Err(RpcError::shutting_down());
@@ -314,10 +415,17 @@ impl ServerContext {
                 .map_err(|err| RpcError::internal_error(err.to_string()))
             }
             "core.capabilities.list" => serde_json::to_value(CapabilitiesListResult {
-                domains: vec!["core".into()],
+                domains: vec!["core".into(), "classic.chat".into()],
                 external_capabilities,
             })
             .map_err(|err| RpcError::internal_error(err.to_string())),
+            "classic.chat.send" => classic::handle_send(self, params).await,
+            "classic.chat.abort" => classic::handle_abort(self, params),
+            "classic.chat.reattach" => classic::handle_reattach(self, params),
+            "classic.chat.listActive" => classic::handle_list_active(self),
+            "classic.chat.compact" => classic::handle_compact(self, params).await,
+            "classic.permission.decide" => classic::handle_permission_decide(self, params),
+            "classic.access.set" => classic::handle_access_set(self, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -344,11 +452,39 @@ where
         shutdown.clone(),
         config.reverse_request_timeout,
     );
+    let (local_tx, mut local_rx) = mpsc::unbounded_channel::<LocalJob>();
+    let local_thread = std::thread::Builder::new()
+        .name("peer-core-local-rt".into())
+        .spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(async move {
+                    while let Some(job) = local_rx.recv().await {
+                        job();
+                    }
+                }));
+            }
+        })?;
+
+    let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
+    let runtime = Arc::new(NativeConversationRuntime::new(
+        &config.data_home,
+        access.clone(),
+    ));
     let context = Arc::new(ServerContext {
         config,
         started_at: Instant::now(),
         state: Mutex::new(CoreState::default()),
         peer: peer.clone(),
+        access,
+        runtime,
+        streams: ClassicStreamRegistry::new(),
+        local_tx,
+        active_background: Arc::new(AtomicUsize::new(0)),
+        background_done: Arc::new(Notify::new()),
     });
     let mut tasks = JoinSet::new();
 
@@ -530,9 +666,11 @@ where
 
     drop(line_reader);
     shutdown.cancel();
+    context.streams.cancel_all();
     peer.fail_all_pending("Core server shutting down");
     if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, async {
         while tasks.join_next().await.is_some() {}
+        context.drain_background().await;
     })
     .await
     .is_err()
@@ -542,6 +680,7 @@ where
     }
     drop(context);
     drop(peer);
+    let _ = local_thread.join();
     let flush_result = writer_handle.finish().await;
 
     match (loop_result, flush_result) {

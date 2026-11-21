@@ -68,6 +68,86 @@ pub fn resolve_exec(
     })
 }
 
+/// Resolve a Desktop `modelProviderId` (model entry UUID, `groupId::model`, or channel/provider ID)
+/// alongside optional requested `effort` and `fast` flags, normalizing unsupported efforts gracefully
+/// to the model's default instead of rejecting the turn.
+pub fn resolve_desktop_model(
+    home: &Path,
+    model_provider_id: Option<&str>,
+    effort: Option<&str>,
+    fast: bool,
+) -> Result<ExecSelection, ExecSelectionError> {
+    let LoadedCatalog {
+        catalog,
+        flat,
+        preferred,
+    } = load_catalog_state(home)?;
+    let trimmed = model_provider_id.map(trim).filter(|s| !s.is_empty());
+    let chosen = if let Some(raw) = trimmed {
+        if let Some(exact) = catalog
+            .iter()
+            .find(|e| e.available && e.entry_id.as_deref() == Some(raw))
+        {
+            exact.clone()
+        } else if let Some((p, m)) = raw
+            .split_once("::")
+            .filter(|(p, m)| !trim(p).is_empty() && !trim(m).is_empty())
+        {
+            let p = trim(p);
+            let m = trim(m);
+            catalog
+                .iter()
+                .find(|e| e.available && e.provider_id == p && e.model_id == m)
+                .cloned()
+                .ok_or_else(|| {
+                    error(
+                        "model_selection_unavailable",
+                        "Unknown or unavailable model",
+                    )
+                })?
+        } else {
+            let mut matches = catalog
+                .iter()
+                .filter(|e| e.available && e.provider_id == raw);
+            let first = matches.next().ok_or_else(|| {
+                error(
+                    "model_selection_unavailable",
+                    "Unknown or unavailable model",
+                )
+            })?;
+            if matches.next().is_some() {
+                return Err(error(
+                    "model_selection_unavailable",
+                    "Ambiguous or unavailable model",
+                ));
+            }
+            first.clone()
+        }
+    } else {
+        resolve_catalog(&catalog, preferred.as_deref(), None, None)?.clone()
+    };
+
+    let row = row_for_entry(&chosen, &flat);
+    let desired_effort = effort
+        .map(trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&chosen.default_reasoning_effort);
+    let final_effort = if chosen
+        .supported_reasoning_efforts
+        .iter()
+        .any(|v| v == desired_effort)
+    {
+        desired_effort.to_owned()
+    } else {
+        chosen.default_reasoning_effort.clone()
+    };
+    let final_fast = fast
+        && row
+            .is_some_and(|r| matches!(text(r, "authMethod"), Some("oauth_chatgpt" | "oauth_grok")));
+
+    Ok(finish_selection(chosen, row, &final_effort, final_fast))
+}
+
 struct LoadedCatalog {
     catalog: Vec<ModelCatalogEntry>,
     flat: Vec<Value>,

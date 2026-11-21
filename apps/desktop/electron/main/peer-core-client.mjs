@@ -54,6 +54,7 @@ export function createPeerCoreClient(options = {}) {
     binaryPath = null,
     resolveBinaryPath = null,
     dataHome = null,
+    env = null,
     clientInfo = { name: 'peer-desktop', version: '0.0.0' },
     externalCapabilities = [],
     onNotification = null,
@@ -346,6 +347,7 @@ export function createPeerCoreClient(options = {}) {
       windowsHide: true,
       env: {
         ...process.env,
+        ...(env && typeof env === 'object' ? env : {}),
         ...(dataHome ? { PEER_AGENT_HOME: dataHome } : {}),
       },
     });
@@ -457,6 +459,10 @@ export function createPeerCoreClient(options = {}) {
     return request('core.capabilities.list', {});
   }
 
+  function isReady() {
+    return state === 'ready' && isChildAlive(child);
+  }
+
   function status() {
     return {
       state,
@@ -539,6 +545,7 @@ export function createPeerCoreClient(options = {}) {
   return Object.freeze({
     start,
     ensureStarted,
+    isReady,
     ping,
     listCapabilities,
     request,

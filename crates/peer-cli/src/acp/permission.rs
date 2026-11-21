@@ -139,6 +139,9 @@ impl ConversationOutput for OutputPort {
                     result,
                     evidence_ref,
                 } => super::tool_update::settled(call_id, result, evidence_ref),
+                ConversationEvent::PermissionSettled { .. } | ConversationEvent::Usage(_) => {
+                    return Ok(());
+                }
             };
             self.connection
                 .writer

@@ -14,6 +14,7 @@ pub struct ConversationContext<'a> {
     pub skill_names: &'a [&'a str],
     pub instructions: &'a instructions::ProjectInstructions,
     pub goal_runner: Option<&'a Value>,
+    pub runtime_reminders: &'a [(String, String)],
 }
 pub fn assemble_conversation_context(
     input: &ConversationContext<'_>,
@@ -78,6 +79,22 @@ pub fn assemble_conversation_context(
         source,
         "runtime",
     ));
+    for (idx, (id, content)) in input.runtime_reminders.iter().enumerate() {
+        let reminder_id = peer_protocol::javascript_trim(id);
+        let body = peer_protocol::javascript_trim(content);
+        if reminder_id.is_empty() || body.is_empty() {
+            continue;
+        }
+        sections.push(section(
+            reminder_id,
+            "L6_MODE_REMINDER",
+            10 + idx as i64,
+            "Runtime reminder",
+            body.to_owned(),
+            json!({ "id": reminder_id, "kind": "runtime-reminder" }),
+            "runtime",
+        ));
+    }
     let mcp = &resource["mcp"];
     let servers = input.servers.iter().take(40).collect::<Vec<_>>();
     let mut content = format!(
@@ -174,6 +191,7 @@ mod tests {
                 servers: c["servers"].as_array().unwrap(),
                 instructions: &instructions::ProjectInstructions::default(),
                 goal_runner: None,
+                runtime_reminders: &[],
             };
             assert_eq!(
                 assemble_conversation_context(&input, &[], c["now"].as_str().unwrap()).unwrap(),
