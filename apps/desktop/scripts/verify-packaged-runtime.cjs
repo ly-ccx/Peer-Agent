@@ -108,6 +108,21 @@ function assertPackagedDockIcons(archivePath) {
   console.log(`[packaged-runtime] verified ${PACKAGED_DOCK_ICONS.length} theme-aware Dock icons in ${iconDirectory}`);
 }
 
+function assertPackagedNativeBinaries(archivePath) {
+  const binDirectory = path.join(path.dirname(archivePath), 'bin');
+  for (const baseName of ['peer-credential-helper', 'peer-native']) {
+    const candidates = [
+      path.join(binDirectory, baseName),
+      path.join(binDirectory, `${baseName}.exe`),
+    ];
+    if (!candidates.some((candidate) => existsSync(candidate))) {
+      throw new Error(`${archivePath}: packaged native binary is missing: ${candidates.join(' or ')}`);
+    }
+  }
+
+  console.log(`[packaged-runtime] verified native binaries in ${binDirectory}`);
+}
+
 const targets = process.argv.slice(2);
 const roots = targets.length > 0 ? targets.map((target) => path.resolve(target)) : [defaultOutputDirectory];
 const archives = roots.flatMap(collectArchives);
@@ -120,4 +135,5 @@ for (const archivePath of archives) {
   assertArchiveRuntime(archivePath);
   assertInteractiveContentExports(archivePath);
   assertPackagedDockIcons(archivePath);
+  assertPackagedNativeBinaries(archivePath);
 }

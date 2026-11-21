@@ -194,6 +194,11 @@ import {
   bindDesktopAppLifecycle,
   createDesktopCompositionRoot,
 } from './desktop-composition-root.mjs';
+import {
+  createPeerCoreClient,
+  isPeerCoreClassicEnabled,
+  resolvePeerCoreBinaryPath,
+} from './peer-core-client.mjs';
 import { createCatalogIpcMain } from './ipc/catalog-ipc-main.mjs';
 import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
 import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
@@ -414,6 +419,7 @@ const automationStore = createAutomationStore({
   },
 });
 let automationRuntimeOwner = null;
+let peerCoreClient = null;
 let automationRunner = null;
 const automationApplicationService = createAutomationApplicationService({
   store: automationStore,
@@ -3852,6 +3858,40 @@ function startAutomationRuntime() {
   };
 }
 
+async function startPeerCoreBridge() {
+  if (!isPeerCoreClassicEnabled()) return null;
+  const binaryPath = resolvePeerCoreBinaryPath({
+    resourcesPath: isPackaged ? process.resourcesPath : undefined,
+    executablePath: app.getPath('exe'),
+    repositoryRoot: isPackaged ? undefined : workspaceRoot,
+    buildProfile: isPackaged ? 'release' : 'debug',
+  });
+  const client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop', version: app.getVersion() },
+    logger: console,
+  });
+  peerCoreClient = client;
+  try {
+    const initialized = await client.start();
+    console.info(
+      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'})`,
+    );
+    return {
+      name: 'peer-core-bridge',
+      dispose: async () => {
+        if (peerCoreClient === client) peerCoreClient = null;
+        await client.dispose();
+      },
+    };
+  } catch (error) {
+    if (peerCoreClient === client) peerCoreClient = null;
+    await client.dispose().catch(() => {});
+    throw error;
+  }
+}
+
 const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionRoot({
   logger: console,
   initialOwners: [
@@ -3872,6 +3912,14 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
   phases: [
     { name: 'recovery-and-appearance', start: startRecoveryAndAppearance },
     { name: 'local-runtime', start: startLocalRuntime },
+    {
+      name: 'peer-core-bridge',
+      fatal: false,
+      start: startPeerCoreBridge,
+      onError: (error) => {
+        console.warn('[peer-core] startup failed, staying on TS runtime:', error?.message || error);
+      },
+    },
     { name: 'desktop-ipc', start: () => registerDesktopIpcHost() },
     {
       name: 'first-main-window',

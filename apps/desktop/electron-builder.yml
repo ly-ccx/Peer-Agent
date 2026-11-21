@@ -49,6 +49,8 @@ extraResources:
     filter:
       - "peer-credential-helper"
       - "peer-credential-helper.exe"
+      - "peer-native"
+      - "peer-native.exe"
   # 本地能力 Manifest
   - from: "../../capabilities/"
     to: "capabilities/"

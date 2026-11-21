@@ -2048,6 +2048,7 @@ dependencies = [
  "base64 0.22.1",
  "crossterm",
  "md-5",
+ "peer-core-rpc",
  "peer-project-agent",
  "peer-protocol",
  "peer-runtime",
@@ -2063,6 +2064,21 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "peer-core-rpc"
+version = "0.1.0-rc.40"
+dependencies = [
+ "peer-project-agent",
+ "peer-protocol",
+ "peer-runtime",
+ "peer-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 

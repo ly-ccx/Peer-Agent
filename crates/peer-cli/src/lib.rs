@@ -4,6 +4,7 @@ pub mod acp;
 pub mod bot_exec;
 pub mod bots;
 mod cancellation;
+pub mod core_rpc;
 pub mod doctor;
 pub mod export;
 pub mod interactive_result;
@@ -26,6 +27,7 @@ pub const VERSION: &str = include_str!("../../../VERSION");
 pub enum Command {
     Version,
     Acp,
+    CoreStdio,
     Help,
     Doctor,
     BotsJson,
@@ -61,6 +63,13 @@ pub fn command(argv: &[String]) -> Command {
             Command::Acp
         } else {
             Command::Usage("Usage: peer acp (stdio; no options)".into())
+        };
+    }
+    if argv.first().is_some_and(|arg| arg == "core") {
+        return if argv.len() == 2 && argv[1] == "--stdio" {
+            Command::CoreStdio
+        } else {
+            Command::Usage("Usage: peer core --stdio".into())
         };
     }
     if argv
@@ -179,6 +188,15 @@ mod tests {
         );
         assert!(matches!(
             command(&["acp".into(), "--help".into()]),
+            Command::Usage(_)
+        ));
+        assert_eq!(
+            command(&["core".into(), "--stdio".into()]),
+            Command::CoreStdio
+        );
+        assert!(matches!(command(&["core".into()]), Command::Usage(_)));
+        assert!(matches!(
+            command(&["core".into(), "--help".into()]),
             Command::Usage(_)
         ));
         assert_eq!(

@@ -83,7 +83,7 @@ run('node', ['--test', 'apps/desktop/electron/main/provider-adapter.test.mjs']);
 run('node', ['--test', 'packages/runtime-node/src/provider-adapters/gemini-usage.test.mjs']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
-run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '-p', 'peer-project-agent', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
+run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '-p', 'peer-project-agent', '-p', 'peer-core-rpc', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
 // Cargo's shared target/debug name can be relinked by a featureless build while
 // the Host suite is running. Pin the fixture-enabled executable for that suite;
 // the later featureless release and its PTY checks remain separate artifacts.

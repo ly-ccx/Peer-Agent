@@ -14,6 +14,7 @@ name = "peer-native"
 path = "src/main.rs"
 
 [dependencies]
+peer-core-rpc = { path = "../peer-core-rpc" }
 peer-project-agent = { path = "../peer-project-agent" }
 peer-protocol = { path = "../peer-protocol" }
 peer-tui = { path = "../peer-tui" }
