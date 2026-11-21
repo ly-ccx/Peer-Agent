@@ -117,7 +117,13 @@ export function createProjectAgentApplicationService({
   } });
   const pendingChanged = new Set();
   const pendingConversation = new Set();
-  const accessPolicy = createBotAccessPolicyService({ authority: accessAuthority, enabled, changed: queueChanged, approvals });
+  const accessPolicy = createBotAccessPolicyService({
+    authority: accessAuthority,
+    enabled,
+    changed: queueChanged,
+    approvals,
+    classicCoreBridge,
+  });
   let changedTimer = null;
   let conversationTimer = null;
 
@@ -193,6 +199,9 @@ export function createProjectAgentApplicationService({
 
   function readAvatar(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectProfileReadAvatar({ workspaceId: payload.workspaceId });
+    }
     const result = profileStore?.readAvatar?.(payload.workspaceId);
     if (!result?.ok) return { ok: false, code: result?.code || 'INVALID_IMAGE' };
     return { ok: true, dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}` };
@@ -234,6 +243,33 @@ export function createProjectAgentApplicationService({
   async function updateProfile(payload = {}, sender = null) {
     if (!open()) return disabled();
     const workspaceId = payload?.workspaceId;
+    if (classicCoreBridge?.isAvailable?.()) {
+      if (profileStore) {
+        const current = profileStore.read?.(workspaceId);
+        if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
+      }
+      const policy = profilePolicyPatch(payload, listModels());
+      if (!policy.ok) return policy;
+      let avatarSourcePath;
+      if (payload.chooseAvatar === true) {
+        if (typeof chooseAvatar !== 'function') return { ok: false, code: 'AVATAR_UNAVAILABLE' };
+        const sourcePath = await chooseAvatar(sender);
+        if (!sourcePath) return { ok: false, code: 'CANCELLED' };
+        avatarSourcePath = sourcePath;
+      }
+      const rpcParams = {
+        workspaceId,
+        ...(typeof payload.displayName === 'string' ? { displayName: payload.displayName } : {}),
+        ...(payload.regenerateAvatar === true ? { regenerateAvatar: true } : {}),
+        ...(payload.avatarColor !== undefined ? { avatarColor: payload.avatarColor } : {}),
+        ...(typeof payload.proactivity === 'string' ? { proactivity: payload.proactivity } : {}),
+        ...(avatarSourcePath ? { avatarSourcePath } : {}),
+        ...policy.patch,
+      };
+      const result = await classicCoreBridge.projectProfileUpdate(rpcParams);
+      if (result?.ok) queueChanged(workspaceId);
+      return result;
+    }
     const current = profileStore?.read?.(workspaceId);
     if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
     const policy = profilePolicyPatch(payload, listModels());
@@ -630,6 +666,9 @@ export function createProjectAgentApplicationService({
 
   function listApprovals(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotListApprovals(payload || {});
+    }
     return { ok: true, approvals: approvals.list(payload) };
   }
 
@@ -758,26 +797,41 @@ export function createProjectAgentApplicationService({
     return { ok: true, approval: saved, ...(resumed ? { resumed } : {}) };
   }
 
-  function markRead(payload = {}) {
-    if (!open()) return disabled();
-    if (payload?.viewing === false) {
-      if (typeof onViewing === 'function') onViewing(null);
-      return { ok: true, viewing: false };
-    }
-    const marked = directory.markRead(payload.workspaceId);
+  function finishMarkRead(workspaceId, marked) {
     if (marked?.ok) {
-      if (marked.changed !== false) queueChanged(payload.workspaceId);
-      if (typeof onViewing === 'function') onViewing(payload.workspaceId);
+      if (marked.changed !== false) queueChanged(workspaceId);
+      if (typeof onViewing === 'function') onViewing(workspaceId);
       const { changed, ...result } = marked;
       return result;
     }
     return marked;
   }
 
+  function markRead(payload = {}) {
+    if (!open()) return disabled();
+    if (payload?.viewing === false) {
+      if (typeof onViewing === 'function') onViewing(null);
+      return { ok: true, viewing: false };
+    }
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotMarkRead({ workspaceId: payload.workspaceId })
+        .then(marked => finishMarkRead(payload.workspaceId, marked));
+    }
+    return finishMarkRead(payload.workspaceId, directory.markRead(payload.workspaceId));
+  }
+
   function search(payload = {}) {
     if (!open()) return disabled();
     const snapshot = typeof directory?.query === 'function' ? directory.query(payload.query) : null;
     const items = snapshot?.items ?? (typeof directory?.search === 'function' ? directory.search(payload.query) : []);
+    if (classicCoreBridge?.isAvailable?.()) {
+      const query = typeof payload?.query === 'string' ? payload.query : '';
+      return classicCoreBridge.projectBotSearch({ query }).then(
+        res => ({ ok: true, items, hits: Array.isArray(res?.hits) ? res.hits : [] }),
+        () => ({ ok: true, items, hits: [] }),
+      );
+    }
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {
@@ -796,6 +850,9 @@ export function createProjectAgentApplicationService({
 
   function listHistory(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotListHistory(payload || {});
+    }
     if (!conversationStore || typeof conversationStore.listConversations !== 'function') {
       return { ok: false, code: 'CONVERSATION_REQUIRED' };
     }

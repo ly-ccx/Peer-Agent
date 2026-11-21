@@ -101,6 +101,8 @@ test('connects to real peer core --stdio, registers external capabilities, and l
       'project.memory',
       'project.objectives',
       'project.profile',
+      'project.access',
+      'project.bot',
     ]);
     assert.equal(caps.externalCapabilities.length, 2);
     assert.equal(caps.externalCapabilities[1].capabilityId, 'local.preview.capture');

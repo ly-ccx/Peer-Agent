@@ -60,7 +60,7 @@ pub use coordination_bridge::{
 pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
-    BotListSession, BotRowState, FamiliarizeOffer, InteractionPage, QuestionState,
+    BotListSession, BotRowState, FamiliarizeOffer, InteractionPage, MarkReadResult, QuestionState,
     ReplyQuestionStatus, default_familiarize_offer, filter_bot_list, is_visible_bot_message,
     project_bot_attention, project_bot_list_item, project_bot_list_message,
     project_reply_questions, sort_bot_list,

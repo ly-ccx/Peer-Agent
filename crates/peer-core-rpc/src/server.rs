@@ -4,7 +4,7 @@ use crate::{
     classic_goal::{self, ClassicGoalRegistry},
     classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
-    classic_usage, project,
+    classic_usage, project, project_bot,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -51,6 +51,8 @@ fn classic_domains() -> Vec<String> {
         "project.memory".into(),
         "project.objectives".into(),
         "project.profile".into(),
+        "project.access".into(),
+        "project.bot".into(),
     ]
 }
 
@@ -543,6 +545,14 @@ impl ServerContext {
             "project.profile.setUnknownOutcomePolicy" => {
                 project::handle_profile_set_unknown_outcome_policy(self, params)
             }
+            "project.profile.readAvatar" => project_bot::handle_profile_read_avatar(self, params),
+            "project.profile.update" => project_bot::handle_profile_update(self, params),
+            "project.access.read" => project_bot::handle_access_read(self, params),
+            "project.access.update" => project_bot::handle_access_update(self, params),
+            "project.bot.markRead" => project_bot::handle_bot_mark_read(self, params),
+            "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
+            "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),
+            "project.bot.search" => project_bot::handle_bot_search(self, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }

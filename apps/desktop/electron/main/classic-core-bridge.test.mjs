@@ -15,6 +15,12 @@ import {
   createMemoryStore,
   createObjectiveStore,
 } from '@peer-agent/runtime-node';
+import { createApprovalStore, createGoalPlanStore } from '@peer-agent/runtime-node/storage';
+import { createProjectRegistry } from '@peer-agent/runtime-node/providers';
+import {
+  createBotAccessPolicyAuthority,
+  createBotDirectory,
+} from '@peer-agent/runtime-node/project-agent';
 import { createProjectMemoryService } from './project-agent/project-memory-service.mjs';
 import { createProjectObjectivesService } from './project-agent/project-objectives-service.mjs';
 import { createProjectAgentApplicationService } from './project-agent/project-agent-application-service.mjs';
@@ -1471,6 +1477,326 @@ test('E2E: project-memory, project-objectives, and unknown-outcome policy run th
     assert.equal(pol4.policy.tier, 'ask');
     assert.equal(pol4.policy.revision, 2);
   } finally {
+    await client.dispose();
+    cleanup();
+  }
+});
+
+test('E2E: bot profile/avatar, access policy, markRead, approvals, history, and search run through peer-native core --stdio', async () => {
+  const binaryPath = resolveTestBinary();
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const reg = registry.ensureForPath(workspace);
+  const workspaceId = reg.workspaceId;
+  const wsPath = reg.path || workspace;
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const botConv = conversationStore.createConversation({
+    title: 'Bot E2E',
+    role: 'project_agent',
+    workspaceId,
+    workspacePath: wsPath,
+    mode: 'chat',
+  });
+  conversationStore.appendMessage(botConv.id, {
+    id: 'anchor-e2e',
+    role: 'user',
+    kind: 'user_input',
+    content: 'Audit Stripe webhook secret rotation',
+    createdAt: '2026-11-21T07:59:00.000Z',
+  });
+  conversationStore.appendMessage(botConv.id, {
+    id: 'bot-e2e-msg-1',
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: 'Implemented webhook signature verification',
+    createdAt: '2026-11-21T08:00:00.000Z',
+  });
+  const botHistory = conversationStore.getPersistedConversationHistory(botConv.id);
+  const childConv = conversationStore.createChildConversation({
+    parentConversationId: botConv.id,
+    role: 'work_session',
+    anchorMessageId: 'anchor-e2e',
+    delegation: { sessionId: 'sess-e2e-1', anchorMessageId: 'anchor-e2e', inputId: 'input-e2e-1' },
+    runtimeState: {
+      conversationId: botConv.id,
+      contentRevision: botHistory.contentRevision,
+      status: 'idle',
+    },
+    capturedAt: '2026-11-21T08:01:00.000Z',
+    backgroundMessageIds: ['anchor-e2e'],
+    confirmMissing: true,
+    title: 'Delegated worker',
+    workspaceId,
+    workspacePath: wsPath,
+  });
+  const ordConv = conversationStore.createConversation({
+    title: 'Classic Workspace Thread',
+    workspacePath: wsPath,
+  });
+  const unscopedConv = conversationStore.createConversation({
+    title: 'Classic Unscoped Thread',
+  });
+
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  profileStore.create({
+    workspaceId,
+    displayName: 'Webhook Bot',
+    agentConversationId: botConv.id,
+  });
+
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const stubModel = {
+    modelProviderId: 'anthropic:claude-sonnet-4-5',
+    providerId: 'anthropic',
+    modelId: 'claude-sonnet-4-5',
+    family: 'claude',
+  };
+  goalPlanStore.createPlan({
+    planId: 'plan-del-e2e',
+    conversationId: childConv.id,
+    title: 'Audit Stripe webhook secret rotation',
+    goal: 'Audit webhooks',
+    status: 'executing',
+    delegationOrigin: {
+      workspaceId,
+      sessionId: 'sess-e2e-1',
+      parentConversationId: botConv.id,
+      anchorMessageId: 'anchor-e2e',
+      inputId: 'input-e2e-1',
+      modelSelection: {
+        worker: stubModel,
+        explorer: stubModel,
+        verifier: stubModel,
+        resolvedAt: '2026-11-21T08:01:00.000Z',
+      },
+    },
+  });
+  goalPlanStore.createPlan({
+    planId: 'plan-classic-e2e',
+    conversationId: ordConv.id,
+    title: 'Release Classic Goal',
+    goal: 'Release',
+    status: 'executing',
+    originWorkspacePath: wsPath,
+    tasks: [],
+  });
+  goalPlanStore.setRunnerState('plan-classic-e2e', { status: 'waiting_user' });
+
+  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
+  approvalStore.append({
+    approvalId: 'appr-stale-e2e',
+    workspaceId,
+    conversationId: childConv.id,
+    planId: 'plan-del-e2e',
+    streamId: 's-e2e-1',
+    capabilityId: 'local.file.write',
+    summary: 'write file',
+    state: 'stale',
+  });
+  approvalStore.append({
+    approvalId: 'appr-ord-e2e',
+    workspaceId,
+    conversationId: ordConv.id,
+    streamId: 's-e2e-2',
+    capabilityId: 'local.file.write',
+    summary: 'ordinary file write',
+    state: 'open',
+  });
+
+  const accessAuthority = createBotAccessPolicyAuthority({
+    dataHome,
+    profileStore,
+    conversationStore,
+    goalPlanStore,
+    legacyAccessLevel: 'ask_before_local',
+  });
+  accessAuthority.initialize();
+
+  const memoryStore = createMemoryStore({ rootDir: dataHome });
+  memoryStore.rememberStated({
+    workspaceId,
+    kind: 'fact',
+    text: 'Webhook endpoints always validate Stripe HMAC headers',
+    anchorMessageId: 'u-e2e-1',
+    messages: [{ id: 'u-e2e-1', kind: 'user_input', content: 'remember' }],
+  });
+
+  const directory = createBotDirectory({
+    rootDir: dataHome,
+    registry,
+    readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+    listSessions: () => [],
+    listApprovals: (id) => approvalStore.list({ workspaceId: id }),
+  });
+
+  const customPngPath = path.join(root, 'avatar.png');
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 8, 9]);
+  writeFileSync(customPngPath, pngBytes);
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-bot-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const changedEvents = [];
+  const viewedIds = [];
+  const testModels = [{
+    id: 'anthropic:claude-sonnet-4-5',
+    provider: 'anthropic',
+    name: 'Anthropic',
+    model: 'claude-sonnet-4-5',
+    enabled: true,
+    apiKeyConfigured: true,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningEffortLevels: ['low', 'medium', 'high'],
+    defaultEffort: 'medium',
+  }];
+
+  const appService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    directory,
+    profileStore,
+    approvals: approvalStore,
+    accessAuthority,
+    listModels: () => testModels,
+    chooseAvatar: async () => customPngPath,
+    onViewing: (id) => viewedIds.push(id),
+    broadcast: (channel, payload) => {
+      if (channel === 'project-agent:changed') changedEvents.push(payload);
+    },
+    debounceMs: 5,
+  });
+
+  try {
+    await client.start();
+
+    // 1. updateProfile (displayName + avatarColor + modelSelection) & chooseAvatar + readAvatar
+    const updated = await appService.updateProfile({
+      workspaceId,
+      displayName: 'Stripe Guard Bot',
+      avatarColor: '#61b68c',
+      proactivity: 'standard',
+      autoHandoffOnPolicyAccept: true,
+      planApproval: 'always',
+      acceptancePolicy: 'confirm',
+    });
+    assert.equal(updated.ok, true);
+    assert.equal(updated.profile.displayName, 'Stripe Guard Bot');
+    assert.equal(updated.profile.avatar.color, '#61b68c');
+    assert.equal(updated.profile.autoHandoffOnPolicyAccept, true);
+    assert.equal(updated.profile.planApproval, 'always');
+    assert.equal(updated.profile.acceptancePolicy, 'confirm');
+
+    const modelUpdated = await appService.updateModelSelection({
+      workspaceId,
+      modelProviderId: 'anthropic:claude-sonnet-4-5',
+      reasoningEffort: 'high',
+    });
+    assert.equal(modelUpdated.ok, true);
+    assert.equal(modelUpdated.profile.modelPolicy.overrides.project_agent.modelProviderId, 'anthropic:claude-sonnet-4-5');
+    assert.equal(modelUpdated.profile.modelPolicy.overrides.project_agent.reasoningEffort, 'high');
+
+    const imgUploaded = await appService.updateProfile({ workspaceId, chooseAvatar: true });
+    assert.equal(imgUploaded.ok, true);
+    assert.equal(imgUploaded.profile.avatar.kind, 'image');
+
+    const avatarRead = await appService.readAvatar({ workspaceId });
+    assert.equal(avatarRead.ok, true);
+    assert.equal(avatarRead.dataUrl, `data:image/png;base64,${pngBytes.toString('base64')}`);
+
+    // 2. readAccessPolicy & updateAccessPolicy (including stale child approval retirement)
+    const access1 = await appService.readAccessPolicy({ workspaceId });
+    assert.equal(access1.ok, true);
+    assert.equal(access1.policy.revision, 1);
+    assert.equal(access1.policy.accessLevel, 'ask_before_local');
+
+    const inheritedRead = await appService.readAccessPolicy({ conversationId: childConv.id });
+    assert.equal(inheritedRead.ok, true);
+    assert.equal(inheritedRead.inherited, true);
+
+    const ordRead = await appService.readAccessPolicy({ conversationId: ordConv.id });
+    assert.equal(ordRead.ok, true);
+    assert.equal(ordRead.policy, null);
+
+    const access2 = await appService.updateAccessPolicy({
+      workspaceId,
+      expectedRevision: 1,
+      accessLevel: 'full_local',
+    });
+    assert.equal(access2.ok, true);
+    assert.equal(access2.policy.revision, 2);
+    assert.equal(access2.policy.accessLevel, 'full_local');
+
+    const conflict = await appService.updateAccessPolicy({
+      workspaceId,
+      expectedRevision: 1,
+      accessLevel: 'restricted_local',
+    });
+    assert.equal(conflict.ok, false);
+    assert.equal(conflict.code, 'POLICY_CONFLICT');
+    assert.equal(conflict.policy.revision, 2);
+
+    // 3. listApprovals (stale child approval retired by updateAccessPolicy, ordConv remains open)
+    const listedApprovals = await appService.listApprovals({ workspaceId });
+    assert.equal(listedApprovals.ok, true);
+    const retiredRow = listedApprovals.approvals.find((a) => a.approvalId === 'appr-stale-e2e');
+    const ordRow = listedApprovals.approvals.find((a) => a.approvalId === 'appr-ord-e2e');
+    assert.equal(retiredRow.state, 'expired');
+    assert.equal(retiredRow.decisionReason, 'permission_policy_changed');
+    assert.equal(ordRow.state, 'open');
+
+    // 4. markRead (first change emits queueChanged + onViewing; repeat does not mark changed; viewing:false clears)
+    const mr1 = await appService.markRead({ workspaceId });
+    assert.equal(mr1.ok, true);
+    assert.equal(mr1.messageId, 'bot-e2e-msg-1');
+    const mr2 = await appService.markRead({ workspaceId });
+    assert.equal(mr2.ok, true);
+    const mrOff = appService.markRead({ viewing: false });
+    assert.deepEqual(mrOff, { ok: true, viewing: false });
+    assert.deepEqual(viewedIds, [workspaceId, workspaceId, null]);
+
+    // 5. listHistory (workspaceId + unscoped)
+    const histWs = await appService.listHistory({ workspaceId });
+    assert.equal(histWs.ok, true);
+    assert.equal(histWs.history.length, 1);
+    assert.equal(histWs.history[0].id, ordConv.id);
+    assert.equal(histWs.goals.length, 1);
+    assert.equal(histWs.goals[0].planId, 'plan-classic-e2e');
+    assert.equal(histWs.goals[0].waitingUser, true);
+
+    const histUnscoped = await appService.listHistory({ unscoped: true });
+    assert.equal(histUnscoped.ok, true);
+    assert.equal(histUnscoped.history.length, 1);
+    assert.equal(histUnscoped.history[0].id, unscopedConv.id);
+    assert.equal(histUnscoped.goals.length, 0);
+
+    // 6. search (items + Rust FTS5 hits across task & memory & message)
+    const searched = await appService.search({ query: 'Stripe' });
+    assert.equal(searched.ok, true);
+    assert.ok(searched.items.some((item) => item.workspaceId === workspaceId));
+    assert.ok(searched.hits.some((hit) => hit.kind === 'task' && hit.sessionId === 'sess-e2e-1'));
+    assert.ok(searched.hits.some((hit) => hit.kind === 'memory' && hit.text.includes('HMAC')));
+
+    await new Promise((r) => setTimeout(r, 30));
+    assert.ok(changedEvents.some((ev) => Array.isArray(ev.workspaceIds) && ev.workspaceIds.includes(workspaceId)));
+  } finally {
+    appService.dispose();
+    accessAuthority.close();
     await client.dispose();
     cleanup();
   }

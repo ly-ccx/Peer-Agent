@@ -1008,6 +1008,38 @@ export function createClassicCoreBridge({
     return requireClient().request('project.profile.setUnknownOutcomePolicy', params || {});
   }
 
+  async function projectProfileReadAvatar(params = {}) {
+    return requireClient().request('project.profile.readAvatar', params || {});
+  }
+
+  async function projectProfileUpdate(params = {}) {
+    return requireClient().request('project.profile.update', params || {});
+  }
+
+  async function projectAccessRead(params = {}) {
+    return requireClient().request('project.access.read', params || {});
+  }
+
+  async function projectAccessUpdate(params = {}) {
+    return requireClient().request('project.access.update', params || {});
+  }
+
+  async function projectBotMarkRead(params = {}) {
+    return requireClient().request('project.bot.markRead', params || {});
+  }
+
+  async function projectBotListApprovals(params = {}) {
+    return requireClient().request('project.bot.listApprovals', params || {});
+  }
+
+  async function projectBotListHistory(params = {}) {
+    return requireClient().request('project.bot.listHistory', params || {});
+  }
+
+  async function projectBotSearch(params = {}) {
+    return requireClient().request('project.bot.search', params || {});
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
@@ -1085,6 +1117,14 @@ export function createClassicCoreBridge({
     projectObjectivesDelete,
     projectProfileReadUnknownOutcomePolicy,
     projectProfileSetUnknownOutcomePolicy,
+    projectProfileReadAvatar,
+    projectProfileUpdate,
+    projectAccessRead,
+    projectAccessUpdate,
+    projectBotMarkRead,
+    projectBotListApprovals,
+    projectBotListHistory,
+    projectBotSearch,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

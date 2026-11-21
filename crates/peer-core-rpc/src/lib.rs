@@ -15,6 +15,7 @@ mod classic_streams;
 mod classic_usage;
 mod external_provider;
 mod project;
+mod project_bot;
 pub mod protocol;
 pub mod server;
 mod transport;
@@ -166,7 +167,9 @@ mod tests {
                 "classic.llm",
                 "project.memory",
                 "project.objectives",
-                "project.profile"
+                "project.profile",
+                "project.access",
+                "project.bot"
             ])
         );
         assert_eq!(

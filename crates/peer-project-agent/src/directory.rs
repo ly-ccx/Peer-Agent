@@ -139,6 +139,14 @@ pub struct InteractionPage {
     pub familiarize_offer: Option<FamiliarizeOffer>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkReadResult {
+    pub at: String,
+    pub message_id: Option<String>,
+    pub changed: bool,
+}
+
 fn clip(value: &str, limit: usize) -> String {
     let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(limit).collect()
@@ -584,6 +592,18 @@ impl BotDirectory {
             .map(str::to_owned)
     }
 
+    pub fn read_cursor_record(&self, workspace_id: &str) -> Option<(String, Option<String>)> {
+        let file = self.read_cursor_file(workspace_id).ok()?;
+        let raw = fs::read_to_string(file).ok()?;
+        let parsed: Value = serde_json::from_str(&raw).ok()?;
+        let at = parsed["at"].as_str().filter(|s| !s.is_empty())?.to_owned();
+        let message_id = parsed["messageId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        Some((at, message_id))
+    }
+
     pub fn mark_read(&self, workspace_id: &str, at: Option<&str>) -> Result<String, ProjectError> {
         let file = self.read_cursor_file(workspace_id)?;
         let stamp = at
@@ -594,6 +614,76 @@ impl BotDirectory {
             .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
         atomic_write(&file, body.as_bytes())?;
         Ok(stamp)
+    }
+
+    /// Parity `markRead` for Bot conversations: tracks `{ at, messageId }` idempotently
+    /// based on the latest visible bot message, avoiding disk writes when unchanged.
+    pub fn mark_read_bot(&self, workspace_id: &str) -> Result<MarkReadResult, ProjectError> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let messages: Vec<Value> = match profile.agent_conversation_id.as_deref() {
+            Some(conv_id) if !conv_id.is_empty() => {
+                if let Ok(Some(page)) = self
+                    .conversations
+                    .read_conversation_window(conv_id, None, None, true)
+                {
+                    page["window"].as_array().cloned().unwrap_or_default()
+                } else {
+                    self.conversations
+                        .read_committed(conv_id, None, 8 * 1024 * 1024)
+                        .map(|snap| snap.history.messages)
+                        .unwrap_or_default()
+                }
+            }
+            _ => Vec::new(),
+        };
+        let visible: Vec<&Value> = messages
+            .iter()
+            .filter(|m| is_visible_bot_message(m))
+            .collect();
+        let last = visible.last().copied();
+        let message_id = last
+            .and_then(|m| m["id"].as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let last_at = last
+            .and_then(|m| m["createdAt"].as_str().or_else(|| m["at"].as_str()))
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let current = self.read_cursor_record(workspace_id);
+        let at = last_at
+            .or_else(|| {
+                current
+                    .as_ref()
+                    .and_then(|(cat, cmid)| (cmid == &message_id).then(|| cat.clone()))
+            })
+            .unwrap_or_else(now_iso);
+        if current
+            .as_ref()
+            .is_some_and(|(cat, cmid)| cat == &at && cmid == &message_id)
+        {
+            return Ok(MarkReadResult {
+                at,
+                message_id,
+                changed: false,
+            });
+        }
+        let file = self.read_cursor_file(workspace_id)?;
+        let mut body = serde_json::to_string(&json!({
+            "at": at,
+            "messageId": message_id,
+        }))
+        .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
+        body.push('\n');
+        atomic_write(&file, body.as_bytes())?;
+        Ok(MarkReadResult {
+            at,
+            message_id,
+            changed: true,
+        })
     }
 
     /// Bounded paginated read of visible bot conversation messages (newest-tail pagination).
@@ -890,5 +980,94 @@ mod tests {
         assert_eq!(states["reply-q2"].state, QuestionState::Superseded);
         assert_eq!(states["reply-q3"].state, QuestionState::Answered);
         assert_eq!(states["reply-q4"].state, QuestionState::Answered);
+    }
+
+    #[test]
+    fn mark_read_bot_is_idempotent_and_tracks_latest_visible_message() {
+        let dir = tempdir().unwrap();
+        let profiles = BotProfileStore::new(dir.path());
+        let convs = ConversationStore::new(dir.path());
+        let created_at = "2026-11-19T02:00:00.000Z";
+        let conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: Some("conv-mark-read"),
+                    title: "Reader",
+                    workspace_id: "ws-mr",
+                    workspace_path: Some("/tmp/mr"),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap();
+        profiles
+            .create(&CreateBotProfile {
+                workspace_id: "ws-mr",
+                display_name: "Reader",
+                managed: false,
+                agent_conversation_id: conv_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+        convs
+            .append_classic_message(
+                conv_id,
+                &json!({
+                    "id": "msg-1",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "content": "First reply",
+                    "createdAt": "2026-11-19T02:01:00.000Z"
+                }),
+            )
+            .unwrap();
+
+        let directory = BotDirectory::new(dir.path());
+        let first = directory.mark_read_bot("ws-mr").unwrap();
+        assert_eq!(
+            first,
+            MarkReadResult {
+                at: "2026-11-19T02:01:00.000Z".into(),
+                message_id: Some("msg-1".into()),
+                changed: true,
+            }
+        );
+
+        let second = directory.mark_read_bot("ws-mr").unwrap();
+        assert!(!second.changed);
+        assert_eq!(second.at, "2026-11-19T02:01:00.000Z");
+        assert_eq!(second.message_id.as_deref(), Some("msg-1"));
+
+        convs
+            .append_classic_message(
+                conv_id,
+                &json!({
+                    "id": "msg-2",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "content": "Second reply",
+                    "createdAt": "2026-11-19T02:02:00.000Z"
+                }),
+            )
+            .unwrap();
+        let third = directory.mark_read_bot("ws-mr").unwrap();
+        assert!(third.changed);
+        assert_eq!(third.at, "2026-11-19T02:02:00.000Z");
+        assert_eq!(third.message_id.as_deref(), Some("msg-2"));
+
+        assert_eq!(
+            directory.mark_read_bot("missing").unwrap_err().code,
+            "NOT_FOUND"
+        );
+        profiles.archive("ws-mr").unwrap();
+        assert_eq!(
+            directory.mark_read_bot("ws-mr").unwrap_err().code,
+            "NOT_FOUND"
+        );
     }
 }

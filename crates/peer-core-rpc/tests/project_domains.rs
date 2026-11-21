@@ -1,10 +1,10 @@
 use peer_core_rpc::{CoreServerConfig, PROTOCOL_VERSION, serve_io};
 use peer_project_agent::{
     BotProfileStore, CreateBotProfile, CreateObjectiveRequest, MemoryStore, ObjectiveBudget,
-    ObjectiveMilestone, ObjectiveStore, WriteMemoryRequest, now_iso, sha256_hex,
+    ObjectiveMilestone, ObjectiveStore, ProjectRegistry, WriteMemoryRequest, now_iso, sha256_hex,
 };
 use peer_runtime::CancellationToken;
-use peer_store::{ConversationStore, NewProjectConversation};
+use peer_store::{ApprovalStore, ConversationStore, HostApproval, NewProjectConversation};
 use serde_json::{Value, json};
 use std::{fs, path::Path, time::Duration};
 use tempfile::TempDir;
@@ -454,6 +454,524 @@ async fn project_memory_objectives_and_profile_policy_roundtrip() {
         .clone();
     assert_eq!(missing_pol["ok"], false);
     assert_eq!(missing_pol["code"], "workspace_not_found");
+
+    let _ = client.call("core.shutdown", json!({})).await;
+    drop(client);
+    server_handle.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn project_bot_profile_access_read_approvals_history_and_search_roundtrip() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-repo");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+    let ws_path_str = ws_dir.to_string_lossy().to_string();
+
+    let registry = ProjectRegistry::new(&home);
+    let reg_entry = registry.register(&ws_path_str, Some("ws-bot")).unwrap();
+    let ws_id = reg_entry.workspace_id.clone();
+
+    let conv_store = ConversationStore::new(&home);
+    let root_conv = conv_store
+        .create_project_conversation(
+            &NewProjectConversation {
+                id: Some("conv-bot-root"),
+                title: "Bot 助理",
+                workspace_id: &ws_id,
+                workspace_path: Some(&ws_path_str),
+                role: "project_agent",
+                parent_conversation_id: None,
+                mode: "project_agent",
+                created_at: "2026-11-20T00:00:00.000Z",
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let bot_conv_id = root_conv["id"].as_str().unwrap().to_owned();
+    conv_store
+        .append_classic_message(
+            &bot_conv_id,
+            &json!({
+                "id": "bot-msg-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Auth login handler is ready in src/auth.ts",
+                "createdAt": "2026-11-20T01:00:00.000Z",
+            }),
+        )
+        .unwrap();
+
+    // Child delegated work_session conversation & active plan to test access inheritance & task search.
+    let child_conv = conv_store
+        .create_project_conversation(
+            &NewProjectConversation {
+                id: Some("conv-child-session"),
+                title: "Auth refactor task",
+                workspace_id: &ws_id,
+                workspace_path: Some(&ws_path_str),
+                role: "work_session",
+                parent_conversation_id: Some(&bot_conv_id),
+                mode: "goal",
+                created_at: "2026-11-20T01:05:00.000Z",
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let child_conv_id = child_conv["id"].as_str().unwrap().to_owned();
+
+    // Ordinary workspace conversation (active) + ordinary unscoped conversation + archived ordinary conversation.
+    let hist_active = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Workspace classic session",
+            "workspacePath": ws_path_str,
+        }))
+        .unwrap();
+    let hist_active_id = hist_active["id"].as_str().unwrap().to_owned();
+    let hist_unscoped = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Global classic session",
+        }))
+        .unwrap();
+    let hist_unscoped_id = hist_unscoped["id"].as_str().unwrap().to_owned();
+    let hist_archived = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Archived workspace session",
+            "workspacePath": ws_path_str,
+        }))
+        .unwrap();
+    let hist_archived_id = hist_archived["id"].as_str().unwrap().to_owned();
+
+    let profiles = BotProfileStore::new(&home);
+    profiles
+        .create(&CreateBotProfile {
+            workspace_id: &ws_id,
+            display_name: "Initial Bot",
+            managed: false,
+            agent_conversation_id: &bot_conv_id,
+            avatar_salt: "",
+        })
+        .unwrap();
+
+    // Goal plans: one delegated session (excluded from classic goals, included in task search),
+    // one active classic non-delegated goal with waiting_user task, one completed goal (excluded).
+    let plans_dir = home.join("goal-plans");
+    fs::create_dir_all(&plans_dir).unwrap();
+    let delegated_plan = json!({
+        "planId": "plan-del-1",
+        "conversationId": child_conv_id,
+        "title": "Refactor OAuth token refresh",
+        "status": "executing",
+        "updatedAt": "2026-11-20T01:10:00.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-del-1",
+            "parentConversationId": bot_conv_id,
+        }
+    });
+    let classic_goal = json!({
+        "planId": "plan-classic-1",
+        "conversationId": hist_active_id,
+        "title": "Ship release checklist",
+        "status": "executing",
+        "workspacePath": ws_path_str,
+        "updatedAt": "2026-11-20T01:12:00.000Z",
+        "runner": { "status": "idle" },
+        "tasks": [{ "id": "t1", "status": "waiting_user" }]
+    });
+    let completed_goal = json!({
+        "planId": "plan-classic-done",
+        "conversationId": hist_active_id,
+        "title": "Completed classic goal",
+        "status": "completed",
+        "workspacePath": ws_path_str,
+        "updatedAt": "2026-11-20T00:30:00.000Z"
+    });
+    fs::write(
+        plans_dir.join("plan-del-1.json"),
+        serde_json::to_string(&delegated_plan).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        plans_dir.join("plan-classic-1.json"),
+        serde_json::to_string(&classic_goal).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        plans_dir.join("plan-classic-done.json"),
+        serde_json::to_string(&completed_goal).unwrap(),
+    )
+    .unwrap();
+    let index_jsonl = format!(
+        "{}\n{}\n{}\n",
+        serde_json::to_string(&delegated_plan).unwrap(),
+        serde_json::to_string(&classic_goal).unwrap(),
+        serde_json::to_string(&completed_goal).unwrap(),
+    );
+    fs::write(plans_dir.join("index.jsonl"), index_jsonl).unwrap();
+
+    // Seed approvals across scoped & unscoped stores.
+    let approvals = ApprovalStore::new(&home);
+    approvals
+        .open(
+            &HostApproval {
+                approval_id: "appr-ws-1",
+                workspace_id: Some(&ws_id),
+                conversation_id: &bot_conv_id,
+                stream_id: "stream-1",
+                plan_id: None,
+                session_id: None,
+                capability_id: "local.file.write",
+                args_digest: &"a".repeat(64),
+                policy_revision: "rev-1",
+                created_at: "2026-11-20T01:15:00.000Z",
+                deadline_at: None,
+            },
+            None,
+        )
+        .unwrap();
+    approvals
+        .open(
+            &HostApproval {
+                approval_id: "appr-unscoped-1",
+                workspace_id: None,
+                conversation_id: &hist_unscoped_id,
+                stream_id: "stream-u1",
+                plan_id: None,
+                session_id: None,
+                capability_id: "local.shell.exec",
+                args_digest: &"b".repeat(64),
+                policy_revision: "rev-0",
+                created_at: "2026-11-20T01:16:00.000Z",
+                deadline_at: None,
+            },
+            None,
+        )
+        .unwrap();
+
+    // Seed an active memory & a forgotten memory for search.
+    let mem_store = MemoryStore::new(&home);
+    mem_store
+        .write(&WriteMemoryRequest {
+            scope: "project",
+            workspace_id: Some(&ws_id),
+            kind: "fact",
+            text: "Use strict OAuth PKCE flow for sign-in",
+            trust: "stated",
+            source_refs: vec!["m-u-1".into()],
+            pinned: false,
+            anchor_message_id: Some("m-u-1"),
+            expires_at: None,
+            topic_key: None,
+            topic_value: None,
+            file_anchors: None,
+        })
+        .unwrap();
+    let forgotten_mem = mem_store
+        .write(&WriteMemoryRequest {
+            scope: "project",
+            workspace_id: Some(&ws_id),
+            kind: "fact",
+            text: "Forgotten OAuth secret token hint",
+            trust: "stated",
+            source_refs: vec!["m-u-2".into()],
+            pinned: false,
+            anchor_message_id: Some("m-u-2"),
+            expires_at: None,
+            topic_key: None,
+            topic_value: None,
+            file_anchors: None,
+        })
+        .unwrap();
+    mem_store
+        .forget_visible(&ws_id, &forgotten_mem.id, "outdated")
+        .unwrap();
+
+    // PNG avatar fixture file.
+    let png_path = temp.path().join("custom-avatar.png");
+    let png_bytes = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 42, 43, 44];
+    fs::write(&png_path, &png_bytes).unwrap();
+
+    let (mut client, server_handle) = spawn_server(&home).await;
+
+    // Archive hist-conv-archived so listHistory skips it.
+    let archived_res = client
+        .call(
+            "classic.conversations.archive",
+            json!({ "id": hist_archived_id }),
+        )
+        .await;
+    assert!(archived_res["error"].is_null());
+
+    // 1. project.profile.update + project.profile.readAvatar
+    let bad_update = client
+        .call(
+            "project.profile.update",
+            json!({ "workspaceId": ws_id, "autoHandoffOnPolicyAccept": "yes" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(bad_update["ok"], false);
+    assert_eq!(bad_update["code"], "INVALID_HANDOFF_POLICY");
+
+    let updated_prof = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "displayName": "Security Bot",
+                "proactivity": "high",
+                "avatarColor": "#61b68c",
+                "autoHandoffOnPolicyAccept": true,
+                "planApproval": "writes",
+                "acceptancePolicy": "confirm",
+                "modelPolicy": {
+                    "overrides": {
+                        "project_agent": { "mode": "tier", "tier": "strong", "reasoningEffort": "high" }
+                    }
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(updated_prof["ok"], true);
+    assert_eq!(updated_prof["profile"]["displayName"], "Security Bot");
+    assert_eq!(updated_prof["profile"]["proactivity"], "high");
+    assert_eq!(updated_prof["profile"]["avatar"]["color"], "#61b68c");
+    assert_eq!(updated_prof["profile"]["autoHandoffOnPolicyAccept"], true);
+    assert_eq!(updated_prof["profile"]["planApproval"], "writes");
+    assert_eq!(updated_prof["profile"]["acceptancePolicy"], "confirm");
+
+    // Installing raster avatar + reading dataUrl + clearing modelPolicy to null
+    let with_img = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "avatarSourcePath": png_path.to_string_lossy(),
+                "modelPolicy": null,
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(with_img["ok"], true);
+    assert_eq!(with_img["profile"]["avatar"]["kind"], "image");
+    assert_eq!(with_img["profile"]["modelPolicy"], Value::Null);
+
+    let avatar_res = client
+        .call(
+            "project.profile.readAvatar",
+            json!({ "workspaceId": ws_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(avatar_res["ok"], true);
+    assert!(
+        avatar_res["dataUrl"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,iVBORw0KGgo")
+    );
+    assert_eq!(
+        client
+            .call(
+                "project.profile.readAvatar",
+                json!({ "workspaceId": "missing" })
+            )
+            .await["result"]["code"],
+        "NOT_FOUND"
+    );
+
+    // 2. project.access.read & project.access.update
+    assert_eq!(
+        client
+            .call(
+                "project.access.read",
+                json!({ "workspaceId": ws_id, "conversationId": bot_conv_id })
+            )
+            .await["result"]["code"],
+        "INVALID_INPUT"
+    );
+    let access_ord = client
+        .call(
+            "project.access.read",
+            json!({ "conversationId": hist_active_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(access_ord["ok"], true);
+    assert_eq!(access_ord["policy"], Value::Null);
+    assert_eq!(access_ord["inherited"], false);
+
+    let access_ws = client
+        .call("project.access.read", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(access_ws["ok"], true);
+    assert_eq!(access_ws["policy"]["revision"], 1);
+    assert_eq!(access_ws["policy"]["accessLevel"], "ask_before_local");
+    assert_eq!(access_ws["inherited"], false);
+    assert_eq!(access_ws["botName"], "Security Bot");
+
+    let access_child = client
+        .call(
+            "project.access.read",
+            json!({ "conversationId": child_conv_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(access_child["ok"], true);
+    assert_eq!(access_child["inherited"], true);
+    assert_eq!(access_child["policy"]["workspaceId"], ws_id);
+
+    let access_upd = client
+        .call(
+            "project.access.update",
+            json!({
+                "workspaceId": ws_id,
+                "expectedRevision": 1,
+                "accessLevel": "session_local",
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(access_upd["ok"], true);
+    assert_eq!(access_upd["policy"]["revision"], 2);
+    assert_eq!(access_upd["policy"]["accessLevel"], "session_local");
+
+    let access_conflict = client
+        .call(
+            "project.access.update",
+            json!({
+                "workspaceId": ws_id,
+                "expectedRevision": 1,
+                "accessLevel": "full_local",
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(access_conflict["ok"], false);
+    assert_eq!(access_conflict["code"], "POLICY_CONFLICT");
+    assert_eq!(access_conflict["policy"]["revision"], 2);
+
+    // 3. project.bot.markRead (idempotent & advances on new message)
+    let mark1 = client
+        .call("project.bot.markRead", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(mark1["ok"], true);
+    assert_eq!(mark1["changed"], true);
+    assert_eq!(mark1["messageId"], "bot-msg-1");
+    assert_eq!(mark1["at"], "2026-11-20T01:00:00.000Z");
+
+    let mark2 = client
+        .call("project.bot.markRead", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(mark2["ok"], true);
+    assert_eq!(mark2["changed"], false);
+
+    conv_store
+        .append_classic_message(
+            &bot_conv_id,
+            &json!({
+                "id": "bot-msg-2",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Follow-up summary",
+                "createdAt": "2026-11-20T02:00:00.000Z",
+            }),
+        )
+        .unwrap();
+    let mark3 = client
+        .call("project.bot.markRead", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(mark3["ok"], true);
+    assert_eq!(mark3["changed"], true);
+    assert_eq!(mark3["messageId"], "bot-msg-2");
+
+    // 4. project.bot.listApprovals
+    let all_approvals = client.call("project.bot.listApprovals", json!({})).await["result"].clone();
+    assert_eq!(all_approvals["ok"], true);
+    assert_eq!(all_approvals["approvals"].as_array().unwrap().len(), 2);
+
+    let ws_approvals = client
+        .call("project.bot.listApprovals", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(ws_approvals["approvals"].as_array().unwrap().len(), 1);
+    assert_eq!(ws_approvals["approvals"][0]["approvalId"], "appr-ws-1");
+
+    let unscoped_approvals = client
+        .call("project.bot.listApprovals", json!({ "workspaceId": null }))
+        .await["result"]
+        .clone();
+    assert_eq!(unscoped_approvals["approvals"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        unscoped_approvals["approvals"][0]["approvalId"],
+        "appr-unscoped-1"
+    );
+
+    // 5. project.bot.listHistory
+    let scoped_hist = client
+        .call("project.bot.listHistory", json!({ "workspaceId": ws_id }))
+        .await["result"]
+        .clone();
+    assert_eq!(scoped_hist["ok"], true);
+    let hist_items = scoped_hist["history"].as_array().unwrap();
+    assert_eq!(hist_items.len(), 1);
+    assert_eq!(hist_items[0]["id"], hist_active_id);
+    let goal_items = scoped_hist["goals"].as_array().unwrap();
+    assert_eq!(goal_items.len(), 1);
+    assert_eq!(goal_items[0]["planId"], "plan-classic-1");
+    assert_eq!(goal_items[0]["waitingUser"], true);
+
+    let unscoped_hist = client
+        .call("project.bot.listHistory", json!({ "unscoped": true }))
+        .await["result"]
+        .clone();
+    assert_eq!(unscoped_hist["ok"], true);
+    assert_eq!(unscoped_hist["history"].as_array().unwrap().len(), 1);
+    assert_eq!(unscoped_hist["history"][0]["id"], hist_unscoped_id);
+    assert_eq!(unscoped_hist["goals"].as_array().unwrap().len(), 0);
+
+    // 6. project.bot.search (message + delegated task + effective memory; excludes forgotten memory)
+    let search_oauth = client
+        .call("project.bot.search", json!({ "query": "OAuth" }))
+        .await["result"]
+        .clone();
+    assert_eq!(search_oauth["ok"], true);
+    let hits = search_oauth["hits"].as_array().unwrap();
+    assert!(
+        hits.iter()
+            .any(|h| h["kind"] == "task" && h["sessionId"] == "sess-del-1")
+    );
+    assert!(
+        hits.iter()
+            .any(|h| h["kind"] == "memory" && h["text"].as_str().unwrap().contains("PKCE"))
+    );
+    assert!(
+        !hits
+            .iter()
+            .any(|h| h["text"].as_str().unwrap().contains("Forgotten OAuth"))
+    );
+
+    let search_bot = client
+        .call("project.bot.search", json!({ "query": "Security Bot" }))
+        .await["result"]
+        .clone();
+    assert_eq!(search_bot["ok"], true);
+    assert!(
+        search_bot["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["kind"] == "bot" && h["workspaceId"] == ws_id)
+    );
 
     let _ = client.call("core.shutdown", json!({})).await;
     drop(client);
