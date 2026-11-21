@@ -85,7 +85,7 @@ pub fn goal_progress_track(percent: u8, width: usize) -> (String, String) {
     ("━".repeat(done), "─".repeat(cols - done))
 }
 
-fn split_pair_line(
+pub(crate) fn split_pair_line(
     left: &str,
     left_style: Style,
     right: &str,
@@ -109,7 +109,7 @@ fn split_pair_line(
     Line::styled(clip_bot_line(left, width), left_style)
 }
 
-fn render_panel_row(
+pub(crate) fn render_panel_row(
     frame: &mut Frame<'_>,
     y: &mut u16,
     y_end: u16,

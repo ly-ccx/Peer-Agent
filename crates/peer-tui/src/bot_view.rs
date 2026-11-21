@@ -9,9 +9,11 @@
 
 use crate::{
     Composer,
+    bot_work_panel::{BotWorkPanelView, render_bot_work_panel},
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     classic_view::{ApprovalCard, approval_dock_height, render_approval_dock},
     commands::{clip_bot_line, format_bot_when},
+    goal_panel::goal_side_panel_width,
     markdown::{
         LineLink, RenderedBlock, ScreenHyperlink, WrapCacheKey, project_line_links,
         render_markdown_themed, stable_hash, stamp_screen_link_id,
@@ -134,6 +136,7 @@ pub struct BotShellView<'a> {
     pub model_picker: &'a ModelPickerState,
     pub approval: Option<(&'a ApprovalCard, usize)>,
     pub overlay: Option<&'a ClassicOverlay>,
+    pub work_panel: Option<&'a BotWorkPanelView>,
     pub wordmark_elapsed_ms: Option<u64>,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
@@ -1147,15 +1150,15 @@ fn render_bot_status_bar(frame: &mut Frame<'_>, area: Rect, view: &BotShellView<
     };
     let hint_suffix = if sw >= 112 {
         if zh {
-            " · /classic 普通对话 · / 命令 · F3 模型"
+            " · /classic 普通对话 · / 命令 · F3 模型 · F4 面板"
         } else {
-            " · /classic chat · / cmds · F3 model"
+            " · /classic chat · / cmds · F3 model · F4 panel"
         }
-    } else if sw >= 88 {
+    } else if sw >= 92 {
         if zh {
-            " · /classic 普通对话 · F3 模型"
+            " · /classic · F3 模型 · F4 面板"
         } else {
-            " · /classic chat · F3 model"
+            " · /classic · F3 model · F4 panel"
         }
     } else if sw >= 72 {
         " · /classic"
@@ -1207,6 +1210,7 @@ fn render_conversation_body(
     messages: &[BotMessageView],
     cards: &[BotCardRow],
     tasks: &[BotTaskRow],
+    show_inline_tasks: bool,
     card_focus: bool,
     selected_card: usize,
     selected_option: usize,
@@ -1331,7 +1335,7 @@ fn render_conversation_body(
                 }
             }
 
-            if !active_tasks.is_empty() {
+            if show_inline_tasks && !active_tasks.is_empty() {
                 hero_lines.push((Line::styled("", bg), Vec::new()));
                 let block_w = width.saturating_sub(4).min(76);
                 let task_pad = width.saturating_sub(block_w) / 2;
@@ -1384,15 +1388,17 @@ fn render_conversation_body(
             );
             tiny_lines.push((Line::styled("", bg), Vec::new()));
         }
-        push_inline_task_rows(
-            &mut tiny_lines,
-            &active_tasks,
-            width,
-            0,
-            false,
-            palette,
-            locale,
-        );
+        if show_inline_tasks {
+            push_inline_task_rows(
+                &mut tiny_lines,
+                &active_tasks,
+                width,
+                0,
+                false,
+                palette,
+                locale,
+            );
+        }
         if tiny_lines.is_empty() {
             let empty_text = if zh {
                 "这里暂时没有内容"
@@ -1657,7 +1663,7 @@ fn render_conversation_body(
         }
     }
 
-    if !active_tasks.is_empty() {
+    if show_inline_tasks && !active_tasks.is_empty() {
         if !all_lines.is_empty() && all_lines.last().is_some_and(|(line, _)| line.width() > 0) {
             all_lines.push((Line::styled("", bg), Vec::new()));
         }
@@ -2003,13 +2009,80 @@ pub fn render_bot_shell_with_links(
     let has_header_divider = !is_list && area.height >= 10;
     let has_lease_banner = !is_list && view.lease_banner.is_some();
     let show_composer = !is_list;
-    let approval_dock_h =
-        if show_composer && !view.model_picker.open && view.approval.is_some() && area.height >= 10
-        {
-            approval_dock_height(area.height.saturating_sub(9).max(4))
-        } else {
-            0
-        };
+
+    let mut top_constraints = vec![Constraint::Length(1)];
+    if has_header_divider {
+        top_constraints.push(Constraint::Length(1));
+    }
+    if has_lease_banner {
+        top_constraints.push(Constraint::Length(1));
+    }
+    top_constraints.push(Constraint::Min(1));
+    let top_areas = Layout::vertical(top_constraints).split(area);
+    let mut tslot = 0usize;
+
+    // ADR 122 §2 Header: BotList is strictly "Peer" (no host/client banner, no ◆ prefix).
+    let header_area = top_areas[tslot];
+    tslot += 1;
+    let header_divider_area = if has_header_divider {
+        let div = top_areas[tslot];
+        tslot += 1;
+        Some(div)
+    } else {
+        None
+    };
+
+    if is_list {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                "Peer",
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(palette.background)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            header_area,
+        );
+    } else {
+        render_bot_topbar(frame, header_area, header_divider_area, &view);
+    }
+
+    if let Some(banner) = view.lease_banner
+        && has_lease_banner
+    {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                clip_bot_line(banner, usize::from(top_areas[tslot].width)),
+                Style::new().fg(palette.warning).bg(palette.background),
+            )),
+            top_areas[tslot],
+        );
+        tslot += 1;
+    }
+
+    let main_area = top_areas[tslot];
+    let side_w = if matches!(view.screen, BotScreen::Conversation) && view.work_panel.is_some() {
+        goal_side_panel_width(full_area.width)
+    } else {
+        0
+    };
+    let (conv_main_area, side_panel_area) = if side_w > 0 && main_area.width > side_w + 56 {
+        let cols =
+            Layout::horizontal([Constraint::Min(56), Constraint::Length(side_w)]).split(main_area);
+        (cols[0], Some(cols[1]))
+    } else {
+        (main_area, None)
+    };
+
+    let approval_dock_h = if show_composer
+        && !view.model_picker.open
+        && view.approval.is_some()
+        && conv_main_area.height >= 8
+    {
+        approval_dock_height(conv_main_area.height.saturating_sub(7).max(4))
+    } else {
+        0
+    };
     let active_dock = view.overlay.filter(|ov| {
         show_composer
             && ov.is_open()
@@ -2017,7 +2090,9 @@ pub fn render_bot_shell_with_links(
             && !view.model_picker.open
             && approval_dock_h == 0
     });
-    let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(10)));
+    let dock_h = active_dock.map_or(0, |ov| {
+        ov.dock_height(conv_main_area.height.saturating_sub(8))
+    });
     let draft = view.composer.draft();
     let slash_open = show_composer
         && !view.model_picker.open
@@ -2096,18 +2171,18 @@ pub fn render_bot_shell_with_links(
         None
     };
 
-    let use_framed_composer = show_composer && area.height >= 12 && area.width >= 20;
+    let use_framed_composer = show_composer && area.height >= 12 && conv_main_area.width >= 20;
     let status_bar_rows: u16 = if !show_composer || area.height < 8 {
         0
-    } else if area.width < 56 && area.height >= 12 {
+    } else if conv_main_area.width < 56 && area.height >= 12 {
         2
     } else {
         1
     };
     let composer_inner_w = if use_framed_composer {
-        usize::from(area.width).saturating_sub(6).max(1)
+        usize::from(conv_main_area.width).saturating_sub(6).max(1)
     } else {
-        usize::from(area.width).saturating_sub(2).max(1)
+        usize::from(conv_main_area.width).saturating_sub(2).max(1)
     };
     let composer_inner_rows: u16 = if draft.is_empty() {
         1
@@ -2121,14 +2196,7 @@ pub fn render_bot_shell_with_links(
         composer_inner_rows
     };
 
-    let mut constraints = vec![Constraint::Length(1)];
-    if has_header_divider {
-        constraints.push(Constraint::Length(1));
-    }
-    if has_lease_banner {
-        constraints.push(Constraint::Length(1));
-    }
-    constraints.push(Constraint::Min(1));
+    let mut constraints = vec![Constraint::Min(1)];
     if show_composer {
         if transient_status.is_some() {
             constraints.push(Constraint::Length(1)); // transient notice / draft warning / reading history
@@ -2154,47 +2222,8 @@ pub fn render_bot_shell_with_links(
         constraints.push(Constraint::Length(1));
     }
 
-    let areas = Layout::vertical(constraints).split(area);
+    let areas = Layout::vertical(constraints).split(conv_main_area);
     let mut slot = 0usize;
-
-    // ADR 122 §2 Header: BotList is strictly "Peer" (no host/client banner, no ◆ prefix).
-    let header_area = areas[slot];
-    slot += 1;
-    let header_divider_area = if has_header_divider {
-        let div = areas[slot];
-        slot += 1;
-        Some(div)
-    } else {
-        None
-    };
-
-    if is_list {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                "Peer",
-                Style::new()
-                    .fg(palette.accent)
-                    .bg(palette.background)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            header_area,
-        );
-    } else {
-        render_bot_topbar(frame, header_area, header_divider_area, &view);
-    }
-
-    if let Some(banner) = view.lease_banner
-        && has_lease_banner
-    {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                clip_bot_line(banner, usize::from(areas[slot].width)),
-                Style::new().fg(palette.warning).bg(palette.background),
-            )),
-            areas[slot],
-        );
-        slot += 1;
-    }
 
     let body_area = areas[slot];
     slot += 1;
@@ -2219,6 +2248,7 @@ pub fn render_bot_shell_with_links(
                 view.messages,
                 view.cards,
                 view.tasks,
+                side_panel_area.is_none(),
                 view.card_focus,
                 view.selected_card,
                 view.selected_card_option,
@@ -2401,6 +2431,7 @@ pub fn render_bot_shell_with_links(
                 /bots              切换机器人列表\n\
                 /tasks             查看委派任务\n\
                 /task N            查看第 N 个任务详情与核验依据\n\
+                /panel             展开/收起右侧工作现场面板 (F4)\n\
                 /cards             查看待处理卡片（对话内 Tab 可直选卡片按钮）\n\
                 /approve N         批准第 N 张卡片\n\
                 /deny N            拒绝第 N 张卡片\n\
@@ -2623,7 +2654,11 @@ pub fn render_bot_shell_with_links(
             render_bot_status_bar(frame, areas[slot], &view);
         }
     } else if !is_list {
-        frame.set_cursor_position((area.x, area.y));
+        frame.set_cursor_position((conv_main_area.x, conv_main_area.y));
+    }
+
+    if let (Some(side_area), Some(panel)) = (side_panel_area, view.work_panel) {
+        render_bot_work_panel(frame, side_area, panel, view.locale, palette);
     }
 
     if view.model_picker.open {
@@ -2695,6 +2730,7 @@ mod tests {
                     model_picker: &picker,
                     approval: None,
                     overlay: None,
+                    work_panel: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
@@ -2773,6 +2809,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -2853,6 +2890,7 @@ mod tests {
                             model_picker: &picker,
                             approval: None,
                             overlay: None,
+                            work_panel: None,
                             wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
                         },
@@ -2982,6 +3020,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: cache,
                     },
@@ -3080,6 +3119,7 @@ mod tests {
                             model_picker: &picker,
                             approval: None,
                             overlay: None,
+                            work_panel: None,
                             wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
                         },
@@ -3172,6 +3212,7 @@ mod tests {
                     model_picker: &picker,
                     approval: None,
                     overlay: None,
+                    work_panel: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
@@ -3224,6 +3265,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3285,6 +3327,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3335,6 +3378,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3382,6 +3426,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3437,6 +3482,7 @@ mod tests {
                         model_picker: &picker,
                         approval: None,
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3506,6 +3552,7 @@ mod tests {
                     model_picker: &picker,
                     approval: None,
                     overlay: None,
+                    work_panel: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
@@ -3573,6 +3620,7 @@ mod tests {
                     model_picker: &picker,
                     approval: None,
                     overlay: None,
+                    work_panel: None,
                     wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
@@ -3636,6 +3684,7 @@ mod tests {
                         model_picker: &picker,
                         approval: Some((&card, 1)),
                         overlay: None,
+                        work_panel: None,
                         wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
@@ -3661,5 +3710,182 @@ mod tests {
             assert!(text.contains("Action  git_query"));
             assert!(text.contains("› 2. 本会话允许此操作"));
         }
+    }
+
+    #[test]
+    fn bot_conversation_renders_right_work_panel_on_wide_and_hides_on_narrow() {
+        use crate::bot_work_panel::{BotWorkMaterialItem, BotWorkTaskItem};
+
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 32);
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::FollowingLatest;
+        let picker = ModelPickerState::default();
+        let msgs = [BotMessageView {
+            id: "m-link-1".into(),
+            revision: 1,
+            role: "assistant".into(),
+            kind: "agent_reply".into(),
+            content:
+                "查看 [crates/peer-tui/src/bot_view.rs](crates/peer-tui/src/bot_view.rs) 确认详情。"
+                    .into(),
+            created_at: Some("2026-11-21T12:00:00.000Z".into()),
+            reply_to_echo: None,
+            marks: vec![],
+            card_number: None,
+            card_summary: None,
+        }];
+        let active_tasks = [BotTaskRow {
+            number: 1,
+            session_id: "s-run-panel".into(),
+            title: "检查工作区".into(),
+            status: "running".into(),
+            accepted: false,
+            updated_at: "2026-11-21T12:00:00.000Z".into(),
+        }];
+        let panel = BotWorkPanelView {
+            attention_label: Some("调用工具中…".into()),
+            attention_detail: Some("正在整理改动范围".into()),
+            recovering: false,
+            obligation_count: 0,
+            obligation_titles: vec![],
+            pending_cards_count: 0,
+            tasks: vec![BotWorkTaskItem {
+                number: 1,
+                session_id: "s-run-panel".into(),
+                title: "检查工作区".into(),
+                status: "running".into(),
+                accepted: false,
+                needs_user: false,
+                blocked: false,
+                completed_steps: 1,
+                total_steps: 2,
+                current_step: Some("扫描目录".into()),
+                read_only: true,
+            }],
+            blocker_count: 0,
+            materials: vec![BotWorkMaterialItem {
+                label: "Summary Table".into(),
+                kind: "result".into(),
+                detail: None,
+            }],
+            total_tasks_count: 1,
+            active_objectives_count: 1,
+        };
+
+        // Wide screen >= 120: renders right work panel cleanly, suppresses duplicate inline tasks,
+        // and keeps left conversation hyperlinks inside the main column.
+        let mut wide_term = Terminal::new(TestBackend::new(140, 32)).unwrap();
+        let mut wide_links = Vec::new();
+        wide_term
+            .draw(|f| {
+                render_bot_shell_with_links(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        workspace_path: Some("~/Documents/Develop/peer-dev"),
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "high",
+                        is_running: true,
+                        lease_banner: None,
+                        messages: &msgs,
+                        live_activity: None,
+                        tasks: &active_tasks,
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        approval: None,
+                        overlay: None,
+                        work_panel: Some(&panel),
+                        wordmark_elapsed_ms: None,
+                        wrap_cache: &mut cache,
+                    },
+                    &mut wide_links,
+                );
+            })
+            .unwrap();
+        let wide_txt = buffer_text(&wide_term);
+        assert!(wide_txt.contains("工作现场"));
+        assert!(wide_txt.contains("Bot 的当前注意力"));
+        assert!(wide_txt.contains("跟进中的任务"));
+        assert!(wide_txt.contains("产出与资料"));
+        assert!(wide_txt.contains("Summary Table"));
+        assert!(!wide_txt.contains("── 委派任务 ──"));
+        assert!(!wide_links.is_empty());
+        let side_w = goal_side_panel_width(140);
+        for link in &wide_links {
+            assert!(
+                link.col_end <= 140 - side_w,
+                "hyperlink must stay inside left column: {link:?}"
+            );
+        }
+
+        // Narrow screen < 120: right panel hides automatically and active task falls back inline
+        let mut narrow_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        narrow_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        workspace_path: Some("~/Documents/Develop/peer-dev"),
+                        model_badge: "gpt-6.1-sol",
+                        effort_badge: "high",
+                        is_running: true,
+                        lease_banner: None,
+                        messages: &msgs,
+                        live_activity: None,
+                        tasks: &active_tasks,
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        approval: None,
+                        overlay: None,
+                        work_panel: Some(&panel),
+                        wordmark_elapsed_ms: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let narrow_txt = buffer_text(&narrow_term);
+        assert!(!narrow_txt.contains("◆ 工作现场"));
+        assert!(narrow_txt.contains("── 委派任务 ──"));
+        assert!(narrow_txt.contains("检查工作区"));
     }
 }

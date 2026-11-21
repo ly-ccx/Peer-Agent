@@ -33,6 +33,7 @@ pub enum ProjectCommand {
     View(BotSubView),
     Task(usize),
     Result(usize),
+    TogglePanel,
     Card {
         operation: CardOperation,
         number: usize,
@@ -121,6 +122,7 @@ pub fn parse_project_command(input: &str) -> ProjectCommand {
         return match name {
             "bots" => ProjectCommand::View(BotSubView::Bots),
             "tasks" => ProjectCommand::View(BotSubView::Tasks),
+            "panel" => ProjectCommand::TogglePanel,
             "memory" => ProjectCommand::View(BotSubView::Memory),
             "objectives" => ProjectCommand::View(BotSubView::Objectives),
             "cards" => ProjectCommand::View(BotSubView::Cards),
@@ -438,6 +440,7 @@ mod tests {
         );
         assert_eq!(parse_classic_command("/version"), ClassicCommand::Version);
         assert_eq!(parse_project_command("/version"), ProjectCommand::Version);
+        assert_eq!(parse_project_command("/panel"), ProjectCommand::TogglePanel);
         assert_eq!(
             parse_project_command("hello world"),
             ProjectCommand::Text("hello world".into())

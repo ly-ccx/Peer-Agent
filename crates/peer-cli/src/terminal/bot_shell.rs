@@ -30,14 +30,15 @@ use peer_runtime::{
 };
 use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
-    BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
-    Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand,
-    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WORDMARK_ANIMATION_TICK_MS,
-    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, filter_slash_items,
-    parse_project_command, render_bot_shell_with_links, terminal_text,
+    BotSubView, BotTaskRow, BotWorkMaterialItem, BotWorkPanelView, BotWorkTaskItem, ByteBudgetLru,
+    CardNumbers, CardOperation, ClassicOverlay, Composer, Effect, MARKDOWN_WRAP_CACHE_BYTES,
+    ModelPickerEvent, ModelPickerState, ProjectCommand, ReadingAnchor, RenderedBlock, ThemeMode,
+    TuiLocale, WORDMARK_ANIMATION_TICK_MS, WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey,
+    action_for_event, filter_slash_items, goal_side_panel_width, parse_project_command,
+    render_bot_shell_with_links, terminal_text,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     path::PathBuf,
     sync::Arc,
@@ -77,6 +78,7 @@ fn is_transient_nav_command(raw: &str) -> bool {
             | ProjectCommand::Quit
             | ProjectCommand::Help
             | ProjectCommand::Version
+            | ProjectCommand::TogglePanel
             | ProjectCommand::View(_)
             | ProjectCommand::Model
             | ProjectCommand::Theme(_)
@@ -84,6 +86,97 @@ fn is_transient_nav_command(raw: &str) -> bool {
             | ProjectCommand::Older
             | ProjectCommand::Latest
     )
+}
+
+fn push_plan_leaf_stats(
+    tasks: &[serde_json::Value],
+    completed: &mut usize,
+    total: &mut usize,
+    active_step: &mut Option<String>,
+    pending_step: &mut Option<String>,
+    blocked: &mut bool,
+) {
+    for task in tasks {
+        if let Some(subs) = task["subtasks"].as_array().filter(|a| !a.is_empty()) {
+            push_plan_leaf_stats(subs, completed, total, active_step, pending_step, blocked);
+            continue;
+        }
+        *total += 1;
+        let status = task["status"].as_str().unwrap_or("pending");
+        if status == "completed" {
+            *completed += 1;
+        }
+        if matches!(status, "failed" | "blocked" | "waiting_user") {
+            *blocked = true;
+        }
+        let title = task["title"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        if active_step.is_none()
+            && matches!(
+                status,
+                "running" | "executing" | "waiting_user" | "blocked" | "failed"
+            )
+        {
+            *active_step = title;
+        } else if pending_step.is_none() && status == "pending" {
+            *pending_step = title;
+        }
+    }
+}
+
+fn extract_plan_step_progress(plan: &serde_json::Value) -> (usize, usize, Option<String>, bool) {
+    let mut completed = 0usize;
+    let mut total = 0usize;
+    let mut active_step = None;
+    let mut pending_step = None;
+    let mut blocked = plan["delegationOrigin"]["phase"] == "awaiting_approval"
+        || plan["runner"]["status"] == "blocked";
+    if let Some(tasks) = plan["tasks"].as_array() {
+        push_plan_leaf_stats(
+            tasks,
+            &mut completed,
+            &mut total,
+            &mut active_step,
+            &mut pending_step,
+            &mut blocked,
+        );
+    }
+    (completed, total, active_step.or(pending_step), blocked)
+}
+
+fn is_follow_up_panel_session(status: &str, accepted: bool) -> bool {
+    if status == "result_ready" {
+        return !accepted;
+    }
+    matches!(
+        status,
+        "waiting_user"
+            | "waiting_agent"
+            | "running"
+            | "starting"
+            | "stopping"
+            | "awaiting_outcome"
+            | "verifying"
+            | "queued"
+    )
+}
+
+fn panel_attention_rank(status: &str) -> usize {
+    match status {
+        "waiting_user" => 0,
+        "waiting_agent" => 1,
+        "result_ready" => 2,
+        "running" => 3,
+        "starting" => 4,
+        "stopping" => 5,
+        "awaiting_outcome" => 6,
+        "verifying" => 7,
+        "queued" => 8,
+        _ => 9,
+    }
 }
 
 struct BotShellState<'a> {
@@ -140,6 +233,8 @@ struct BotShellState<'a> {
     last_maintenance: Instant,
     interaction_limit: usize,
     active_task_results: Vec<(String, String)>,
+    work_panel_open: bool,
+    work_panel: BotWorkPanelView,
 }
 
 impl<'a> BotShellState<'a> {
@@ -257,6 +352,8 @@ impl<'a> BotShellState<'a> {
             last_maintenance: Instant::now(),
             interaction_limit: 40,
             active_task_results: Vec::new(),
+            work_panel_open: true,
+            work_panel: BotWorkPanelView::default(),
         };
         if !matches!(state.screen, BotScreen::BindWorkspace { .. }) {
             state.refresh_snapshot(true);
@@ -707,17 +804,19 @@ impl<'a> BotShellState<'a> {
                 },
             ]);
         }
+        let mut obligation_titles: Vec<String> = Vec::new();
         for grant in self.host.pending_obligation_grants(&ws_id) {
             if let Some(grant_id) = grant["grantId"].as_str().filter(|s| !s.is_empty()) {
                 let card_id = format!("card:obligation:{grant_id}");
                 let num = self.card_numbers.assign(&ws_id, &card_id);
-                let title = grant["items"][0]["title"]
+                let title: String = grant["items"][0]["title"]
                     .as_str()
                     .filter(|s| !s.trim().is_empty())
                     .unwrap_or(grant_id)
                     .chars()
                     .take(120)
                     .collect();
+                obligation_titles.push(title.clone());
                 cards.push(BotCardRow {
                     number: num,
                     card_id,
@@ -809,17 +908,139 @@ impl<'a> BotShellState<'a> {
                 .map(|m| format!("[{}/{}] {}", m.scope, m.kind, m.text))
                 .collect();
         }
+        let all_objectives = self.host.objectives().list(&ws_id).unwrap_or_default();
+        let active_objectives_count = all_objectives
+            .iter()
+            .filter(|o| o.status == "active")
+            .count();
         if self.screen == BotScreen::Objectives {
-            self.objectives = self
-                .host
-                .objectives()
-                .list(&ws_id)
-                .unwrap_or_default()
+            self.objectives = all_objectives
                 .into_iter()
                 .take(50)
                 .map(|o| format!("[{}] {} — {}", o.status, o.title, o.outcome))
                 .collect();
         }
+
+        // Work panel snapshot (aligned with Desktop BotWorkPanel)
+        let mut ranked_sessions: Vec<(usize, &_)> = sessions
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| is_follow_up_panel_session(&s.status, s.accepted))
+            .collect();
+        ranked_sessions.sort_by_key(|(idx, s)| (panel_attention_rank(&s.status), *idx));
+        let mut panel_tasks = Vec::new();
+        for (idx, s) in ranked_sessions.into_iter().take(8) {
+            let (completed_steps, total_steps, current_step, plan_blocked) =
+                if !s.plan_id.is_empty() {
+                    self.host
+                        .supervisor()
+                        .read_plan(&s.plan_id)
+                        .map(|p| extract_plan_step_progress(&p))
+                        .unwrap_or((0, 0, None, false))
+                } else {
+                    (0, 0, None, false)
+                };
+            let needs_user =
+                s.status == "waiting_user" || (s.status == "result_ready" && !s.accepted);
+            let blocked = needs_user || plan_blocked;
+            panel_tasks.push(BotWorkTaskItem {
+                number: idx + 1,
+                session_id: s.session_id.clone(),
+                title: s.title.clone(),
+                status: s.status.clone(),
+                accepted: s.accepted,
+                needs_user,
+                blocked,
+                completed_steps,
+                total_steps,
+                current_step,
+                read_only: s.read_only,
+            });
+        }
+        let blocker_count = panel_tasks
+            .iter()
+            .filter(|t| t.needs_user || t.blocked)
+            .count();
+
+        let mut materials = Vec::new();
+        let mut seen_materials: HashSet<(String, String)> = HashSet::new();
+        if let Some(conv_id) = self
+            .host
+            .profiles()
+            .read(&ws_id)
+            .and_then(|p| p.agent_conversation_id)
+        {
+            let owner = InteractiveOwner {
+                workspace_id: ws_id.clone(),
+                conversation_id: conv_id,
+            };
+            if let Ok(ir_items) = self.host.interactive_results().list_for_owner(&owner) {
+                for item in ir_items.into_iter().take(4) {
+                    if item["cleaned"] == true {
+                        continue;
+                    }
+                    let title = item["title"].as_str().unwrap_or("").trim();
+                    if title.is_empty() {
+                        continue;
+                    }
+                    if seen_materials.insert(("result".to_owned(), title.to_owned())) {
+                        materials.push(BotWorkMaterialItem {
+                            label: title.to_owned(),
+                            kind: "result".to_owned(),
+                            detail: None,
+                        });
+                    }
+                }
+            }
+        }
+        for s in sessions.iter().take(3) {
+            if materials.len() >= 8 {
+                break;
+            }
+            if let Ok(rep) = self.host.supervisor().read_report(&ws_id, &s.session_id) {
+                for path in rep.changed_files {
+                    if materials.len() >= 8 {
+                        break;
+                    }
+                    if seen_materials.insert(("output".to_owned(), path.clone())) {
+                        materials.push(BotWorkMaterialItem {
+                            label: path,
+                            kind: "output".to_owned(),
+                            detail: None,
+                        });
+                    }
+                }
+                for ev in rep.evidence_refs {
+                    if materials.len() >= 8 {
+                        break;
+                    }
+                    if ev.starts_with("interactive-result://") {
+                        continue;
+                    }
+                    if seen_materials.insert(("artifact".to_owned(), ev.clone())) {
+                        materials.push(BotWorkMaterialItem {
+                            label: ev,
+                            kind: "artifact".to_owned(),
+                            detail: None,
+                        });
+                    }
+                }
+            }
+        }
+        let obligation_count = obligation_titles.len();
+        self.work_panel = BotWorkPanelView {
+            attention_label: self.work_panel.attention_label.clone(),
+            attention_detail: self.work_panel.attention_detail.clone(),
+            recovering: self.lease_banner.is_some(),
+            obligation_count,
+            obligation_titles,
+            pending_cards_count: self.cards.len(),
+            tasks: panel_tasks,
+            blocker_count,
+            materials,
+            total_tasks_count: self.tasks.len(),
+            active_objectives_count,
+        };
 
         // Mark read when viewing latest conversation messages.
         if self.screen == BotScreen::Conversation && self.anchor.is_following() {
@@ -1619,6 +1840,12 @@ impl<'a> BotShellState<'a> {
                 self.notice = Some(format!("peer {}", crate::VERSION.trim()));
                 None
             }
+            ProjectCommand::TogglePanel => {
+                self.composer.accepted();
+                self.clear_persisted_draft();
+                self.toggle_work_panel();
+                None
+            }
             ProjectCommand::Quit => {
                 self.composer.accepted();
                 self.clear_persisted_draft();
@@ -1690,6 +1917,19 @@ impl<'a> BotShellState<'a> {
             }
         }
         None
+    }
+
+    fn toggle_work_panel(&mut self) {
+        self.work_panel_open = !self.work_panel_open;
+        let cols = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(120);
+        if !self.work_panel_open {
+            self.notice = Some("已收起右侧工作现场面板（按 F4 或 /panel 重新展开）。".to_owned());
+        } else if goal_side_panel_width(cols) == 0 {
+            self.notice =
+                Some("已开启工作现场面板（终端宽度需 ≥ 120 列才会在右侧展示）。".to_owned());
+        } else {
+            self.notice = Some("已展开右侧工作现场面板（按 F4 或 /panel 收起）。".to_owned());
+        }
     }
 
     fn apply_theme_mode(&mut self, next_mode: ThemeMode) {
@@ -1805,27 +2045,42 @@ impl<'a> BotShellState<'a> {
 
     fn draw(&mut self, terminal: &mut TerminalGuard) -> io::Result<()> {
         let zh = self.prefs.locale.is_zh();
-        let live_activity = self
+        let active_act = self
             .host
             .runner()
             .current_activity()
-            .filter(|act| act.finished_at.is_none())
-            .map(|act| {
-                if !act.reply_text.is_empty() {
-                    act.reply_text
-                } else {
-                    match (act.phase.as_str(), zh) {
-                        ("thinking", true) => "思考中…".to_owned(),
-                        ("thinking", false) => "Thinking…".to_owned(),
-                        ("responding", true) => "输出中…".to_owned(),
-                        ("responding", false) => "Responding…".to_owned(),
-                        ("tool", true) => "调用工具中…".to_owned(),
-                        ("tool", false) => "Running tools…".to_owned(),
-                        (_, true) => "正在推进…".to_owned(),
-                        (_, false) => "Working…".to_owned(),
-                    }
-                }
-            });
+            .filter(|act| act.finished_at.is_none());
+        let phase_label = |phase: &str| -> String {
+            match (phase, zh) {
+                ("thinking", true) => "思考中…".to_owned(),
+                ("thinking", false) => "Thinking…".to_owned(),
+                ("responding", true) => "输出中…".to_owned(),
+                ("responding", false) => "Responding…".to_owned(),
+                ("tool", true) => "调用工具中…".to_owned(),
+                ("tool", false) => "Running tools…".to_owned(),
+                (_, true) => "正在推进…".to_owned(),
+                (_, false) => "Working…".to_owned(),
+            }
+        };
+        let live_activity = active_act.as_ref().map(|act| {
+            if !act.reply_text.is_empty() {
+                act.reply_text.clone()
+            } else {
+                phase_label(&act.phase)
+            }
+        });
+        let mut live_panel = self.work_panel.clone();
+        if let Some(ref act) = active_act {
+            live_panel.attention_label = Some(phase_label(&act.phase));
+            let trimmed = act.reply_text.trim();
+            live_panel.attention_detail =
+                (!trimmed.is_empty()).then(|| trimmed.chars().take(120).collect());
+        } else {
+            live_panel.attention_label = None;
+            live_panel.attention_detail = None;
+        }
+        live_panel.recovering = self.lease_banner.is_some();
+        let work_panel_ref = self.work_panel_open.then_some(&live_panel);
         let is_host = self.lease_banner.is_none();
         let is_running = self.is_running_activity();
         let model_badge = self
@@ -1881,6 +2136,7 @@ impl<'a> BotShellState<'a> {
                     model_picker: &self.model_picker,
                     approval: approval_view,
                     overlay: Some(&self.overlay),
+                    work_panel: work_panel_ref,
                     wordmark_elapsed_ms,
                     wrap_cache: &mut self.wrap_cache,
                 },
@@ -2308,6 +2564,9 @@ impl<'a> BotShellState<'a> {
                                 );
                                 dirty = true;
                             }
+                        } else if key.code == KeyCode::F(4) {
+                            self.toggle_work_panel();
+                            dirty = true;
                         } else if key.code == KeyCode::Char('d')
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                             && self.composer.draft().is_empty()
@@ -2715,17 +2974,42 @@ pub(super) async fn run_bot_shell(
 
 #[cfg(test)]
 mod tests {
-    use super::is_transient_nav_command;
+    use super::{extract_plan_step_progress, is_transient_nav_command};
+    use serde_json::json;
 
     #[test]
     fn transient_nav_commands_are_not_restored_as_composer_drafts() {
         assert!(is_transient_nav_command("/classic"));
         assert!(is_transient_nav_command("/bots"));
+        assert!(is_transient_nav_command("/panel"));
         assert!(is_transient_nav_command("/help"));
         assert!(is_transient_nav_command("/model"));
         assert!(!is_transient_nav_command("请继续"));
         assert!(!is_transient_nav_command("/answer 1 好的"));
         assert!(!is_transient_nav_command("/approve 1"));
         assert!(!is_transient_nav_command("/action 1 1"));
+    }
+
+    #[test]
+    fn extract_plan_step_progress_counts_nested_leaves_and_active_step() {
+        let plan = json!({
+            "delegationOrigin": { "phase": "running" },
+            "tasks": [
+                {
+                    "taskId": "p1",
+                    "title": "Parent",
+                    "subtasks": [
+                        { "taskId": "s1", "title": "Done step", "status": "completed" },
+                        { "taskId": "s2", "title": "Active step", "status": "running" }
+                    ]
+                },
+                { "taskId": "p2", "title": "Blocked step", "status": "waiting_user" }
+            ]
+        });
+        let (done, total, cur, blocked) = extract_plan_step_progress(&plan);
+        assert_eq!(done, 1);
+        assert_eq!(total, 3);
+        assert_eq!(cur.as_deref(), Some("Active step"));
+        assert!(blocked);
     }
 }

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bot_view;
+pub mod bot_work_panel;
 pub mod bounded_cache;
 pub mod classic_view;
 pub mod commands;
@@ -20,6 +21,9 @@ pub mod wordmark;
 pub use bot_view::{
     BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView, BotTaskRow, render_bot_shell,
     render_bot_shell_with_links,
+};
+pub use bot_work_panel::{
+    BotWorkMaterialItem, BotWorkPanelView, BotWorkTaskItem, render_bot_work_panel,
 };
 pub use bounded_cache::{
     ByteBudgetLru, ByteSized, DISPLAY_PAGE_CACHE_BYTES, MARKDOWN_WRAP_CACHE_BYTES, ReadingAnchor,

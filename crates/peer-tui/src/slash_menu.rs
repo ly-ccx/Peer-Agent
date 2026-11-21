@@ -65,6 +65,13 @@ pub static BOT_SLASH_ITEMS: &[SlashItem] = &[
         shortcut: "",
     },
     SlashItem {
+        command: "/panel",
+        desc_zh: "展开/收起右侧工作现场面板",
+        desc_en: "Toggle right work panel",
+        keywords: "work panel side drawer 面板 工作现场",
+        shortcut: "F4",
+    },
+    SlashItem {
         command: "/task ",
         desc_zh: "查看第 N 个任务详情与核验依据",
         desc_en: "Inspect task report (/task N)",
