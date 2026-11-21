@@ -548,7 +548,26 @@ export function registerDesktopProjectAgent({
     readTurns: workspaceId => conversationStore.getPersistedConversationHistory(resolveConversationId(workspaceId))?.messages || [],
     readScheduler: executionScheduler.diagnosticSnapshot,
   });
-  const diagnostics = createDiagnosticsExport({ readReport: diagnosticsReader.read, chooseTarget: sender => {
+  const diagnostics = createDiagnosticsExport({
+    readReport: () => {
+      if (classicCoreBridge?.isAvailable?.()) {
+        let scheduler = null;
+        let schedulerUnavailable = false;
+        try {
+          scheduler = executionScheduler.diagnosticSnapshot();
+        } catch {
+          schedulerUnavailable = true;
+        }
+        return classicCoreBridge
+          .projectBotDiagnostics({ scheduler, schedulerUnavailable })
+          .then((res) => {
+            if (res?.ok && res.report) return res.report;
+            throw new Error(res?.code || 'DIAGNOSTICS_UNAVAILABLE');
+          });
+      }
+      return diagnosticsReader.read();
+    },
+    chooseTarget: sender => {
     const parent = sender ? BrowserWindow.fromWebContents(sender) : undefined;
     const options = { title: 'Export diagnostics / 导出诊断',
       defaultPath: 'peer-agent-diagnostics.json', filters: [{ name: 'JSON', extensions: ['json'] }] };

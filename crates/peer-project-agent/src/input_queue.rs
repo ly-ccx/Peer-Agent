@@ -82,6 +82,18 @@ pub struct SubmitInputRequest<'a> {
     pub attachment_refs: Vec<String>,
     pub attachments: Vec<Value>,
     pub answer_to: Option<String>,
+    pub history_ref: Option<String>,
+    pub history_snapshot_id: Option<String>,
+    pub history_confirmed: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputDiagnosticSnapshot {
+    pub depth: usize,
+    pub execution_depth: usize,
+    pub cursor: Option<String>,
+    pub executed_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +108,15 @@ pub struct InputQueue {
 
 fn valid_surface(surface: &str) -> bool {
     matches!(surface, "desktop" | "quick_chat" | "tui" | "remote")
+}
+
+fn optional_history_token(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() || trimmed.encode_utf16().count() > 200 || trimmed.contains(['\r', '\n'])
+    {
+        return None;
+    }
+    Some(trimmed.to_owned())
 }
 
 impl InputQueue {
@@ -237,6 +258,11 @@ impl InputQueue {
             if let Some(found) = existing.into_iter().find(|r| r.input_id == input_id) {
                 return Ok(found);
             }
+            let history_ref =
+                optional_history_token(request.history_ref.as_deref()).map(Value::String);
+            let history_snapshot_id =
+                optional_history_token(request.history_snapshot_id.as_deref());
+            let history_confirmed = (request.history_confirmed == Some(true)).then_some(true);
             let row = ProjectInput {
                 input_id: input_id.to_owned(),
                 workspace_id: ws.to_owned(),
@@ -249,9 +275,9 @@ impl InputQueue {
                 resource_feedback: None,
                 created_at: now_iso(),
                 answer_to: request.answer_to.clone(),
-                history_ref: None,
-                history_snapshot_id: None,
-                history_confirmed: None,
+                history_ref,
+                history_snapshot_id,
+                history_confirmed,
             };
             let file = self.queue_file(ws)?;
             let mut line = serde_json::to_string(&row)
@@ -376,6 +402,19 @@ impl InputQueue {
                 }
                 if let Some(ref answer_to) = item.answer_to {
                     msg["answerTo"] = json!(answer_to);
+                }
+                if let Some(ref history_ref) = item.history_ref
+                    && !history_ref.is_null()
+                {
+                    msg["historyRef"] = history_ref.clone();
+                }
+                if let Some(ref history_snapshot_id) = item.history_snapshot_id
+                    && !history_snapshot_id.is_empty()
+                {
+                    msg["historySnapshotId"] = json!(history_snapshot_id);
+                }
+                if item.history_confirmed == Some(true) {
+                    msg["historyConfirmed"] = json!(true);
                 }
                 conversations.append_message_idempotent(
                     conversation_id,
@@ -540,6 +579,114 @@ impl InputQueue {
             Ok(true)
         })
     }
+
+    fn read_inputs_strict(&self, workspace_id: &str) -> Result<Vec<ProjectInput>, ProjectError> {
+        let file = self.queue_file(workspace_id)?;
+        let meta = match fs::metadata(&file) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(_) => return Err(ProjectError::code("CORRUPT_INPUT_QUEUE")),
+        };
+        if !meta.is_file() || meta.len() > MAX_QUEUE_BYTES {
+            return Err(ProjectError::code("CORRUPT_INPUT_QUEUE"));
+        }
+        let raw =
+            fs::read_to_string(&file).map_err(|_| ProjectError::code("CORRUPT_INPUT_QUEUE"))?;
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let row: ProjectInput = serde_json::from_str(line)
+                .map_err(|_| ProjectError::code("CORRUPT_INPUT_QUEUE"))?;
+            if row.workspace_id != workspace_id
+                || !is_valid_input_id(&row.input_id)
+                || !valid_surface(&row.surface)
+            {
+                return Err(ProjectError::code("CORRUPT_INPUT_QUEUE"));
+            }
+            if seen.insert(row.input_id.clone()) {
+                out.push(row);
+            }
+        }
+        Ok(out)
+    }
+
+    fn read_checked_cursor(&self, workspace_id: &str) -> Result<CursorState, ProjectError> {
+        let file = self.cursor_file(workspace_id)?;
+        let raw = match fs::read_to_string(&file) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(CursorState::default()),
+            Err(_) => return Err(ProjectError::code("CORRUPT_INPUT_CURSOR")),
+        };
+        let val: Value =
+            serde_json::from_str(&raw).map_err(|_| ProjectError::code("CORRUPT_INPUT_CURSOR"))?;
+        let Some(obj) = val.as_object() else {
+            return Err(ProjectError::code("CORRUPT_INPUT_CURSOR"));
+        };
+        for key in ["inputId", "executedInputId"] {
+            if let Some(v) = obj.get(key) {
+                let Some(s) = v.as_str() else {
+                    return Err(ProjectError::code("CORRUPT_INPUT_CURSOR"));
+                };
+                if !is_valid_input_id(s) {
+                    return Err(ProjectError::code("CORRUPT_INPUT_CURSOR"));
+                }
+            }
+        }
+        if let Some(comp) = obj.get("completedInputIds") {
+            let Some(arr) = comp.as_array() else {
+                return Err(ProjectError::code("CORRUPT_INPUT_CURSOR"));
+            };
+            if arr
+                .iter()
+                .any(|item| !item.as_str().is_some_and(is_valid_input_id))
+            {
+                return Err(ProjectError::code("CORRUPT_INPUT_CURSOR"));
+            }
+        }
+        serde_json::from_value(val).map_err(|_| ProjectError::code("CORRUPT_INPUT_CURSOR"))
+    }
+
+    /// Read-only queue & cursor metrics matching `input-queue.mjs#diagnosticSnapshot`.
+    pub fn diagnostic_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<InputDiagnosticSnapshot, ProjectError> {
+        let ws = workspace_id.trim();
+        if !is_valid_workspace_id(ws) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let inputs = self.read_inputs_strict(ws)?;
+        let state = self.read_checked_cursor(ws)?;
+        let delivered = state
+            .input_id
+            .as_deref()
+            .and_then(|id| inputs.iter().position(|r| r.input_id == id));
+        let executed = state
+            .executed_input_id
+            .as_deref()
+            .and_then(|id| inputs.iter().position(|r| r.input_id == id));
+        let depth = match delivered {
+            Some(d) => inputs.len().saturating_sub(d + 1),
+            None => inputs.len(),
+        };
+        let start_exec = executed.map(|e| e + 1).unwrap_or(0);
+        let execution_depth = match delivered {
+            Some(d) if start_exec <= d => inputs[start_exec..=d]
+                .iter()
+                .filter(|item| !state.completed_input_ids.contains(&item.input_id))
+                .count(),
+            _ => 0,
+        };
+        Ok(InputDiagnosticSnapshot {
+            depth,
+            execution_depth,
+            cursor: state.input_id,
+            executed_cursor: state.executed_input_id,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -581,6 +728,9 @@ mod tests {
             attachment_refs: vec![],
             attachments: vec![],
             answer_to: None,
+            history_ref: None,
+            history_snapshot_id: None,
+            history_confirmed: None,
         };
         let first = queue.submit_input(&req).unwrap();
         let dup = queue.submit_input(&req).unwrap();
@@ -595,9 +745,20 @@ mod tests {
             "LEASE_REQUIRED"
         );
 
+        let snap_before = queue.diagnostic_snapshot("ws-1").unwrap();
+        assert_eq!(snap_before.depth, 1);
+        assert_eq!(snap_before.execution_depth, 0);
+        assert_eq!(snap_before.cursor, None);
+
         let out = queue.consume("ws-1", conv_id, &conv_store, true).unwrap();
         assert_eq!(out.consumed.len(), 1);
         assert_eq!(out.pending_execution.len(), 1);
+
+        let snap_delivered = queue.diagnostic_snapshot("ws-1").unwrap();
+        assert_eq!(snap_delivered.depth, 0);
+        assert_eq!(snap_delivered.execution_depth, 1);
+        assert_eq!(snap_delivered.cursor.as_deref(), Some("in-1"));
+        assert_eq!(snap_delivered.executed_cursor, None);
 
         // Re-consuming produces no duplicate messages.
         let out2 = queue.consume("ws-1", conv_id, &conv_store, true).unwrap();
@@ -608,5 +769,90 @@ mod tests {
             .mark_executed("ws-1", &["in-1".to_owned()], &[], true)
             .unwrap();
         assert!(remaining.is_empty());
+
+        let snap_done = queue.diagnostic_snapshot("ws-1").unwrap();
+        assert_eq!(snap_done.depth, 0);
+        assert_eq!(snap_done.execution_depth, 0);
+        assert_eq!(snap_done.cursor.as_deref(), Some("in-1"));
+        assert_eq!(snap_done.executed_cursor.as_deref(), Some("in-1"));
+    }
+
+    #[test]
+    fn history_fields_roundtrip_and_strict_diagnostics_detect_corruption() {
+        let dir = tempdir().unwrap();
+        let conv_store = ConversationStore::new(dir.path());
+        let conv = conv_store
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Bot",
+                    workspace_id: "ws-h",
+                    workspace_path: Some("/tmp/repo"),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: &now_iso(),
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap();
+
+        let queue = InputQueue::new(dir.path());
+        let submitted = queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-h",
+                input_id: "hist-in-1",
+                surface: "desktop",
+                text: "继续：Old chat",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: None,
+                history_ref: Some("old-conv-1".to_owned()),
+                history_snapshot_id: Some("a".repeat(64)),
+                history_confirmed: Some(true),
+            })
+            .unwrap();
+        assert_eq!(submitted.history_ref, Some(json!("old-conv-1")));
+        assert_eq!(
+            submitted.history_snapshot_id.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert_eq!(submitted.history_confirmed, Some(true));
+
+        let consumed = queue.consume("ws-h", conv_id, &conv_store, true).unwrap();
+        assert_eq!(consumed.consumed.len(), 1);
+        let hist = conv_store
+            .read_committed(conv_id, None, 1024 * 1024)
+            .unwrap();
+        let msg = hist
+            .history
+            .messages
+            .iter()
+            .find(|m| m["id"] == "input-hist-in-1")
+            .unwrap();
+        assert_eq!(msg["historyRef"], "old-conv-1");
+        assert_eq!(msg["historySnapshotId"], "a".repeat(64));
+        assert_eq!(msg["historyConfirmed"], true);
+
+        // Corrupt cursor fails strict snapshot.
+        let cursor_path = dir.path().join("project-runtime/ws-h/input-cursor.json");
+        fs::write(&cursor_path, "{bad json").unwrap();
+        assert_eq!(
+            queue.diagnostic_snapshot("ws-h").unwrap_err().code,
+            "CORRUPT_INPUT_CURSOR"
+        );
+        fs::remove_file(&cursor_path).unwrap();
+
+        // Corrupt queue line fails strict snapshot.
+        let q_path = dir.path().join("project-runtime/ws-h/input-queue.jsonl");
+        fs::write(&q_path, "{\"inputId\":\"ok\"}\n{bad\n").unwrap();
+        assert_eq!(
+            queue.diagnostic_snapshot("ws-h").unwrap_err().code,
+            "CORRUPT_INPUT_QUEUE"
+        );
     }
 }

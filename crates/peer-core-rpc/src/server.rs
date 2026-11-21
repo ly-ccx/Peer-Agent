@@ -4,7 +4,7 @@ use crate::{
     classic_goal::{self, ClassicGoalRegistry},
     classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
-    classic_usage, project, project_bot,
+    classic_usage, project, project_bot, project_bot_ops,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -553,6 +553,17 @@ impl ServerContext {
             "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
             "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),
             "project.bot.search" => project_bot::handle_bot_search(self, params),
+            "project.bot.diagnostics" => project_bot_ops::handle_bot_diagnostics(self, params),
+            "project.bot.continueHistory" => {
+                project_bot_ops::handle_bot_continue_history(self, params)
+            }
+            "project.bot.readInputDraft" => {
+                project_bot_ops::handle_bot_read_input_draft(self, params)
+            }
+            "project.bot.writeInputDraft" => {
+                project_bot_ops::handle_bot_write_input_draft(self, params)
+            }
+            "project.bot.readEvidence" => project_bot_ops::handle_bot_read_evidence(self, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }

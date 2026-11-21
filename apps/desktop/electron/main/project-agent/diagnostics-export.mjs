@@ -7,7 +7,7 @@ export function createDiagnosticsExport({ readReport, chooseTarget, write = writ
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || Object.keys(payload).some(key => key !== 'action')
       || !['read','export'].includes(payload.action)) return { ok: false, code: 'INVALID_INPUT' };
     let report;
-    try { report = readReport(); } catch { return { ok: false, code: 'DIAGNOSTICS_UNAVAILABLE' }; }
+    try { report = await readReport(); } catch { return { ok: false, code: 'DIAGNOSTICS_UNAVAILABLE' }; }
     if (payload.action === 'read') return { ok: true, report };
     let temp;
     try {

@@ -46,6 +46,12 @@ pub struct AppendResult {
     pub duplicates: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InboxDiagnosticSnapshot {
+    pub cursor: u64,
+    pub events: Vec<Value>,
+}
+
 pub struct ProjectInbox {
     runtime_root: PathBuf,
     merge_window_ms: i64,
@@ -385,6 +391,125 @@ impl ProjectInbox {
             .iter()
             .any(|ev| ev["seq"].as_u64().unwrap_or(0) > cursor)
     }
+
+    /// Strict read-only diagnostic snapshot matching `project-inbox.mjs#diagnosticSnapshot`,
+    /// reading active `inbox.jsonl` plus gzip archives newest-first up to 200 events.
+    pub fn diagnostic_snapshot(
+        &self,
+        workspace_id: &str,
+    ) -> Result<InboxDiagnosticSnapshot, ProjectError> {
+        if !is_valid_workspace_id(workspace_id) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let cursor_path = self.cursor_file(workspace_id);
+        let cursor = match fs::read_to_string(&cursor_path) {
+            Ok(raw) => {
+                let parsed: Value = serde_json::from_str(&raw)
+                    .map_err(|_| ProjectError::code("CORRUPT_INBOX_CURSOR"))?;
+                parsed
+                    .get("seq")
+                    .and_then(Value::as_u64)
+                    .filter(|&n| n <= 9_007_199_254_740_991)
+                    .ok_or_else(|| ProjectError::code("CORRUPT_INBOX_CURSOR"))?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(_) => return Err(ProjectError::code("CORRUPT_INBOX_CURSOR")),
+        };
+
+        let mut events: Vec<Value> = Vec::new();
+        let add_events = |text: &str, out: &mut Vec<Value>| -> Result<(), ProjectError> {
+            for line in text.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let row: Value =
+                    serde_json::from_str(line).map_err(|_| ProjectError::code("CORRUPT_INBOX"))?;
+                if !row.get("eventId").is_some_and(Value::is_string)
+                    || row
+                        .get("seq")
+                        .and_then(Value::as_u64)
+                        .is_none_or(|n| !(1..=9_007_199_254_740_991).contains(&n))
+                {
+                    return Err(ProjectError::code("CORRUPT_INBOX"));
+                }
+                out.push(row);
+            }
+            Ok(())
+        };
+
+        let active_path = self.inbox_file(workspace_id);
+        match fs::read_to_string(&active_path) {
+            Ok(raw) => add_events(&raw, &mut events)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(ProjectError::code("CORRUPT_INBOX")),
+        }
+
+        if events.len() < 200 {
+            let dir = self.dir_for(workspace_id);
+            let mut archives: Vec<(String, u32, PathBuf)> = match fs::read_dir(&dir) {
+                Ok(entries) => entries
+                    .flatten()
+                    .filter_map(|entry| {
+                        let name = entry.file_name();
+                        let s = name.to_str()?;
+                        let (day, suffix) = parse_archive_name(s)?;
+                        Some((day, suffix, entry.path()))
+                    })
+                    .collect(),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(_) => return Err(ProjectError::code("CORRUPT_INBOX")),
+            };
+            archives.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+            for (_, _, path) in archives {
+                let bytes = fs::read(&path).map_err(|_| ProjectError::code("CORRUPT_INBOX"))?;
+                let mut decoder = GzDecoder::new(&bytes[..]);
+                let mut text = String::new();
+                decoder
+                    .read_to_string(&mut text)
+                    .map_err(|_| ProjectError::code("CORRUPT_INBOX"))?;
+                add_events(&text, &mut events)?;
+                if events.len() >= 200 {
+                    break;
+                }
+            }
+        }
+
+        events.sort_by_key(|ev| ev["seq"].as_u64().unwrap_or(0));
+        if events.len() > 200 {
+            events.drain(..events.len() - 200);
+        }
+        Ok(InboxDiagnosticSnapshot { cursor, events })
+    }
+}
+
+fn parse_archive_name(name: &str) -> Option<(String, u32)> {
+    let rest = name.strip_prefix("inbox-")?.strip_suffix(".jsonl.gz")?;
+    if rest.len() == 10 {
+        return is_yyyy_mm_dd(rest).then(|| (rest.to_owned(), 0));
+    }
+    if rest.len() <= 11 || rest.as_bytes()[10] != b'-' {
+        return None;
+    }
+    let date_part = &rest[..10];
+    let num_part = &rest[11..];
+    if !is_yyyy_mm_dd(date_part)
+        || num_part.is_empty()
+        || !num_part.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let num = num_part.parse::<u32>().ok()?;
+    Some((date_part.to_owned(), num))
+}
+
+fn is_yyyy_mm_dd(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..10].iter().all(u8::is_ascii_digit)
 }
 
 #[cfg(test)]
@@ -437,5 +562,22 @@ mod tests {
             .unwrap();
         assert_eq!(dup_archived.appended, 0);
         assert_eq!(dup_archived.duplicates, vec!["ev-1"]);
+
+        let snap = inbox.diagnostic_snapshot("ws-1").unwrap();
+        assert_eq!(snap.cursor, 1);
+        assert_eq!(snap.events.len(), 2);
+        assert_eq!(snap.events[0]["eventId"], "ev-1");
+        assert_eq!(snap.events[1]["eventId"], "ev-2");
+
+        // Corrupt cursor triggers error.
+        fs::write(
+            dir.path().join("project-runtime/ws-1/inbox-cursor.json"),
+            "{bad",
+        )
+        .unwrap();
+        assert_eq!(
+            inbox.diagnostic_snapshot("ws-1").unwrap_err().code,
+            "CORRUPT_INBOX_CURSOR"
+        );
     }
 }

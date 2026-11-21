@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,16 +15,25 @@ import {
   createBotProfileStore,
   createMemoryStore,
   createObjectiveStore,
+  createProjectInputDraftStore,
 } from '@peer-agent/runtime-node';
 import { createApprovalStore, createGoalPlanStore } from '@peer-agent/runtime-node/storage';
 import { createProjectRegistry } from '@peer-agent/runtime-node/providers';
 import {
   createBotAccessPolicyAuthority,
   createBotDirectory,
+  createInputQueue,
+  createProjectInbox,
 } from '@peer-agent/runtime-node/project-agent';
 import { createProjectMemoryService } from './project-agent/project-memory-service.mjs';
 import { createProjectObjectivesService } from './project-agent/project-objectives-service.mjs';
 import { createProjectAgentApplicationService } from './project-agent/project-agent-application-service.mjs';
+import { createDiagnosticsExport } from './project-agent/diagnostics-export.mjs';
+import { createEvidenceReader } from './project-agent/evidence-reader.mjs';
+import {
+  createEvidenceDeliveryProjection,
+  createScopedExternalEvidenceReader,
+} from './project-agent/evidence-deliveries.mjs';
 import {
   beginCompaction,
   endCompaction,
@@ -1797,6 +1807,431 @@ test('E2E: bot profile/avatar, access policy, markRead, approvals, history, and 
   } finally {
     appService.dispose();
     accessAuthority.close();
+    await client.dispose();
+    cleanup();
+  }
+});
+
+test('E2E: bot diagnostics, continueHistory, input drafts, and readEvidence run through peer-native core --stdio', async () => {
+  const binaryPath = resolveTestBinary();
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const reg = registry.ensureForPath(workspace);
+  const workspaceId = reg.workspaceId;
+  const wsPath = reg.path || workspace;
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const botConv = conversationStore.createConversation({
+    title: 'Bot Ops E2E',
+    role: 'project_agent',
+    workspaceId,
+    workspacePath: wsPath,
+    mode: 'chat',
+  });
+  conversationStore.appendMessage(botConv.id, {
+    id: 'turn-e2e-1',
+    role: 'assistant',
+    kind: 'agent_turn',
+    content: 'checked',
+    createdAt: '2026-11-21T09:00:00.000Z',
+    meta: {
+      diagnosticTiming: {
+        startedAt: '2026-11-21T09:00:00.000Z',
+        finishedAt: '2026-11-21T09:00:02.000Z',
+        durationMs: 2000,
+        outcome: 'done',
+      },
+    },
+    rounds: [{
+      toolCalls: [{
+        name: 'get_session',
+        result: {
+          ok: true,
+          title: 'Deploy Bearer topsecret123',
+          statusLabel: 'Done',
+          evidenceRefs: ['tool-result://q-e2e'],
+        },
+      }],
+    }],
+  });
+
+  const childConv = conversationStore.createChildConversation({
+    parentConversationId: botConv.id,
+    role: 'work_session',
+    anchorMessageId: 'turn-e2e-1',
+    delegation: { sessionId: 'sess-ops-e2e', anchorMessageId: 'turn-e2e-1', inputId: 'in-ops-e2e' },
+    runtimeState: {
+      conversationId: botConv.id,
+      contentRevision: conversationStore.getPersistedConversationHistory(botConv.id).contentRevision,
+      status: 'idle',
+    },
+    capturedAt: '2026-11-21T09:00:30.000Z',
+    backgroundMessageIds: ['turn-e2e-1'],
+    confirmMissing: true,
+    title: 'Child worker',
+    workspaceId,
+    workspacePath: wsPath,
+  });
+
+  const histFull = conversationStore.createConversation({ title: 'Clean History', workspacePath: wsPath });
+  conversationStore.appendMessage(histFull.id, { id: 'h-u-1', role: 'user', content: 'Inspect billing' });
+  conversationStore.appendMessage(histFull.id, { id: 'h-a-1', role: 'assistant', content: 'Looked at billing' });
+
+  const histPartial = conversationStore.createConversation({ title: 'Tool History', workspacePath: wsPath });
+  conversationStore.appendMessage(histPartial.id, {
+    id: 'hp-a-1',
+    role: 'assistant',
+    content: 'Executed check',
+    tool_calls: [{ id: 'tc-e2e' }],
+  });
+
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  profileStore.create({
+    workspaceId,
+    displayName: 'Ops E2E Bot',
+    agentConversationId: botConv.id,
+  });
+
+  const inputQueue = createInputQueue({ rootDir: runtimeRoot });
+  inputQueue.submitInput({
+    workspaceId,
+    inputId: 'queued-e2e-1',
+    surface: 'desktop',
+    text: 'Check queue',
+  });
+  const inbox = createProjectInbox({ rootDir: runtimeRoot });
+  inbox.append(workspaceId, [{ eventId: 'ev-e2e-1', kind: 'needs_user', at: '2026-11-21T09:01:00.000Z' }]);
+
+  const objectiveStore = createObjectiveStore({ rootDir: dataHome });
+  const objective = objectiveStore.create({
+    workspaceId,
+    projectAgentConversationId: botConv.id,
+    originMessageId: 'turn-e2e-1',
+    title: 'Health Watch',
+    outcome: 'Green',
+    autonomy: 'propose',
+    createdBy: 'user_request',
+    watches: [{
+      watchId: 'w-e2e',
+      kind: 'event',
+      source: { type: 'files', paths: ['src/index.ts', 'token=abcd', 'sk-secretkeyvalue123'] },
+    }],
+  }).item;
+
+  const execKey = 'exec-e2e-key';
+  const execHash = createHash('sha256').update(execKey).digest('hex');
+  const watchRef = `objective-probe:${workspaceId}:${execHash}`;
+  const objRtDir = path.join(runtimeRoot, workspaceId, 'objectives');
+  mkdirSync(path.join(objRtDir, 'probe-evidence'), { recursive: true });
+  writeFileSync(
+    path.join(objRtDir, 'watch-state.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      watches: {
+        [createHash('sha256').update(`${objective.objectiveId}:w-e2e`).digest('hex')]: {
+          lastObservationAt: '2026-11-21T09:02:00.000Z',
+          pendingExecutionKey: 'pending-1',
+        },
+      },
+      reservations: {},
+    }),
+  );
+  writeFileSync(
+    path.join(objRtDir, 'probe-evidence', `${execHash}.json`),
+    JSON.stringify({
+      workspaceId,
+      executionKey: execKey,
+      evidenceRef: watchRef,
+      observation: { summary: 'probe drift ok', severity: 'info', observedAt: '2026-11-21T09:02:00.000Z' },
+      execution: { call: { toolName: 'git_status' }, grant: { granted: true }, result: { status: 'success' } },
+    }),
+  );
+
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const stubModel = {
+    modelProviderId: 'anthropic:claude-sonnet-4-5',
+    providerId: 'anthropic',
+    modelId: 'claude-sonnet-4-5',
+    family: 'claude',
+  };
+  goalPlanStore.createPlan({
+    planId: 'plan-ops-e2e',
+    conversationId: childConv.id,
+    title: 'Ops delegation',
+    goal: 'Run check',
+    status: 'executing',
+    delegationOrigin: {
+      workspaceId,
+      sessionId: 'sess-ops-e2e',
+      parentConversationId: botConv.id,
+      anchorMessageId: 'turn-e2e-1',
+      inputId: 'in-ops-e2e',
+      modelSelection: {
+        worker: stubModel,
+        explorer: stubModel,
+        verifier: stubModel,
+        resolvedAt: '2026-11-21T09:00:30.000Z',
+      },
+    },
+  });
+
+  mkdirSync(path.join(dataHome, 'shell-artifacts', '2026-11-21', 'sh-e2e'), { recursive: true });
+  writeFileSync(path.join(dataHome, 'shell-artifacts', '2026-11-21', 'sh-e2e', 'stdout.txt'), 'e2e stdout ok\n');
+  writeFileSync(
+    path.join(dataHome, 'goal-plans', 'evidence-index.jsonl'),
+    `${[
+      JSON.stringify({
+        evidenceRef: 'tool-result://q-e2e',
+        conversationId: botConv.id,
+        streamId: 'turn-e2e-1',
+        toolName: 'get_session',
+        capabilityId: 'local.delegation.get_session',
+        createdAt: '2026-11-21T09:00:00.000Z',
+      }),
+      JSON.stringify({
+        evidenceRef: 'local-shell-artifact://sh-e2e/stdout',
+        conversationId: childConv.id,
+        planId: 'plan-ops-e2e',
+        toolName: 'shell_exec',
+        createdAt: '2026-11-21T09:01:00.000Z',
+        artifactRefs: ['local-shell-artifact://sh-e2e/stdout'],
+        userArtifacts: [{
+          kind: 'code-change',
+          ref: `file://${path.join(wsPath, 'index.ts')}`,
+          label: 'index.ts',
+          preview: { kind: 'code', diffLines: ['-a', '+b'] },
+        }],
+      }),
+    ].join('\n')}\n`,
+  );
+
+  // Exercise real JS inputDrafts store + fallback on resourceFeedback
+  const inputDrafts = createProjectInputDraftStore({
+    rootDir: runtimeRoot,
+    validateInteractiveFeedback: () => true,
+  });
+
+  // Exercise local readEvidence fallback (e.g. if interactive ref delegates back to JS)
+  const localEvidenceReader = createEvidenceReader({
+    findRecords: (refs) => goalPlanStore.findEvidenceIndexRecords(refs),
+    readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
+    readArtifact: () => '',
+    readScopedExternal: createScopedExternalEvidenceReader({
+      findWatch: () => null,
+      readWatchBody: () => null,
+    }),
+    projectDeliveries: createEvidenceDeliveryProjection({
+      getConversationId: () => botConv.id,
+      getPlan: (id) => goalPlanStore.getPlan(id),
+      getSession: (id) => ({ sessionId: id, workspaceId, report: { planId: 'plan-ops-e2e' } }),
+    }),
+  });
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-bot-ops-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const directory = createBotDirectory({
+    rootDir: dataHome,
+    registry,
+    readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages || [],
+    listSessions: () => [],
+    listApprovals: () => [],
+  });
+  const woken = [];
+  const changed = [];
+  const convChanged = [];
+  const appService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    directory,
+    profileStore,
+    inputDrafts,
+    readEvidenceBody: localEvidenceReader,
+    wake: (ws) => woken.push(ws),
+    broadcast: (ch, payload) => {
+      if (ch === 'project-agent:changed') changed.push(payload);
+      if (ch === 'project-agent:conversation-changed') convChanged.push(payload);
+    },
+    debounceMs: 5,
+  });
+
+  const exportFile = path.join(root, 'exported-diagnostics.json');
+  const diagnosticsExporter = createDiagnosticsExport({
+    readReport: () => bridge.projectBotDiagnostics({
+      scheduler: {
+        stats: { active: 1, waiting: 0, limit: 2 },
+        queue: [],
+        projects: [{ workspaceId, slots: { read: 1, write: 0, isolated: 0 }, queue: [] }],
+      },
+      schedulerUnavailable: false,
+    }).then((res) => {
+      if (res?.ok && res.report) return res.report;
+      throw new Error(res?.code || 'DIAGNOSTICS_UNAVAILABLE');
+    }),
+    chooseTarget: async () => ({ canceled: false, filePath: exportFile }),
+  });
+
+  try {
+    await client.start();
+
+    // 1. Diagnostics read + atomic export
+    const diagRead = await diagnosticsExporter.execute({ action: 'read' });
+    assert.equal(diagRead.ok, true);
+    assert.equal(diagRead.report.schemaVersion, 1);
+    assert.equal(diagRead.report.bots.length, 1);
+    assert.equal(diagRead.report.bots[0].input.depth, 1);
+    assert.deepEqual(diagRead.report.bots[0].objectives[0].watches[0].paths, ['src/index.ts']);
+    assert.equal(diagRead.report.bots[0].turns[0].outcome, 'done');
+
+    const diagSaved = await diagnosticsExporter.execute({ action: 'export' });
+    assert.equal(diagSaved.ok, true);
+    assert.equal(diagSaved.saved, true);
+    assert.equal(JSON.parse(readFileSync(exportFile, 'utf8')).schemaVersion, 1);
+
+    // 2. continueHistory: confirmation gate -> confirmed -> cross-check Rust snapshot with JS store!
+    const contNeedConfirm = await appService.continueHistory({
+      workspaceId,
+      conversationId: histPartial.id,
+    });
+    assert.equal(contNeedConfirm.ok, false);
+    assert.equal(contNeedConfirm.code, 'BACKGROUND_CONFIRMATION_REQUIRED');
+    // JS conversationStore.readInheritedBackground verifies Rust's contentHash + key order bit-for-bit!
+    const verifiedByJs = conversationStore.readInheritedBackground(contNeedConfirm.snapshot.snapshotId);
+    assert.equal(verifiedByJs.status, 'partial');
+    assert.equal(verifiedByJs.contentHash, contNeedConfirm.snapshot.snapshotId);
+
+    const contConfirmed = await appService.continueHistory({
+      workspaceId,
+      conversationId: histPartial.id,
+      confirmMissing: true,
+      inputId: 'cont-e2e-partial',
+    });
+    assert.equal(contConfirmed.ok, true);
+    assert.equal(contConfirmed.input.historyConfirmed, true);
+
+    const contClean = await appService.continueHistory({
+      workspaceId,
+      conversationId: histFull.id,
+      inputId: 'cont-e2e-clean',
+    });
+    assert.equal(contClean.ok, true);
+    assert.equal(contClean.input.text, '继续：Clean History');
+    assert.equal(conversationStore.readInheritedBackground(contClean.snapshot.snapshotId).status, 'full');
+    assert.deepEqual(woken, [workspaceId, workspaceId]);
+
+    // 3. InputDrafts: write via Rust -> read & verify via JS store -> rewrite same upload via Rust (SHA-256 parity) -> conflict
+    const writeRust = await appService.writeInputDraft({
+      workspaceId,
+      surface: 'desktop',
+      revision: 0,
+      uploads: [{
+        id: 'u-e2e-1',
+        name: 'spec.txt',
+        mimeType: 'text/plain',
+        size: 7,
+        kind: 'text',
+        text: 'content',
+      }],
+      draft: { text: 'hello draft', quote: { messageId: 'm1', text: 'q1' }, attachmentIds: ['u-e2e-1'] },
+      pending: [],
+    });
+    assert.deepEqual(writeRust, { ok: true, revision: 1 });
+
+    // JS store verifies SHA-256 digest of blob written by Rust
+    const readByJs = inputDrafts.read({ workspaceId, surface: 'desktop' }, true);
+    assert.equal(readByJs.ok, true);
+    assert.equal(readByJs.snapshot.revision, 1);
+    assert.equal(readByJs.snapshot.draft.attachments[0].text, 'content');
+
+    // Re-writing same upload through Rust matches stored SHA-256 (no DRAFT_ATTACHMENT_CONFLICT)
+    const writeRust2 = await appService.writeInputDraft({
+      workspaceId,
+      surface: 'desktop',
+      revision: 1,
+      uploads: [{
+        id: 'u-e2e-1',
+        name: 'spec.txt',
+        mimeType: 'text/plain',
+        size: 7,
+        kind: 'text',
+        text: 'content',
+      }],
+      draft: { text: 'hello draft v2', quote: null, attachmentIds: ['u-e2e-1'] },
+      pending: [],
+    });
+    assert.deepEqual(writeRust2, { ok: true, revision: 2 });
+    const conflictRust = await appService.writeInputDraft({
+      workspaceId,
+      surface: 'desktop',
+      revision: 1,
+      uploads: [],
+      draft: { text: 'stale', quote: null, attachmentIds: [] },
+      pending: [],
+    });
+    assert.deepEqual(conflictRust, { ok: false, code: 'DRAFT_CONFLICT' });
+
+    // Non-empty resourceFeedback falls back cleanly to local inputDrafts without throwing
+    const badFeedbackWrite = await appService.writeInputDraft({
+      workspaceId,
+      surface: 'desktop',
+      revision: 2,
+      uploads: [],
+      draft: { text: 'fb', quote: null, resourceFeedback: [{ bad: true }], attachmentIds: [] },
+      pending: [],
+    });
+    assert.deepEqual(badFeedbackWrite, { ok: false, code: 'INVALID_DRAFT' });
+
+    // 4. readEvidence: batch, query redaction, shell artifact + scoped delivery, watch evidence + scope denied
+    const evBatch = await appService.readEvidence({
+      evidenceRefs: ['tool-result://q-e2e', 'local-shell-artifact://sh-e2e/stdout', 'tool-result://q-e2e'],
+    });
+    assert.equal(evBatch.ok, true);
+    assert.equal(evBatch.items.length, 2);
+
+    const evQuery = await appService.readEvidence({ evidenceRef: 'tool-result://q-e2e' });
+    assert.equal(evQuery.ok, true);
+    assert.equal(evQuery.summary, 'Deploy Bearer [REDACTED_TOKEN]\nDone');
+
+    const evShell = await appService.readEvidence({
+      evidenceRef: 'local-shell-artifact://sh-e2e/stdout',
+      context: { workspaceId, task: { sessionId: 'sess-ops-e2e', planId: 'plan-ops-e2e' } },
+    });
+    assert.equal(evShell.ok, true);
+    assert.equal(evShell.deliveryStatus, 'available');
+    assert.equal(evShell.deliveries[0].reference.task.sessionId, 'sess-ops-e2e');
+
+    const evWatch = await appService.readEvidence({
+      evidenceRef: watchRef,
+      context: { workspaceId },
+    });
+    assert.equal(evWatch.ok, true);
+    assert.ok(evWatch.summary.includes('probe drift ok'));
+
+    const evWatchDenied = await appService.readEvidence({
+      evidenceRef: watchRef,
+      context: { workspaceId: 'other-bot' },
+    });
+    assert.equal(evWatchDenied.code, 'SCOPE_DENIED');
+
+    await new Promise((r) => setTimeout(r, 30));
+    assert.ok(changed.length >= 1);
+    assert.ok(convChanged.length >= 1);
+  } finally {
+    appService.dispose();
     await client.dispose();
     cleanup();
   }

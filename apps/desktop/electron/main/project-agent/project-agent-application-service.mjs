@@ -320,6 +320,17 @@ export function createProjectAgentApplicationService({
 
   function draftRequest(payload, operation) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface)) return { ok: false, code: 'NOT_FOUND' };
+      const rpc = operation === 'read'
+        ? classicCoreBridge.projectBotReadInputDraft(payload)
+        : classicCoreBridge.projectBotWriteInputDraft(payload);
+      return rpc.then(res => (
+        res?.code === 'RESOURCE_FEEDBACK_HOST_REQUIRED'
+          ? ((!directory || directory.hasActiveBot(payload?.workspaceId)) ? inputDrafts[operation](payload) : { ok: false, code: 'NOT_FOUND' })
+          : res
+      ));
+    }
     if (!['desktop', 'quick_chat', 'tui'].includes(payload?.surface) || !directory.hasActiveBot(payload?.workspaceId)) return { ok: false, code: 'NOT_FOUND' };
     return inputDrafts[operation](payload);
   }
@@ -890,6 +901,18 @@ export function createProjectAgentApplicationService({
     const conversationId = typeof payload?.conversationId === 'string' ? payload.conversationId.trim() : '';
     const workspaceId = typeof payload?.workspaceId === 'string' ? payload.workspaceId.trim() : '';
     if (!conversationId || !workspaceId) return { ok: false, code: 'INVALID_INPUT' };
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotContinueHistory(payload).then(res => {
+        if (res?.ok) {
+          if (typeof wake === 'function') {
+            try { wake(workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
+          }
+          queueConversation(workspaceId);
+          queueChanged(workspaceId);
+        }
+        return res;
+      });
+    }
     if (!conversationStore
       || typeof conversationStore.getConversation !== 'function'
       || typeof conversationStore.getPersistedConversationHistory !== 'function'
@@ -994,8 +1017,7 @@ export function createProjectAgentApplicationService({
     return result;
   }
 
-  function readEvidence(payload = {}) {
-    if (!open()) return disabled();
+  function readEvidenceLocal(payload = {}) {
     if (Array.isArray(payload.evidenceRefs)) {
       if (payload.evidenceRef !== undefined || payload.evidenceRefs.length > 100
         || !payload.evidenceRefs.every(evidenceRefAllowed)) return { ok: false, code: 'INVALID_REF' };
@@ -1015,6 +1037,16 @@ export function createProjectAgentApplicationService({
         ...(body.code ? { code: body.code } : {}),
       } : {}) };
     } catch { return { ok: false, evidenceRef, availability: 'unavailable', code: 'READ_FAILED' }; }
+  }
+
+  function readEvidence(payload = {}) {
+    if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotReadEvidence(payload)
+        .then(res => (res?.code === 'INTERACTIVE_EVIDENCE_HOST_REQUIRED' ? readEvidenceLocal(payload) : res));
+    }
+    return readEvidenceLocal(payload);
   }
 
   async function takeoverHost(payload = {}) {

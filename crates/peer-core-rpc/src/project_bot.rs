@@ -697,7 +697,7 @@ pub fn handle_bot_mark_read(ctx: &ServerContext, params_val: Value) -> Result<Va
     }
 }
 
-fn read_approval_jsonl_lines(
+pub(crate) fn read_approval_jsonl_lines(
     file: &Path,
     folded: &mut Vec<(String, Value)>,
     pos: &mut HashMap<String, usize>,

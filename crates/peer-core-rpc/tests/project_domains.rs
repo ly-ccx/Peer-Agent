@@ -1,10 +1,14 @@
 use peer_core_rpc::{CoreServerConfig, PROTOCOL_VERSION, serve_io};
 use peer_project_agent::{
-    BotProfileStore, CreateBotProfile, CreateObjectiveRequest, MemoryStore, ObjectiveBudget,
-    ObjectiveMilestone, ObjectiveStore, ProjectRegistry, WriteMemoryRequest, now_iso, sha256_hex,
+    BotProfileStore, CreateBotProfile, CreateObjectiveRequest, InputQueue, MemoryStore,
+    ObjectiveBudget, ObjectiveMilestone, ObjectiveStore, ProjectInbox, ProjectRegistry,
+    SubmitInputRequest, WriteMemoryRequest, now_iso, sha256_hex,
 };
 use peer_runtime::CancellationToken;
-use peer_store::{ApprovalStore, ConversationStore, HostApproval, NewProjectConversation};
+use peer_store::{
+    ApprovalStore, ConversationStore, HostApproval, HostIdentity, HostLeaseStore, HostSurface,
+    NewProjectConversation,
+};
 use serde_json::{Value, json};
 use std::{fs, path::Path, time::Duration};
 use tempfile::TempDir;
@@ -972,6 +976,654 @@ async fn project_bot_profile_access_read_approvals_history_and_search_roundtrip(
             .iter()
             .any(|h| h["kind"] == "bot" && h["workspaceId"] == ws_id)
     );
+
+    let _ = client.call("core.shutdown", json!({})).await;
+    drop(client);
+    server_handle.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn project_bot_diagnostics_history_drafts_and_evidence_roundtrip() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let repo_dir = temp.path().join("repo-ops");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&repo_dir).unwrap();
+
+    let registry = ProjectRegistry::new(&home);
+    let reg = registry
+        .register(&repo_dir.to_string_lossy(), None)
+        .unwrap();
+    let ws_id = reg.workspace_id;
+
+    let conv_store = ConversationStore::new(&home);
+    let created_at = "2026-11-21T03:00:00.000Z";
+    let bot_conv = conv_store
+        .create_project_conversation(
+            &NewProjectConversation {
+                id: None,
+                title: "Ops Bot",
+                workspace_id: &ws_id,
+                workspace_path: Some(&reg.path),
+                role: "project_agent",
+                parent_conversation_id: None,
+                mode: "project_agent",
+                created_at,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let bot_conv_id = bot_conv["id"].as_str().unwrap().to_owned();
+
+    conv_store
+        .append_classic_message(
+            &bot_conv_id,
+            &json!({
+                "id": "turn-ops-1",
+                "role": "assistant",
+                "kind": "agent_turn",
+                "content": "checked",
+                "createdAt": created_at,
+                "meta": {
+                    "diagnosticTiming": {
+                        "startedAt": "2026-11-21T03:00:00.000Z",
+                        "finishedAt": "2026-11-21T03:00:01.250Z",
+                        "durationMs": 1250,
+                        "outcome": "done"
+                    }
+                },
+                "rounds": [{
+                    "toolCalls": [{
+                        "name": "get_session",
+                        "result": {
+                            "ok": true,
+                            "title": "Audit Bearer secret-token-999",
+                            "statusLabel": "Completed",
+                            "evidenceRefs": ["tool-result://query-ops"]
+                        }
+                    }]
+                }]
+            }),
+        )
+        .unwrap();
+
+    let child_conv = conv_store
+        .create_project_conversation(
+            &NewProjectConversation {
+                id: None,
+                title: "Worker Task",
+                workspace_id: &ws_id,
+                workspace_path: Some(&reg.path),
+                role: "work_session",
+                parent_conversation_id: Some(&bot_conv_id),
+                mode: "goal",
+                created_at,
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let child_conv_id = child_conv["id"].as_str().unwrap().to_owned();
+
+    let hist_conv = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Legacy Auth Migration",
+            "workspacePath": &reg.path,
+            "mode": "chat",
+        }))
+        .unwrap();
+    let hist_conv_id = hist_conv["id"].as_str().unwrap().to_owned();
+    conv_store
+        .append_classic_message(
+            &hist_conv_id,
+            &json!({ "id": "hm-1", "role": "user", "content": "Review OAuth" }),
+        )
+        .unwrap();
+    conv_store
+        .append_classic_message(
+            &hist_conv_id,
+            &json!({ "id": "hm-2", "role": "assistant", "content": "Checked endpoints" }),
+        )
+        .unwrap();
+
+    let partial_hist = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Partial Tool Chat",
+            "workspacePath": &reg.path,
+            "mode": "chat",
+        }))
+        .unwrap();
+    let partial_hist_id = partial_hist["id"].as_str().unwrap().to_owned();
+    conv_store
+        .append_classic_message(
+            &partial_hist_id,
+            &json!({
+                "id": "ph-1",
+                "role": "assistant",
+                "content": "Ran tool",
+                "tool_calls": [{ "id": "tc-1" }]
+            }),
+        )
+        .unwrap();
+
+    let archived_hist = conv_store
+        .create_classic_conversation(&json!({
+            "title": "Archived Thread",
+            "workspacePath": &reg.path,
+            "mode": "chat",
+        }))
+        .unwrap();
+    let archived_hist_id = archived_hist["id"].as_str().unwrap().to_owned();
+    conv_store
+        .set_archive_status(&archived_hist_id, true)
+        .unwrap();
+
+    BotProfileStore::new(&home)
+        .create(&CreateBotProfile {
+            workspace_id: &ws_id,
+            display_name: "Ops Bot",
+            managed: false,
+            agent_conversation_id: &bot_conv_id,
+            avatar_salt: "",
+        })
+        .unwrap();
+
+    // Seed Lease, InputQueue, Inbox, Approval, Objective + WatchState
+    let lease_store = HostLeaseStore::new(&home);
+    let host_ident = HostIdentity::new("host-ops-1", HostSurface::Desktop, 4242, "0.1.0").unwrap();
+    let _lease = lease_store
+        .acquire(&ws_id, &host_ident, 1_700_000_000_000)
+        .unwrap();
+
+    let queue = InputQueue::new(&home);
+    queue
+        .submit_input(&SubmitInputRequest {
+            workspace_id: &ws_id,
+            input_id: "in-diag-1",
+            surface: "desktop",
+            text: "hello",
+            anchor_refs: vec![],
+            quote_refs: vec![],
+            attachment_refs: vec![],
+            attachments: vec![],
+            answer_to: None,
+            history_ref: None,
+            history_snapshot_id: None,
+            history_confirmed: None,
+        })
+        .unwrap();
+
+    ProjectInbox::new(&home)
+        .append(
+            &ws_id,
+            &[json!({
+                "eventId": "ev-diag-1",
+                "kind": "needs_user",
+                "at": "2026-11-21T03:01:00.000Z"
+            })],
+        )
+        .unwrap();
+
+    ApprovalStore::new(&home)
+        .open(
+            &HostApproval {
+                approval_id: "appr-open-diag",
+                workspace_id: Some(&ws_id),
+                conversation_id: &child_conv_id,
+                stream_id: "s-1",
+                plan_id: Some("plan-ops-1"),
+                session_id: Some("sess-ops-1"),
+                capability_id: "local.file.write",
+                args_digest: &"a".repeat(64),
+                policy_revision: "rev-1",
+                created_at: "2026-11-21T03:00:00.000Z",
+                deadline_at: None,
+            },
+            None,
+        )
+        .unwrap();
+
+    let obj_store = ObjectiveStore::new(&home);
+    let (obj, _) = obj_store
+        .create(&CreateObjectiveRequest {
+            workspace_id: &ws_id,
+            project_agent_conversation_id: &bot_conv_id,
+            origin_message_id: "m-obj",
+            title: "Watch API",
+            outcome: "Healthy",
+            autonomy: "propose",
+            created_by: "user_request",
+            watches: vec![json!({
+                "watchId": "w-1",
+                "kind": "event",
+                "source": {
+                    "type": "files",
+                    "paths": ["src/main.rs", "token=abcd", "sk-secretkeyvalue123"]
+                }
+            })],
+            milestones: vec![ObjectiveMilestone {
+                id: "ms-1".into(),
+                title: "Check".into(),
+                status: "pending".into(),
+                session_ids: vec![],
+            }],
+            success_signals: vec![],
+            budget: Some(ObjectiveBudget::default()),
+            deadline: None,
+            request_id: None,
+        })
+        .unwrap();
+
+    let watch_key = sha256_hex(format!("{}:w-1", obj.objective_id).as_bytes());
+    let obj_rt_dir = home.join("project-runtime").join(&ws_id).join("objectives");
+    fs::create_dir_all(obj_rt_dir.join("probe-evidence")).unwrap();
+    fs::write(
+        obj_rt_dir.join("watch-state.json"),
+        serde_json::to_string(&json!({
+            "schemaVersion": 1,
+            "watches": {
+                watch_key: {
+                    "lastObservationAt": "2026-11-21T03:02:00.000Z",
+                    "nextRunAt": "2026-11-21T04:02:00.000Z",
+                    "pendingExecutionKey": "exec-1"
+                }
+            },
+            "reservations": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let exec_key = "probe-exec-ops-1";
+    let exec_hash = sha256_hex(exec_key.as_bytes());
+    let watch_ev_ref = format!("objective-probe:{ws_id}:{exec_hash}");
+    fs::write(
+        obj_rt_dir
+            .join("probe-evidence")
+            .join(format!("{exec_hash}.json")),
+        serde_json::to_string(&json!({
+            "workspaceId": ws_id,
+            "executionKey": exec_key,
+            "evidenceRef": watch_ev_ref,
+            "observation": { "summary": "drift detected", "severity": "info", "observedAt": "2026-11-21T03:02:00.000Z" },
+            "execution": { "call": { "toolName": "git_status" }, "grant": { "granted": true }, "result": { "status": "success" } }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Seed delegated goal plan + shell artifact + evidence-index.jsonl
+    let gp_dir = home.join("goal-plans");
+    fs::create_dir_all(&gp_dir).unwrap();
+    let plan_obj = json!({
+        "planId": "plan-ops-1",
+        "conversationId": child_conv_id,
+        "title": "Audit task",
+        "status": "executing",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-ops-1",
+            "parentConversationId": bot_conv_id
+        }
+    });
+    fs::write(
+        gp_dir.join("plan-ops-1.json"),
+        serde_json::to_string(&plan_obj).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        gp_dir.join("index.jsonl"),
+        format!("{}\n", serde_json::to_string(&plan_obj).unwrap()),
+    )
+    .unwrap();
+
+    let shell_art_dir = home.join("shell-artifacts/2026-11-21/art-1");
+    fs::create_dir_all(&shell_art_dir).unwrap();
+    fs::write(shell_art_dir.join("stdout.txt"), "all checks green\n").unwrap();
+
+    let changed_target = repo_dir.join("src/auth.rs");
+    let ev_records = [
+        json!({
+            "evidenceRef": "tool-result://query-ops",
+            "conversationId": bot_conv_id,
+            "streamId": "turn-ops-1",
+            "toolName": "get_session",
+            "capabilityId": "local.delegation.get_session",
+            "createdAt": "2026-11-21T03:00:00.000Z"
+        }),
+        json!({
+            "evidenceRef": "local-shell-artifact://art-1/stdout",
+            "conversationId": child_conv_id,
+            "planId": "plan-ops-1",
+            "toolName": "shell_exec",
+            "createdAt": "2026-11-21T03:01:00.000Z",
+            "artifactRefs": ["local-shell-artifact://art-1/stdout"],
+            "userArtifacts": [{
+                "kind": "code-change",
+                "ref": format!("file://{}", changed_target.to_string_lossy()),
+                "label": "auth.rs",
+                "preview": { "kind": "code", "diffLines": ["-old", "+new"] }
+            }]
+        }),
+    ];
+    fs::write(
+        gp_dir.join("evidence-index.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&ev_records[0]).unwrap(),
+            serde_json::to_string(&ev_records[1]).unwrap()
+        ),
+    )
+    .unwrap();
+
+    let (mut client, server_handle) = spawn_server(&home).await;
+
+    // 1. project.bot.diagnostics
+    let diag_res = client
+        .call(
+            "project.bot.diagnostics",
+            json!({
+                "scheduler": {
+                    "stats": { "active": 1, "waiting": 0, "limit": 4 },
+                    "queue": [],
+                    "projects": [{
+                        "workspaceId": ws_id,
+                        "slots": { "read": 1, "write": 0, "isolated": 0 },
+                        "queue": [{ "sessionId": "sess-ops-1", "priority": "high", "enqueuedAt": "2026-11-21T03:00:00.000Z", "reason": null }]
+                    }]
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(diag_res["ok"], true);
+    let report = &diag_res["report"];
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["errors"], json!([]));
+    assert_eq!(report["scheduler"]["stats"]["limit"], 4);
+    assert_eq!(report["bots"].as_array().unwrap().len(), 1);
+    let bot_diag = &report["bots"][0];
+    assert_eq!(bot_diag["lease"]["surface"], "desktop");
+    assert_eq!(bot_diag["lease"]["pid"], 4242);
+    assert_eq!(bot_diag["input"]["depth"], 1);
+    assert_eq!(bot_diag["inbox"]["events"].as_array().unwrap().len(), 1);
+    assert_eq!(bot_diag["approvals"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        bot_diag["objectives"][0]["watches"][0]["paths"],
+        json!(["src/main.rs"])
+    );
+    assert_eq!(bot_diag["objectives"][0]["watches"][0]["pending"], true);
+    assert_eq!(bot_diag["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(bot_diag["turns"][0]["outcome"], "done");
+    assert_eq!(bot_diag["errors"], json!([]));
+
+    // 2. project.bot.continueHistory
+    assert_eq!(
+        client
+            .call(
+                "project.bot.continueHistory",
+                json!({ "conversationId": bot_conv_id, "workspaceId": ws_id })
+            )
+            .await["result"]["code"],
+        "NOT_HISTORY"
+    );
+    assert_eq!(
+        client
+            .call(
+                "project.bot.continueHistory",
+                json!({ "conversationId": archived_hist_id, "workspaceId": ws_id })
+            )
+            .await["result"]["code"],
+        "ARCHIVED"
+    );
+    let cont_full = client
+        .call(
+            "project.bot.continueHistory",
+            json!({ "conversationId": hist_conv_id, "workspaceId": ws_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(cont_full["ok"], true);
+    assert_eq!(cont_full["input"]["historyRef"], hist_conv_id);
+    assert_eq!(
+        cont_full["input"]["historySnapshotId"],
+        cont_full["snapshot"]["snapshotId"]
+    );
+    assert_eq!(cont_full["input"]["text"], "继续：Legacy Auth Migration");
+
+    let cont_need_confirm = client
+        .call(
+            "project.bot.continueHistory",
+            json!({ "conversationId": partial_hist_id, "workspaceId": ws_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(cont_need_confirm["ok"], false);
+    assert_eq!(
+        cont_need_confirm["code"],
+        "BACKGROUND_CONFIRMATION_REQUIRED"
+    );
+
+    let cont_confirmed = client
+        .call(
+            "project.bot.continueHistory",
+            json!({
+                "conversationId": partial_hist_id,
+                "workspaceId": ws_id,
+                "confirmMissing": true,
+                "text": "Continue from tool run",
+                "inputId": "hist-in-confirmed"
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(cont_confirmed["ok"], true);
+    assert_eq!(cont_confirmed["input"]["historyConfirmed"], true);
+    assert_eq!(cont_confirmed["input"]["inputId"], "hist-in-confirmed");
+
+    // 3. project.bot.readInputDraft / writeInputDraft
+    assert_eq!(
+        client
+            .call(
+                "project.bot.readInputDraft",
+                json!({ "workspaceId": ws_id, "surface": "remote" })
+            )
+            .await["result"]["code"],
+        "NOT_FOUND"
+    );
+    let draft0 = client
+        .call(
+            "project.bot.readInputDraft",
+            json!({ "workspaceId": ws_id, "surface": "desktop" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(draft0["ok"], true);
+    assert_eq!(draft0["snapshot"]["revision"], 0);
+
+    let write_ok = client
+        .call(
+            "project.bot.writeInputDraft",
+            json!({
+                "workspaceId": ws_id,
+                "surface": "desktop",
+                "revision": 0,
+                "uploads": [{
+                    "id": "up-1",
+                    "name": "diff.txt",
+                    "mimeType": "text/plain",
+                    "size": 4,
+                    "kind": "text",
+                    "text": "diff"
+                }],
+                "draft": {
+                    "text": "Draft follow-up",
+                    "quote": null,
+                    "attachmentIds": ["up-1"]
+                },
+                "pending": []
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(write_ok, json!({ "ok": true, "revision": 1 }));
+
+    let draft1 = client
+        .call(
+            "project.bot.readInputDraft",
+            json!({ "workspaceId": ws_id, "surface": "desktop" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(draft1["ok"], true);
+    assert_eq!(draft1["snapshot"]["revision"], 1);
+    assert_eq!(
+        draft1["snapshot"]["draft"]["attachments"][0]["text"],
+        "diff"
+    );
+
+    let conflict = client
+        .call(
+            "project.bot.writeInputDraft",
+            json!({
+                "workspaceId": ws_id,
+                "surface": "desktop",
+                "revision": 0,
+                "uploads": [],
+                "draft": { "text": "stale", "quote": null, "attachmentIds": [] },
+                "pending": []
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(conflict, json!({ "ok": false, "code": "DRAFT_CONFLICT" }));
+
+    // 4. project.bot.readEvidence
+    assert_eq!(
+        client
+            .call(
+                "project.bot.readEvidence",
+                json!({ "evidenceRef": "../secret" })
+            )
+            .await["result"]["code"],
+        "INVALID_REF"
+    );
+    assert_eq!(
+        client
+            .call(
+                "project.bot.readEvidence",
+                json!({ "evidenceRef": "tool-result://missing" })
+            )
+            .await["result"]["code"],
+        "NOT_FOUND"
+    );
+
+    let batch_ev = client
+        .call(
+            "project.bot.readEvidence",
+            json!({
+                "evidenceRefs": [
+                    "tool-result://query-ops",
+                    "tool-result://query-ops",
+                    "tool-result://missing"
+                ]
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(batch_ev["ok"], true);
+    assert_eq!(batch_ev["items"].as_array().unwrap().len(), 2);
+    assert_eq!(batch_ev["items"][0]["toolName"], "get_session");
+
+    let query_ev = client
+        .call(
+            "project.bot.readEvidence",
+            json!({ "evidenceRef": "tool-result://query-ops" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(query_ev["ok"], true);
+    assert_eq!(query_ev["kind"], "observation");
+    assert_eq!(
+        query_ev["summary"],
+        "Audit Bearer [REDACTED_TOKEN]\nCompleted"
+    );
+
+    let shell_scoped = client
+        .call(
+            "project.bot.readEvidence",
+            json!({
+                "evidenceRef": "local-shell-artifact://art-1/stdout",
+                "context": {
+                    "workspaceId": ws_id,
+                    "task": { "sessionId": "sess-ops-1", "planId": "plan-ops-1" }
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(shell_scoped["ok"], true);
+    assert_eq!(shell_scoped["kind"], "diff");
+    assert_eq!(shell_scoped["deliveryStatus"], "available");
+    assert_eq!(
+        shell_scoped["deliveries"][0]["reference"]["task"]["sessionId"],
+        "sess-ops-1"
+    );
+    assert!(
+        shell_scoped["summary"]
+            .as_str()
+            .unwrap()
+            .contains("all checks green")
+    );
+
+    let shell_denied = client
+        .call(
+            "project.bot.readEvidence",
+            json!({
+                "evidenceRef": "local-shell-artifact://art-1/stdout",
+                "context": { "workspaceId": "other-ws" }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(shell_denied["ok"], false);
+    assert_eq!(shell_denied["deliveryStatus"], "scope_denied");
+    assert_eq!(shell_denied["code"], "SCOPE_DENIED");
+
+    let watch_ok = client
+        .call(
+            "project.bot.readEvidence",
+            json!({
+                "evidenceRef": watch_ev_ref,
+                "context": { "workspaceId": ws_id }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(watch_ok["ok"], true);
+    assert_eq!(watch_ok["deliveryStatus"], "available");
+    assert!(
+        watch_ok["summary"]
+            .as_str()
+            .unwrap()
+            .contains("drift detected")
+    );
+
+    let watch_denied = client
+        .call(
+            "project.bot.readEvidence",
+            json!({
+                "evidenceRef": watch_ev_ref,
+                "context": {
+                    "workspaceId": ws_id,
+                    "task": { "sessionId": "sess-ops-1", "planId": "plan-ops-1" }
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(watch_denied["code"], "SCOPE_DENIED");
 
     let _ = client.call("core.shutdown", json!({})).await;
     drop(client);

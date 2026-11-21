@@ -16,6 +16,7 @@ pub mod directory;
 pub mod drafts;
 pub mod host;
 pub mod inbox;
+pub mod inherited_background;
 pub mod input_queue;
 pub mod interactive_results;
 pub mod memory;
@@ -67,16 +68,18 @@ pub use directory::{
 };
 pub use drafts::{
     DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftWriteRequest,
-    InputDraftStore,
+    HydratedDraftBody, HydratedDraftEnvelope, HydratedDraftSnapshot, InputDraftStore,
 };
 pub use host::{
     FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, ForegroundTickReport, HostTickReport,
     LeaseStatus, MaintenanceReport, NativeProjectHost, RESPONSIBILITY_QUESTION,
     StartFamiliarizeResult, bot_list_json,
 };
-pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
+pub use inbox::{InboxBatch, InboxCursor, InboxDiagnosticSnapshot, ProjectInbox};
+pub use inherited_background::{CapturedBackground, capture_inherited_background};
 pub use input_queue::{
-    ConsumeOutcome, InputQueue, ProjectInput, SubmitInputRequest, input_message_id,
+    ConsumeOutcome, InputDiagnosticSnapshot, InputQueue, ProjectInput, SubmitInputRequest,
+    input_message_id,
 };
 pub use interactive_results::{
     INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_RESULTS_PER_BOT,
@@ -262,6 +265,23 @@ pub fn parse_iso_ms(value: &str) -> Option<i64> {
     i64::try_from(dt.unix_timestamp_nanos() / 1_000_000).ok()
 }
 
+/// Normalize ISO timestamp matching `diagnostics.mjs#iso` (`^\d{4}-\d{2}-\d{2}T` + RFC3339).
+pub fn normalize_diagnostic_iso(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 11
+        || !bytes[..4].iter().all(u8::is_ascii_digit)
+        || bytes[4] != b'-'
+        || !bytes[5..7].iter().all(u8::is_ascii_digit)
+        || bytes[7] != b'-'
+        || !bytes[8..10].iter().all(u8::is_ascii_digit)
+        || bytes[10] != b'T'
+    {
+        return None;
+    }
+    let dt = OffsetDateTime::parse(value, &Rfc3339).ok()?;
+    format_iso(dt)
+}
+
 /// FNV-1a 32-bit over UTF-16 code units, matching JavaScript `charCodeAt` hashing.
 pub(crate) fn fnv1a_utf16(text: &str) -> u32 {
     let mut hash: u32 = 0x811c_9dc5;
@@ -292,4 +312,93 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ProjectError
         let _ = d.sync_all();
     }
     Ok(())
+}
+
+/// Slice a `&str` to at most `max_units` UTF-16 code units cleanly along UTF-8 boundaries.
+pub fn utf16_slice(raw: &str, max_units: usize) -> &str {
+    let mut units = 0;
+    let mut end = 0;
+    for (pos, ch) in raw.char_indices() {
+        let next = units + ch.len_utf16();
+        if next > max_units {
+            break;
+        }
+        units = next;
+        end = pos + ch.len_utf8();
+    }
+    &raw[..end]
+}
+
+fn compiled_regex(pattern: &str) -> regex::Regex {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(128 * 1024)
+        .dfa_size_limit(256 * 1024)
+        .build()
+        .expect("fixed regex pattern")
+}
+
+/// Redact secrets and truncate preview matching `packages/runtime-node/src/project-agent/output-redaction.mjs`.
+pub fn redact_shell_output(raw: &str) -> String {
+    use regex::Regex;
+    use std::sync::OnceLock;
+
+    const WS: &str = r"\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
+    let truncated = utf16_slice(raw, 4_000);
+    let mut text = if truncated.len() < raw.len() {
+        format!("{truncated}\n...[preview truncated]")
+    } else {
+        truncated.to_owned()
+    };
+
+    static RE: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
+    for (re, to) in RE.get_or_init(|| {
+        vec![
+            (compiled_regex("AKIA[0-9A-Z]{16}"), "[REDACTED_AWS_KEY]"),
+            (
+                compiled_regex("sk-[A-Za-z0-9_-]{20,}"),
+                "[REDACTED_API_KEY]",
+            ),
+            (
+                compiled_regex(&format!(r"((?i-u:Bearer)[{WS}]+)[A-Za-z0-9._-]+")),
+                "${1}[REDACTED_TOKEN]",
+            ),
+            (
+                compiled_regex(&format!(
+                    r"((?i-u:[A-Za-z_][A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|KEY))=)[^{WS}]+"
+                )),
+                "${1}[REDACTED]",
+            ),
+        ]
+    }) {
+        text = re.replace_all(&text, *to).into_owned();
+    }
+    text
+}
+
+/// Filter relative diagnostic watch paths matching `packages/runtime-node/src/project-agent/diagnostics.mjs#relativePaths`.
+pub fn is_safe_diagnostic_relative_path(item: &str) -> bool {
+    use regex::Regex;
+    use std::sync::OnceLock;
+
+    let len_u16 = item.encode_utf16().count();
+    if len_u16 == 0 || len_u16 > 500 {
+        return false;
+    }
+    if item.starts_with('/') || item.contains('\\') || item.contains(['\r', '\n', '\0']) {
+        return false;
+    }
+    let bytes = item.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return false;
+    }
+    if item.split('/').any(|seg| seg == "..") {
+        return false;
+    }
+    static SECRET_HINT: OnceLock<Regex> = OnceLock::new();
+    let re = SECRET_HINT.get_or_init(|| {
+        compiled_regex(
+            r"(?i:\b(?:sk|pk|rk)-[A-Za-z0-9]{8,}|Bearer\s|(?:api[_-]?key|token|secret|password)\s*[=:])",
+        )
+    });
+    !re.is_match(item)
 }

@@ -1040,6 +1040,26 @@ export function createClassicCoreBridge({
     return requireClient().request('project.bot.search', params || {});
   }
 
+  async function projectBotDiagnostics(params = {}) {
+    return requireClient().request('project.bot.diagnostics', params || {});
+  }
+
+  async function projectBotContinueHistory(params = {}) {
+    return requireClient().request('project.bot.continueHistory', params || {});
+  }
+
+  async function projectBotReadInputDraft(params = {}) {
+    return requireClient().request('project.bot.readInputDraft', params || {});
+  }
+
+  async function projectBotWriteInputDraft(params = {}) {
+    return requireClient().request('project.bot.writeInputDraft', params || {});
+  }
+
+  async function projectBotReadEvidence(params = {}) {
+    return requireClient().request('project.bot.readEvidence', params || {});
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
@@ -1125,6 +1145,11 @@ export function createClassicCoreBridge({
     projectBotListApprovals,
     projectBotListHistory,
     projectBotSearch,
+    projectBotDiagnostics,
+    projectBotContinueHistory,
+    projectBotReadInputDraft,
+    projectBotWriteInputDraft,
+    projectBotReadEvidence,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

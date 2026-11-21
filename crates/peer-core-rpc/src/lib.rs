@@ -16,6 +16,7 @@ mod classic_usage;
 mod external_provider;
 mod project;
 mod project_bot;
+mod project_bot_ops;
 pub mod protocol;
 pub mod server;
 mod transport;

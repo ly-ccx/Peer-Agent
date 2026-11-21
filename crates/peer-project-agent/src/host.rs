@@ -440,6 +440,9 @@ impl NativeProjectHost {
             attachment_refs: vec![],
             attachments,
             answer_to,
+            history_ref: None,
+            history_snapshot_id: None,
+            history_confirmed: None,
         })
     }
 
