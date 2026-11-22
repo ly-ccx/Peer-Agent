@@ -989,3 +989,74 @@ test('task detail refuses a claim the host cannot close without showing a card',
   assert.equal(result.code, 'claim_not_closeable');
   assert.equal(requested, 0);
 });
+
+test('rust bot host interactive resourceFeedback validates via inputQueue then wakes Rust idempotently, and deleteBot finalizes cleanup errors', async () => {
+  const rustCalls = [];
+  const bridge = {
+    isProjectBotHostActive: () => true,
+    isAvailable: () => true,
+    async projectBotSubmitInput(payload) {
+      rustCalls.push(['submitInput', payload]);
+      return { ok: true, input: { inputId: payload.inputId, text: payload.text }, delivery: 'queued' };
+    },
+    async projectBotDelete(payload) {
+      rustCalls.push(['delete', payload]);
+      if (payload.phase === 'prepare') {
+        return {
+          ok: true,
+          archived: true,
+          managed: true,
+          path: '/tmp/nonexistent-managed-folder-for-test',
+          profile: {
+            workspaceId: payload.workspaceId,
+            managed: true,
+            status: 'archived',
+            deletionCleanup: {
+              folder: '/tmp/nonexistent-managed-folder-for-test',
+              trashPending: true,
+              removePending: true,
+            },
+          },
+        };
+      }
+      return {
+        ok: false,
+        archived: true,
+        cleanupPending: true,
+        code: payload.cleanupError || 'CLEANUP_FAILED',
+      };
+    },
+  };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    inputQueue: {
+      submitInput(value) {
+        return { ...value, inputId: value.inputId || 'rf-in-1', text: value.text ?? '' };
+      },
+    },
+    moveToTrash: async () => ({ ok: true }),
+    removeWorkspace: async () => {
+      throw Object.assign(new Error('disk locked'), { code: 'REMOVE_FAILED' });
+    },
+  });
+
+  const feedback = [{ id: 'rf-1', recipient: { workspaceId: 'w1', conversationId: 'c1' }, excerpt: 'sel' }];
+  const submitted = await service.submitInput({
+    workspaceId: 'w1',
+    inputId: 'rf-in-1',
+    text: '',
+    resourceFeedback: feedback,
+  });
+  assert.equal(submitted.ok, true);
+  assert.equal(rustCalls[0][0], 'submitInput');
+  assert.equal(rustCalls[0][1].inputId, 'rf-in-1');
+
+  const delFailed = await service.deleteBot({ workspaceId: 'w1', confirmManaged: true });
+  assert.equal(delFailed.ok, false);
+  assert.equal(delFailed.cleanupPending, true);
+  assert.equal(delFailed.code, 'REMOVE_FAILED');
+  assert.equal(rustCalls[2][0], 'delete');
+  assert.equal(rustCalls[2][1].phase, 'finalize');
+  assert.equal(rustCalls[2][1].folderRemoved, false);
+});

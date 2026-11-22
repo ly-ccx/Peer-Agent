@@ -357,8 +357,24 @@ const dataHome = getDataHome();
   if (!isManagedPreview) migrateFromLegacy(legacyUserData);
 }
 
-const settingsStore = createSettingsStore();
+let peerCoreStartupPending = isPeerCoreClassicEnabled();
+let peerCoreDisposing = false;
+let lastProjectAgentShell = null;
+const settingsStore = createSettingsStore({
+  onChange: (partial, next) => {
+    if (!partial || typeof partial !== 'object') return;
+    const touchesBotPolicy = Object.hasOwn(partial, 'projectAgent') || Object.hasOwn(partial, 'memory');
+    if (!touchesBotPolicy) return;
+    const nextShell = next?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
+    const switchedFromClassic = lastProjectAgentShell === 'classic' && nextShell !== 'classic';
+    lastProjectAgentShell = nextShell;
+    if (classicCoreBridge.isAvailable()) {
+      void syncProjectBotHostConfig({ includeWorkspaces: switchedFromClassic });
+    }
+  },
+});
 const initialSettings = settingsStore.getAll();
+lastProjectAgentShell = initialSettings?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
 
 const capabilityRegistry = createCapabilityRegistry({ workspaceRoot: resourcesRoot });
 const sessionStore = createSessionStore({
@@ -434,11 +450,62 @@ const automationStore = createAutomationStore({
 });
 let automationRuntimeOwner = null;
 let peerCoreClient = null;
+function buildProjectBotHostConfig({ includeWorkspaces = false } = {}) {
+  const policy = settingsStore.getRuntimePolicy();
+  const enabled = policy?.projectAgent?.shell !== 'classic';
+  const settings = includeWorkspaces && enabled ? settingsStore.getAll() : null;
+  return {
+    enabled,
+    ...(typeof policy?.projectAgent?.proactivity === 'string' ? { proactivity: policy.projectAgent.proactivity } : {}),
+    learnPreferences: policy?.memory?.learnPreferences !== false,
+    ...(Number.isInteger(policy?.projectAgent?.concurrency) && policy.projectAgent.concurrency > 0
+      ? { concurrency: policy.projectAgent.concurrency }
+      : {}),
+    ...(includeWorkspaces && enabled && Array.isArray(settings?.workspaces)
+      ? { workspaces: settings.workspaces }
+      : {}),
+  };
+}
+function syncProjectBotHostConfig({ includeWorkspaces = false } = {}) {
+  if (!classicCoreBridge.isAvailable()) return Promise.resolve(null);
+  const config = buildProjectBotHostConfig({ includeWorkspaces });
+  return classicCoreBridge.configureProjectBotHost(config).catch((error) => {
+    console.warn('[peer-core] project bot host configure failed:', error?.message || error);
+    return null;
+  });
+}
+function notifyProjectBotConversationChanged({ workspaceId, conversationId } = {}) {
+  const notifier = projectAgentNotifier;
+  if (!notifier) return;
+  const cid = (typeof conversationId === 'string' && conversationId)
+    || (typeof workspaceId === 'string' && workspaceId
+      ? projectAgentDirectory.projectAccess?.directory?.conversationId?.(workspaceId)
+      : '')
+    || '';
+  if (!cid) return;
+  const history = conversationStore.getPersistedConversationHistory(cid);
+  const messages = Array.isArray(history?.messages) ? history.messages : [];
+  for (const message of messages.slice(-3)) {
+    if (!message?.meta?.surfacingFacts && !message?.meta?.surfacing) continue;
+    try {
+      notifier.handleAppended({ conversationId: cid, message });
+    } catch (error) {
+      console.warn('[project-agent-notifier] rust push hook failed:', error);
+    }
+  }
+}
 const classicCoreBridge = createClassicCoreBridge({
   getClient: () => peerCoreClient,
   getLocalToolHost: () => localToolHost,
   broadcast: broadcastToAllWindows,
   onGoalPlanChanged: (payload) => handleGoalPlanChanged(payload),
+  onProjectBotConversationChanged: (payload) => notifyProjectBotConversationChanged(payload),
+  onProjectBotHostStateChanged: ({ active, reason }) => {
+    if (!active && reason === 'unexpected_exit' && !peerCoreDisposing) {
+      peerCoreStartupPending = false;
+      hostLeases.pulse();
+    }
+  },
   prepareGoalWorkspace: (params) => prepareClassicGoalWorkspace(params),
   runVisualVerification: (params) => runClassicVisualVerification(params),
   compactionRegistry: {
@@ -1053,7 +1120,13 @@ const webUiCapture = createWebUiCapture({
 const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 const hostLeases = createHostLease({
   surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
-  projectAgentEnabled: () => settingsStore.getAll()?.projectAgent?.shell !== 'classic', botWorkspaceIds: listBotWorkspaceIds,
+  projectAgentEnabled: () => (
+    !peerCoreDisposing
+    && !peerCoreStartupPending
+    && !classicCoreBridge.isProjectBotHostOwnedOrPending()
+    && settingsStore.getAll()?.projectAgent?.shell !== 'classic'
+  ),
+  botWorkspaceIds: listBotWorkspaceIds,
 });
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
@@ -1579,6 +1652,7 @@ const settingsApplicationService = createSettingsApplicationService({
     classicCore: {
       enabled: isPeerCoreClassicEnabled(),
       active: classicCoreBridge.isAvailable(),
+      projectBotHostActive: classicCoreBridge.isProjectBotHostActive(),
       engine: classicCoreBridge.isAvailable() ? 'rust' : 'ts',
       status: peerCoreClient?.status?.() ?? null,
     },
@@ -4514,7 +4588,11 @@ function startAutomationRuntime() {
 }
 
 async function startPeerCoreBridge() {
-  if (!isPeerCoreClassicEnabled()) return null;
+  if (!isPeerCoreClassicEnabled()) {
+    peerCoreStartupPending = false;
+    hostLeases.pulse();
+    return null;
+  }
   const binaryPath = resolvePeerCoreBinaryPath({
     resourcesPath: isPackaged ? process.resourcesPath : undefined,
     executablePath: app.getPath('exe'),
@@ -4537,19 +4615,28 @@ async function startPeerCoreBridge() {
     const initialized = await client.start();
     const initialAccessLevel = resolveLocalAccessLevel(settingsStore.getAll());
     await classicCoreBridge.setLocalAccessLevel(initialAccessLevel);
+    const botConfig = buildProjectBotHostConfig({ includeWorkspaces: true });
+    const botHostStatus = await classicCoreBridge.configureProjectBotHost(botConfig);
+    peerCoreStartupPending = false;
+    const botSummary = botHostStatus?.enabled === true
+      ? `active(owned=${botHostStatus.ownedWorkspaces?.length ?? 0})`
+      : 'dormant';
     console.info(
-      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel})`,
+      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel}, botHost=${botSummary})`,
     );
     return {
       name: 'peer-core-bridge',
       dispose: async () => {
+        peerCoreDisposing = true;
         if (peerCoreClient === client) peerCoreClient = null;
         await client.dispose();
       },
     };
   } catch (error) {
+    peerCoreStartupPending = false;
     if (peerCoreClient === client) peerCoreClient = null;
     await client.dispose().catch(() => {});
+    if (!peerCoreDisposing) hostLeases.pulse();
     throw error;
   }
 }

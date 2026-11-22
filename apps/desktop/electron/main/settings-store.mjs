@@ -15,7 +15,7 @@ import { pathOf } from './data-store.mjs';
  *
  * settingsFile 可注入，便于单测隔离；默认走 data-store 注册中心的 pathOf('settings')。
  */
-export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) {
+export function createSettingsStore({ settingsFile = pathOf('settings'), onChange = null } = {}) {
   function readAll() {
     return loadMigratedSettings(settingsFile);
   }
@@ -52,6 +52,13 @@ export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) 
     }
     const next = { ...readAll(), ...partial };
     writeAll(next);
+    if (typeof onChange === 'function') {
+      try {
+        onChange(partial, next);
+      } catch {
+        // listener errors must not roll back persisted settings
+      }
+    }
     return next;
   }
 

@@ -100,6 +100,8 @@ export function createClassicCoreBridge({
   getLocalToolHost = () => null,
   broadcast = null,
   onGoalPlanChanged = null,
+  onProjectBotConversationChanged = null,
+  onProjectBotHostStateChanged = null,
   prepareGoalWorkspace = null,
   runVisualVerification = null,
   compactionRegistry = null,
@@ -109,6 +111,16 @@ export function createClassicCoreBridge({
   const pendingPermissions = new Map();
   const activeGoals = new Set();
   const activeCompactions = new Map();
+  let projectBotHostActive = false;
+  let projectBotHostDesiredEnabled = false;
+  let botHostConfigureSeq = 0;
+  let botHostConfigureQueue = Promise.resolve();
+  let hostStatusRefreshTimer = null;
+  const botOwnedWorkspaces = new Set();
+  const botActivities = new Map();
+  const botAgentStatuses = new Map();
+  const botRecoveryStatus = new Map();
+  const botRecoveryAttention = new Map();
 
   function activeClient() {
     const client = typeof getClient === 'function' ? getClient() : null;
@@ -121,6 +133,99 @@ export function createClassicCoreBridge({
 
   function isAvailable() {
     return activeClient() !== null;
+  }
+
+  function clearBotHostCaches() {
+    botOwnedWorkspaces.clear();
+    botActivities.clear();
+    botAgentStatuses.clear();
+    botRecoveryStatus.clear();
+    botRecoveryAttention.clear();
+  }
+
+  function applyMapSnapshot(target, sourceObj, scopedWorkspaceId) {
+    const obj = sourceObj && typeof sourceObj === 'object' ? sourceObj : null;
+    if (scopedWorkspaceId) {
+      if (obj && Object.hasOwn(obj, scopedWorkspaceId)) {
+        target.set(scopedWorkspaceId, obj[scopedWorkspaceId]);
+      } else {
+        target.delete(scopedWorkspaceId);
+      }
+      return;
+    }
+    target.clear();
+    if (!obj) return;
+    for (const [key, value] of Object.entries(obj)) {
+      if (key) target.set(key, value);
+    }
+  }
+
+  function applyProjectBotHostStatus(snapshot, scopedWorkspaceId = null) {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    projectBotHostActive = snapshot.enabled === true;
+    if (Array.isArray(snapshot.ownedWorkspaces)) {
+      botOwnedWorkspaces.clear();
+      for (const id of snapshot.ownedWorkspaces) {
+        if (typeof id === 'string' && id) botOwnedWorkspaces.add(id);
+      }
+    }
+    applyMapSnapshot(botActivities, snapshot.activities, scopedWorkspaceId);
+    applyMapSnapshot(botAgentStatuses, snapshot.agentStatuses, scopedWorkspaceId);
+    applyMapSnapshot(botRecoveryStatus, snapshot.recoveryStatus, scopedWorkspaceId);
+    applyMapSnapshot(botRecoveryAttention, snapshot.recoveryAttention, scopedWorkspaceId);
+  }
+
+  function clearProjectBotHostState(reason = 'reset') {
+    if (hostStatusRefreshTimer) {
+      clearTimeout(hostStatusRefreshTimer);
+      hostStatusRefreshTimer = null;
+    }
+    const wasActive = projectBotHostActive || projectBotHostDesiredEnabled;
+    projectBotHostActive = false;
+    projectBotHostDesiredEnabled = false;
+    clearBotHostCaches();
+    if (wasActive) {
+      onProjectBotHostStateChanged?.({ active: false, reason });
+    }
+  }
+
+  function scheduleProjectBotHostStatusRefresh() {
+    if (!projectBotHostActive || !isAvailable() || hostStatusRefreshTimer) return;
+    hostStatusRefreshTimer = setTimeout(() => {
+      hostStatusRefreshTimer = null;
+      if (projectBotHostActive && isAvailable()) {
+        void projectBotHostStatus().catch(() => {});
+      }
+    }, 150);
+    hostStatusRefreshTimer.unref?.();
+  }
+
+  function isProjectBotHostActive() {
+    return Boolean(isAvailable() && projectBotHostActive);
+  }
+
+  function isProjectBotHostOwnedOrPending() {
+    return Boolean(isAvailable() && (projectBotHostActive || projectBotHostDesiredEnabled));
+  }
+
+  function isProjectBotWorkspaceOnline(workspaceId) {
+    return Boolean(isProjectBotHostActive() && typeof workspaceId === 'string' && botOwnedWorkspaces.has(workspaceId));
+  }
+
+  function readProjectBotActivity(workspaceId) {
+    return typeof workspaceId === 'string' ? (botActivities.get(workspaceId) ?? null) : null;
+  }
+
+  function readProjectBotAgentStatus(workspaceId) {
+    return typeof workspaceId === 'string' ? botAgentStatuses.get(workspaceId) : undefined;
+  }
+
+  function readProjectBotRecovery(workspaceId) {
+    return typeof workspaceId === 'string' ? (botRecoveryStatus.get(workspaceId) ?? null) : null;
+  }
+
+  function needsProjectBotRecoveryAttention(workspaceId) {
+    return typeof workspaceId === 'string' && botRecoveryAttention.get(workspaceId) === true;
   }
 
   function canHandleChatSend({ mode = 'chat', hasResourceFeedback = false } = {}) {
@@ -176,6 +281,55 @@ export function createClassicCoreBridge({
   }
 
   function handleNotification(method, params) {
+    if (method === 'project.bot.changed') {
+      const workspaceIds = Array.isArray(params?.workspaceIds)
+        ? params.workspaceIds.filter((id) => typeof id === 'string' && id)
+        : [];
+      if (workspaceIds.length > 0) {
+        broadcast?.('project-agent:changed', { workspaceIds });
+      }
+      scheduleProjectBotHostStatusRefresh();
+      return;
+    }
+
+    if (method === 'project.bot.conversationChanged') {
+      const workspaceIds = Array.isArray(params?.workspaceIds)
+        ? params.workspaceIds.filter((id) => typeof id === 'string' && id)
+        : (typeof params?.workspaceId === 'string' && params.workspaceId ? [params.workspaceId] : []);
+      if (workspaceIds.length > 0) {
+        broadcast?.('project-agent:conversation-changed', { workspaceIds });
+      }
+      onProjectBotConversationChanged?.({
+        workspaceId: typeof params?.workspaceId === 'string' ? params.workspaceId : (workspaceIds[0] ?? ''),
+        conversationId: typeof params?.conversationId === 'string' ? params.conversationId : null,
+      });
+      return;
+    }
+
+    if (method === 'project.bot.activity') {
+      const activity = params?.activity && typeof params.activity === 'object'
+        ? params.activity
+        : (params && typeof params === 'object' && typeof params.workspaceId === 'string' ? params : null);
+      const workspaceId = typeof params?.workspaceId === 'string'
+        ? params.workspaceId
+        : (typeof activity?.workspaceId === 'string' ? activity.workspaceId : '');
+      if (workspaceId && activity) {
+        botActivities.set(workspaceId, activity);
+      }
+      if (workspaceId && typeof params?.status === 'string') {
+        botAgentStatuses.set(workspaceId, params.status);
+      }
+      if (activity) {
+        broadcast?.('project-agent:activity', activity);
+      }
+      return;
+    }
+
+    if (method === 'project.bot.obligationGrants') {
+      broadcast?.('project-agent:obligation-grants', params ?? {});
+      return;
+    }
+
     if (method === 'goalPlans:changed') {
       if (typeof onGoalPlanChanged === 'function') {
         onGoalPlanChanged(params);
@@ -341,6 +495,7 @@ export function createClassicCoreBridge({
   }
 
   function handleUnexpectedExit() {
+    clearProjectBotHostState('unexpected_exit');
     activeGoals.clear();
     for (const [conversationId, streamId] of activeCompactions.entries()) {
       compactionRegistry?.endCompaction?.({ conversationId, streamId });
@@ -1088,8 +1243,134 @@ export function createClassicCoreBridge({
     return requireClient().request('project.bot.getSession', params || {});
   }
 
+  function configureProjectBotHost(params = {}) {
+    const mySeq = ++botHostConfigureSeq;
+    projectBotHostDesiredEnabled = params?.enabled === true;
+    const run = async () => {
+      try {
+        const res = await requireClient().request('project.bot.hostConfigure', params || {}, { timeoutMs: 60_000 });
+        applyProjectBotHostStatus(res, null);
+        if (res?.enabled !== true) {
+          if (mySeq === botHostConfigureSeq) {
+            projectBotHostDesiredEnabled = false;
+          }
+          clearBotHostCaches();
+        }
+        onProjectBotHostStateChanged?.({ active: projectBotHostActive, reason: 'configure' });
+        return res;
+      } catch (err) {
+        if (mySeq === botHostConfigureSeq) {
+          projectBotHostDesiredEnabled = projectBotHostActive;
+        }
+        throw err;
+      }
+    };
+    const next = botHostConfigureQueue.then(run, run);
+    botHostConfigureQueue = next.catch(() => {});
+    return next;
+  }
+
+  async function projectBotHostStatus(params = {}) {
+    const res = await requireClient().request('project.bot.hostStatus', params || {});
+    applyProjectBotHostStatus(res, typeof params?.workspaceId === 'string' ? params.workspaceId : null);
+    return res;
+  }
+
+  async function projectBotCreate(params = {}) {
+    const res = await requireClient().request('project.bot.create', params || {}, { timeoutMs: 60_000 });
+    if (res?.ok && res?.workspaceId && projectBotHostActive) {
+      botOwnedWorkspaces.add(res.workspaceId);
+      botRecoveryStatus.set(res.workspaceId, { status: 'ready' });
+      void projectBotHostStatus({ workspaceId: res.workspaceId }).catch(() => {});
+    }
+    return res;
+  }
+
+  async function projectBotDelete(params = {}) {
+    const res = await requireClient().request('project.bot.delete', params || {}, { timeoutMs: 60_000 });
+    if ((res?.ok || res?.archived) && typeof params?.workspaceId === 'string') {
+      botOwnedWorkspaces.delete(params.workspaceId);
+      botActivities.delete(params.workspaceId);
+      botAgentStatuses.delete(params.workspaceId);
+      botRecoveryStatus.delete(params.workspaceId);
+      botRecoveryAttention.delete(params.workspaceId);
+    }
+    return res;
+  }
+
+  async function projectBotSubmitInput(params = {}) {
+    return requireClient().request('project.bot.submitInput', params || {});
+  }
+
+  async function projectBotStopResponse(params = {}) {
+    return requireClient().request('project.bot.stopResponse', params || {});
+  }
+
+  async function projectBotCancelSession(params = {}) {
+    return requireClient().request('project.bot.cancelSession', params || {});
+  }
+
+  async function projectBotResumeSession(params = {}) {
+    return requireClient().request('project.bot.resumeSession', params || {});
+  }
+
+  async function projectBotDecideObligation(params = {}) {
+    return requireClient().request('project.bot.decideObligation', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotRequestClaimClosure(params = {}) {
+    return requireClient().request('project.bot.requestClaimClosure', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotDecideApproval(params = {}) {
+    return requireClient().request('project.bot.decideApproval', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotStartFamiliarize(params = {}) {
+    return requireClient().request('project.bot.startFamiliarize', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotConfirmResult(params = {}) {
+    return requireClient().request('project.bot.confirmResult', params || {});
+  }
+
+  async function projectBotAcceptReadme(params = {}) {
+    return requireClient().request('project.bot.acceptReadme', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotRetry(params = {}) {
+    return requireClient().request('project.bot.retry', params || {}, { timeoutMs: 60_000 });
+  }
+
+  async function projectBotTakeoverHost(params = {}) {
+    const res = await requireClient().request('project.bot.takeoverHost', params || {});
+    if (res?.ok && typeof params?.workspaceId === 'string') {
+      if (res.acquired || res.alreadyHost) {
+        botOwnedWorkspaces.add(params.workspaceId);
+      }
+      scheduleProjectBotHostStatusRefresh();
+    }
+    return res;
+  }
+
+  async function projectBotRecovery(params = {}) {
+    const res = await requireClient().request('project.bot.recovery', params || {}, { timeoutMs: 60_000 });
+    if (res?.ok && typeof params?.workspaceId === 'string' && params?.action !== 'inspect') {
+      botRecoveryStatus.set(params.workspaceId, { status: 'ready' });
+      botRecoveryAttention.set(params.workspaceId, false);
+    }
+    return res;
+  }
+
   return Object.freeze({
     isAvailable,
+    isProjectBotHostActive,
+    isProjectBotHostOwnedOrPending,
+    isProjectBotWorkspaceOnline,
+    readProjectBotActivity,
+    readProjectBotAgentStatus,
+    readProjectBotRecovery,
+    needsProjectBotRecoveryAttention,
     canHandleChatSend,
     canHandleGoalPlan,
     ownsGoalPlan,
@@ -1185,6 +1466,23 @@ export function createClassicCoreBridge({
     projectBotReadConversation,
     projectBotListSessions,
     projectBotGetSession,
+    configureProjectBotHost,
+    projectBotHostStatus,
+    projectBotCreate,
+    projectBotDelete,
+    projectBotSubmitInput,
+    projectBotStopResponse,
+    projectBotCancelSession,
+    projectBotResumeSession,
+    projectBotDecideObligation,
+    projectBotRequestClaimClosure,
+    projectBotDecideApproval,
+    projectBotStartFamiliarize,
+    projectBotConfirmResult,
+    projectBotAcceptReadme,
+    projectBotRetry,
+    projectBotTakeoverHost,
+    projectBotRecovery,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

@@ -419,7 +419,7 @@ export function registerDesktopProjectAgent({
       return { ok: true };
     },
   });
-  if (runtimeEnabled()) {
+  if (runtimeEnabled() && !classicCoreBridge?.isProjectBotHostActive?.()) {
     try {
       const settings = typeof getSettings === 'function' ? getSettings() : null;
       const workspaces = Array.isArray(settings?.workspaces) ? settings.workspaces : [];
@@ -597,10 +597,22 @@ export function registerDesktopProjectAgent({
     sessions: supervisor,
     listModels,
     readModelRouting: () => readRuntimePolicy()?.modelRouting,
-    readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
-    readRecovery: workspaceId => host.recovery.status(workspaceId),
+    readActivity: workspaceId => (
+      classicCoreBridge?.isProjectBotHostActive?.()
+        ? classicCoreBridge.readProjectBotActivity(workspaceId)
+        : (host.runnerFor(workspaceId)?.activity() || null)
+    ),
+    readRecovery: workspaceId => (
+      classicCoreBridge?.isProjectBotHostActive?.()
+        ? classicCoreBridge.readProjectBotRecovery(workspaceId)
+        : host.recovery.status(workspaceId)
+    ),
     readPersistedObligationGrants: workspaceId => readPersistedObligationGrants({ rootDir: runtimeRoot, workspaceId }),
-    obligationBinding: workspaceId => workBudgetBinding(workspaceId) ? 'registered' : 'absent',
+    obligationBinding: workspaceId => (
+      classicCoreBridge?.isProjectBotHostActive?.()
+        ? (classicCoreBridge.isProjectBotWorkspaceOnline(workspaceId) ? 'registered' : 'absent')
+        : (workBudgetBinding(workspaceId) ? 'registered' : 'absent')
+    ),
     openObligationRuntime: async workspaceId => {
       const synced = await host?.sync?.([workspaceId]);
       const failed = synced?.outcomes?.find(row => row.workspaceId === workspaceId && row.ok === false);
@@ -619,6 +631,8 @@ export function registerDesktopProjectAgent({
     approvals: approvalStore,
     readEvidenceBody,
     bindWorkspace: (sender) => workspace.addWorkspace(sender),
+    removeWorkspace: (folder) => workspace.removeWorkspace(folder),
+    moveToTrash: (folder) => shell.trashItem(folder),
     rememberWorkspace({ workspaceId, path: folder, name }) {
       const settings = getSettings() || {};
       const workspaces = Array.isArray(settings.workspaces) ? [...settings.workspaces] : [];
@@ -651,8 +665,16 @@ export function registerDesktopProjectAgent({
     wake: (workspaceId) => {
       void host.sync([workspaceId]).catch(() => {});
     },
-    agentOnline: (workspaceId) => typeof holdsLease === 'function' && holdsLease(workspaceId) === true,
-    readAgentStatus: (workspaceId) => host.runnerFor(workspaceId)?.status(),
+    agentOnline: (workspaceId) => (
+      classicCoreBridge?.isProjectBotHostActive?.()
+        ? classicCoreBridge.isProjectBotWorkspaceOnline(workspaceId)
+        : (typeof holdsLease === 'function' && holdsLease(workspaceId) === true)
+    ),
+    readAgentStatus: (workspaceId) => (
+      classicCoreBridge?.isProjectBotHostActive?.()
+        ? classicCoreBridge.readProjectBotAgentStatus(workspaceId)
+        : host.runnerFor(workspaceId)?.status()
+    ),
     onViewing,
     broadcast,
     conversationStore,
@@ -726,7 +748,18 @@ export function registerDesktopProjectAgent({
       submitInput: (input) => {
         try {
           const saved = inputQueue.submitInput(input);
-          void host.sync([saved.workspaceId]).catch(() => {});
+          if (classicCoreBridge?.isProjectBotHostActive?.()) {
+            void classicCoreBridge.projectBotSubmitInput({
+              workspaceId: saved.workspaceId,
+              inputId: saved.inputId,
+              surface: saved.surface || 'desktop',
+              text: saved.text || '',
+              ...(saved.attachments?.length ? { attachments: saved.attachments } : {}),
+              ...(saved.attachmentRefs?.length ? { attachmentRefs: saved.attachmentRefs } : {}),
+            }).catch(() => {});
+          } else {
+            void host.sync([saved.workspaceId]).catch(() => {});
+          }
           return saved;
         } catch (error) {
           return { ok: false, message: error instanceof Error ? error.message : String(error) };

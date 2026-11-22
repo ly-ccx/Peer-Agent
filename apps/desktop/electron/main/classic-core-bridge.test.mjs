@@ -14,9 +14,11 @@ import { createAutomationStore } from './automation-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
 import {
   createBotProfileStore,
+  createHostLease,
   createMemoryStore,
   createObjectiveStore,
   createProjectInputDraftStore,
+  listBotWorkspaceIds,
 } from '@peer-agent/runtime-node';
 import { createApprovalStore, createGoalPlanStore } from '@peer-agent/runtime-node/storage';
 import { createProjectRegistry } from '@peer-agent/runtime-node/providers';
@@ -2925,6 +2927,400 @@ test('C4b-2b-2b-1 readConversation (4 modes + cards), listSessions, and getSessi
     assert.equal(isolatedInteractions.messages.some((m) => m.id === 'm-turn-1'), false);
   } finally {
     appService.dispose();
+    await client.dispose();
+    cleanup();
+  }
+});
+
+test('E2E: C4b-2b-2b-2b Desktop cutover owns leases exclusively in Rust, routes all mutations + 4 push streams, and completes create -> chat -> stop/retry -> recovery -> delete', async () => {
+  const { root, dataHome, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+
+  let slowRes = null;
+  let slowHangRemaining = true;
+  let resolveSlowArrived = null;
+  const slowArrived = new Promise((resolve) => { resolveSlowArrived = resolve; });
+  const mockServer = await startMockSseServer(({ body, res }) => {
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const joined = JSON.stringify(messages);
+    if (joined.includes('slow_stop_turn') && slowHangRemaining) {
+      slowHangRemaining = false;
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      });
+      res.write(`data: ${JSON.stringify({
+        id: 'bot-slow',
+        choices: [{ index: 0, delta: { role: 'assistant', content: 'working before stop...' }, finish_reason: null }],
+      })}\n\n`);
+      slowRes = res;
+      resolveSlowArrived?.();
+      res.on('close', () => {
+        if (slowRes === res) slowRes = null;
+      });
+      return;
+    }
+    if (joined.includes('slow_stop_turn')) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(sseText('retried', 'Retried reply ok.'));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(sseText('thinking cutover', 'Reply from Rust Bot Host.'));
+  });
+
+  const broadcasts = [];
+  const notifierHooks = [];
+  const hostStateEvents = [];
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: (channel, payload) => broadcasts.push({ channel, payload }),
+    onProjectBotConversationChanged: (payload) => notifierHooks.push(payload),
+    onProjectBotHostStateChanged: (payload) => hostStateEvents.push(payload),
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  // JS hostLeases gated identically to main.mjs — must hold zero leases while Rust Bot Host is active.
+  const jsHostLeases = createHostLease({
+    rootDir: runtimeRoot,
+    hostId: 'js-desktop-cutover-test',
+    surface: 'desktop',
+    pid: process.pid,
+    heartbeatMs: 60_000,
+    projectAgentEnabled: () => !bridge.isProjectBotHostOwnedOrPending(),
+    botWorkspaceIds: () => listBotWorkspaceIds(path.join(dataHome, 'projects')),
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-cutover',
+      PEER_MODEL_ID: 'e2e-mock-cutover',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-cutover-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const mustNotBeCalled = (label) => () => {
+    throw new Error(`JS fallback ${label} must not be called when Rust ProjectHostRuntime is active`);
+  };
+  const trashedPaths = [];
+  const removedPaths = [];
+  const remembered = [];
+
+  const appService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    directory: {
+      list: mustNotBeCalled('directory.list'),
+      get: mustNotBeCalled('directory.get'),
+      readConversation: mustNotBeCalled('directory.readConversation'),
+      hasActiveBot: mustNotBeCalled('directory.hasActiveBot'),
+    },
+    lifecycle: {
+      ensureBot: mustNotBeCalled('lifecycle.ensureBot'),
+      startFamiliarize: mustNotBeCalled('lifecycle.startFamiliarize'),
+      acceptReadme: mustNotBeCalled('lifecycle.acceptReadme'),
+      deleteBot: mustNotBeCalled('lifecycle.deleteBot'),
+    },
+    inputQueue: {
+      submitInput: mustNotBeCalled('inputQueue.submitInput'),
+    },
+    sessions: {
+      list: mustNotBeCalled('sessions.list'),
+      get: mustNotBeCalled('sessions.get'),
+      cancel: mustNotBeCalled('sessions.cancel'),
+      resume: mustNotBeCalled('sessions.resume'),
+      confirmResult: mustNotBeCalled('sessions.confirmResult'),
+      confirmCompletion: mustNotBeCalled('sessions.confirmCompletion'),
+      inspectExecutionObligations: mustNotBeCalled('sessions.inspectExecutionObligations'),
+      requestObligationAuthorization: mustNotBeCalled('sessions.requestObligationAuthorization'),
+      confirmObligationGrant: mustNotBeCalled('sessions.confirmObligationGrant'),
+      revokeObligationGrant: mustNotBeCalled('sessions.revokeObligationGrant'),
+    },
+    approvals: {
+      list: mustNotBeCalled('approvals.list'),
+      append: mustNotBeCalled('approvals.append'),
+    },
+    stopResponseTurn: mustNotBeCalled('stopResponseTurn'),
+    retryTurn: mustNotBeCalled('retryTurn'),
+    requestTakeover: mustNotBeCalled('requestTakeover'),
+    recoveryControl: {
+      needsAttention: () => false,
+      execute: mustNotBeCalled('recoveryControl.execute'),
+    },
+    readActivity: (wsId) => bridge.readProjectBotActivity(wsId),
+    readRecovery: (wsId) => bridge.readProjectBotRecovery(wsId),
+    agentOnline: (wsId) => bridge.isProjectBotWorkspaceOnline(wsId),
+    readAgentStatus: (wsId) => bridge.readProjectBotAgentStatus(wsId),
+    createManaged: (name) => {
+      const folder = path.join(root, 'managed', name);
+      mkdirSync(folder, { recursive: true });
+      const entry = registry.ensureForPath(folder);
+      return { ok: true, workspace: entry, path: folder, name };
+    },
+    rememberWorkspace: (info) => remembered.push(info),
+    moveToTrash: async (folder) => {
+      trashedPaths.push(folder);
+      rmSync(folder, { recursive: true, force: true });
+      return { ok: true };
+    },
+    removeWorkspace: async (folder) => {
+      removedPaths.push(folder);
+      return { ok: true };
+    },
+    debounceMs: 5,
+  });
+
+  async function waitUntil(predicate, label, timeoutMs = 8_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const val = await predicate();
+      if (val) return val;
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    throw new Error(`Timed out waiting for ${label}`);
+  }
+
+  try {
+    await client.start();
+    const configured = await bridge.configureProjectBotHost({
+      enabled: true,
+      proactivity: 'standard',
+      learnPreferences: true,
+      heartbeatIntervalMs: 100,
+    });
+    assert.equal(configured.ok, true);
+    assert.equal(configured.enabled, true);
+    assert.equal(bridge.isProjectBotHostActive(), true);
+    assert.equal(hostStateEvents.some((e) => e.active === true && e.reason === 'configure'), true);
+
+    jsHostLeases.pulse();
+    assert.deepEqual(jsHostLeases.heldWorkspaceIds(), []);
+
+    // 1. Create managed bot via Rust (blank repo -> synchronous RESPONSIBILITY_QUESTION)
+    const created = await appService.create({ kind: 'managed', name: 'Cutover Bot' });
+    assert.equal(created.ok, true);
+    const ws = created.workspaceId;
+    assert.ok(ws);
+    assert.equal(created.profile.managed, true);
+    assert.equal(created.familiarize.kind, 'blank');
+    assert.equal(remembered.length, 1);
+    assert.equal(remembered[0].workspaceId, ws);
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), true);
+
+    // JS hostLeases still holds ZERO leases while Rust holds host.lease on disk
+    jsHostLeases.pulse();
+    assert.deepEqual(jsHostLeases.heldWorkspaceIds(), []);
+    const leaseOnDisk = JSON.parse(readFileSync(path.join(runtimeRoot, ws, 'host.lease'), 'utf8'));
+    assert.equal(leaseOnDisk.surface, 'desktop');
+    assert.equal(leaseOnDisk.hostId, configured.hostId);
+
+    // 2. Submit input -> live SSE bot reply -> push streams (activity unwrapped + conversationChanged wrapped)
+    const sent = await appService.submitInput({
+      workspaceId: ws,
+      inputId: 'in-cutover-1',
+      text: 'hello rust cutover',
+    });
+    assert.equal(sent.ok, true);
+
+    await waitUntil(async () => {
+      const conv = await appService.readConversation({ workspaceId: ws });
+      return conv.ok && conv.messages.some((m) => String(m.content || '').includes('Reply from Rust Bot Host.')) ? conv : null;
+    }, 'bot reply persisted via Rust');
+
+    const activityEvents = broadcasts.filter((e) => e.channel === 'project-agent:activity');
+    assert.ok(activityEvents.length >= 1);
+    assert.equal(activityEvents[0].payload.workspaceId, ws);
+    assert.equal(typeof activityEvents[0].payload.turnId, 'string');
+    assert.equal(Number.isFinite(activityEvents[0].payload.revision), true);
+
+    const convEvents = broadcasts.filter((e) => e.channel === 'project-agent:conversation-changed');
+    assert.ok(convEvents.some((e) => Array.isArray(e.payload?.workspaceIds) && e.payload.workspaceIds.includes(ws)));
+    assert.ok(notifierHooks.some((n) => n.workspaceId === ws));
+
+    const convSnap = await appService.readConversation({ workspaceId: ws });
+    assert.ok(convSnap.activity && convSnap.activity.workspaceId === ws);
+    const listed = await appService.list();
+    assert.equal(listed.ok, true);
+    const botRow = listed.items.find((item) => item.workspaceId === ws);
+    assert.ok(botRow && ['idle', 'thinking', 'waiting_provider', 'error'].includes(botRow.state.agentStatus));
+
+    const firstTurnId = await waitUntil(() => {
+      const act = bridge.readProjectBotActivity(ws);
+      return act && act.turnId && Boolean(act.finishedAt) ? act.turnId : null;
+    }, 'first turn activity finished');
+
+    // 3. Stop in-flight turn -> Retry turn end-to-end
+    const slowSubmit = await appService.submitInput({
+      workspaceId: ws,
+      inputId: 'in-cutover-slow',
+      text: 'slow_stop_turn please',
+    });
+    assert.equal(slowSubmit.ok, true);
+
+    await slowArrived;
+    const activeTurnId = await waitUntil(() => {
+      const act = bridge.readProjectBotActivity(ws);
+      return act && !act.finishedAt && act.turnId && act.turnId !== firstTurnId && act.phase !== 'done'
+        ? act.turnId
+        : null;
+    }, 'active streaming turnId');
+
+    const stopped = await appService.stopResponse({ workspaceId: ws, turnId: activeTurnId });
+    assert.equal(stopped.ok, true);
+    assert.equal(stopped.stopping, true);
+
+    await waitUntil(() => {
+      const act = bridge.readProjectBotActivity(ws);
+      return act && act.turnId === activeTurnId && Boolean(act.finishedAt);
+    }, 'stopped turn finished');
+
+    const retried = await appService.retry({ workspaceId: ws, turnId: activeTurnId });
+    assert.equal(retried.ok, true);
+
+    await waitUntil(async () => {
+      const conv = await appService.readConversation({ workspaceId: ws });
+      return conv.ok && conv.messages.some((m) => String(m.content || '').includes('Retried reply ok.'));
+    }, 'retried turn reply persisted');
+
+    // 4. Takeover (alreadyHost) + Recovery inspect (fresh workspace with no coordination-v2/fork yet)
+    const takeover = await appService.takeoverHost({ workspaceId: ws });
+    assert.equal(takeover.ok, true);
+    assert.equal(takeover.alreadyHost, true);
+
+    const rec = await appService.controlRecovery({ workspaceId: ws, action: 'inspect' });
+    assert.equal(rec.ok, false);
+    assert.ok(['coordination_repair_no_fork', 'coordination_repair_path_invalid'].includes(rec.code));
+
+    // 5. Two-phase Delete (confirmManaged required -> moveToTrash + removeWorkspace -> Rust finalize + lease release)
+    const needConfirm = await appService.deleteBot({ workspaceId: ws, confirmManaged: false });
+    assert.equal(needConfirm.ok, false);
+    assert.equal(needConfirm.code, 'CONFIRM_REQUIRED');
+
+    const deleted = await appService.deleteBot({ workspaceId: ws, confirmManaged: true });
+    assert.equal(deleted.ok, true);
+    assert.equal(deleted.archived, true);
+    assert.deepEqual(trashedPaths, [created.path]);
+    assert.deepEqual(removedPaths, [created.path]);
+    assert.equal(existsSync(created.path), false);
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), false);
+    assert.equal(existsSync(path.join(runtimeRoot, ws, 'host.lease')), false);
+    const archivedProfile = profileStore.read(ws);
+    assert.equal(archivedProfile.status, 'archived');
+    assert.equal(archivedProfile.deletionCleanup ?? null, null);
+  } finally {
+    if (slowRes) {
+      try {
+        slowRes.end();
+        slowRes.destroy();
+      } catch {}
+    }
+    jsHostLeases.close();
+    appService.dispose();
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});
+
+test('E2E: C4b-2b-2b-2b hostConfigure(enabled:false), obligationGrants push, and unexpected exit TS fallback release', async () => {
+  const { dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const ws = registry.ensureForPath(workspace).workspaceId;
+
+  const broadcasts = [];
+  const stateChanges = [];
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: (channel, payload) => broadcasts.push({ channel, payload }),
+    onProjectBotHostStateChanged: (payload) => stateChanges.push(payload),
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const jsHostLeases = createHostLease({
+    rootDir: runtimeRoot,
+    hostId: 'js-desktop-fallback-test',
+    surface: 'desktop',
+    pid: process.pid,
+    heartbeatMs: 60_000,
+    projectAgentEnabled: () => !bridge.isProjectBotHostOwnedOrPending(),
+    botWorkspaceIds: () => listBotWorkspaceIds(path.join(dataHome, 'projects')),
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-fallback-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: () => {
+      bridge.handleUnexpectedExit();
+      jsHostLeases.pulse();
+    },
+    maxRestarts: 0,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    await bridge.configureProjectBotHost({
+      enabled: true,
+      heartbeatIntervalMs: 100,
+      workspaces: [{ path: workspace, name: 'Fallback Bot' }],
+    });
+    assert.equal(bridge.isProjectBotHostActive(), true);
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), true);
+    jsHostLeases.pulse();
+    assert.deepEqual(jsHostLeases.heldWorkspaceIds(), []);
+
+    // Verify project.bot.obligationGrants push translation
+    bridge.handleNotification('project.bot.obligationGrants', { workspaceId: ws, grantId: 'g-1', decision: 'confirm' });
+    assert.deepEqual(
+      broadcasts.find((b) => b.channel === 'project-agent:obligation-grants')?.payload,
+      { workspaceId: ws, grantId: 'g-1', decision: 'confirm' },
+    );
+
+    // Disable host cleanly -> Rust releases lease, JS can acquire via TS fallback
+    const disabled = await bridge.configureProjectBotHost({ enabled: false });
+    assert.equal(disabled.enabled, false);
+    assert.equal(bridge.isProjectBotHostActive(), false);
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), false);
+    jsHostLeases.pulse();
+    assert.deepEqual(jsHostLeases.heldWorkspaceIds(), [ws]);
+    jsHostLeases.release(ws);
+
+    // Re-enable in Rust, then simulate unexpected exit reset
+    await bridge.configureProjectBotHost({ enabled: true, heartbeatIntervalMs: 100 });
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), true);
+    bridge.handleNotification('project.bot.activity', {
+      workspaceId: ws,
+      activity: { workspaceId: ws, conversationId: 'c1', turnId: 't1', revision: 1, startedAt: '2026-11-22T00:00:00.000Z', replyTo: [], phase: 'thinking', replyText: '' },
+      status: 'thinking',
+    });
+    assert.equal(bridge.readProjectBotAgentStatus(ws), 'thinking');
+
+    bridge.handleUnexpectedExit();
+    assert.equal(bridge.isProjectBotHostActive(), false);
+    assert.equal(bridge.isProjectBotHostOwnedOrPending(), false);
+    assert.equal(bridge.isProjectBotWorkspaceOnline(ws), false);
+    assert.equal(bridge.readProjectBotActivity(ws), null);
+    assert.equal(bridge.readProjectBotAgentStatus(ws), undefined);
+    assert.ok(stateChanges.some((e) => e.active === false && e.reason === 'unexpected_exit'));
+  } finally {
+    jsHostLeases.close();
     await client.dispose();
     cleanup();
   }

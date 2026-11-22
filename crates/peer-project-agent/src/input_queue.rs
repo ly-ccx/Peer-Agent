@@ -239,24 +239,26 @@ impl InputQueue {
             return Err(ProjectError::code("INVALID_SURFACE"));
         }
         let text = request.text.trim();
-        let normalized_attachments = if request.attachments.is_empty() {
-            None
-        } else {
-            Some(crate::attachments::normalize_input_attachments(
-                &request.attachments,
-            )?)
-        };
-        if text.is_empty() && request.attachment_refs.is_empty() && normalized_attachments.is_none()
-        {
-            return Err(ProjectError::code("EMPTY_INPUT"));
-        }
-        if text.len() > MAX_TEXT_BYTES {
-            return Err(ProjectError::code("INPUT_TOO_LARGE"));
-        }
         self.with_lock(ws, || {
             let existing = self.read_inputs_unlocked(ws)?;
             if let Some(found) = existing.into_iter().find(|r| r.input_id == input_id) {
                 return Ok(found);
+            }
+            let normalized_attachments = if request.attachments.is_empty() {
+                None
+            } else {
+                Some(crate::attachments::normalize_input_attachments(
+                    &request.attachments,
+                )?)
+            };
+            if text.is_empty()
+                && request.attachment_refs.is_empty()
+                && normalized_attachments.is_none()
+            {
+                return Err(ProjectError::code("EMPTY_INPUT"));
+            }
+            if text.len() > MAX_TEXT_BYTES {
+                return Err(ProjectError::code("INPUT_TOO_LARGE"));
             }
             let history_ref =
                 optional_history_token(request.history_ref.as_deref()).map(Value::String);
@@ -854,5 +856,63 @@ mod tests {
             queue.diagnostic_snapshot("ws-h").unwrap_err().code,
             "CORRUPT_INPUT_QUEUE"
         );
+    }
+
+    #[test]
+    fn existing_input_id_returns_idempotently_even_with_empty_text() {
+        let dir = tempdir().unwrap();
+        let queue = InputQueue::new(dir.path());
+        let first = queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-idem",
+                input_id: "in-existing-1",
+                surface: "desktop",
+                text: "original",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: None,
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+
+        let re_submitted = queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-idem",
+                input_id: "in-existing-1",
+                surface: "desktop",
+                text: "",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: None,
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+        assert_eq!(re_submitted, first);
+
+        let err = queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-idem",
+                input_id: "in-brand-new",
+                surface: "desktop",
+                text: "",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: None,
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap_err();
+        assert_eq!(err.code, "EMPTY_INPUT");
     }
 }

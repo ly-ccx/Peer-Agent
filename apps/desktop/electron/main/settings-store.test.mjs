@@ -110,3 +110,21 @@ test('R5-03 reading metadata round-trips in existing workbench settings without 
   assert.equal(restored.localAccessLevel, 'ask'); assert.equal(restored.memory.enabled, false);
   assert.equal(restored.workbench.open, false);
 });
+
+test('merge invokes onChange with partial and next settings and isolates listener errors', () => {
+  const seen = [];
+  const store = createSettingsStore({
+    settingsFile,
+    onChange: (partial, next) => {
+      seen.push({ partial, shell: next.projectAgent?.shell });
+      if (partial.throwMe) throw new Error('boom');
+    },
+  });
+  store.merge({ schemaVersion: 3, projectAgent: { shell: 'classic' } });
+  const res = store.merge({ throwMe: true, appMode: 'work' });
+  assert.equal(res.appMode, 'work');
+  assert.deepEqual(seen, [
+    { partial: { schemaVersion: 3, projectAgent: { shell: 'classic' } }, shell: 'classic' },
+    { partial: { throwMe: true, appMode: 'work' }, shell: 'classic' },
+  ]);
+});

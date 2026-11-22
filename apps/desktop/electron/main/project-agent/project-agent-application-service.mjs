@@ -8,6 +8,7 @@ import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import {
   BOT_LEVELS,
   cleanDisplayName,
@@ -77,6 +78,8 @@ export function createProjectAgentApplicationService({
   bindWorkspace = null,
   rememberWorkspace = null,
   createManaged = null,
+  moveToTrash = null,
+  removeWorkspace = null,
   chooseAvatar = null,
   wake = null,
   onViewing = null,
@@ -153,6 +156,10 @@ export function createProjectAgentApplicationService({
 
   function open() {
     return enabled() === true;
+  }
+
+  function rustBotHostActive() {
+    return classicCoreBridge?.isProjectBotHostActive?.() === true;
   }
 
   function withAgentStatus(item) {
@@ -248,6 +255,23 @@ export function createProjectAgentApplicationService({
       if (typeof bindWorkspace !== 'function') return { ok: false, code: 'BIND_UNAVAILABLE' };
       const bound = await bindWorkspace(sender);
       if (!bound?.id) return { ok: false, code: 'CANCELLED' };
+      if (rustBotHostActive()) {
+        const created = await classicCoreBridge.projectBotCreate({
+          workspaceId: bound.id,
+          workspacePath: bound.path,
+          ...(bound.name ? { name: bound.name } : {}),
+          managed: false,
+          startFamiliarize: true,
+        });
+        if (!created?.ok) return created;
+        queueChanged(created.workspaceId || bound.id);
+        return {
+          ok: true,
+          workspaceId: created.workspaceId || bound.id,
+          profile: created.profile,
+          familiarize: created.familiarize ?? null,
+        };
+      }
       const bot = lifecycle.ensureBot(bound.id, { managed: false });
       if (!bot?.ok) return bot;
       const familiarize = await lifecycle.startFamiliarize?.(bound.id) ?? null;
@@ -265,6 +289,24 @@ export function createProjectAgentApplicationService({
           path: created.path,
           name: created.name,
         });
+      }
+      if (rustBotHostActive()) {
+        const res = await classicCoreBridge.projectBotCreate({
+          workspaceId,
+          workspacePath: created.path,
+          name: created.name,
+          managed: true,
+          startFamiliarize: true,
+        });
+        if (!res?.ok) return res;
+        queueChanged(res.workspaceId || workspaceId);
+        return {
+          ok: true,
+          workspaceId: res.workspaceId || workspaceId,
+          path: created.path,
+          profile: res.profile,
+          familiarize: res.familiarize ?? null,
+        };
       }
       const bot = lifecycle.ensureBot(workspaceId, { managed: true });
       if (!bot?.ok) return bot;
@@ -346,6 +388,59 @@ export function createProjectAgentApplicationService({
 
   async function deleteBot(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      const prep = await classicCoreBridge.projectBotDelete({
+        workspaceId: payload.workspaceId,
+        phase: 'prepare',
+        confirmManaged: payload.confirmManaged === true,
+      });
+      if (!prep?.ok || prep.reused === true) {
+        if (prep?.ok || prep?.archived) queueChanged(payload.workspaceId);
+        return prep;
+      }
+      const folder = prep.path || prep.profile?.deletionCleanup?.folder || '';
+      const trashPending = prep.profile?.deletionCleanup?.trashPending === true;
+      const removePending = prep.profile?.deletionCleanup?.removePending === true;
+      let fallbackCode = trashPending ? 'TRASH_FAILED' : 'REMOVE_FAILED';
+      try {
+        if (trashPending) {
+          if (!folder) throw Object.assign(new Error('folder missing'), { code: 'NOT_FOUND' });
+          if (typeof moveToTrash !== 'function') {
+            throw Object.assign(new Error('trash unavailable'), { code: 'TRASH_UNAVAILABLE' });
+          }
+          if (existsSync(folder)) {
+            const tr = await moveToTrash(folder);
+            if (tr?.ok === false) {
+              throw Object.assign(new Error(tr.message || 'trash failed'), { code: tr.code || 'TRASH_FAILED' });
+            }
+          }
+        }
+        fallbackCode = 'REMOVE_FAILED';
+        if (removePending && folder && typeof removeWorkspace === 'function') {
+          const rm = await removeWorkspace(folder);
+          if (rm?.ok === false) {
+            throw Object.assign(new Error(rm.message || 'remove failed'), { code: rm.code || 'REMOVE_FAILED' });
+          }
+        }
+        const finalized = await classicCoreBridge.projectBotDelete({
+          workspaceId: payload.workspaceId,
+          phase: 'finalize',
+          folderRemoved: true,
+        });
+        if (finalized?.ok || finalized?.archived) queueChanged(payload.workspaceId);
+        return finalized;
+      } catch (error) {
+        const cleanupError = typeof error?.code === 'string' && error.code ? error.code : fallbackCode;
+        const failed = await classicCoreBridge.projectBotDelete({
+          workspaceId: payload.workspaceId,
+          phase: 'finalize',
+          folderRemoved: false,
+          cleanupError,
+        });
+        queueChanged(payload.workspaceId);
+        return { ...failed, ...(error?.message ? { message: error.message } : {}) };
+      }
+    }
     const result = await lifecycle.deleteBot(payload.workspaceId, {
       confirmManaged: payload.confirmManaged === true,
     });
@@ -374,6 +469,66 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     try {
       const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo.trim() : '';
+      if (rustBotHostActive()) {
+        if (
+          Array.isArray(payload.resourceFeedback)
+          && payload.resourceFeedback.length > 0
+          && typeof inputQueue?.submitInput === 'function'
+        ) {
+          if (answerTo.startsWith('card:question:reply:') && typeof directory?.questionState === 'function') {
+            const existing = inputQueue.findSubmission?.(payload.workspaceId, payload.inputId);
+            if (existing) {
+              return classicCoreBridge.projectBotSubmitInput({
+                workspaceId: payload.workspaceId,
+                inputId: existing.inputId,
+                surface: existing.surface || payload.surface || 'desktop',
+                text: existing.text || '',
+                ...(answerTo ? { answerTo } : {}),
+              });
+            }
+            const answered = inputQueue.findAnswer?.(payload.workspaceId, answerTo);
+            if (answered || directory.questionState(payload.workspaceId, answerTo.slice('card:question:reply:'.length)) !== 'open') {
+              queueChanged(payload.workspaceId); queueConversation(payload.workspaceId);
+              return { ok: false, code: 'QUESTION_CLOSED' };
+            }
+          }
+          const persisted = inputQueue.submitInput({
+            workspaceId: payload.workspaceId,
+            inputId: payload.inputId,
+            surface: payload.surface || 'desktop',
+            text: payload.text,
+            anchorRefs: payload.anchorRefs,
+            quoteRefs: payload.quoteRefs,
+            attachmentRefs: payload.attachmentRefs,
+            attachments: payload.attachments,
+            resourceFeedback: payload.resourceFeedback,
+            createdAt: payload.createdAt,
+            ...(answerTo ? { answerTo } : {}),
+          });
+          return classicCoreBridge.projectBotSubmitInput({
+            workspaceId: payload.workspaceId,
+            inputId: persisted.inputId,
+            surface: persisted.surface || 'desktop',
+            text: persisted.text || '',
+            ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
+            ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
+            ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
+            ...(payload.attachments ? { attachments: payload.attachments } : {}),
+            ...(answerTo ? { answerTo } : {}),
+          });
+        }
+        return classicCoreBridge.projectBotSubmitInput({
+          workspaceId: payload.workspaceId,
+          ...(payload.inputId ? { inputId: payload.inputId } : {}),
+          surface: payload.surface || 'desktop',
+          text: payload.text,
+          ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
+          ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
+          ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
+          ...(payload.attachments ? { attachments: payload.attachments } : {}),
+          ...(answerTo ? { answerTo } : {}),
+        });
+      }
       if (answerTo.startsWith('card:question:reply:') && typeof directory.questionState === 'function') {
         const existing = inputQueue.findSubmission?.(payload.workspaceId, payload.inputId);
         if (existing) return { ok: true, input: existing, delivery: 'queued' };
@@ -440,7 +595,11 @@ export function createProjectAgentApplicationService({
         : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
           ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
     const decorate = page => {
-      page = { ...page, recoveryAttention: recoveryControl?.needsAttention?.(payload.workspaceId) === true };
+      const recoveryAttention = rustBotHostActive()
+        ? (classicCoreBridge.needsProjectBotRecoveryAttention?.(payload.workspaceId) === true
+          || recoveryControl?.needsAttention?.(payload.workspaceId) === true)
+        : (recoveryControl?.needsAttention?.(payload.workspaceId) === true);
+      page = { ...page, recoveryAttention };
       const status = readRecovery(payload.workspaceId);
       const recovery = status?.status === 'failed' ? projectBotRecoveryStatus(status.error, status.phase)
         : !page?.ok && page?.code?.startsWith('coordination_') ? projectBotRecoveryStatus(page.code) : null;
@@ -454,6 +613,9 @@ export function createProjectAgentApplicationService({
   function stopResponse(payload = {}) {
     if (!open()) return disabled();
     if (typeof payload.workspaceId !== 'string' || typeof payload.turnId !== 'string' || !payload.turnId || payload.turnId.length > 200) return { ok: false, code: 'INVALID_INPUT' };
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotStopResponse(payload);
+    }
     if (!directory.get(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
     return stopResponseTurn?.(payload) || { ok: false, code: 'HOST_OFFLINE' };
   }
@@ -632,6 +794,18 @@ export function createProjectAgentApplicationService({
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
     const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
     if (!workspaceId || !sessionId) return { ok: false, code: 'invalid_input' };
+    if (rustBotHostActive()) {
+      const requested = await classicCoreBridge.projectBotRequestClaimClosure({ workspaceId, sessionId });
+      appendObligationLog({
+        event: 'request_claim_closure',
+        workspaceId,
+        sessionId,
+        ok: requested?.ok === true,
+        code: requested?.ok === true ? null : requested?.error || requested?.code || 'request_failed',
+        grantId: requested?.grantId || null,
+      });
+      return requested;
+    }
     if (typeof sessions?.inspectExecutionObligations !== 'function' || typeof sessions?.requestObligationAuthorization !== 'function') {
       return { ok: false, code: 'obligation_unavailable' };
     }
@@ -665,6 +839,22 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
     const grantId = typeof payload.grantId === 'string' ? payload.grantId : null;
+    if (rustBotHostActive()) {
+      const result = await classicCoreBridge.projectBotDecideObligation(payload);
+      const legacy = result?.legacy && typeof result.legacy === 'object' ? result.legacy : null;
+      appendObligationLog({
+        event: 'decide',
+        workspaceId,
+        grantId,
+        ok: result?.ok === true,
+        code: result?.ok === false ? (result.error || result.code || 'failed') : null,
+        check: legacy?.check || null,
+        seal: legacy?.seal || null,
+        change: legacy?.change || null,
+        file: legacy?.file || null,
+      });
+      return result;
+    }
     if (typeof sessions?.confirmObligationGrant !== 'function') {
       appendObligationLog({ event: 'decide', workspaceId, grantId, ok: false, code: 'UNAVAILABLE' });
       return { ok: false, code: 'UNAVAILABLE' };
@@ -703,6 +893,7 @@ export function createProjectAgentApplicationService({
 
   async function cancelSession(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) return classicCoreBridge.projectBotCancelSession(payload);
     const session = await sessions.cancel(payload);
     if (!session) return { ok: false, code: 'NOT_FOUND' };
     if (session.error) return { ok: false, code: session.error };
@@ -712,6 +903,7 @@ export function createProjectAgentApplicationService({
 
   async function resumeSession(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) return classicCoreBridge.projectBotResumeSession(payload);
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : '';
     const session = await sessions.get({ sessionId: payload.sessionId });
     const profile = profileStore?.read(workspaceId);
@@ -745,6 +937,9 @@ export function createProjectAgentApplicationService({
 
   async function decideApproval(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotDecideApproval(payload);
+    }
     const decision = payload.decision === 'approve'
       ? 'approved'
       : payload.decision === 'cancel' ? 'cancelled' : (payload.decision === 'reject' || payload.decision === 'deny' ? 'denied' : '');
@@ -964,7 +1159,7 @@ export function createProjectAgentApplicationService({
     if (classicCoreBridge?.isAvailable?.()) {
       return classicCoreBridge.projectBotContinueHistory(payload).then(res => {
         if (res?.ok) {
-          if (typeof wake === 'function') {
+          if (!rustBotHostActive() && typeof wake === 'function') {
             try { wake(workspaceId); } catch { /* 唤醒失败不回滚已经入队的输入 */ }
           }
           queueConversation(workspaceId);
@@ -1034,6 +1229,9 @@ export function createProjectAgentApplicationService({
 
   async function startFamiliarize(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotStartFamiliarize({ workspaceId: payload.workspaceId });
+    }
     if (typeof lifecycle?.startFamiliarize !== 'function') return { ok: false, code: 'FAMILIARIZE_UNAVAILABLE' };
     const result = await lifecycle.startFamiliarize(payload.workspaceId);
     if (result?.ok) {
@@ -1045,6 +1243,9 @@ export function createProjectAgentApplicationService({
 
   async function confirmResult(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotConfirmResult(payload);
+    }
     const session = sessions?.get?.({ sessionId: payload.sessionId });
     if (!payload.workspaceId || session?.workspaceId !== payload.workspaceId) return { ok: false, code: 'NOT_FOUND' };
     if (payload.stage && !['manual_completion', 'result_acceptance'].includes(payload.stage)) return { ok: false, code: 'INVALID_INPUT' };
@@ -1058,6 +1259,9 @@ export function createProjectAgentApplicationService({
 
   async function acceptReadme(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotAcceptReadme({ workspaceId: payload.workspaceId });
+    }
     if (!directory.get(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
     const result = await lifecycle.acceptReadme(payload.workspaceId);
     if (result?.ok) { queueChanged(payload.workspaceId); queueConversation(payload.workspaceId); }
@@ -1066,6 +1270,16 @@ export function createProjectAgentApplicationService({
 
   async function retry(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      if (typeof payload.workspaceId !== 'string' || !payload.workspaceId || !payload.turnId) {
+        return { ok: false, code: 'NOT_FOUND' };
+      }
+      const key = `${payload.workspaceId}:${payload.turnId}`;
+      if (retrying.has(key)) return retrying.get(key);
+      const promise = Promise.resolve().then(() => classicCoreBridge.projectBotRetry(payload)).finally(() => retrying.delete(key));
+      retrying.set(key, promise);
+      return promise;
+    }
     if (!directory.get(payload.workspaceId)?.ok || !payload.turnId) return { ok: false, code: 'NOT_FOUND' };
     if (typeof retryTurn !== 'function') return { ok: false, code: 'RETRY_UNAVAILABLE' };
     const key = `${payload.workspaceId}:${payload.turnId}`;
@@ -1112,6 +1326,9 @@ export function createProjectAgentApplicationService({
   async function takeoverHost(payload = {}) {
     if (!open()) return disabled();
     if (typeof payload.workspaceId !== 'string' || !payload.workspaceId.trim()) return { ok: false, code: 'INVALID_INPUT' };
+    if (rustBotHostActive()) {
+      return classicCoreBridge.projectBotTakeoverHost({ workspaceId: payload.workspaceId });
+    }
     const got = directory?.get?.(payload.workspaceId);
     if (!got?.ok) return { ok: false, code: 'NOT_FOUND' };
     if (typeof requestTakeover !== 'function') return { ok: false, code: 'HOST_UNAVAILABLE' };
@@ -1123,6 +1340,10 @@ export function createProjectAgentApplicationService({
 
   async function controlRecovery(payload = {}) {
     if (!open()) return disabled();
+    if (rustBotHostActive()) {
+      if (typeof payload?.workspaceId !== 'string' || !payload.workspaceId.trim()) return { ok: false, code: 'NOT_FOUND' };
+      return classicCoreBridge.projectBotRecovery(payload);
+    }
     if (typeof payload?.workspaceId !== 'string' || !directory?.get?.(payload.workspaceId)?.ok) return { ok: false, code: 'NOT_FOUND' };
     return recoveryControl?.execute(payload) ?? { ok: false, code: 'RECOVERY_UNAVAILABLE' };
   }
