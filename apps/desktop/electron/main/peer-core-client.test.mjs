@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +10,8 @@ import {
   PEER_CORE_PROTOCOL_VERSION,
   createPeerCoreClient,
   isPeerCoreClassicEnabled,
+  isPeerCoreDaemonEnabled,
+  readPeerCoreDaemonDescriptor,
   resolvePeerCoreBinaryPath,
 } from './peer-core-client.mjs';
 
@@ -211,6 +214,123 @@ test('graceful dispose shuts down cleanly and rejects subsequent start or reques
     await assert.rejects(client.start(), /peer_core_disposed/);
     await assert.rejects(client.request('core.ping', {}), /not ready|disposed/);
   } finally {
+    home.cleanup();
+  }
+});
+
+test('isPeerCoreDaemonEnabled defaults on and respects PEER_CORE_DAEMON kill-switch', () => {
+  assert.equal(isPeerCoreDaemonEnabled({}), true);
+  assert.equal(isPeerCoreDaemonEnabled({ PEER_CORE_DAEMON: '0' }), false);
+  assert.equal(isPeerCoreDaemonEnabled({ PEER_CORE_DAEMON: 'false' }), false);
+  assert.equal(isPeerCoreDaemonEnabled({ PEER_CORE_DAEMON: 'off' }), false);
+  assert.equal(isPeerCoreDaemonEnabled({ PEER_CORE_DAEMON: '1' }), true);
+  assert.equal(isPeerCoreDaemonEnabled({ PEER_CORE_DAEMON: 'true' }), true);
+});
+
+test('daemon transport shares one PID with a second client and peer bots --json, and shuts down cleanly via shutdownIfLast / core stop', async () => {
+  const home = makeTempDataHome();
+  const binaryPath = resolveTestBinary();
+
+  const client1 = createPeerCoreClient({
+    binaryPath,
+    dataHome: home.dir,
+    transport: 'daemon',
+    clientInfo: { name: 'peer-desktop-1', version: '0.1.0-test' },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const client2 = createPeerCoreClient({
+    binaryPath,
+    dataHome: home.dir,
+    transport: 'daemon',
+    clientInfo: { name: 'peer-desktop-2', version: '0.1.0-test' },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  let daemonEndpoint = null;
+  try {
+    const init1 = await client1.start();
+    const st1 = client1.status();
+    assert.equal(st1.state, 'ready');
+    assert.equal(st1.transport, 'daemon');
+    assert.equal(st1.ownedDaemon, true);
+    assert.equal(st1.pid, init1.pid);
+    assert.ok(st1.endpoint);
+    daemonEndpoint = st1.endpoint;
+
+    const descPath = path.join(home.dir, 'core-daemon.json');
+    const descriptor = readPeerCoreDaemonDescriptor(home.dir);
+    assert.ok(descriptor, 'expected core-daemon.json descriptor');
+    assert.equal(descriptor.pid, st1.pid);
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(descPath).mode & 0o777, 0o600);
+      assert.equal(statSync(daemonEndpoint).mode & 0o777, 0o600);
+    }
+
+    await client2.start();
+    const st2 = client2.status();
+    assert.equal(st2.transport, 'daemon');
+    assert.equal(st2.ownedDaemon, false);
+    assert.equal(st2.pid, st1.pid);
+
+    const status2 = await client2.request('core.daemon.status', {});
+    assert.equal(status2.daemon, true);
+    assert.equal(status2.connectedClients, 2);
+    assert.equal(status2.initializedClients, 2);
+
+    const botsStdout = execFileSync(binaryPath, ['bots', '--json'], {
+      env: { ...process.env, PEER_AGENT_HOME: home.dir },
+      encoding: 'utf8',
+    });
+    const parsedBots = JSON.parse(botsStdout.trim());
+    assert.ok(Array.isArray(parsedBots));
+
+    // client1 was owner (shutdownIfLast: true), but client2 is still connected -> daemon stays alive.
+    await client1.dispose();
+    const statusAfter1 = await client2.request('core.daemon.status', {});
+    assert.equal(statusAfter1.connectedClients, 1);
+    const pong2 = await client2.ping();
+    assert.equal(pong2.ok, true);
+
+    // client2 has ownedDaemon=false -> daemon stays running after client2 disconnects until `core stop`.
+    await client2.dispose();
+    assert.ok(existsSync(descPath), 'daemon descriptor should remain until core stop');
+
+    execFileSync(binaryPath, ['core', 'stop'], {
+      env: { ...process.env, PEER_AGENT_HOME: home.dir },
+      encoding: 'utf8',
+    });
+    assert.equal(existsSync(descPath), false, 'core-daemon.json should be removed after core stop');
+    if (process.platform !== 'win32') {
+      assert.equal(existsSync(daemonEndpoint), false, 'unix socket should be removed after core stop');
+    }
+
+    // Also verify single-owner auto-shutdown via shutdownIfLast on dispose().
+    const solo = createPeerCoreClient({
+      binaryPath,
+      dataHome: home.dir,
+      transport: 'daemon',
+      clientInfo: { name: 'peer-desktop-solo', version: '0.1.0-test' },
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    await solo.start();
+    const soloEndpoint = solo.status().endpoint;
+    assert.equal(solo.status().ownedDaemon, true);
+    await solo.dispose();
+    assert.equal(existsSync(descPath), false, 'single owner dispose must clean descriptor');
+    if (process.platform !== 'win32') {
+      assert.equal(existsSync(soloEndpoint), false, 'single owner dispose must clean unix socket');
+    }
+  } finally {
+    await client1.dispose().catch(() => {});
+    await client2.dispose().catch(() => {});
+    try {
+      execFileSync(binaryPath, ['core', 'stop'], {
+        env: { ...process.env, PEER_AGENT_HOME: home.dir },
+        stdio: 'ignore',
+      });
+    } catch {
+      // Ignore cleanup errors if already stopped.
+    }
     home.cleanup();
   }
 });

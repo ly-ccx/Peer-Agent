@@ -741,9 +741,80 @@ export function registerDesktopProjectAgent({
       const profile = profileStore.read(owner.workspaceId);
       return profile?.status === 'active' && profile.agentConversationId === owner.conversationId;
     } });
+    const remoteDirectory = {
+      get: (ws) => directory.get(ws),
+      workspaceIds: () => directory.workspaceIds(),
+      conversationId: (ws) => directory.conversationId(ws),
+      list: async () => {
+        if (classicCoreBridge?.isAvailable?.()) {
+          const res = await classicCoreBridge.projectBotList({});
+          if (res?.ok && Array.isArray(res.items)) return res.items;
+        }
+        return directory.list();
+      },
+      readConversation: async (ws, opts = {}) => {
+        if (classicCoreBridge?.isAvailable?.()) {
+          const res = await classicCoreBridge.projectBotReadConversation({ workspaceId: ws, ...opts });
+          if (res && typeof res === 'object' && 'ok' in res) return res;
+        }
+        return directory.readConversation(ws, opts);
+      },
+      listSessions: async (ws) => {
+        if (classicCoreBridge?.isAvailable?.()) {
+          const res = await classicCoreBridge.projectBotListSessions({ workspaceId: ws });
+          if (res?.ok && Array.isArray(res.sessions)) return res.sessions;
+        }
+        return directory.listSessions(ws);
+      },
+      listApprovals: async (ws) => {
+        if (classicCoreBridge?.isAvailable?.()) {
+          const res = await classicCoreBridge.projectBotListApprovals({ workspaceId: ws });
+          if (res?.ok && Array.isArray(res.approvals)) return res.approvals;
+        }
+        return directory.listApprovals(ws);
+      },
+    };
+    const remoteInputQueue = {
+      submitInput: async (input) => {
+        if (classicCoreBridge?.isProjectBotHostActive?.()) {
+          const res = await classicCoreBridge.projectBotSubmitInput({
+            workspaceId: input.workspaceId,
+            inputId: input.inputId,
+            surface: input.surface || 'remote',
+            text: typeof input.text === 'string' ? input.text.trim() : '',
+          });
+          if (res?.ok && res.input) return res.input;
+          const err = new Error(res?.code || 'INPUT_SUBMIT_FAILED');
+          err.code = res?.code;
+          throw err;
+        }
+        return inputQueue.submitInput(input);
+      },
+    };
     onReady({
-      projectAccess: {directory,inputQueue,readInteractiveResult,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
-        wake:workspaceId=>{void host.sync([workspaceId]).catch(()=>{});}},
+      projectAccess: {
+        directory: classicCoreBridge ? remoteDirectory : directory,
+        inputQueue: classicCoreBridge ? remoteInputQueue : inputQueue,
+        readInteractiveResult,
+        getSession: (sessionId) => supervisor.get({ sessionId, detail: 'report' }),
+        ...(classicCoreBridge ? {
+          getSessionAsync: async (sessionId) => {
+            if (classicCoreBridge.isAvailable?.()) {
+              const res = await classicCoreBridge.projectBotGetSession({ sessionId, detail: 'report' });
+              if (res?.ok && res.session) return res.session;
+              if (res?.code === 'NOT_FOUND') return null;
+            }
+            return supervisor.get({ sessionId, detail: 'report' });
+          },
+        } : {}),
+        wake: (workspaceId) => {
+          if (classicCoreBridge?.isProjectBotHostActive?.()) {
+            void classicCoreBridge.projectBotWake(workspaceId).catch(() => {});
+          } else {
+            void host.sync([workspaceId]).catch(() => {});
+          }
+        },
+      },
       listItems: () => directory.list(),
       submitInput: (input) => {
         try {

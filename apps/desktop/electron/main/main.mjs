@@ -204,6 +204,7 @@ import {
 import {
   createPeerCoreClient,
   isPeerCoreClassicEnabled,
+  isPeerCoreDaemonEnabled,
   resolvePeerCoreBinaryPath,
 } from './peer-core-client.mjs';
 import {
@@ -1651,9 +1652,12 @@ const settingsApplicationService = createSettingsApplicationService({
     loadedEnvKeys,
     classicCore: {
       enabled: isPeerCoreClassicEnabled(),
+      daemonEnabled: isPeerCoreDaemonEnabled(),
       active: classicCoreBridge.isAvailable(),
       projectBotHostActive: classicCoreBridge.isProjectBotHostActive(),
       engine: classicCoreBridge.isAvailable() ? 'rust' : 'ts',
+      transport: peerCoreClient?.status?.()?.transport ?? null,
+      endpoint: peerCoreClient?.status?.()?.endpoint ?? null,
       status: peerCoreClient?.status?.() ?? null,
     },
   }),
@@ -4603,6 +4607,8 @@ async function startPeerCoreBridge() {
   const client = createPeerCoreClient({
     binaryPath,
     dataHome,
+    transport: isPeerCoreDaemonEnabled() ? 'daemon' : 'stdio',
+    fallbackToStdio: true,
     clientInfo: { name: 'peer-desktop', version: app.getVersion() },
     externalCapabilities,
     onNotification: classicCoreBridge.handleNotification,
@@ -4613,6 +4619,7 @@ async function startPeerCoreBridge() {
   peerCoreClient = client;
   try {
     const initialized = await client.start();
+    const clientStatus = client.status();
     const initialAccessLevel = resolveLocalAccessLevel(settingsStore.getAll());
     await classicCoreBridge.setLocalAccessLevel(initialAccessLevel);
     const botConfig = buildProjectBotHostConfig({ includeWorkspaces: true });
@@ -4622,7 +4629,7 @@ async function startPeerCoreBridge() {
       ? `active(owned=${botHostStatus.ownedWorkspaces?.length ?? 0})`
       : 'dormant';
     console.info(
-      `[peer-core] bridge ready (pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel}, botHost=${botSummary})`,
+      `[peer-core] bridge ready (transport=${clientStatus.transport}, pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel}, botHost=${botSummary})`,
     );
     return {
       name: 'peer-core-bridge',

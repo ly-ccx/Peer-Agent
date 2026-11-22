@@ -1362,6 +1362,14 @@ export function createClassicCoreBridge({
     return res;
   }
 
+  async function projectBotWake(workspaceId) {
+    return requireClient().request('project.bot.wake', { workspaceId });
+  }
+
+  async function getDaemonStatus() {
+    return requireClient().request('core.daemon.status', {});
+  }
+
   return Object.freeze({
     isAvailable,
     isProjectBotHostActive,
@@ -1483,6 +1491,8 @@ export function createClassicCoreBridge({
     projectBotRetry,
     projectBotTakeoverHost,
     projectBotRecovery,
+    projectBotWake,
+    getDaemonStatus,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

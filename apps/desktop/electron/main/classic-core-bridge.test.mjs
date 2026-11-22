@@ -9,6 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { createPeerCoreClient } from './peer-core-client.mjs';
+import { setupRemoteAccess } from './runtime-gateway/setup-remote-access.mjs';
 import { createAutomationRunner } from './automation-runner.mjs';
 import { createAutomationStore } from './automation-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
@@ -3322,6 +3323,214 @@ test('E2E: C4b-2b-2b-2b hostConfigure(enabled:false), obligationGrants push, and
   } finally {
     jsHostLeases.close();
     await client.dispose();
+    cleanup();
+  }
+});
+
+test('E2E: remote-device-connector (setupRemoteAccess + createRemoteProjectAccess) runs against peer-native core --daemon', async () => {
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+
+  const mockServer = await startMockSseServer(({ res }) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(sseText('remote daemon thoughts', 'Remote ack from Rust daemon.'));
+  });
+
+  const notifications = [];
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: (channel, payload) => notifications.push({ channel, payload }),
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    transport: 'daemon',
+    shutdownDaemonOnDispose: true,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-remote-daemon',
+      PEER_MODEL_ID: 'e2e-mock-remote-daemon',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-remote-daemon-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const directory = createBotDirectory({
+    rootDir: dataHome,
+    registry,
+    readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
+  });
+
+  let capturedConnector = null;
+  let remote = null;
+
+  try {
+    await client.start();
+    assert.equal(client.status().transport, 'daemon');
+    await bridge.configureProjectBotHost({
+      enabled: true,
+      heartbeatIntervalMs: 100,
+    });
+
+    const created = await bridge.projectBotCreate({
+      workspacePath: workspace,
+      name: 'Remote Daemon Bot',
+      startFamiliarize: false,
+    });
+    assert.equal(created.ok, true);
+    const workspaceId = created.workspaceId;
+
+    const projectAccess = {
+      directory: {
+        get: (ws) => directory.get(ws),
+        workspaceIds: () => directory.workspaceIds(),
+        conversationId: (ws) => directory.conversationId(ws),
+        list: async () => {
+          const res = await bridge.projectBotList({});
+          return res?.ok && Array.isArray(res.items) ? res.items : directory.list();
+        },
+        readConversation: async (ws, opts = {}) => bridge.projectBotReadConversation({ workspaceId: ws, ...opts }),
+        listSessions: async (ws) => (await bridge.projectBotListSessions({ workspaceId: ws }))?.sessions ?? [],
+        listApprovals: async (ws) => (await bridge.projectBotListApprovals({ workspaceId: ws }))?.approvals ?? [],
+      },
+      inputQueue: {
+        submitInput: async (input) => {
+          const res = await bridge.projectBotSubmitInput({
+            workspaceId: input.workspaceId,
+            inputId: input.inputId,
+            surface: input.surface || 'remote',
+            text: typeof input.text === 'string' ? input.text.trim() : '',
+          });
+          if (res?.ok && res.input) return res.input;
+          throw new Error(res?.code || 'INPUT_SUBMIT_FAILED');
+        },
+      },
+      getSession: () => null,
+      getSessionAsync: async (sessionId) => {
+        const res = await bridge.projectBotGetSession({ sessionId, detail: 'report' });
+        return res?.ok && res.session ? res.session : null;
+      },
+      wake: (ws) => {
+        void bridge.projectBotWake(ws).catch(() => {});
+      },
+    };
+
+    const userDataPath = path.join(root, 'remote-user-data');
+    mkdirSync(userDataPath, { recursive: true });
+    let identitySecret = null;
+    remote = setupRemoteAccess({
+      userDataPath,
+      gatewayOrigin: 'https://peer.example',
+      deviceName: 'desktop-daemon-e2e',
+      workspaceId,
+      goalPlanStore,
+      sessionStore: { getSession: () => ({ sessionId: 'sess-main', locale: 'en-US' }) },
+      buildProjection: () => ({ projectionId: 'proj-1', sessionId: 'sess-main', capabilities: [] }),
+      host: { async execute() { return { grant: {}, result: {} }; } },
+      connectorFactory(options) {
+        capturedConnector = options;
+        return { stop() {}, closed: Promise.resolve({ reason: 'stopped' }) };
+      },
+      identityStore: {
+        isSupported: () => true,
+        async loadSecret() { return identitySecret; },
+        async saveSecret(next) { identitySecret = next; },
+        async deleteSecret() { identitySecret = null; return true; },
+      },
+      registryFile: path.join(dataHome, 'projects', 'registry.json'),
+      projectGrants: [{ workspaceId, allowProjectRead: true, allowProjectMessage: true }],
+      getProjectAccess: () => projectAccess,
+    });
+    await remote.start();
+    remote.bindingStore.save({
+      origin: 'https://peer.example',
+      deviceId: 'phone-1',
+      ownerId: 'owner-1',
+      bindingVersion: 1,
+    });
+    capturedConnector.onState({ status: 'online', connectionEpoch: 9 });
+
+    const mkReq = (operation, extra = {}) => ({
+      protocolVersion: 1,
+      type: 'project.submit',
+      requestId: `req-${operation}-${Math.random().toString(16).slice(2)}`,
+      ownerId: 'owner-1',
+      deviceId: 'phone-1',
+      bindingVersion: 1,
+      connectionEpoch: 9,
+      delegationVersion: 1,
+      expiresAt: Date.now() + 10_000,
+      operation,
+      ...extra,
+    });
+
+    // 1. project.list via shared Rust Core daemon
+    const listOut = await capturedConnector.onProjectAccess(mkReq('project.list'));
+    assert.equal(listOut.status, 'ok', `listOut failed: ${JSON.stringify(listOut)}`);
+    assert.equal(listOut.result.projects.length, 1);
+    assert.equal(listOut.result.projects[0].workspaceId, workspaceId);
+    assert.equal(listOut.result.projects[0].canMessage, true);
+
+    // 2. project.input.submit with padded whitespace (trim + conflict guard + idempotency)
+    const submitReq = mkReq('project.input.submit', {
+      requestId: 'req-remote-msg-1',
+      workspaceId,
+      text: '  hello from phone  ',
+    });
+    const submitOut = await capturedConnector.onProjectAccess(submitReq);
+    assert.equal(submitOut.status, 'ok');
+    assert.equal(submitOut.result.status, 'received');
+    const replayOut = await capturedConnector.onProjectAccess({
+      ...submitReq,
+      text: 'hello from phone',
+    });
+    assert.deepEqual(replayOut, submitOut);
+    const conflictOut = await capturedConnector.onProjectAccess({
+      ...submitReq,
+      text: 'tampered text',
+    });
+    assert.equal(conflictOut.status, 'rejected');
+    assert.equal(conflictOut.code, 'REQUEST_CONFLICT');
+
+    // 3. Wait for live Rust ProjectHostRuntime to wake & produce assistant reply, then read via project.conversation.read
+    let convOut = null;
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      const readRes = await capturedConnector.onProjectAccess(mkReq('project.conversation.read', {
+        workspaceId,
+        limit: 20,
+        before: null,
+      }));
+      if (readRes.status === 'ok' && readRes.result.messages.some((m) => m.kind === 'agent_reply' && m.content.includes('Remote ack from Rust daemon.'))) {
+        convOut = readRes;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    assert.ok(convOut, 'expected live Rust reply in remote project.conversation.read');
+    assert.ok(convOut.result.messages.some((m) => m.kind === 'user_input' && m.content === 'hello from phone'));
+    assert.equal(JSON.stringify(convOut).includes(workspace), false, 'private local workspace path must be redacted');
+
+    // 4. project.session.read via async Rust lookup cleanly rejects missing session without error
+    const missingSess = await capturedConnector.onProjectAccess(mkReq('project.session.read', {
+      workspaceId,
+      sessionId: 'nonexistent-session-id',
+    }));
+    assert.equal(missingSess.status, 'rejected');
+    assert.equal(missingSess.code, 'TASK_DENIED');
+  } finally {
+    remote?.stop();
+    await client.dispose();
+    await mockServer.close();
     cleanup();
   }
 });

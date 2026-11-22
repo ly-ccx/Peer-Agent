@@ -12,7 +12,7 @@ peer-runtime = { path = "../peer-runtime" }
 peer-project-agent = { path = "../peer-project-agent" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "=1.48.0", features = ["rt", "macros", "io-std", "io-util", "sync", "time"] }
+tokio = { version = "=1.48.0", features = ["rt", "macros", "io-std", "io-util", "net", "sync", "time"] }
 uuid = { version = "=1.18.1", features = ["v4"] }
 
 [dev-dependencies]

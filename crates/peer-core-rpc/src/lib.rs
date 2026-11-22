@@ -13,6 +13,8 @@ mod classic_mcp;
 mod classic_skills;
 mod classic_streams;
 mod classic_usage;
+pub mod client;
+pub mod daemon;
 mod external_provider;
 mod project;
 mod project_bot;
@@ -25,12 +27,21 @@ pub mod server;
 mod transport;
 
 pub use classic::{ModelLoader, ResolvedTurnModel};
-pub use protocol::{
-    ClientInfo, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT, ExternalCapabilityManifest,
-    InitializeParams, InitializeResult, MAX_EXTERNAL_CAPABILITIES, MAX_FRAME_BYTES,
-    PROTOCOL_VERSION, PingParams, PingResult, RpcError, ServerInfo, ShutdownResult,
+pub use client::{DaemonClient, HostRequestHandler, RawDaemonConnection};
+pub use daemon::{
+    DaemonDescriptor, DaemonOptions, DaemonReadyCallback, cleanup_stale_descriptor,
+    daemon_descriptor_path, read_daemon_descriptor, resolve_daemon_endpoint, serve_daemon,
 };
-pub use server::{CoreServerConfig, RpcPeer, serve_io, serve_stdio};
+pub use protocol::{
+    CODE_UNAUTHORIZED, ClientInfo, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
+    DaemonStatusResult, ExternalCapabilityManifest, InitializeParams, InitializeResult,
+    MAX_EXTERNAL_CAPABILITIES, MAX_FRAME_BYTES, PROTOCOL_VERSION, PingParams, PingResult, RpcError,
+    ServerInfo, ShutdownResult,
+};
+pub use server::{
+    CoreEngine, CoreServerConfig, DaemonRuntimeMeta, RpcPeer, serve_connection, serve_io,
+    serve_stdio,
+};
 
 #[cfg(test)]
 mod tests {

@@ -8,11 +8,11 @@ use crate::{
     project_host::ProjectHostRuntime,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
-        ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
-        MAX_PENDING_HOST_CALLS, PROTOCOL_VERSION, PingParams, PingResult, RpcError, ServerInfo,
-        ShutdownResult,
+        DaemonStatusResult, ExternalCapabilityManifest, InitializeParams, InitializeResult,
+        MAX_FRAME_BYTES, MAX_PENDING_HOST_CALLS, PROTOCOL_VERSION, PingParams, PingResult,
+        RpcError, ServerInfo, ShutdownResult,
     },
-    transport::{BoundedLineReader, FrameWriter, FrameWriterHandle},
+    transport::{BoundedLineReader, FrameWriter, FrameWriterHandle, encode_frame},
 };
 use peer_protocol::{JsonDecodeError, JsonLimits, LocalAccessLevel, decode_json_bounded};
 use peer_runtime::{
@@ -21,12 +21,12 @@ use peer_runtime::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt, io,
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -38,6 +38,7 @@ use tokio::{
 
 const MAX_INBOUND_STRING_BYTES: usize = 1024 * 1024;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const MULTI_CLIENT_NOTIFY_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn classic_domains() -> Vec<String> {
     vec![
@@ -87,44 +88,354 @@ impl CoreServerConfig {
     }
 }
 
-#[derive(Default)]
-struct CoreState {
-    initialized: bool,
-    draining: bool,
-    client: Option<crate::protocol::ClientInfo>,
-    external_capabilities: Vec<ExternalCapabilityManifest>,
+#[derive(Debug, Clone)]
+pub struct DaemonRuntimeMeta {
+    pub transport: String,
+    pub endpoint: String,
+    pub auth_token: String,
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 type PendingMap = HashMap<String, oneshot::Sender<Result<Value, RpcError>>>;
 
+struct ClientSlot {
+    writer: FrameWriter,
+    initialized: bool,
+    client_info: Option<crate::protocol::ClientInfo>,
+    external_capabilities: Vec<ExternalCapabilityManifest>,
+    pending: Arc<Mutex<PendingMap>>,
+}
+
+pub struct PeerHub {
+    next_client_id: AtomicU64,
+    next_host_call_id: AtomicU64,
+    clients: Mutex<HashMap<u64, ClientSlot>>,
+}
+
+impl PeerHub {
+    fn new() -> Self {
+        Self {
+            next_client_id: AtomicU64::new(1),
+            next_host_call_id: AtomicU64::new(1),
+            clients: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn register_client(&self, writer: FrameWriter) -> u64 {
+        let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut guard) = self.clients.lock() {
+            guard.insert(
+                client_id,
+                ClientSlot {
+                    writer,
+                    initialized: false,
+                    client_info: None,
+                    external_capabilities: Vec::new(),
+                    pending: Arc::new(Mutex::new(HashMap::new())),
+                },
+            );
+        }
+        client_id
+    }
+
+    fn unregister_client(&self, client_id: u64) -> usize {
+        let (removed, remaining) = match self.clients.lock() {
+            Ok(mut guard) => {
+                let slot = guard.remove(&client_id);
+                (slot, guard.len())
+            }
+            Err(_) => (None, 0),
+        };
+        if let Some(slot) = removed {
+            Self::fail_pending_map(&slot.pending, "Host client disconnected");
+        }
+        remaining
+    }
+
+    fn mark_initialized(
+        &self,
+        client_id: u64,
+        client_info: crate::protocol::ClientInfo,
+        external_capabilities: Vec<ExternalCapabilityManifest>,
+    ) -> Result<(), RpcError> {
+        let mut guard = self
+            .clients
+            .lock()
+            .map_err(|_| RpcError::internal_error("peer hub lock poisoned"))?;
+        let Some(slot) = guard.get_mut(&client_id) else {
+            return Err(RpcError::shutting_down());
+        };
+        if slot.initialized {
+            return Err(RpcError::already_initialized());
+        }
+        slot.initialized = true;
+        slot.client_info = Some(client_info);
+        slot.external_capabilities = external_capabilities;
+        Ok(())
+    }
+
+    fn is_client_initialized(&self, client_id: u64) -> bool {
+        self.clients
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(&client_id).map(|slot| slot.initialized))
+            .unwrap_or(false)
+    }
+
+    fn connected_counts(&self) -> (usize, usize) {
+        let Ok(guard) = self.clients.lock() else {
+            return (0, 0);
+        };
+        let total = guard.len();
+        let initialized = guard.values().filter(|slot| slot.initialized).count();
+        (total, initialized)
+    }
+
+    fn snapshot_external_capabilities(&self) -> Result<Vec<ExternalCapabilityManifest>, RpcError> {
+        let guard = self
+            .clients
+            .lock()
+            .map_err(|_| RpcError::internal_error("peer hub lock poisoned"))?;
+        let mut ordered_ids: Vec<u64> = guard
+            .iter()
+            .filter_map(|(id, slot)| if slot.initialized { Some(*id) } else { None })
+            .collect();
+        ordered_ids.sort_unstable();
+
+        let mut seen_aliases = HashSet::new();
+        let mut merged = Vec::new();
+        for id in ordered_ids {
+            if let Some(slot) = guard.get(&id) {
+                for cap in &slot.external_capabilities {
+                    if seen_aliases.insert(cap.alias.clone()) {
+                        merged.push(cap.clone());
+                    }
+                }
+            }
+        }
+        Ok(merged)
+    }
+
+    async fn broadcast_notification(&self, method: &str, params: Value) -> io::Result<()> {
+        let writers: Vec<FrameWriter> = {
+            let Ok(guard) = self.clients.lock() else {
+                return Ok(());
+            };
+            let mut entries: Vec<(u64, FrameWriter)> = guard
+                .iter()
+                .filter_map(|(id, slot)| {
+                    if slot.initialized {
+                        Some((*id, slot.writer.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            entries.sort_by_key(|(id, _)| *id);
+            entries.into_iter().map(|(_, writer)| writer).collect()
+        };
+        if writers.is_empty() {
+            return Ok(());
+        }
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
+        });
+        if writers.len() == 1 {
+            return writers[0].send_value(&payload).await;
+        }
+        let encoded = encode_frame(&payload)?;
+        for writer in writers {
+            let _ = tokio::time::timeout(
+                MULTI_CLIENT_NOTIFY_TIMEOUT,
+                writer.send_preencoded(encoded.clone()),
+            )
+            .await;
+        }
+        Ok(())
+    }
+
+    fn select_host_target(
+        &self,
+        preferred_client_id: Option<u64>,
+        method: &str,
+        params: &Value,
+    ) -> Option<(FrameWriter, Arc<Mutex<PendingMap>>)> {
+        let guard = self.clients.lock().ok()?;
+        let pick_slot = |id: u64| -> Option<(FrameWriter, Arc<Mutex<PendingMap>>)> {
+            guard
+                .get(&id)
+                .filter(|slot| slot.initialized)
+                .map(|slot| (slot.writer.clone(), Arc::clone(&slot.pending)))
+        };
+
+        if method == "host.ping" {
+            if let Some(id) = preferred_client_id
+                && let Some(target) = pick_slot(id)
+            {
+                return Some(target);
+            }
+            let mut ids: Vec<u64> = guard
+                .iter()
+                .filter_map(|(id, slot)| if slot.initialized { Some(*id) } else { None })
+                .collect();
+            ids.sort_unstable();
+            return ids.first().and_then(|id| pick_slot(*id));
+        }
+
+        if method == "host.capability.execute" {
+            let alias = params.get("alias").and_then(Value::as_str);
+            let capability_id = params.get("capabilityId").and_then(Value::as_str);
+            let matches_slot = |slot: &ClientSlot| {
+                slot.initialized
+                    && slot.external_capabilities.iter().any(|cap| {
+                        alias.is_some_and(|a| cap.alias == a)
+                            || capability_id.is_some_and(|cid| cap.capability_id == cid)
+                    })
+            };
+            if let Some(id) = preferred_client_id
+                && guard.get(&id).is_some_and(matches_slot)
+            {
+                return pick_slot(id);
+            }
+            let mut matching_ids: Vec<u64> = guard
+                .iter()
+                .filter_map(|(id, slot)| if matches_slot(slot) { Some(*id) } else { None })
+                .collect();
+            matching_ids.sort_unstable();
+            return matching_ids.first().and_then(|id| pick_slot(*id));
+        }
+
+        // `host.goal.*` or other reverse host RPCs: prefer caller if initialized
+        // and registered external capabilities (Desktop), else any client with
+        // external capabilities, else preferred client or lowest initialized client.
+        if let Some(id) = preferred_client_id
+            && guard
+                .get(&id)
+                .is_some_and(|s| s.initialized && !s.external_capabilities.is_empty())
+        {
+            return pick_slot(id);
+        }
+        let mut ext_ids: Vec<u64> = guard
+            .iter()
+            .filter_map(|(id, slot)| {
+                if slot.initialized && !slot.external_capabilities.is_empty() {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        ext_ids.sort_unstable();
+        if let Some(id) = ext_ids.first() {
+            return pick_slot(*id);
+        }
+        if let Some(id) = preferred_client_id
+            && let Some(target) = pick_slot(id)
+        {
+            return Some(target);
+        }
+        let mut any_ids: Vec<u64> = guard
+            .iter()
+            .filter_map(|(id, slot)| if slot.initialized { Some(*id) } else { None })
+            .collect();
+        any_ids.sort_unstable();
+        any_ids.first().and_then(|id| pick_slot(*id))
+    }
+
+    fn resolve_pending(&self, client_id: u64, id: &str, message: &Value) {
+        let pending_arc = self
+            .clients
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(&client_id).map(|slot| Arc::clone(&slot.pending)));
+        let Some(pending_arc) = pending_arc else {
+            return;
+        };
+        let sender = pending_arc.lock().ok().and_then(|mut map| map.remove(id));
+        let Some(tx) = sender else {
+            return;
+        };
+        let outcome = if let Some(error_obj) = message.get("error") {
+            let code = error_obj["code"].as_i64().unwrap_or(-32004) as i32;
+            let msg = error_obj["message"]
+                .as_str()
+                .unwrap_or("Host request failed")
+                .to_owned();
+            let data = error_obj.get("data").cloned();
+            Err(RpcError {
+                code,
+                message: msg,
+                data,
+            })
+        } else {
+            Ok(message.get("result").cloned().unwrap_or(Value::Null))
+        };
+        let _ = tx.send(outcome);
+    }
+
+    fn fail_pending_map(pending: &Arc<Mutex<PendingMap>>, reason: &str) {
+        if let Ok(mut map) = pending.lock() {
+            for (_, tx) in map.drain() {
+                let _ = tx.send(Err(RpcError::host_call_failed(reason, None)));
+            }
+        }
+    }
+
+    fn fail_all_pending(&self, reason: &str) {
+        let pending_maps: Vec<Arc<Mutex<PendingMap>>> = self
+            .clients
+            .lock()
+            .ok()
+            .map(|guard| {
+                guard
+                    .values()
+                    .map(|slot| Arc::clone(&slot.pending))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for pending in pending_maps {
+            Self::fail_pending_map(&pending, reason);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct RpcPeer {
-    writer: FrameWriter,
-    next_id: Arc<AtomicU64>,
-    pending: Arc<Mutex<PendingMap>>,
+    hub: Arc<PeerHub>,
+    client_id: Option<u64>,
     shutdown: CancellationToken,
     reverse_timeout: Duration,
 }
 
 impl RpcPeer {
-    fn new(writer: FrameWriter, shutdown: CancellationToken, reverse_timeout: Duration) -> Self {
+    fn new(
+        hub: Arc<PeerHub>,
+        client_id: Option<u64>,
+        shutdown: CancellationToken,
+        reverse_timeout: Duration,
+    ) -> Self {
         Self {
-            writer,
-            next_id: Arc::new(AtomicU64::new(1)),
-            pending: Arc::new(Mutex::new(HashMap::new())),
+            hub,
+            client_id,
             shutdown,
             reverse_timeout,
         }
     }
 
     pub async fn notify(&self, method: &str, params: Value) -> io::Result<()> {
-        self.writer
-            .send_value(&json!({
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": params,
-            }))
-            .await
+        self.hub.broadcast_notification(method, params).await
     }
 
     pub fn shutdown_child_token(&self) -> CancellationToken {
@@ -151,11 +462,21 @@ impl RpcPeer {
         if self.shutdown.is_cancelled() || cancel.is_cancelled() {
             return Err(RpcError::shutting_down());
         }
-        let id = format!("core-{}", self.next_id.fetch_add(1, Ordering::Relaxed));
+        let Some((writer, pending)) = self.hub.select_host_target(self.client_id, method, &params)
+        else {
+            return Err(RpcError::host_call_failed(
+                format!("No connected host client handles '{method}'"),
+                None,
+            ));
+        };
+
+        let id = format!(
+            "core-{}",
+            self.hub.next_host_call_id.fetch_add(1, Ordering::Relaxed)
+        );
         let (tx, rx) = oneshot::channel();
         {
-            let mut guard = self
-                .pending
+            let mut guard = pending
                 .lock()
                 .map_err(|_| RpcError::internal_error("pending host call lock poisoned"))?;
             if guard.len() >= MAX_PENDING_HOST_CALLS {
@@ -173,8 +494,10 @@ impl RpcPeer {
             "method": method,
             "params": params,
         });
-        if let Err(err) = self.writer.send_value(&payload).await {
-            self.remove_pending(&id);
+        if let Err(err) = writer.send_value(&payload).await {
+            if let Ok(mut map) = pending.lock() {
+                map.remove(&id);
+            }
             return Err(RpcError::host_call_failed(
                 format!("Failed to write host request: {err}"),
                 None,
@@ -184,18 +507,24 @@ impl RpcPeer {
         let sleep_timer = tokio::time::sleep(timeout);
         tokio::pin!(sleep_timer);
 
-        let response = tokio::select! {
+        let remove_pending = || {
+            if let Ok(mut map) = pending.lock() {
+                map.remove(&id);
+            }
+        };
+
+        tokio::select! {
             biased;
             _ = self.shutdown.cancelled() => {
-                self.remove_pending(&id);
+                remove_pending();
                 Err(RpcError::shutting_down())
             }
             _ = cancel.cancelled() => {
-                self.remove_pending(&id);
+                remove_pending();
                 Err(RpcError::host_call_failed("Host request cancelled", None))
             }
             _ = &mut sleep_timer => {
-                self.remove_pending(&id);
+                remove_pending();
                 Err(RpcError::host_call_failed(
                     format!("Host request '{method}' timed out"),
                     None,
@@ -207,44 +536,6 @@ impl RpcPeer {
                     format!("Host request '{method}' closed before reply"),
                     None,
                 )),
-            }
-        };
-        response
-    }
-
-    fn resolve_pending(&self, id: &str, message: &Value) {
-        let sender = self.pending.lock().ok().and_then(|mut map| map.remove(id));
-        let Some(tx) = sender else {
-            return;
-        };
-        let outcome = if let Some(error_obj) = message.get("error") {
-            let code = error_obj["code"].as_i64().unwrap_or(-32004) as i32;
-            let msg = error_obj["message"]
-                .as_str()
-                .unwrap_or("Host request failed")
-                .to_owned();
-            let data = error_obj.get("data").cloned();
-            Err(RpcError {
-                code,
-                message: msg,
-                data,
-            })
-        } else {
-            Ok(message.get("result").cloned().unwrap_or(Value::Null))
-        };
-        let _ = tx.send(outcome);
-    }
-
-    fn remove_pending(&self, id: &str) {
-        if let Ok(mut map) = self.pending.lock() {
-            map.remove(id);
-        }
-    }
-
-    fn fail_all_pending(&self, reason: &str) {
-        if let Ok(mut map) = self.pending.lock() {
-            for (_, tx) in map.drain() {
-                let _ = tx.send(Err(RpcError::host_call_failed(reason, None)));
             }
         }
     }
@@ -292,10 +583,169 @@ impl LocalBackgroundSpawner {
     }
 }
 
+pub struct CoreEngine {
+    pub config: CoreServerConfig,
+    pub started_at: Instant,
+    pub hub: Arc<PeerHub>,
+    pub shutdown: CancellationToken,
+    pub daemon_meta: Option<DaemonRuntimeMeta>,
+    draining: AtomicBool,
+    pub access: ConversationAccess,
+    pub runtime: Arc<NativeConversationRuntime>,
+    pub streams: ClassicStreamRegistry,
+    pub goals: ClassicGoalRegistry,
+    pub project_host: Arc<ProjectHostRuntime>,
+    local_tx: mpsc::UnboundedSender<LocalJob>,
+    local_stop: CancellationToken,
+    active_background: Arc<AtomicUsize>,
+    background_done: Arc<Notify>,
+    local_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl CoreEngine {
+    pub fn new(
+        config: CoreServerConfig,
+        shutdown: CancellationToken,
+        daemon_meta: Option<DaemonRuntimeMeta>,
+    ) -> io::Result<Arc<Self>> {
+        let (local_tx, mut local_rx) = mpsc::unbounded_channel::<LocalJob>();
+        let local_stop = CancellationToken::new();
+        let thread_stop = local_stop.clone();
+        let local_thread = std::thread::Builder::new()
+            .name("peer-core-local-rt".into())
+            .spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    let local = tokio::task::LocalSet::new();
+                    rt.block_on(local.run_until(async move {
+                        loop {
+                            tokio::select! {
+                                biased;
+                                _ = thread_stop.cancelled() => break,
+                                maybe_job = local_rx.recv() => match maybe_job {
+                                    Some(job) => job(),
+                                    None => break,
+                                }
+                            }
+                        }
+                    }));
+                }
+            })?;
+
+        let hub = Arc::new(PeerHub::new());
+        let shared_peer = RpcPeer::new(
+            Arc::clone(&hub),
+            None,
+            shutdown.clone(),
+            config.reverse_request_timeout,
+        );
+        let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
+        let runtime = Arc::new(NativeConversationRuntime::new(
+            &config.data_home,
+            access.clone(),
+        ));
+        let active_background = Arc::new(AtomicUsize::new(0));
+        let background_done = Arc::new(Notify::new());
+        let spawner = LocalBackgroundSpawner {
+            local_tx: local_tx.clone(),
+            active_background: Arc::clone(&active_background),
+            background_done: Arc::clone(&background_done),
+        };
+        let project_host = Arc::new(
+            ProjectHostRuntime::new(
+                config.data_home.clone(),
+                &config.version,
+                shared_peer,
+                spawner,
+                config.model_loader.clone(),
+            )
+            .map_err(|err| io::Error::other(err.detail))?,
+        );
+
+        Ok(Arc::new(Self {
+            config,
+            started_at: Instant::now(),
+            hub,
+            shutdown,
+            daemon_meta,
+            draining: AtomicBool::new(false),
+            access,
+            runtime,
+            streams: ClassicStreamRegistry::new(),
+            goals: ClassicGoalRegistry::new(),
+            project_host,
+            local_tx,
+            local_stop,
+            active_background,
+            background_done,
+            local_thread: Mutex::new(Some(local_thread)),
+        }))
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::SeqCst)
+    }
+
+    pub fn context_for_client(self: &Arc<Self>, client_id: u64) -> Arc<ServerContext> {
+        Arc::new(ServerContext {
+            config: self.config.clone(),
+            started_at: self.started_at,
+            engine: Arc::clone(self),
+            client_id,
+            peer: RpcPeer::new(
+                Arc::clone(&self.hub),
+                Some(client_id),
+                self.shutdown.clone(),
+                self.config.reverse_request_timeout,
+            ),
+            access: self.access.clone(),
+            runtime: Arc::clone(&self.runtime),
+            streams: self.streams.clone(),
+            goals: self.goals.clone(),
+            project_host: Arc::clone(&self.project_host),
+            local_tx: self.local_tx.clone(),
+            active_background: Arc::clone(&self.active_background),
+            background_done: Arc::clone(&self.background_done),
+        })
+    }
+
+    async fn drain_background(&self) {
+        while self.active_background.load(Ordering::SeqCst) > 0 {
+            self.background_done.notified().await;
+        }
+    }
+
+    pub async fn shutdown_and_drain(&self) {
+        self.draining.store(true, Ordering::SeqCst);
+        self.shutdown.cancel();
+        self.project_host.begin_shutdown();
+        self.goals.cancel_all();
+        self.streams.cancel_all();
+        self.hub.fail_all_pending("Core server shutting down");
+        let _ = tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, self.drain_background()).await;
+        self.local_stop.cancel();
+        self.project_host.release_all_leases();
+        let handle = self
+            .local_thread
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if let Some(handle) = handle {
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = handle.join();
+            })
+            .await;
+        }
+    }
+}
+
 pub struct ServerContext {
     pub config: CoreServerConfig,
     pub started_at: Instant,
-    state: Mutex<CoreState>,
+    engine: Arc<CoreEngine>,
+    client_id: u64,
     pub peer: RpcPeer,
     pub access: ConversationAccess,
     pub runtime: Arc<NativeConversationRuntime>,
@@ -311,11 +761,7 @@ impl ServerContext {
     pub fn snapshot_external_capabilities(
         &self,
     ) -> Result<Vec<ExternalCapabilityManifest>, RpcError> {
-        let guard = self
-            .state
-            .lock()
-            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
-        Ok(guard.external_capabilities.clone())
+        self.engine.hub.snapshot_external_capabilities()
     }
 
     pub fn dispatch_local<F>(&self, job: F) -> Result<(), RpcError>
@@ -339,49 +785,32 @@ impl ServerContext {
         .spawn(spawn_fn)
     }
 
-    async fn drain_background(&self) {
-        while self.active_background.load(Ordering::SeqCst) > 0 {
-            self.background_done.notified().await;
-        }
-    }
-
-    fn snapshot_capabilities(
-        &self,
-    ) -> Result<(bool, bool, Vec<ExternalCapabilityManifest>), RpcError> {
-        let guard = self
-            .state
-            .lock()
-            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
-        Ok((
-            guard.initialized,
-            guard.draining,
-            guard.external_capabilities.clone(),
-        ))
-    }
-
     fn initialize(&self, params_value: Value) -> Result<Value, RpcError> {
         let params: InitializeParams = serde_json::from_value(params_value)
             .map_err(|err| RpcError::invalid_params(format!("Invalid initialize params: {err}")))?;
         params.validate()?;
 
-        let mut guard = self
-            .state
-            .lock()
-            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
-        if guard.draining {
+        if self.engine.is_draining() {
             return Err(RpcError::shutting_down());
         }
-        if guard.initialized {
-            return Err(RpcError::already_initialized());
+        if let Some(meta) = &self.engine.daemon_meta {
+            let provided = params.auth_token.as_deref().unwrap_or("");
+            if !constant_time_eq(provided.as_bytes(), meta.auth_token.as_bytes()) {
+                return Err(RpcError::unauthorized(
+                    "Invalid or missing daemon authToken",
+                ));
+            }
         }
-        let aliases = params
+        let aliases: Vec<String> = params
             .external_capabilities
             .iter()
             .map(|c| c.alias.clone())
             .collect();
-        guard.initialized = true;
-        guard.client = Some(params.client);
-        guard.external_capabilities = params.external_capabilities;
+        self.engine.hub.mark_initialized(
+            self.client_id,
+            params.client,
+            params.external_capabilities,
+        )?;
 
         let result = InitializeResult {
             protocol_version: PROTOCOL_VERSION,
@@ -400,15 +829,74 @@ impl ServerContext {
         serde_json::to_value(result).map_err(|err| RpcError::internal_error(err.to_string()))
     }
 
-    fn begin_shutdown(&self) -> Result<Value, RpcError> {
-        let mut guard = self
-            .state
-            .lock()
-            .map_err(|_| RpcError::internal_error("server state poisoned"))?;
-        guard.draining = true;
-        serde_json::to_value(ShutdownResult {
+    fn begin_shutdown(&self, params: &Value) -> Result<(Value, bool), RpcError> {
+        if self.engine.daemon_meta.is_none() {
+            self.engine.draining.store(true, Ordering::SeqCst);
+            let value = serde_json::to_value(ShutdownResult {
+                ok: true,
+                draining: true,
+                disconnected: None,
+                daemon_shutdown: None,
+                remaining_clients: None,
+            })
+            .map_err(|err| RpcError::internal_error(err.to_string()))?;
+            return Ok((value, true));
+        }
+
+        if !self.engine.hub.is_client_initialized(self.client_id) {
+            return Err(RpcError::not_initialized());
+        }
+        let shutdown_daemon = params.get("shutdownDaemon").and_then(Value::as_bool) == Some(true)
+            || params.get("scope").and_then(Value::as_str) == Some("daemon");
+        let shutdown_if_last = params.get("shutdownIfLast").and_then(Value::as_bool) == Some(true);
+        let (total, _) = self.engine.hub.connected_counts();
+        let remaining = total.saturating_sub(1);
+        let will_stop = shutdown_daemon || (shutdown_if_last && remaining == 0);
+        if will_stop {
+            self.engine.draining.store(true, Ordering::SeqCst);
+        }
+        let value = serde_json::to_value(ShutdownResult {
             ok: true,
-            draining: true,
+            draining: will_stop,
+            disconnected: Some(true),
+            daemon_shutdown: Some(will_stop),
+            remaining_clients: Some(remaining),
+        })
+        .map_err(|err| RpcError::internal_error(err.to_string()))?;
+        Ok((value, will_stop))
+    }
+
+    fn daemon_status(&self) -> Result<Value, RpcError> {
+        let (connected_clients, initialized_clients) = self.engine.hub.connected_counts();
+        let (transport, endpoint) = match &self.engine.daemon_meta {
+            Some(meta) => (meta.transport.clone(), Some(meta.endpoint.clone())),
+            None => ("stdio".to_owned(), None),
+        };
+        let host_status = self.project_host.status(None);
+        let owned_workspaces: Vec<String> = host_status
+            .get("ownedWorkspaces")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let uptime_ms = u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        serde_json::to_value(DaemonStatusResult {
+            ok: true,
+            daemon: self.engine.daemon_meta.is_some(),
+            pid: std::process::id(),
+            server_version: self.config.version.clone(),
+            uptime_ms,
+            connected_clients,
+            initialized_clients,
+            transport,
+            endpoint,
+            project_bot_host_enabled: self.project_host.is_enabled(),
+            owned_workspaces,
         })
         .map_err(|err| RpcError::internal_error(err.to_string()))
     }
@@ -418,13 +906,13 @@ impl ServerContext {
         method: &str,
         params: Value,
     ) -> Result<Value, RpcError> {
-        let (initialized, draining, external_capabilities) = self.snapshot_capabilities()?;
-        if draining {
+        if self.engine.is_draining() {
             return Err(RpcError::shutting_down());
         }
-        if !initialized {
+        if !self.engine.hub.is_client_initialized(self.client_id) {
             return Err(RpcError::not_initialized());
         }
+        let external_capabilities = self.snapshot_external_capabilities()?;
         match method {
             "core.ping" => {
                 let parsed: PingParams = if params.is_null() {
@@ -465,6 +953,7 @@ impl ServerContext {
                 external_capabilities,
             })
             .map_err(|err| RpcError::internal_error(err.to_string())),
+            "core.daemon.status" => self.daemon_status(),
             "classic.chat.send" => classic::handle_send(self, params).await,
             "classic.chat.abort" => classic::handle_abort(self, params),
             "classic.chat.reattach" => classic::handle_reattach(self, params),
@@ -629,6 +1118,7 @@ impl ServerContext {
             "project.bot.retry" => project_bot_live::handle_retry(self, params).await,
             "project.bot.takeoverHost" => project_bot_live::handle_takeover_host(self, params),
             "project.bot.recovery" => project_bot_live::handle_recovery(self, params).await,
+            "project.bot.wake" => project_bot_live::handle_wake(self, params),
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -648,67 +1138,26 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    let engine = CoreEngine::new(config, shutdown, None)?;
+    let conn_result = serve_connection(Arc::clone(&engine), reader, writer).await;
+    engine.shutdown_and_drain().await;
+    conn_result
+}
+
+pub async fn serve_connection<R, W>(engine: Arc<CoreEngine>, reader: R, writer: W) -> io::Result<()>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
     let mut line_reader = BoundedLineReader::new(reader);
     let writer_handle = FrameWriterHandle::spawn(writer);
-    let peer = RpcPeer::new(
-        writer_handle.writer(),
-        shutdown.clone(),
-        config.reverse_request_timeout,
-    );
-    let (local_tx, mut local_rx) = mpsc::unbounded_channel::<LocalJob>();
-    let local_thread = std::thread::Builder::new()
-        .name("peer-core-local-rt".into())
-        .spawn(move || {
-            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                let local = tokio::task::LocalSet::new();
-                rt.block_on(local.run_until(async move {
-                    while let Some(job) = local_rx.recv().await {
-                        job();
-                    }
-                }));
-            }
-        })?;
-
-    let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
-    let runtime = Arc::new(NativeConversationRuntime::new(
-        &config.data_home,
-        access.clone(),
-    ));
-    let active_background = Arc::new(AtomicUsize::new(0));
-    let background_done = Arc::new(Notify::new());
-    let spawner = LocalBackgroundSpawner {
-        local_tx: local_tx.clone(),
-        active_background: Arc::clone(&active_background),
-        background_done: Arc::clone(&background_done),
-    };
-    let project_host = Arc::new(
-        ProjectHostRuntime::new(
-            config.data_home.clone(),
-            &config.version,
-            peer.clone(),
-            spawner,
-            config.model_loader.clone(),
-        )
-        .map_err(|err| io::Error::other(err.detail))?,
-    );
-    let context = Arc::new(ServerContext {
-        config,
-        started_at: Instant::now(),
-        state: Mutex::new(CoreState::default()),
-        peer: peer.clone(),
-        access,
-        runtime,
-        streams: ClassicStreamRegistry::new(),
-        goals: ClassicGoalRegistry::new(),
-        project_host,
-        local_tx,
-        active_background,
-        background_done,
-    });
+    let client_writer = writer_handle.writer();
+    let client_id = engine.hub.register_client(client_writer.clone());
+    let context = engine.context_for_client(client_id);
+    let shutdown = engine.shutdown.clone();
     let mut tasks = JoinSet::new();
+    let mut stop_daemon_after_flush = false;
+    let mut disconnecting = false;
 
     let loop_result: io::Result<()> = loop {
         while tasks.try_join_next().is_some() {}
@@ -719,8 +1168,7 @@ where
             Ok(None) => break Ok(()),
             Err(err) => {
                 // Report frame limit errors cleanly before closing if the pipe is still open.
-                let _ = peer
-                    .writer
+                let _ = client_writer
                     .send_value(
                         &RpcError::invalid_request(err.to_string()).to_response(Value::Null),
                     )
@@ -744,8 +1192,7 @@ where
         ) {
             Ok(doc) => doc.value,
             Err(JsonDecodeError::LimitExceeded) => {
-                if let Err(write_err) = peer
-                    .writer
+                if let Err(write_err) = client_writer
                     .send_value(
                         &RpcError::invalid_request("JSON frame limit exceeded")
                             .to_response(Value::Null),
@@ -757,8 +1204,7 @@ where
                 continue;
             }
             Err(JsonDecodeError::InvalidJson) => {
-                if let Err(write_err) = peer
-                    .writer
+                if let Err(write_err) = client_writer
                     .send_value(&RpcError::parse_error("Invalid JSON").to_response(Value::Null))
                     .await
                 {
@@ -769,8 +1215,7 @@ where
         };
 
         let Some(obj) = decoded.as_object() else {
-            if let Err(write_err) = peer
-                .writer
+            if let Err(write_err) = client_writer
                 .send_value(
                     &RpcError::invalid_request("JSON-RPC payload must be an object")
                         .to_response(Value::Null),
@@ -785,8 +1230,7 @@ where
         let reply_id = extract_valid_id(obj.get("id"));
         if obj.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
             let err_id = reply_id.flatten().unwrap_or(Value::Null);
-            if let Err(write_err) = peer
-                .writer
+            if let Err(write_err) = client_writer
                 .send_value(
                     &RpcError::invalid_request("jsonrpc version must be '2.0'").to_response(err_id),
                 )
@@ -805,12 +1249,11 @@ where
             if (has_result ^ has_error)
                 && let Some(id_str) = obj.get("id").and_then(Value::as_str)
             {
-                peer.resolve_pending(id_str, &decoded);
+                engine.hub.resolve_pending(client_id, id_str, &decoded);
                 continue;
             }
             let err_id = reply_id.flatten().unwrap_or(Value::Null);
-            if let Err(write_err) = peer
-                .writer
+            if let Err(write_err) = client_writer
                 .send_value(
                     &RpcError::invalid_request("Malformed JSON-RPC message").to_response(err_id),
                 )
@@ -823,8 +1266,7 @@ where
 
         let Some(method) = obj.get("method").and_then(Value::as_str) else {
             let err_id = reply_id.flatten().unwrap_or(Value::Null);
-            if let Err(write_err) = peer
-                .writer
+            if let Err(write_err) = client_writer
                 .send_value(
                     &RpcError::invalid_request("JSON-RPC method must be a string")
                         .to_response(err_id),
@@ -840,8 +1282,7 @@ where
         match reply_id {
             // Invalid `id` type present on a request.
             None if obj.contains_key("id") => {
-                if let Err(write_err) = peer
-                    .writer
+                if let Err(write_err) = client_writer
                     .send_value(
                         &RpcError::invalid_request("Invalid JSON-RPC request id")
                             .to_response(Value::Null),
@@ -853,8 +1294,11 @@ where
             }
             // Notification (no `"id"` field).
             None => {
-                if method == "core.shutdown" {
-                    let _ = context.begin_shutdown();
+                if method == "core.shutdown"
+                    && let Ok((_, will_stop)) = context.begin_shutdown(&params)
+                {
+                    disconnecting = true;
+                    stop_daemon_after_flush = will_stop;
                     break Ok(());
                 }
             }
@@ -862,22 +1306,33 @@ where
             Some(Some(id)) => match method {
                 "core.initialize" => {
                     let response = format_reply(id, context.initialize(params));
-                    if let Err(write_err) = peer.writer.send_value(&response).await {
+                    if let Err(write_err) = client_writer.send_value(&response).await {
                         break Err(write_err);
                     }
                 }
-                "core.shutdown" => {
-                    let response = format_reply(id, context.begin_shutdown());
-                    let send_res = peer.writer.send_value(&response).await;
-                    break send_res;
-                }
+                "core.shutdown" => match context.begin_shutdown(&params) {
+                    Ok((val, will_stop)) => {
+                        disconnecting = true;
+                        stop_daemon_after_flush = will_stop;
+                        let response = format_reply(id, Ok(val));
+                        let send_res = client_writer.send_value(&response).await;
+                        break send_res;
+                    }
+                    Err(err) => {
+                        let response = format_reply(id, Err(err));
+                        if let Err(write_err) = client_writer.send_value(&response).await {
+                            break Err(write_err);
+                        }
+                    }
+                },
                 _ => {
                     let ctx = Arc::clone(&context);
+                    let w = client_writer.clone();
                     let method_owned = method.to_owned();
                     tasks.spawn(async move {
                         let res = ctx.handle_request(&method_owned, params).await;
                         let response = format_reply(id, res);
-                        let _ = ctx.peer.writer.send_value(&response).await;
+                        let _ = w.send_value(&response).await;
                     });
                 }
             },
@@ -887,14 +1342,9 @@ where
     };
 
     drop(line_reader);
-    shutdown.cancel();
-    context.project_host.begin_shutdown();
-    context.goals.cancel_all();
-    context.streams.cancel_all();
-    peer.fail_all_pending("Core server shutting down");
+    engine.hub.unregister_client(client_id);
     if tokio::time::timeout(SHUTDOWN_DRAIN_TIMEOUT, async {
         while tasks.join_next().await.is_some() {}
-        context.drain_background().await;
     })
     .await
     .is_err()
@@ -902,14 +1352,13 @@ where
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
     }
-    let shutting_down = context
-        .snapshot_capabilities()
-        .is_ok_and(|(_, draining, _)| draining);
-    context.project_host.release_all_leases();
+    let shutting_down = disconnecting || engine.is_draining();
     drop(context);
-    drop(peer);
-    let _ = local_thread.join();
+    drop(client_writer);
     let flush_result = writer_handle.finish().await;
+    if stop_daemon_after_flush {
+        engine.shutdown.cancel();
+    }
 
     match (loop_result, flush_result) {
         (Err(err), _) => Err(err),

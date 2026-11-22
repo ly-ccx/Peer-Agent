@@ -1474,3 +1474,31 @@ pub async fn handle_recovery(ctx: &ServerContext, params: Value) -> Result<Value
         Err(err) => Ok(ok_fail(err.code)),
     }
 }
+
+// ---------------------------------------------------------------------------
+// 17. project.bot.wake
+// ---------------------------------------------------------------------------
+
+pub fn handle_wake(ctx: &ServerContext, params: Value) -> Result<Value, RpcError> {
+    let workspace_id = params
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("");
+    if !is_valid_workspace_id(workspace_id) {
+        return Ok(ok_fail("INVALID_WORKSPACE"));
+    }
+    let woken =
+        if ctx.project_host.is_enabled() && ctx.project_host.host().holds_lease(workspace_id) {
+            ctx.project_host.wake_workspace(workspace_id);
+            true
+        } else {
+            false
+        };
+    Ok(json!({
+        "ok": true,
+        "woken": woken,
+        "workspaceId": workspace_id,
+    }))
+}

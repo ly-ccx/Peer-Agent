@@ -136,20 +136,29 @@ impl FrameWriterHandle {
     }
 }
 
+pub(crate) fn encode_frame(message: &Value) -> io::Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec(message)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    if bytes.len() > MAX_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "JSON-RPC output frame too large",
+        ));
+    }
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
 impl FrameWriter {
-    pub(crate) async fn send_value(&self, message: &Value) -> io::Result<()> {
-        let mut bytes = serde_json::to_vec(message)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-        if bytes.len() > MAX_FRAME_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "JSON-RPC output frame too large",
-            ));
-        }
-        bytes.push(b'\n');
+    pub(crate) async fn send_preencoded(&self, bytes: Vec<u8>) -> io::Result<()> {
         self.tx
             .send(WriterMsg::Frame(bytes))
             .await
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "JSON-RPC output closed"))
+    }
+
+    pub(crate) async fn send_value(&self, message: &Value) -> io::Result<()> {
+        let bytes = encode_frame(message)?;
+        self.send_preencoded(bytes).await
     }
 }

@@ -17,6 +17,7 @@ pub const CODE_NOT_INITIALIZED: i32 = -32001;
 pub const CODE_ALREADY_INITIALIZED: i32 = -32002;
 pub const CODE_SHUTTING_DOWN: i32 = -32003;
 pub const CODE_HOST_CALL_FAILED: i32 = -32004;
+pub const CODE_UNAUTHORIZED: i32 = -32005;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RpcError {
@@ -95,6 +96,14 @@ impl RpcError {
             code: CODE_HOST_CALL_FAILED,
             message: message.into(),
             data,
+        }
+    }
+
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            code: CODE_UNAUTHORIZED,
+            message: message.into(),
+            data: None,
         }
     }
 
@@ -187,6 +196,8 @@ pub struct InitializeParams {
     pub client: ClientInfo,
     #[serde(default)]
     pub external_capabilities: Vec<ExternalCapabilityManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
 
 impl InitializeParams {
@@ -269,7 +280,30 @@ pub struct CapabilitiesListResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct DaemonStatusResult {
+    pub ok: bool,
+    pub daemon: bool,
+    pub pid: u32,
+    pub server_version: String,
+    pub uptime_ms: u64,
+    pub connected_clients: usize,
+    pub initialized_clients: usize,
+    pub transport: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    pub project_bot_host_enabled: bool,
+    pub owned_workspaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ShutdownResult {
     pub ok: bool,
     pub draining: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disconnected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daemon_shutdown: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_clients: Option<usize>,
 }

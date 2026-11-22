@@ -21,38 +21,70 @@ mod text;
 pub mod update;
 pub use text::finish_stdout;
 
+use std::path::PathBuf;
+
 pub const VERSION: &str = include_str!("../../../VERSION");
+
+const CORE_USAGE: &str =
+    "Usage: peer core --stdio | --daemon [--socket <path>] [--quiet] | status [--json] | stop";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Version,
     Acp,
     CoreStdio,
+    CoreDaemon {
+        socket: Option<PathBuf>,
+        quiet: bool,
+    },
+    CoreStatus {
+        json: bool,
+    },
+    CoreStop,
     Help,
     Doctor,
-    BotsJson,
+    BotsJson {
+        standalone: bool,
+    },
     Interactive(terminal::InteractiveMode),
     Models,
     SessionsList,
     SessionsResume(String),
-    SessionsDelete { id: String, yes: bool },
+    SessionsDelete {
+        id: String,
+        yes: bool,
+    },
     Completions(String),
     CompletionsHelp,
-    Update { check_only: bool },
+    Update {
+        check_only: bool,
+    },
     UpdateHelp,
     Usage(String),
     ShellHelp(&'static str),
     Export(export::Options),
-    Result { reference: String, json: bool },
+    Result {
+        reference: String,
+        json: bool,
+    },
     ResultHelp,
     ResultCleanupReceipt,
-    Exec { plan: String, max_turns: usize },
+    Exec {
+        plan: String,
+        max_turns: usize,
+    },
     OrdinaryExec(Box<ordinary_exec::Options>),
     ExecHelp,
     Recover(String),
     RecoverSession(String),
-    McpAuth { server: String, refresh: bool },
-    ModelAuth { action: String, channel: String },
+    McpAuth {
+        server: String,
+        refresh: bool,
+    },
+    ModelAuth {
+        action: String,
+        channel: String,
+    },
     Unavailable(String),
 }
 
@@ -66,11 +98,7 @@ pub fn command(argv: &[String]) -> Command {
         };
     }
     if argv.first().is_some_and(|arg| arg == "core") {
-        return if argv.len() == 2 && argv[1] == "--stdio" {
-            Command::CoreStdio
-        } else {
-            Command::Usage("Usage: peer core --stdio".into())
-        };
+        return parse_core_command(&argv[1..]);
     }
     if argv
         .iter()
@@ -164,7 +192,16 @@ pub fn command(argv: &[String]) -> Command {
                 _ => Command::Unavailable("exec: invalid max turns".into()),
             }
         }
-        Some("bots") if argv.len() == 2 && argv[1] == "--json" => Command::BotsJson,
+        Some("bots") if argv.len() == 2 && argv[1] == "--json" => {
+            Command::BotsJson { standalone: false }
+        }
+        Some("bots")
+            if argv.len() == 3
+                && ((argv[1] == "--json" && argv[2] == "--standalone")
+                    || (argv[1] == "--standalone" && argv[2] == "--json")) =>
+        {
+            Command::BotsJson { standalone: true }
+        }
         Some("bots") if argv.len() == 1 => Command::Interactive(terminal::InteractiveMode::Bots),
         Some("version") if argv.len() == 1 => Command::Version,
         Some("help") if argv.len() == 1 => Command::Help,
@@ -173,6 +210,50 @@ pub fn command(argv: &[String]) -> Command {
         }
         None => Command::Interactive(terminal::InteractiveMode::Auto),
         Some(name) => Command::Unavailable(name.to_owned()),
+    }
+}
+
+fn parse_core_command(args: &[String]) -> Command {
+    let usage = || Command::Usage(CORE_USAGE.into());
+    let Some(first) = args.first().map(String::as_str) else {
+        return usage();
+    };
+    match first {
+        "--stdio" if args.len() == 1 => Command::CoreStdio,
+        "--daemon" => {
+            let mut socket = None;
+            let mut quiet = false;
+            let mut i = 1;
+            while i < args.len() {
+                let arg = args[i].as_str();
+                if arg == "--quiet" {
+                    quiet = true;
+                    i += 1;
+                } else if arg == "--socket" {
+                    let Some(val) = args.get(i + 1).filter(|s| !s.is_empty()) else {
+                        return usage();
+                    };
+                    socket = Some(PathBuf::from(val));
+                    i += 2;
+                } else if let Some(val) = arg.strip_prefix("--socket=") {
+                    if val.is_empty() {
+                        return usage();
+                    }
+                    socket = Some(PathBuf::from(val));
+                    i += 1;
+                } else {
+                    return usage();
+                }
+            }
+            Command::CoreDaemon { socket, quiet }
+        }
+        "status" => match args.len() {
+            1 => Command::CoreStatus { json: false },
+            2 if args[1] == "--json" => Command::CoreStatus { json: true },
+            _ => usage(),
+        },
+        "stop" if args.len() == 1 => Command::CoreStop,
+        _ => usage(),
     }
 }
 
@@ -194,11 +275,44 @@ mod tests {
             command(&["core".into(), "--stdio".into()]),
             Command::CoreStdio
         );
+        assert_eq!(
+            command(&["core".into(), "--daemon".into()]),
+            Command::CoreDaemon {
+                socket: None,
+                quiet: false,
+            }
+        );
+        assert_eq!(
+            command(&[
+                "core".into(),
+                "--daemon".into(),
+                "--socket".into(),
+                "/tmp/p.sock".into(),
+                "--quiet".into(),
+            ]),
+            Command::CoreDaemon {
+                socket: Some(PathBuf::from("/tmp/p.sock")),
+                quiet: true,
+            }
+        );
+        assert_eq!(
+            command(&["core".into(), "status".into(), "--json".into()]),
+            Command::CoreStatus { json: true }
+        );
+        assert_eq!(command(&["core".into(), "stop".into()]), Command::CoreStop);
         assert!(matches!(command(&["core".into()]), Command::Usage(_)));
         assert!(matches!(
             command(&["core".into(), "--help".into()]),
             Command::Usage(_)
         ));
+        assert_eq!(
+            command(&["bots".into(), "--json".into()]),
+            Command::BotsJson { standalone: false }
+        );
+        assert_eq!(
+            command(&["bots".into(), "--json".into(), "--standalone".into()]),
+            Command::BotsJson { standalone: true }
+        );
         assert_eq!(
             command(&[]),
             Command::Interactive(terminal::InteractiveMode::Auto)
