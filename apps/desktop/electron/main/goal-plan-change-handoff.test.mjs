@@ -32,10 +32,10 @@ function fixture(status) {
       start: id => { calls.push(['start', id]); },
       resume: (id, options) => { calls.push(['resume', id, options.reason]); },
     },
-    llmChatService: { forceCompleteConversationStreams: (id, options) => {
+    forceCompleteActiveConversationStreams: (id, options) => {
       calls.push(['release-request', id, options.reason]);
       return { released };
-    } },
+    },
     shouldAutoStartAcceptedGoalRunner,
     shouldAutoStartAcceptedGoalRunnerFromChange,
     shouldRearmFailedGoalPlanFromChange,

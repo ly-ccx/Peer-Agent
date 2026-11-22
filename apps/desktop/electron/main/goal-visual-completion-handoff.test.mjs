@@ -149,24 +149,26 @@ test('Desktop foreground binds plan identity before send and keeps it through ou
   const calls = [];
   const context = vm.createContext({
     conversationId: 'c', resumeInterruptedReply: false, mode: 'chat', answeredRequestedUserInputPlanId: null,
+    streamId: 's', assistantMessageId: 'a', persistedConversation: { workspacePath: '/ws' },
+    workspacePath: '/ws', settingsStore: { getAll: () => ({ activeWorkspace: '/ws' }) }, workspaceRoot: '/ws',
+    resolvedModelProviderId: 'p1', effort: 'default', fastMode: false, modelProviderId: 'p1',
+    effectiveRuntimeReminders: [], configInstructions: undefined, contextAttachments: undefined,
+    attachmentContext: undefined, contextExtensions: undefined, sender: null,
     goalPlanStore: { getActivePlanByConversation: () => active },
-    llmChatService: { sendMessage: () => outcomePromise },
-    visualCompletionHandoff: { handoff: (...args) => { calls.push(args); return Promise.resolve(true); } },
-    convergeIntakeAfterGoalTurn: () => calls.push('converged'),
-    shouldRearmStalledAcceptedGoalRunner: () => false,
-    shouldAutoStartAcceptedGoalRunner: () => false,
-    shouldRecoverAcceptedGoalRunnerOnConversationOpen: () => false,
-    console,
+    classicCoreBridge: { send: () => outcomePromise },
+    finalizeClassicGoalTurnOutcome(promise, opts) {
+      return Promise.resolve(promise).then((outcome) => {
+        calls.push('converged');
+        calls.push([opts.conversationId, outcome, opts.visualCompletionPlanId]);
+        return outcome;
+      });
+    },
   });
-  // Execute both production composition slices; only provider payload is omitted.
   const bindingStart = main.indexOf('  const visualCompletionPlanId =');
-  const sendStart = main.indexOf('  const outcomePromise = llmChatService.sendMessage(', bindingStart);
-  const outcomeStart = main.indexOf('  if (!resumeInterruptedReply && (mode ===', sendStart);
-  const outcomeEnd = main.indexOf('\n  return outcomePromise;', outcomeStart);
-  assert.ok(bindingStart >= 0 && sendStart > bindingStart && outcomeEnd > outcomeStart);
-  vm.runInContext(`this.run = async () => { ${main.slice(bindingStart, sendStart)}
-    const outcomePromise = llmChatService.sendMessage({});
-    ${main.slice(outcomeStart, outcomeEnd)} };`, context);
+  const sendStart = main.indexOf('  const classicOutcomePromise = classicCoreBridge.send(', bindingStart);
+  const outcomeEnd = main.indexOf('\n}\n\n// ── Stream reattach', sendStart);
+  assert.ok(bindingStart >= 0 && sendStart > bindingStart && outcomeEnd > sendStart);
+  vm.runInContext(`this.run = async () => { ${main.slice(bindingStart, outcomeEnd)} };`, context);
   const pending = context.run();
   active = { planId: 'newer-plan' };
   resolveOutcome(done);
@@ -198,18 +200,18 @@ test('actual Desktop composition uses the exported release port', async () => {
   const f = fixture();
   const calls = [];
   const start = main.indexOf('const visualCompletionHandoff = createGoalVisualCompletionHandoff(');
-  const finish = main.indexOf('\ngoalRunner = createDesktopGoalRunnerHost(', start);
+  const finish = main.indexOf('\ngoalRunner = {', start);
   assert.ok(start >= 0 && finish > start);
   const context = vm.createContext({ createGoalVisualCompletionHandoff,
     goalPlanStore: f.store, desktopPreviewProvider: { authority: { read: () => ({ required: true }) } },
-    llmChatService: { forceCompleteConversationStreams: (id, options) => {
+    forceCompleteActiveConversationStreams: (id, options) => {
       calls.push(['release', id, options.reason]); return { released: Promise.resolve() };
-    } }, goalRunner: { start: id => { calls.push(['start', id]); } },
+    }, goalRunner: { start: id => { calls.push(['start', id]); } },
   });
   vm.runInContext(`${main.slice(start, finish)}\nthis.service = visualCompletionHandoff;`, context);
   assert.equal(await context.service.handoff('c', done, 'p'), true);
   assert.deepEqual(calls, [['release', 'c', 'goal-visual-completion-handoff'], ['start', 'p']]);
-  const llm = readFileSync(new URL('./llm-chat-service.mjs', import.meta.url), 'utf8');
-  assert.match(llm, /function forceCompleteConversationStreams\(/);
-  assert.match(llm, /\n    forceCompleteConversationStreams,/);
+  const bridge = readFileSync(new URL('./classic-core-bridge.mjs', import.meta.url), 'utf8');
+  assert.match(bridge, /function forceCompleteConversationStreams\(/);
+  assert.match(bridge, /\n    forceCompleteConversationStreams,/);
 });

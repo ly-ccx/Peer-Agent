@@ -10,10 +10,10 @@ import { registerDesktopPreviewService, unregisterDesktopPreviewService,
 import { createVisualRequestReceiptStore } from '../runtime-gateway/visual-request-receipts.mjs';
 import { createVisualRequestScope } from './visual-request-context.mjs';
 import { fetchWithConnectionRecovery } from './recovering-fetch.mjs';
-import { executeDesktopProviderRequest } from '../chat-runtime/provider-request-coordinator.mjs';
-import { sanitizeApiMessages } from '../chat-runtime/message-sanitizer.mjs';
+import { executeDesktopProviderRequest } from './desktop-provider-request.mjs';
+import { sanitizeApiMessages } from '../provider-adapters/message-sanitizer.mjs';
 import { createOpenAIVisualObservationMessage, createAnthropicToolResultContent,
-  createGeminiVisualObservationParts, INDEPENDENT_VISUAL_REVIEW_PURPOSE } from '../chat-runtime/visual-observation-projection.mjs';
+  createGeminiVisualObservationParts, INDEPENDENT_VISUAL_REVIEW_PURPOSE } from '../runtime-gateway/visual-observation-projection.mjs';
 import { encodeOpenAIChatRequest, encodeOpenAIResponsesRequest, encodeAnthropicMessagesRequest,
   encodeGeminiGenerateContentRequest } from '../provider-encoders/index.mjs';
 import { encodedVisualImageHashes, hashVisualBytes } from '../provider-encoders/visual-request-images.mjs';

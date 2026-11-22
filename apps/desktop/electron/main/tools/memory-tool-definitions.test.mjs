@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { evaluateGoalModeGate } from '../chat-runtime/goal-mode-gate.mjs';
 import { createLocalToolHost } from '../runtime-gateway/local-tool-host.mjs';
 import { MEMORY_TOOL_DEFINITIONS } from './memory-tool-definitions.mjs';
 import {
@@ -25,10 +24,6 @@ test('memory prompts are loaded from resource files and only project_agent can s
   const remember = projection.capabilities.find((capability) => capability.name === 'memory_remember');
   assert.equal(remember.health, 'available');
   assert.equal(remember.riskLevel, 'L0_inert');
-  assert.deepEqual(
-    evaluateGoalModeGate({ mode: 'project_agent', toolName: 'memory_remember', riskLevel: remember.riskLevel }),
-    { allowed: true },
-  );
   const chat = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
   assert.equal(
     chat.capabilities.find((capability) => capability.name === 'memory_remember')?.health,

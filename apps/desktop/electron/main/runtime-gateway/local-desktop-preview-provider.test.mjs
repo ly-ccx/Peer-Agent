@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { createLocalDesktopPreviewProvider } from './local-desktop-preview-provider.mjs';
-import { createChatPermissionGate } from '../chat-runtime/permission-gate.mjs';
+import { createChatPermissionGate } from './local-permission-gate.mjs';
 
 // Negative-path tests only. Real rendering/provenance is exercised by the Electron smoke.
 function fixture(t, overrides = {}, options = {}) {

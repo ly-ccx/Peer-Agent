@@ -1,12 +1,14 @@
 import { getDesktopPreviewService } from './desktop-preview-service.mjs';
 import { resolveChannel } from '../provider-channels.mjs';
-import { executeDesktopProviderRequest } from '../chat-runtime/provider-request-coordinator.mjs';
-import { createOpenAIVisualObservationMessage, createAnthropicToolResultContent, createGeminiVisualObservationParts, INDEPENDENT_VISUAL_REVIEW_PURPOSE } from '../chat-runtime/visual-observation-projection.mjs';
-import { sanitizeApiMessages } from '../chat-runtime/message-sanitizer.mjs';
+import { executeDesktopProviderRequest } from '../provider-transports/desktop-provider-request.mjs';
+import { createOpenAIVisualObservationMessage, createAnthropicToolResultContent, createGeminiVisualObservationParts, INDEPENDENT_VISUAL_REVIEW_PURPOSE } from './visual-observation-projection.mjs';
+import { sanitizeApiMessages } from '../provider-adapters/message-sanitizer.mjs';
 import { sendOpenAIChatStream } from '../provider-adapters/openai-chat-adapter.mjs';
 import { sendOpenAIResponsesStream } from '../provider-adapters/openai-responses-adapter.mjs';
 import { sendAnthropicMessagesStream } from '../provider-adapters/anthropic-messages-adapter.mjs';
 import { sendGeminiStream } from '../provider-adapters/gemini-adapter.mjs';
+import { resolveProviderCredential } from '../provider-credential-resolver.mjs';
+import { buildSystemContext, renderSystemContext } from '../llm-prompts.mjs';
 
 const handles = new WeakMap();
 const senders = { 'openai-chat': sendOpenAIChatStream, 'openai-responses': sendOpenAIResponsesStream,
@@ -98,20 +100,98 @@ export async function runDesktopVisualReview({ handle, provider, resolvedChannel
   }
 }
 
-export async function runPlanVisualVerifier({ plan, verifierRunId, signal, goalPlanStore, workspacePath,
-  llmChatService, modelProviderId }) {
-  const provider = getDesktopPreviewService(goalPlanStore, workspacePath);
-  if (!provider?.prepareVisualReview) throw new Error('visual-review-service-unavailable');
-  const handle = provider.prepareVisualReview(plan.planId, verifierRunId, signal);
-  let terminal = null;
+export async function runPlanVisualVerifier({
+  plan,
+  verifierRunId,
+  signal,
+  goalPlanStore,
+  workspacePath,
+  llmConfigStore = null,
+  resolveCredential = resolveProviderCredential,
+  llmChatService = null,
+  modelProviderId = null,
+}) {
+  const providerService = getDesktopPreviewService(goalPlanStore, workspacePath);
+  if (!providerService?.prepareVisualReview) throw new Error('visual-review-service-unavailable');
+  const handle = providerService.prepareVisualReview(plan.planId, verifierRunId, signal);
+  if (llmChatService) {
+    let terminal = null;
+    try {
+      const outcome = await llmChatService.sendMessage({
+        messages: [],
+        streamId: verifierRunId,
+        mode: 'explorer',
+        ephemeral: true,
+        conversationId: null,
+        workspacePath,
+        modelProviderId,
+        visualReviewHandle: handle,
+        webContents: {
+          send(channel, payload) {
+            if (['chat:stream:error', 'chat:stream:aborted'].includes(channel)) {
+              terminal = payload?.error || channel;
+            }
+          },
+        },
+      });
+      signal?.throwIfAborted();
+      if (!outcome?.visualReviewReport) throw new Error(terminal || 'visual-review-no-report');
+      return outcome.visualReviewReport;
+    } finally {
+      cancelDesktopVisualReview(handle);
+    }
+  }
+
+  let visualReview = null;
   try {
-    const outcome = await llmChatService.sendMessage({ messages: [], streamId: verifierRunId,
-      mode: 'explorer', ephemeral: true, conversationId: null, workspacePath, modelProviderId,
-      visualReviewHandle: handle, webContents: { send(channel, payload) {
-        if (['chat:stream:error', 'chat:stream:aborted'].includes(channel)) terminal = payload?.error || channel;
-      } } });
+    visualReview = requireDesktopVisualReview(handle, {
+      goalPlanStore,
+      mode: 'explorer',
+      ephemeral: true,
+      conversationId: null,
+    });
+    const providers = (llmConfigStore?.listProviders?.() ?? []).filter((p) => p && p.apiKeyConfigured !== false);
+    const provider = modelProviderId
+      ? providers.find((p) => p.id === modelProviderId) ?? null
+      : providers.find((p) => p.isDefault) ?? providers[0] ?? null;
+    if (!provider) {
+      throw new Error(modelProviderId ? 'visual-review-selected-provider-missing' : 'no_provider_configured');
+    }
+    requireVisualReviewProvider(provider);
+    const credential = await resolveCredential({ provider, llmConfigStore });
+    const resolvedChannel = resolveChannel({
+      ...provider,
+      apiKey: credential.apiKey,
+      accountId: credential.accountId,
+      oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
+      sessionId: verifierRunId,
+    });
+    const systemContext = buildSystemContext(visualReview.workspacePath, {
+      mode: 'explorer',
+      provider: resolvedChannel.legacyProvider,
+      model: provider.model,
+      verifierContext: visualReview.verifierContext,
+      goalPlanStore,
+    });
+    const systemPrompt = renderSystemContext(systemContext);
+    const report = await runDesktopVisualReview({
+      handle,
+      provider,
+      resolvedChannel,
+      apiKey: credential.apiKey,
+      systemPrompt,
+      streamId: verifierRunId,
+      signal,
+    });
     signal?.throwIfAborted();
-    if (!outcome?.visualReviewReport) throw new Error(terminal || 'visual-review-no-report');
-    return outcome.visualReviewReport;
-  } finally { cancelDesktopVisualReview(handle); }
+    if (!report) throw new Error('visual-review-no-report');
+    return report;
+  } catch (error) {
+    if (typeof error?.message === 'string' && error.message.startsWith('visual-review-')) {
+      try { visualReview?.recordFailure?.(error.message); } catch { /* best-effort */ }
+    }
+    throw error;
+  } finally {
+    cancelDesktopVisualReview(handle);
+  }
 }

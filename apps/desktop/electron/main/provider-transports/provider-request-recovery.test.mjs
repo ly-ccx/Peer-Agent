@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
-import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { fetchWithConnectionRecovery } from './recovering-fetch.mjs';
 import { sendOpenAIResponsesStreamWithResilience } from '../provider-adapters/openai-responses-adapter.mjs';
 import {
   runProviderRequestWithRecovery,

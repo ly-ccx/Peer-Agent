@@ -23,7 +23,7 @@ import {
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
 import { obligationDisplayTitle, selectPendingGrants } from '@peer-agent/runtime-node/execution-obligation';
-import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
+import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../runtime-gateway/local-permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
 import { evidenceRefAllowed, presentEvidence } from './evidence-presenter.mjs';

@@ -26,7 +26,7 @@ export function createDesktopRecoveryController({ rootDir, host, hostLeases, hol
       const sessions = plans(id);
       if (sessions.some(plan => !terminal(plan)) && typeof goalRunner?.waitForIdle !== 'function') throw new Error('coordination_recovery_stop_unavailable');
       for (const plan of sessions) if (shouldPauseForHostHandoff(plan)) goalRunner.pause(plan.planId, 'host_handoff');
-      await agentTurnExecutor.stop?.(id);
+      await agentTurnExecutor?.stop?.(id);
       await objectiveWatches.stopWorkspace(id);
       await host.waitForIdle(id);
       await supervisor.waitForCoordinationIdle(id);

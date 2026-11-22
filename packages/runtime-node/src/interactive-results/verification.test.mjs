@@ -15,12 +15,10 @@ import { createProjectInputDraftStore } from '../project-agent/input-draft-store
 import { createInputQueue } from '../project-agent/input-queue.mjs';
 import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
 import { jsonDigest } from './storage.mjs';
-import { normalizeTurnProfile } from '../../../../apps/desktop/electron/main/chat-runtime/turn-context.mjs';
+import { normalizeTurnProfile } from './test-turn-profile.mjs';
 import { normalizeEvidenceIndexRecord as legacyNormalize } from './test-fixtures/rc35-evidence-normalizer.mjs';
 import { createProjectGoalRunnerHost } from '../project-agent/goal-runner-host.mjs';
-import { createAgentTurnExecutor } from '../../../../apps/desktop/electron/main/agent-host/agent-turn-executor.mjs';
 import { createSessionVerification } from '../project-agent/session-verification.mjs';
-import { agentLoopOpenAI } from '../../../../apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs';
 import { createRuntimeToolProjection, buildOpenAIToolsFromModelProjection } from '../../../../apps/desktop/electron/main/tools/index.mjs';
 import { installDesktopInteractiveRuntime } from '../../../../apps/desktop/electron/main/interactive-results/runtime-port.mjs';
 
@@ -339,55 +337,52 @@ test('actual ephemeral inspection observations retain privacy without admitting 
   assert.notEqual((await f.inspect(review, 'program')).result.status, 'success');
 });
 
-for (const complete of [false, true]) test(`actual GoalHost → Desktop Executor → normalized ephemeral Provider enforces factual coverage: ${complete}`, async t => {
+for (const complete of [false, true]) test(`actual GoalHost → normalized ephemeral Provider enforces factual coverage: ${complete}`, async t => {
   const f = await fixture(t), frozen = await f.freeze(), events = [];
-  let calls = 0, issuedProfile;
-  const originalFetch = globalThis.fetch, requests = [];
+  let calls = 0, inspectCalls = 0, issuedProfile;
   const uninstall = installDesktopInteractiveRuntime({ runtime: f.runtime, enabled: () => true });
-  t.after(() => { globalThis.fetch = originalFetch; uninstall(); });
-  globalThis.fetch = async (_url, init) => {
-    const request = JSON.parse(init.body); requests.push(request);
-    assert.equal(JSON.stringify(request).includes(issuedProfile.interactiveReview.token), false);
-    const refs = f.plans.listEvidenceIndex().filter(row => row.interactiveInspection).map(row => row.evidenceRef);
-    const frames = requests.length === 1 ? [
-      ...[{ view: 'program' }, { view: 'data', bindingId: 'facts' }, { view: 'evaluate' }, { view: 'evaluate', followupId: frozen.followupId }].flatMap((extra, i) => [
-        { type: 'response.output_item.added', item: { type: 'function_call', id: `fc-${i}`, call_id: `inspect-${i}`, name: 'inspect_interactive_result' } },
-        { type: 'response.function_call_arguments.done', item_id: `fc-${i}`, arguments: JSON.stringify({ target: { kind: 'result', reference: f.reference }, ...extra }) },
-      ]), { type: 'response.completed', response: { usage: { input_tokens: 100, output_tokens: 20 } } },
-    ] : [
-      { type: 'response.output_text.delta', delta: JSON.stringify(success(refs)) },
-      { type: 'response.completed', response: { usage: { input_tokens: 100, output_tokens: 20 } } },
-    ];
-    assert.ok(requests.length <= 2, 'no extra request or format repair');
-    return new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+  t.after(() => { uninstall(); });
+  const executor = {
+    resolveGoalRole: () => ({ ok: true, selection: { modelProviderId: 'fixture' } }),
+    async runTurn(input) {
+      calls++;
+      issuedProfile = normalizeTurnProfile(input.turnProfile);
+      assert.equal(input.conversationId, null);
+      assert.ok(issuedProfile.executionIdentity);
+      assert.ok(issuedProfile.interactiveReview?.token);
+      assert.equal(JSON.stringify(input.messages).includes(issuedProfile.interactiveReview.token), false);
+      assert.match(JSON.stringify(input.messages), /targetsDigest/);
+      assert.match(JSON.stringify(input.runtimeReminders), /interactive/i);
+      if (complete) {
+        const { modelProjection } = createRuntimeToolProjection({ projectionOptions: {
+          mode: 'explorer', turnProfile: issuedProfile, readOnlyWorkSession: true } });
+        const tools = buildOpenAIToolsFromModelProjection(modelProjection);
+        assert.equal(tools.some(tool => tool.function?.name === 'inspect_interactive_result'), true);
+        for (const [i, extra] of [{ view: 'program' }, { view: 'data', bindingId: 'facts' }, { view: 'evaluate' }, { view: 'evaluate', followupId: frozen.followupId }].entries()) {
+          inspectCalls++;
+          const toolCallId = `inspect-${i}`;
+          const execution = await f.runtime.provider.executeCapability(
+            { call: { toolCallId, capabilityId: INSPECT, arguments: { target: { kind: 'result', reference: f.reference }, ...extra } } },
+            { toolContext: { workspaceId: 'bot', conversationId: null, turnProfile: issuedProfile } },
+          );
+          assert.equal(execution.result.status, 'success', JSON.stringify(execution.result.outputPreview));
+          input.sink.send('chat:stream:tool-result', {
+            toolCallId,
+            toolName: 'inspect_interactive_result',
+            evidenceRefs: collectToolEvidenceRefs({ toolCallId, execution }),
+            result: execution.result,
+          });
+        }
+        const refs = f.plans.listEvidenceIndex().filter(row => row.interactiveInspection).map(row => row.evidenceRef);
+        const text = JSON.stringify(success(refs));
+        input.sink.send('chat:stream:delta', { content: text });
+        return { terminalStatus: 'done', text };
+      }
+      const text = JSON.stringify(success([f.publicationRef]));
+      input.sink.send('chat:stream:delta', { content: text });
+      return { terminalStatus: 'done', text };
+    },
   };
-  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
-    calls++;
-    issuedProfile = normalizeTurnProfile(input.turnProfile);
-    assert.equal(input.conversationId, null);
-    assert.ok(issuedProfile.executionIdentity);
-    assert.ok(issuedProfile.interactiveReview?.token);
-    assert.equal(JSON.stringify(input.messages).includes(issuedProfile.interactiveReview.token), false);
-    assert.match(JSON.stringify(input.messages), /targetsDigest/);
-    assert.match(JSON.stringify(input.runtimeReminders), /interactive/i);
-    if (complete) {
-      const { registry, projection, modelProjection } = createRuntimeToolProjection({ projectionOptions: {
-        mode: 'explorer', turnProfile: issuedProfile, readOnlyWorkSession: true } });
-      const tools = buildOpenAIToolsFromModelProjection(modelProjection);
-      assert.equal(tools.some(tool => tool.function?.name === 'inspect_interactive_result'), true);
-      await agentLoopOpenAI({ baseUrl: 'https://fixture.invalid', apiKey: 'controlled-transport', authMethod: 'oauth_chatgpt', providerId: 'fixture', model: 'fixture',
-        systemPrompt: 'Readonly verifier.', messages: input.messages, tools, streamId: input.streamId, signal: input.signal,
-        executionBudget: input.executionBudget, workspacePath: f.root, conversationId: null, runtimeMode: 'explorer', registry,
-        runtimeProjection: projection, goalPlanStore: f.plans, toolContext: { mode: 'explorer', turnRole: 'work_session', agentKind: 'verifier',
-          planId: f.current().planId, workspaceId: 'bot', conversationId: null, turnProfile: issuedProfile, readFiles: new Map(), turnToolCalls: [], turnId: input.streamId },
-        permissionGate: { createFilePermissionRequester: () => async () => ({ granted: true }),
-          createLocalCapabilityPermissionRequester: () => async () => ({ granted: true }), createShellApprovalDecider: () => async () => ({ granted: true }) },
-        webContents: input.webContents });
-      return { terminalStatus: 'done' };
-    }
-    input.webContents.send('chat:stream:delta', { content: JSON.stringify(success([f.publicationRef])) });
-    return { terminalStatus: 'done' };
-  } } });
   const host = createProjectGoalRunnerHost({ agentTurnExecutor: executor, goalPlanStore: f.plans, conversationStore: f.conversations,
     llmChatService: {}, broadcast: (channel, payload) => events.push({ channel, payload }), hostLeases: { holds: () => true }, workspaceRoot: f.root,
     resolveConversationModelProviderId: () => 'fixture', getInteractiveVerification: () => f.runtime.verification });
@@ -405,7 +400,7 @@ for (const complete of [false, true]) test(`actual GoalHost → Desktop Executor
   assert.equal(verification.facts('session').independentVerifier, complete ? 'passed' : 'missing');
   assert.equal(verdict.passed, complete, JSON.stringify(verdict));
   assert.equal(calls, 1, 'semantic missing coverage is not a report-format retry');
-  assert.equal(requests.length, complete ? 2 : 0);
+  assert.equal(inspectCalls, complete ? 4 : 0);
   if (!complete) assert.match(JSON.stringify(verdict.missingEvidence), /interactive_verification_evidence_missing/);
   assert.notEqual((await f.inspect({ binding: issuedProfile.interactiveReview }, 'program')).result.status, 'success', 'finished host review closes the private lifetime token');
 });

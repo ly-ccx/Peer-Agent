@@ -1,4 +1,4 @@
-import { refreshActiveAccessPolicies } from '../chat-runtime/permission-gate.mjs';
+import { refreshActiveAccessPolicies } from '../runtime-gateway/local-permission-gate.mjs';
 
 /** Local UI authority port; generic profile edits and remote tools cannot call this mutation. */
 export function createBotAccessPolicyService({

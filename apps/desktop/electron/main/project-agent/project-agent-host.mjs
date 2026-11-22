@@ -158,7 +158,7 @@ export function registerDesktopProjectAgent({
   let objectiveWatches=null;
   const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
-  const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
+  const executionScheduler = agentTurnExecutor?.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
     isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const readEvidenceBody = createEvidenceReader({
@@ -246,17 +246,17 @@ export function registerDesktopProjectAgent({
       if (result.ok) return result.policy;
       return result.code === 'NOT_FOUND' ? null : { tier: result.code };
     },
-    readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
+    readDelegationCapabilities: input => agentTurnExecutor?.readDelegationCapabilities?.(input),
     readResourceFeedback: interactive.feedback.restore,
     projectReportEvidence: interactive.publications.projectReportEvidence,
     recoverStoppedPublications: interactive.recoverWorkspace,
     approvalStore,
     memoryStore,
-    resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
+    resolveModel: (input) => agentTurnExecutor?.resolveGoalRole?.({
       ...input,
       workerModelProviderId: input.workerModel?.modelProviderId,
       projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy,
-    }),
+    }) ?? { ok: false, missing: 'agent_turn_executor_unavailable' },
     resolveAcceptancePolicy: (workspaceId, plan) => plan?.delegationOrigin?.objectiveId ? objectiveService.acceptancePolicy(workspaceId,plan.delegationOrigin.objectiveId) : profileStore.read(workspaceId)?.acceptancePolicy,
     readSessionFacts: (plan) => ({ autoHandoffOnPolicyAccept: profileStore.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true, hostAuthority: {
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
@@ -344,7 +344,11 @@ export function registerDesktopProjectAgent({
             projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy })
           : null
       ),
-      runTurn: (input) => agentTurnExecutor.runTurn(input),
+      runTurn: (input) => (
+        typeof agentTurnExecutor?.runTurn === 'function'
+          ? agentTurnExecutor.runTurn(input)
+          : Promise.reject(new Error('peer_core_not_ready'))
+      ),
     }),
     resolveFileAnchors: fileAnchors.capture,
     onWrote: memoryChanged,
@@ -474,7 +478,7 @@ export function registerDesktopProjectAgent({
     hasMessage,
     appendMessage,
     inbox,
-    resolveModel: (input) => agentTurnExecutor.resolveGoalRole({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }),
+    resolveModel: (input) => agentTurnExecutor?.resolveGoalRole?.({ ...input, projectPolicy: profileStore.read(input.workspaceId)?.modelPolicy }) ?? { ok: false, missing: 'agent_turn_executor_unavailable' },
     resolveContext:({workspaceId,...scope})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId),scope),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     resolveTurnRoster: scope => supervisor.summaries(scope),
@@ -491,6 +495,9 @@ export function registerDesktopProjectAgent({
         ? (await conversationStore.readInteractionContext(input.conversationId))?.messages || []
         : conversationStore.getPersistedConversationHistory(input.conversationId)?.messages || [];
       const messages = projectConversationHistory(history.filter((message) => message.kind === 'user_input' || message.kind === 'agent_reply' || !message.kind && ['user', 'assistant'].includes(message.role))).messages;
+      if (typeof agentTurnExecutor?.runTurn !== 'function') {
+        throw new Error('peer_core_not_ready');
+      }
       return agentTurnExecutor.runTurn({
         ...input,
         messages,
@@ -529,7 +536,7 @@ export function registerDesktopProjectAgent({
     if (reason !== 'lost') for (const session of sessions) {
       if (shouldPauseForHostHandoff(goalPlanStore.getPlan(session.planId))) goalRunner.pause(session.planId, 'host_handoff');
     }
-    await agentTurnExecutor.stop?.(workspaceId);
+    await agentTurnExecutor?.stop?.(workspaceId);
     await objectiveWatches.stopWorkspace(workspaceId);
     await Promise.allSettled(sessions.map(session => goalRunner.waitForIdle?.(session.planId)));
   });

@@ -1,6 +1,6 @@
 import {realpathSync,statSync,lstatSync} from 'node:fs';
 import path from 'node:path';
-import {createPermissionGrant,createFailedClientToolResult} from '../runtime-gateway/tool-result-factory.mjs';
+import { createPermissionGrant, createFailedClientToolResult } from './tool-result-factory.mjs';
 const READS=new Set(['local.file.read','local.file.list','local.file.search','local.search.aggregate']);
 /** Probe authority is a host policy. Cached approvals and full access cannot expand this read-only scope. */
 export function evaluateObjectiveProbeCall({policy,call,workspacePath}={}){

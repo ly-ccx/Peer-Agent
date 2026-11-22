@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evaluateVerificationGate } from './goal-runner.mjs';
+import { evaluateVerificationGate } from '@peer-agent/runtime-node/project-agent';
 
 const plan = { tasks: [{ taskId: 'done', status: 'completed', evidenceRefs: ['mechanical'] }] };
 for (const host of ['web', 'desktop']) {

@@ -1120,6 +1120,17 @@ impl PermissionInput for BotApprovalPermissionInput {
             let mirrored = approval_obj["workspaceId"].is_null();
             let initial_policy_stamp =
                 current_bot_policy_stamp(&self.data_home, &self.workspace_id);
+            let (tx, rx) = oneshot::channel();
+            if let Ok(mut guard) = self.live_approvals.lock() {
+                guard.insert(
+                    approval_id.clone(),
+                    LiveApprovalWaiter {
+                        workspace_id: self.workspace_id.clone(),
+                        mirrored_in_workspace: mirrored,
+                        tx,
+                    },
+                );
+            }
             let mirrored_row = if mirrored {
                 let cap_id = approval_obj["capabilityId"]
                     .as_str()
@@ -1169,17 +1180,6 @@ impl PermissionInput for BotApprovalPermissionInput {
                 None
             };
 
-            let (tx, rx) = oneshot::channel();
-            if let Ok(mut guard) = self.live_approvals.lock() {
-                guard.insert(
-                    approval_id.clone(),
-                    LiveApprovalWaiter {
-                        workspace_id: self.workspace_id.clone(),
-                        mirrored_in_workspace: mirrored,
-                        tx,
-                    },
-                );
-            }
             let _ = self
                 .peer
                 .notify(

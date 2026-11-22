@@ -26,7 +26,6 @@ after(() => {
   if (oldTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE; else process.env.PEER_AGENT_PROVIDER_TRACE = oldTrace;
   rmSync(home, { recursive: true, force: true });
 });
-const { createLlmChatService } = await import('../llm-chat-service.mjs');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VvYAAAAASUVORK5CYII=', 'base64');
 const formats = { openai: ['openai', 'openai-chat'], 'openai-responses': ['openai', 'openai-responses'],
   anthropic: ['anthropic', 'anthropic-messages'], gemini: ['google-ai', 'gemini'] };
@@ -87,13 +86,13 @@ async function service(t, f, wire, scenario) {
   const [channelId, wireOverride] = formats[wire];
   const config = { id: 'fixture', channelId, wireOverride, model: 'fixture-model', baseUrl: `http://127.0.0.1:${server.address().port}`,
     supportsVision: scenario !== 'no-vision', supportsReasoning: false, contextWindow: 100000, apiKeyConfigured: true, isDefault: true };
-  const llm = createLlmChatService({ goalPlanStore: f.store, llmConfigStore: {
-    listProviders: () => [config], getDecryptedApiKey: () => { credentials++; return 'fixture-not-a-secret'; },
-  }, conversationStore: { getConversation(id) { assert.ok(!id, 'must not load a daily conversation'); return null; },
-    saveConversation() { throw new Error('must not persist review'); } } });
-  return { llm, received, config, credentials: () => credentials,
+  const llmConfigStore = {
+    listProviders: () => [config],
+    getDecryptedApiKey: () => { credentials++; return 'fixture-not-a-secret'; },
+  };
+  return { llmConfigStore, received, config, credentials: () => credentials,
     invoke: () => runPlanVisualVerifier({ plan: f.plan, verifierRunId: `review:${randomUUID()}`, signal: f.controller.signal,
-      goalPlanStore: f.store, workspacePath: f.root, llmChatService: llm, modelProviderId: 'fixture' }) };
+      goalPlanStore: f.store, workspacePath: f.root, llmConfigStore, modelProviderId: 'fixture' }) };
 }
 for (const wire of Object.keys(formats)) {
   for (const scene of ['application', 'background-runtime']) for (const scenario of ['passed', 'failed', 'inconclusive', 'missing-image', 'no-vision', 'cancel', 'stale', 'malformed']) {
@@ -168,7 +167,7 @@ for (const scenario of ['passed', 'failed', 'inconclusive']) {
       verifierRunner: { async runVerifier(args) {
         stages.push(args.stage || 'evidence');
         if (args.stage === 'visual') return runPlanVisualVerifier({ ...args, goalPlanStore: f.store,
-          workspacePath: f.root, llmChatService: s.llm, modelProviderId: 'fixture' });
+          workspacePath: f.root, llmConfigStore: s.llmConfigStore, modelProviderId: 'fixture' });
         return { passed: true, evidenceRefs: [f.stored.evidenceRef] };
       } }, chatRuntime: { async runGoalTurn() {
         f.store.recordTaskEvidence(f.plan.planId, 'observe', { status: 'completed', evidenceRefs: [f.stored.evidenceRef] });
@@ -208,16 +207,17 @@ test('independent review sends the same grok identity headers as chat', async t 
   };
   const config = { id: 'fixture', channelId: 'grok', authMethod: 'oauth_grok', model: 'grok-4.6',
     supportsVision: true, supportsReasoning: false, contextWindow: 100000, apiKeyConfigured: true, isDefault: true };
-  const llm = createLlmChatService({ goalPlanStore: f.store, llmConfigStore: {
-    listProviders: () => [config], getDecryptedApiKey: () => 'fixture-not-a-secret',
+  const llmConfigStore = {
+    listProviders: () => [config],
+    getDecryptedApiKey: () => 'fixture-not-a-secret',
     refreshOAuthTokens: async (_id, tokens) => {
       assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
       return { tokens, refreshed: false };
     },
     getCredential: () => ({ tokens: { access: 'fixture-not-a-secret', scope: 'api:access', expires: Date.now() + 3_600_000 } }),
-  }, conversationStore: { getConversation() { return null; }, saveConversation() { throw new Error('must not persist review'); } } });
+  };
   await assert.rejects(runPlanVisualVerifier({ plan: f.plan, verifierRunId: `review:${randomUUID()}`,
-    signal: f.controller.signal, goalPlanStore: f.store, workspacePath: f.root, llmChatService: llm, modelProviderId: 'fixture' }));
+    signal: f.controller.signal, goalPlanStore: f.store, workspacePath: f.root, llmConfigStore, modelProviderId: 'fixture' }));
   assert.equal(received.length, 1, 'review must still reach Grok');
   const headers = new Headers(received[0].headers);
   const value = (name) => headers.get(name);

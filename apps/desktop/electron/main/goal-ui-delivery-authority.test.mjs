@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
-import { createGoalRunner } from './goal-runner.mjs';
+import { createGoalRunner } from '@peer-agent/runtime-node/project-agent';
 
 for (const host of ['web', 'desktop']) {
   for (const mode of ['valid', 'missing', 'failed', 'stale', 'throws', 'non-ui']) {

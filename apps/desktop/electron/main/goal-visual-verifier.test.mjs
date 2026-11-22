@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
-import { createGoalRunner } from './goal-runner.mjs';
+import { createGoalRunner } from '@peer-agent/runtime-node/project-agent';
 import { createGoalVisualVerification } from '../../../../packages/runtime-node/src/goal-visual-verification.mjs';
 import { buildGoalRunnerTickMessage, describeVisualRepair } from '../../../../packages/runtime-node/src/goal-visual-repair.mjs';
 

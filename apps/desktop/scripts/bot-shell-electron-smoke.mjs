@@ -438,8 +438,6 @@ ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await i
 // The UI deliberately holds each stream phase while capturing multiple layouts.
 // Keep that fixture wait bounded separately from real interaction timing budgets.
 globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole,phaseTimeoutMs:300_000});` : ''}
-const {withImagePermissionFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/image-permission-fixture.mjs')).href)});
-globalThis.rcBotShellService=await withImagePermissionFixture(globalThis.rcBotShellService,{mainRoot:${JSON.stringify(path.dirname(main))},imageRoot:${JSON.stringify(path.join(root,'image-lifecycle'))},receiptFile:${JSON.stringify(imageReceipt)}});
 const fixtureSend=globalThis.rcBotShellService.sendMessage.bind(globalThis.rcBotShellService);
 globalThis.rcBotShellService.sendMessage=input=>{
   if(input.messages?.findLast(message=>message.role==='user')?.content==='RC_QUICK_INPUT') {

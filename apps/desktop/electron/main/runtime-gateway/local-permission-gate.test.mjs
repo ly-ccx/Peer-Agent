@@ -5,7 +5,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { createApprovalStore, digestApprovalArgs } from '@peer-agent/runtime-node';
 
-import { createChatPermissionGate, createOneTimeApprovalBook } from './permission-gate.mjs';
+import { createChatPermissionGate, createOneTimeApprovalBook } from './local-permission-gate.mjs';
 
 function createWebContents(events) {
   return {

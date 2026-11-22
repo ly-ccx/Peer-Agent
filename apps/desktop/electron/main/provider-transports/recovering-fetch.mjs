@@ -148,7 +148,7 @@ function emitConnectionRecovery(webContents, payload) {
 import { observeVisualTransportAttempt } from './visual-request-context.mjs';
 import { grokSubscriptionTransport } from '@peer-agent/runtime-node';
 import { dispatchProviderRequest, hasManagedProviderRequest,
-  providerRequestDispatchIndex } from '../chat-runtime/provider-request-recovery.mjs';
+  providerRequestDispatchIndex } from './provider-request-recovery.mjs';
 
 export async function fetchWithConnectionRecovery(url, init = {}, {
   webContents = null,

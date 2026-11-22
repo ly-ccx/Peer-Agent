@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { digestApprovalArgs, createOneTimeApprovalBook } from '@peer-agent/runtime-node';
 import { RESOURCE_FILE_REPLACE_CAPABILITY, normalizeResourceEditHandle, resourceEditToken, resourceEditDigest } from '@peer-agent/protocol';
-import { createChatPermissionGate } from './chat-runtime/permission-gate.mjs';
+import { createChatPermissionGate } from './runtime-gateway/local-permission-gate.mjs';
 import { createPermissionGrant } from './runtime-gateway/tool-result-factory.mjs';
 const fail = code => ({ ok: false, code });
 const key = op => `resource-edit:${op.requestId}`;

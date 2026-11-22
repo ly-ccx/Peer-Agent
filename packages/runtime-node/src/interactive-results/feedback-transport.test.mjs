@@ -149,7 +149,7 @@ test('known attachments carry the complete selection through a real already-open
   // fixture above retains its original source digest and is still executed.
   const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
   const pinnedWriterBlocks = [
-    ['function readJsonl(', '\nfunction readJson(', 'f949bb59a56320c71cbe26e4bee7672571fe2c8cf08c92894413b7620e3a94b7'],
+    ['function readJsonl(', '\nfunction readJson(', '67316241561ec2ff30d48979df321ceb529dd868c2b34218316fde842409dcc3'],
     ['function normalizeMeta(', '\n// 一次性数据迁移', 'f6517a5371f61f887e3b58dc22292a5edfc33a27484e87adcea9f9024c955060'],
     ['  function isEmptyUserMessage(', '\n  const terminalCommitter', '88dcfdce6dfedd297c8574b69612650c601309113acf485175a51705bd037705'],
     ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '047c361dbac5ac3964c25d8a34687c330e0b364ac1ae3154edbe5cba83deee86'],

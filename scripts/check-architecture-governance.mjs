@@ -181,7 +181,7 @@ function assertSystemContextProtocolContracts() {
 
   const main = readText('apps/desktop/electron/main/main.mjs');
   if (!main.includes('configInstructions') || !main.includes('contextExtensions')) {
-    fail('main.mjs chat:send must pass protocol configInstructions/contextExtensions into llm-chat-service.');
+    fail('main.mjs chat:send must pass protocol configInstructions/contextExtensions into classicCoreBridge.');
   }
 
   const chatSurface = readText('apps/desktop/renderer/src/chat/components/ChatSurface.tsx');
@@ -253,18 +253,6 @@ function assertProviderAdaptersOwnProviderStreaming() {
   ]) {
     if (!existsSync(path.join(repoRoot, filePath))) {
       fail(`Provider streaming adapter is missing: ${filePath}`);
-    }
-  }
-
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  for (const forbidden of [
-    'function consumeOpenAIStream',
-    'function consumeAnthropicStream',
-    'function consumeOpenAIStreamLine',
-    'function consumeAnthropicStreamLine',
-  ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own provider stream parser ${forbidden}; use provider-adapters/*.`);
     }
   }
 }
@@ -395,157 +383,61 @@ function assertToolPromptsAreAssetBacked() {
   }
 }
 
-function assertChatRuntimePermissionGateIsModular() {
-  const permissionGatePath = 'apps/desktop/electron/main/chat-runtime/permission-gate.mjs';
-  if (!existsSync(path.join(repoRoot, permissionGatePath))) {
-    fail(`Chat runtime Permission Gate module is missing: ${permissionGatePath}`);
-    return;
+function assertDesktopConvergedOnRustCore() {
+  for (const retiredPath of [
+    'apps/desktop/electron/main/chat-runtime',
+    'apps/desktop/electron/main/agent-host',
+    'apps/desktop/electron/main/llm-chat-service.mjs',
+    'apps/desktop/electron/main/goal-runner.mjs',
+    'apps/desktop/electron/main/context-compactor.mjs',
+  ]) {
+    if (existsSync(path.join(repoRoot, retiredPath))) {
+      fail(`Retired Desktop TS agent engine artifact must stay deleted: ${retiredPath}`);
+    }
   }
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
+
+  for (const helperPath of [
+    'apps/desktop/electron/main/compaction-registry.mjs',
+    'apps/desktop/electron/main/runtime-gateway/pending-permission-wait.mjs',
+    'apps/desktop/electron/main/runtime-gateway/local-permission-gate.mjs',
+    'apps/desktop/electron/main/runtime-gateway/objective-probe-gate.mjs',
+    'apps/desktop/electron/main/runtime-gateway/visual-observation-projection.mjs',
+    'apps/desktop/electron/main/provider-adapters/message-sanitizer.mjs',
+    'apps/desktop/electron/main/provider-transports/provider-request-recovery.mjs',
+    'apps/desktop/electron/main/provider-transports/desktop-provider-request.mjs',
+  ]) {
+    if (!existsSync(path.join(repoRoot, helperPath))) {
+      fail(`Relocated Desktop host/transport helper is missing: ${helperPath}`);
+    }
+  }
+
+  const main = readText('apps/desktop/electron/main/main.mjs');
+  for (const required of [
+    'createClassicCoreBridge',
+    'createPeerCoreClient',
+    'classicCoreBridge.send(',
+    'classicCoreBridge.compact(',
+  ]) {
+    if (!main.includes(required)) {
+      fail(`main.mjs must route classic execution through Rust Peer Core (${required}).`);
+    }
+  }
   for (const forbidden of [
-    'pendingPermissionRequests',
-    'approvedPermissionScopes',
-    'function buildFilePermissionCall',
-    'function buildShellPermissionCall',
+    'llm-chat-service',
+    'chat-runtime/',
+    'agent-host/',
+    'tsGoalRunner',
   ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own Permission Gate state or builders (${forbidden}); use chat-runtime/permission-gate.mjs.`);
-    }
-  }
-  if (!chatService.includes('createChatPermissionGate')) {
-    fail('llm-chat-service.mjs must compose chat-runtime/permission-gate.mjs for permission request handling.');
-  }
-}
-
-function assertChatRuntimeToolOrchestratorIsModular() {
-  const toolOrchestratorPath = 'apps/desktop/electron/main/chat-runtime/tool-orchestrator.mjs';
-  if (!existsSync(path.join(repoRoot, toolOrchestratorPath))) {
-    fail(`Chat runtime Tool Orchestrator module is missing: ${toolOrchestratorPath}`);
-    return;
-  }
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  for (const forbidden of [
-    'executeLegacyLlmLocalTool',
-    'createShellArtifactStore',
-    'function safeParseJson',
-    'executeModelToolCall',
-  ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own Tool Orchestrator behavior (${forbidden}); use chat-runtime/tool-orchestrator.mjs.`);
-    }
-  }
-  const agentLoopFiles = [
-    'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
-    'apps/desktop/electron/main/chat-runtime/anthropic-agent-loop.mjs',
-  ];
-  for (const filePath of agentLoopFiles) {
-    if (!existsSync(path.join(repoRoot, filePath))) continue;
-    const content = readText(filePath);
-    if (!content.includes('executeModelToolCall')) {
-      fail(`${filePath} must delegate model tool execution to chat-runtime/tool-orchestrator.mjs.`);
-    }
-  }
-}
-
-function assertProjectedToolExecutionUsesRuntimeProjection() {
-  const projectedExecutorPath = 'apps/desktop/electron/main/chat-runtime/projected-tool-executor.mjs';
-  if (!existsSync(path.join(repoRoot, projectedExecutorPath))) {
-    fail(`Projected tool executor is missing: ${projectedExecutorPath}`);
-    return;
-  }
-  const projectedExecutor = readText(projectedExecutorPath);
-  for (const snippet of [
-    'DEFAULT_RUNTIME_PROJECTION',
-    'DEFAULT_TOOL_REGISTRY',
-    'createLocalToolHost',
-    'resolveProjectedModelToolCall',
-  ]) {
-    if (!projectedExecutor.includes(snippet)) {
-      fail(`${projectedExecutorPath} must route model tools through Runtime Projection and Local Tool Host (${snippet}).`);
+    if (main.includes(forbidden)) {
+      fail(`main.mjs must not retain retired TS engine dependency: ${forbidden}`);
     }
   }
 
-  const toolOrchestrator = readText('apps/desktop/electron/main/chat-runtime/tool-orchestrator.mjs');
-  if (toolOrchestrator.includes('executeLegacyLlmLocalTool')) {
-    fail('tool-orchestrator.mjs must not call executeLegacyLlmLocalTool directly; use projected-tool-executor.mjs.');
-  }
-  if (toolOrchestrator.includes('export async function executeTool')) {
-    fail('tool-orchestrator.mjs must not keep the legacy executeTool compatibility API; use executeProjectedModelTool or executeModelToolCall.');
-  }
-  if (!toolOrchestrator.includes('projected-tool-executor.mjs')) {
-    fail('tool-orchestrator.mjs must delegate model-visible tool execution to projected-tool-executor.mjs.');
-  }
-  const executeModelToolCallBody = toolOrchestrator.match(/export async function executeModelToolCall[\s\S]*$/)?.[0] ?? '';
-  if (executeModelToolCallBody.includes('executeTool(')) {
-    fail('executeModelToolCall must call executeProjectedModelTool directly; executeTool has been removed.');
-  }
-  if (!executeModelToolCallBody.includes('executeProjectedModelTool')) {
-    fail('executeModelToolCall must use executeProjectedModelTool for runtime model tool execution.');
-  }
-
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  if (chatService.includes('executeTool')) {
-    fail('llm-chat-service.mjs must not re-export legacy executeTool; chat service does not own tool execution.');
-  }
-}
-
-function assertChatRuntimeCompactionCoordinatorIsModular() {
-  const compactionCoordinatorPath = 'apps/desktop/electron/main/chat-runtime/compaction-coordinator.mjs';
-  if (!existsSync(path.join(repoRoot, compactionCoordinatorPath))) {
-    fail(`Chat runtime Compaction Coordinator module is missing: ${compactionCoordinatorPath}`);
-    return;
-  }
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  for (const forbidden of [
-    'compactIfNeeded',
-    'microcompactMessagesForContext',
-    'estimateTokensFromMessages',
-    'COMPACTION_CONFIG',
-    'chat:compaction',
-  ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own Compaction Coordinator behavior (${forbidden}); use chat-runtime/compaction-coordinator.mjs.`);
+  const peerCoreClient = readText('apps/desktop/electron/main/peer-core-client.mjs');
+  for (const required of ['isPeerCoreDaemonEnabled', 'fallbackToStdio']) {
+    if (!peerCoreClient.includes(required)) {
+      fail(`peer-core-client.mjs must preserve daemon/stdio switch (${required}).`);
     }
-  }
-  const requestCoordinatorPath = 'apps/desktop/electron/main/chat-runtime/provider-request-coordinator.mjs';
-  const requestCoordinator = readText(requestCoordinatorPath);
-  if (!requestCoordinator.includes('runCompactionCheck')) {
-    fail(`${requestCoordinatorPath} must own the shared request-preflight compaction check.`);
-  }
-  const agentLoopFiles = [
-    'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
-    'apps/desktop/electron/main/chat-runtime/anthropic-agent-loop.mjs',
-    'apps/desktop/electron/main/chat-runtime/gemini-agent-loop.mjs',
-    'apps/desktop/electron/main/chat-runtime/qoder-agent-loop.mjs',
-  ];
-  for (const filePath of agentLoopFiles) {
-    if (!existsSync(path.join(repoRoot, filePath))) continue;
-    const content = readText(filePath);
-    if (!content.includes('executeDesktopProviderRequest')) {
-      fail(`${filePath} must delegate request-preflight compaction to provider-request-coordinator.mjs.`);
-    }
-  }
-}
-
-function assertChatRuntimeResponseGuardIsModular() {
-  const responseGuardPath = 'apps/desktop/electron/main/chat-runtime/response-guard.mjs';
-  if (!existsSync(path.join(repoRoot, responseGuardPath))) {
-    fail(`Chat runtime Response Guard module is missing: ${responseGuardPath}`);
-    return;
-  }
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  for (const forbidden of [
-    'UNSUPPORTED_TOOL_CLAIM_PATTERNS',
-    'DANGLING_TOOL_INTENT_PATTERNS',
-    'function unsupportedToolResponseCorrection',
-    'function emptyModelResponseError',
-  ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own Response Guard behavior (${forbidden}); use chat-runtime/response-guard.mjs.`);
-    }
-  }
-  if (!chatService.includes('response-guard.mjs')) {
-    fail('llm-chat-service.mjs must compose chat-runtime/response-guard.mjs for model response guarding.');
   }
 }
 
@@ -619,10 +511,6 @@ function assertPromptBaselineIsRecorded() {
   ) {
     fail('Durable Context Epoch ledger must be queryable through typed IPC handlers.');
   }
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  if (!chatService.includes('getActiveContextEpochId') || !chatService.includes('contextEpochId')) {
-    fail('Chat prompt snapshots must be anchored to the active Context Epoch so retries reuse the same baseline.');
-  }
 
   const preloadContract = readText('apps/desktop/renderer/src/preload/contracts/bootstrapPreloadApi.ts');
   for (const snippet of ['PromptContextEpochEventRecord', 'promptContextEpochEvents', 'promptContextEpochChain']) {
@@ -648,9 +536,6 @@ function assertContextAccountingPolicyIsCentralized() {
   const tokenUsageDisplay = readText('apps/desktop/renderer/src/chat/components/thread/TokenUsageDisplay.tsx');
   const preload = readText('apps/desktop/electron/preload/preload.cjs');
   const preloadContract = readText('apps/desktop/renderer/src/preload/contracts/bootstrapPreloadApi.ts');
-  const compactionCoordinator = readText(
-    'apps/desktop/electron/main/chat-runtime/compaction-coordinator.mjs',
-  );
 
   if (!protocol.includes('export interface ContextAccountingSnapshot')) {
     fail('Protocol must define ContextAccountingSnapshot as the cross-host context-capacity state.');
@@ -686,7 +571,7 @@ function assertContextAccountingPolicyIsCentralized() {
     fail('Legacy chat:context:projection IPC must not return.');
   }
   for (const legacy of ['nextRequestInputTokens', 'compactionPressureTokens']) {
-    if (preloadContract.includes(legacy) || compactionCoordinator.includes(legacy)) {
+    if (preloadContract.includes(legacy)) {
       fail(`Compaction IPC must not publish a parallel context-capacity field (${legacy}).`);
     }
   }
@@ -757,73 +642,6 @@ function assertContextAccountingPolicyIsCentralized() {
     || !tuiComposerStatus.includes('emptyContext && accounting == null')
   ) {
     fail('A brand-new empty Desktop/TUI conversation must display 0%, while restored unknown stays unknown.');
-  }
-}
-
-function assertChatRuntimeAgentLoopsAreModular() {
-  const loopPaths = [
-    'apps/desktop/electron/main/chat-runtime/openai-agent-loop.mjs',
-    'apps/desktop/electron/main/chat-runtime/anthropic-agent-loop.mjs',
-  ];
-  for (const loopPath of loopPaths) {
-    if (!existsSync(path.join(repoRoot, loopPath))) {
-      fail(`Chat runtime Agent Loop module is missing: ${loopPath}`);
-    }
-  }
-
-  const chatService = readText('apps/desktop/electron/main/llm-chat-service.mjs');
-  for (const forbidden of [
-    'async function agentLoopOpenAI',
-    'async function agentLoopAnthropic',
-    'sendOpenAIChatStream',
-    'sendAnthropicMessagesStream',
-    'runCompactionCheck',
-  ]) {
-    if (chatService.includes(forbidden)) {
-      fail(`llm-chat-service.mjs must not own provider Agent Loop behavior (${forbidden}); use chat-runtime/*-agent-loop.mjs.`);
-    }
-  }
-  if (!chatService.includes('agentLoopOpenAI') || !chatService.includes('agentLoopAnthropic')) {
-    fail('llm-chat-service.mjs must compose provider Agent Loop modules instead of owning provider loops.');
-  }
-
-  const loopKernelPath = 'apps/desktop/electron/main/chat-runtime/agent-loop-kernel.mjs';
-  const loopKernel = readText(loopKernelPath);
-  if (!loopKernel.includes('handleTerminalTextResponse')) {
-    fail(`${loopKernelPath} must own provider-neutral terminal text response transitions.`);
-  }
-
-  if (existsSync(path.join(repoRoot, loopPaths[0]))) {
-    const openaiLoop = readText(loopPaths[0]);
-    for (const snippet of ['sendOpenAIChatStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
-      if (!openaiLoop.includes(snippet)) {
-        fail(`${loopPaths[0]} is missing required provider loop dependency ${snippet}.`);
-      }
-    }
-    if (
-      openaiLoop.includes('unsupportedToolClaimRetries')
-      || openaiLoop.includes('inputTokens: 0')
-      || openaiLoop.includes('claimUnsupportedToolRetry')
-      || openaiLoop.includes('emptyModelResponseError(')
-    ) {
-      fail(`${loopPaths[0]} must use chat-runtime/agent-loop-kernel.mjs for shared loop usage/retry state.`);
-    }
-  }
-  if (existsSync(path.join(repoRoot, loopPaths[1]))) {
-    const anthropicLoop = readText(loopPaths[1]);
-    for (const snippet of ['sendAnthropicMessagesStream', 'executeDesktopProviderRequest', 'executeModelToolCall', 'createAgentLoopKernel', 'handleTerminalTextResponse']) {
-      if (!anthropicLoop.includes(snippet)) {
-        fail(`${loopPaths[1]} is missing required provider loop dependency ${snippet}.`);
-      }
-    }
-    if (
-      anthropicLoop.includes('unsupportedToolClaimRetries')
-      || anthropicLoop.includes('inputTokens: 0')
-      || anthropicLoop.includes('claimUnsupportedToolRetry')
-      || anthropicLoop.includes('emptyModelResponseError(')
-    ) {
-      fail(`${loopPaths[1]} must use chat-runtime/agent-loop-kernel.mjs for shared loop usage/retry state.`);
-    }
   }
 }
 
@@ -1024,13 +842,8 @@ assertLocalFileProviderOwnsFileRuntime();
 assertLocalShellProviderOwnsShellRuntime();
 assertToolSchemasMaterializeFromRuntimeProjection();
 assertToolPromptsAreAssetBacked();
-assertChatRuntimePermissionGateIsModular();
-assertChatRuntimeToolOrchestratorIsModular();
-assertProjectedToolExecutionUsesRuntimeProjection();
-assertChatRuntimeCompactionCoordinatorIsModular();
-assertChatRuntimeResponseGuardIsModular();
+assertDesktopConvergedOnRustCore();
 assertPromptBaselineIsRecorded();
-assertChatRuntimeAgentLoopsAreModular();
 assertContextAccountingPolicyIsCentralized();
 } else {
   fail(`Unknown architecture governance scope: ${scope}`);

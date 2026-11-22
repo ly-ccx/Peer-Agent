@@ -18,12 +18,3 @@ test('observed-only restore uses provider-request observations and never billing
   assert.match(handler, /await projectConversationHistoryYielding\(conv\.messages\)/);
   assert.doesNotMatch(handler, /conversationStore\.getConversation\(conversationId\)/);
 });
-
-test('main terminal writer persists request usage with the final assistant message', async () => {
-  const source = await readFile(new URL('./chat-runtime/stream-event-projection.mjs', import.meta.url), 'utf8');
-
-  assert.match(
-    source,
-    /final && hasBillableUsage\(streamRecord\.finalUsage\)[\s\S]*?patch\.usage/,
-  );
-});

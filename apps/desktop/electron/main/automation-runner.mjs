@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { createCallbackSink } from './agent-host/turn-sinks.mjs';
+
+function createSimpleCallbackSink(onEvent) {
+  const send = typeof onEvent === 'function'
+    ? (channel, payload) => { onEvent({ channel, payload }); }
+    : () => {};
+  return { send, isDestroyed: () => false };
+}
 
 function permissionPolicyFromGrant(grant) {
   return Object.freeze({
@@ -159,7 +165,7 @@ export function createAutomationRunner({
           `Automation run ${initial.runId}. Use only the saved Automation Grant. Do not request permanent access changes.`,
         ];
         const permissionPolicy = permissionPolicyFromGrant(initial.snapshot.grant);
-        const sink = createCallbackSink(onBackgroundEvent);
+        const sink = createSimpleCallbackSink(onBackgroundEvent);
         activeStreams.set(initial.runId, {
           streamId,
           engine: useRustCore ? 'rust' : 'ts',

@@ -1,4 +1,4 @@
-import { bindPreviewImage } from '../runtime-gateway/desktop-preview-service.mjs';
+import { bindPreviewImage } from './desktop-preview-service.mjs';
 import { isLocalImageObservation, LOCAL_IMAGE_CONTEXT_PREFIX, bindLocalImageContextBlock } from '@peer-agent/runtime-node';
 
 export const INDEPENDENT_VISUAL_REVIEW_PURPOSE = 'independent-review';

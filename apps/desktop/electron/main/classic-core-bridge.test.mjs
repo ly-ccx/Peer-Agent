@@ -45,7 +45,7 @@ import {
   getCompaction,
   updateCompactionProgress,
   __resetCompactionRegistry,
-} from './chat-runtime/compaction-registry.mjs';
+} from './compaction-registry.mjs';
 import {
   DESKTOP_EXTERNAL_CAPABILITY_PREFIXES,
   collectDesktopExternalCapabilities,

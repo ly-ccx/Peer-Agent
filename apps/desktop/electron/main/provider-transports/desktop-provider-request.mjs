@@ -1,96 +1,22 @@
+import { contextAccountingModelKey } from '@peer-agent/protocol';
 import {
   createContextAccountingCompactionPipeline,
   fingerprintCanonicalRequest,
+  microcompactMessagesForContext,
   parseContextOverflowEvidence,
 } from '@peer-agent/runtime-core';
-import { contextAccountingModelKey } from '@peer-agent/protocol';
-import {
-  applyMicrocompaction,
-  runCompactionCheck,
-} from './compaction-coordinator.mjs';
-
-/**
- * Desktop provider 请求前的唯一协调入口。
- *
- * 所有 provider loop 都必须在真正调用传输 adapter 前经过这里。压缩判定和
- * request_preflight 投影因此读取同一份 Runtime messages/tools/contextWindow；
- * provider 只负责把压缩结果映射回自身的 system/messages 形态。
- */
-export async function coordinateDesktopProviderRequest({
-  messages,
-  systemPrompt,
-  contextWindow,
-  providerConfig,
-  signal,
-  persistCompaction,
-  conversationId,
-  streamId,
-  webContents,
-  continuityContext = [],
-  tools = null,
-  preserveLatestUserTurn = true,
-  // Goal 模式有界 keep；true 或 partial policy 对象。
-  goalKeepPolicy = null,
-  // Milestone C: 压缩事务需要 Goal Store 做 prepare/commit/mark persisted。
-  goalPlanStore = null,
-  goalPlanId = null,
-  usageSnapshot = null,
-  runtimeUsageAccounting = null,
-  budgetGuard = null,
-  rebuildSystemPrompt = null,
-  force = false,
-  emergency = false,
-}) {
-  const sourceMessages = Array.isArray(messages) ? messages : [];
-  const compaction = await runCompactionCheck({
-    messages: sourceMessages,
-    systemPrompt,
-    contextWindow,
-    providerConfig,
-    signal,
-    persistCompaction,
-    conversationId,
-    streamId,
-    webContents,
-    continuityContext,
-    tools,
-    preserveLatestUserTurn,
-    goalKeepPolicy,
-    goalPlanStore,
-    goalPlanId,
-    usageSnapshot,
-    runtimeUsageAccounting,
-    budgetGuard,
-    rebuildSystemPrompt,
-    force,
-    emergency,
-  });
-
-  const effectiveMessages = Array.isArray(compaction.messages)
-    ? compaction.messages
-    : sourceMessages;
-  return Object.freeze({
-    ...compaction,
-    compaction,
-    messages: effectiveMessages,
-  });
-}
-
-/**
- * Desktop provider 请求的共享执行入口。
- *
- * runtime-core 拥有 build -> count/observe -> decide -> compact -> rebuild ->
- * send -> observe -> overflow retry 的状态机；这里仅适配 Desktop 的消息形态、
- * compactor 与 provider transport。
- */
 import { projectSelectionRequestMessages } from '../selection-background-context.mjs';
-import { createVisualRequestScope } from '../provider-transports/visual-request-context.mjs';
 import { runProviderRequestWithRecovery } from './provider-request-recovery.mjs';
+import { createVisualRequestScope } from './visual-request-context.mjs';
 
+/**
+ * Shared Desktop single-request execution coordinator for host-owned provider calls
+ * (e.g., independent visual verification) using runtime-core accounting and recovery.
+ */
 export async function executeDesktopProviderRequest({
   request,
   send,
-  compactRequest = coordinateDesktopProviderRequest,
+  compactRequest = async () => ({ compacted: false }),
   getUsage = (response) => response?.streamUsage ?? null,
   buildCanonicalRequest = ({ messages, systemPrompt, tools, model }) => ({
     messages,
@@ -103,9 +29,14 @@ export async function executeDesktopProviderRequest({
   const sourceSystemPrompt = typeof request?.systemPrompt === 'string'
     ? request.systemPrompt
     : '';
-  const visualScope = createVisualRequestScope({ messages: sourceMessages,
-    ...request?.visualRequestHost, conversationId: request?.conversationId, streamId: request?.streamId,
-    model: request?.providerConfig?.model, signal: request?.signal });
+  const visualScope = createVisualRequestScope({
+    messages: sourceMessages,
+    ...request?.visualRequestHost,
+    conversationId: request?.conversationId,
+    streamId: request?.streamId,
+    model: request?.providerConfig?.model,
+    signal: request?.signal,
+  });
   const pipeline = createContextAccountingCompactionPipeline({
     identity: request?.accountingIdentity ?? {
       conversationId: request?.conversationId || request?.streamId || 'desktop',
@@ -121,8 +52,10 @@ export async function executeDesktopProviderRequest({
     countRequest: request?.countRequest,
     onSnapshot: request?.onContextAccounting,
     buildRequest(state) {
-      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {},
-        preserveLatestUserTurn: request?.preserveLatestUserTurn ?? true }).messages;
+      const projectedMessages = microcompactMessagesForContext(state.messages, {
+        log: () => {},
+        preserveLatestUserTurn: request?.preserveLatestUserTurn ?? true,
+      }).messages;
       return buildCanonicalRequest({
         messages: projectSelectionRequestMessages(projectedMessages, request?.conversationId),
         systemPrompt: state.systemPrompt,
@@ -152,8 +85,6 @@ export async function executeDesktopProviderRequest({
       };
     },
     send: (canonicalRequest) => {
-      // The accounting pipeline already fingerprinted this object. Reuse that digest
-      // for the first physical send, and recompute only if a retry might observe a mutation.
       const fingerprint = fingerprintCanonicalRequest(canonicalRequest);
       let dispatched = false;
       return visualScope.send(() => runProviderRequestWithRecovery(
@@ -176,7 +107,8 @@ export async function executeDesktopProviderRequest({
           provider: request?.providerConfig?.provider,
           model: request?.providerConfig?.model,
           ...request?.requestRecoveryOptions,
-        }));
+        },
+      ));
     },
     getUsage,
     onProviderRequest: request?.onProviderRequest,

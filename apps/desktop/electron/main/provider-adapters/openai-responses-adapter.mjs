@@ -12,15 +12,14 @@
 // - 语义终态（response.completed / failed / [DONE]）后立即结束读循环，
 //   并提供 idle timeout，避免 Grok/代理在 completed 后挂连接导致 UI 永不解锁。
 
-import { hasLiteralToolCallSyntax } from '../chat-runtime/response-guard.mjs';
+import { hasLiteralToolCallSyntax, formatGrokSubscriptionHttpError } from '@peer-agent/runtime-node';
 import { encodeOpenAIResponsesRequest } from '../provider-encoders/index.mjs';
 import { createProviderStreamTrace } from '../provider-diagnostics/provider-trace-recorder.mjs';
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
 import { trackVisualAdapterResponse } from '../provider-transports/visual-request-context.mjs';
-import { hasManagedProviderRequest } from '../chat-runtime/provider-request-recovery.mjs';
+import { hasManagedProviderRequest } from '../provider-transports/provider-request-recovery.mjs';
 import { emitToolArgProgress } from './tool-arg-progress.mjs';
 import { parseSseDataPayload, throwIfSseReaderAborted, readSseChunk, cancelSseReader, createSseIdleTimeoutError as streamIdleTimeoutError } from './sse-line.mjs';
-import { formatGrokSubscriptionHttpError } from '@peer-agent/runtime-node';
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 120_000;
 

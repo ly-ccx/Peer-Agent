@@ -21,7 +21,7 @@ import {
   projectPlanToNotificationTask,
   DEFAULT_NOTIFICATION_SETTINGS,
 } from './task-notification-policy.mjs';
-import { isDelegatedWorkSession } from './agent-host/work-session-profile.mjs';
+import { isDelegatedWorkSession } from '@peer-agent/runtime-node';
 import { createTaskNotificationReceiptStore } from './task-notification-receipt-store.mjs';
 
 /**
