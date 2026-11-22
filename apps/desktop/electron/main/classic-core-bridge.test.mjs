@@ -4,6 +4,7 @@ import http from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -2230,6 +2231,365 @@ test('E2E: bot diagnostics, continueHistory, input drafts, and readEvidence run 
     await new Promise((r) => setTimeout(r, 30));
     assert.ok(changed.length >= 1);
     assert.ok(convChanged.length >= 1);
+  } finally {
+    appService.dispose();
+    await client.dispose();
+    cleanup();
+  }
+});
+
+test('E2E: project-agent list, listAttention, get, search items+hits, and listObligationGrants run through peer-native core --stdio', async () => {
+  const binaryPath = resolveTestBinary();
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const wsBetaDir = path.join(root, 'workspace-beta');
+  const wsArchDir = path.join(root, 'workspace-archived');
+  mkdirSync(wsBetaDir, { recursive: true });
+  mkdirSync(wsArchDir, { recursive: true });
+
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const wsAlpha = registry.ensureForPath(workspace).workspaceId;
+  const wsBeta = registry.ensureForPath(wsBetaDir).workspaceId;
+  const wsArchived = registry.ensureForPath(wsArchDir).workspaceId;
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const convAlpha = conversationStore.createConversation({
+    title: 'Alpha Bot',
+    role: 'project_agent',
+    workspaceId: wsAlpha,
+    workspacePath: workspace,
+    mode: 'project_agent',
+  });
+  const convBeta = conversationStore.createConversation({
+    title: 'Beta Bot',
+    role: 'project_agent',
+    workspaceId: wsBeta,
+    workspacePath: wsBetaDir,
+    mode: 'project_agent',
+  });
+  const convArch = conversationStore.createConversation({
+    title: 'Archived Bot',
+    role: 'project_agent',
+    workspaceId: wsArchived,
+    workspacePath: wsArchDir,
+    mode: 'project_agent',
+  });
+
+  conversationStore.appendMessage(convAlpha.id, {
+    id: 'msg-alpha-e2e-1',
+    role: 'user',
+    kind: 'user_input',
+    content: 'Check OAuth Callback handler',
+    createdAt: '2099-01-01T00:00:00.000Z',
+  });
+  conversationStore.appendMessage(convAlpha.id, {
+    id: 'msg-alpha-e2e-2',
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: 'OAuth Callback ready for verification',
+    createdAt: '2099-01-01T00:00:00.500Z',
+  });
+  conversationStore.appendMessage(convBeta.id, {
+    id: 'msg-beta-e2e-1',
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: 'Idle heartbeat',
+    createdAt: '2026-11-21T00:00:00.000Z',
+  });
+
+  const alphaHistory = conversationStore.getPersistedConversationHistory(convAlpha.id);
+  const childAlpha = conversationStore.createChildConversation({
+    parentConversationId: convAlpha.id,
+    role: 'work_session',
+    anchorMessageId: 'msg-alpha-e2e-1',
+    delegation: { sessionId: 'sess-read-e2e', anchorMessageId: 'msg-alpha-e2e-1', inputId: 'in-read-e2e' },
+    runtimeState: {
+      conversationId: convAlpha.id,
+      contentRevision: alphaHistory.contentRevision,
+      status: 'idle',
+    },
+    capturedAt: '2026-11-22T01:00:00.000Z',
+    backgroundMessageIds: ['msg-alpha-e2e-1'],
+    confirmMissing: true,
+    title: 'Migrate SAML Handshake',
+    workspaceId: wsAlpha,
+    workspacePath: workspace,
+  });
+
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  profileStore.create({ workspaceId: wsAlpha, displayName: 'Alpha Bot', agentConversationId: convAlpha.id });
+  profileStore.create({ workspaceId: wsBeta, displayName: 'Beta Bot', agentConversationId: convBeta.id });
+  profileStore.create({ workspaceId: wsArchived, displayName: 'Archived Bot', agentConversationId: convArch.id });
+  profileStore.save({ workspaceId: wsArchived, status: 'archived' });
+
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const stubModel = {
+    modelProviderId: 'anthropic:claude-sonnet-4-5',
+    providerId: 'anthropic',
+    modelId: 'claude-sonnet-4-5',
+    family: 'claude',
+  };
+  goalPlanStore.createPlan({
+    planId: 'plan-read-e2e',
+    conversationId: childAlpha.id,
+    title: 'Migrate SAML Handshake',
+    goal: 'Migrate SAML',
+    status: 'executing',
+    updatedAt: '2099-01-01T00:00:01.000Z',
+    delegationOrigin: {
+      workspaceId: wsAlpha,
+      sessionId: 'sess-read-e2e',
+      parentConversationId: convAlpha.id,
+      anchorMessageId: 'msg-alpha-e2e-1',
+      inputId: 'in-read-e2e',
+      modelSelection: {
+        worker: stubModel,
+        explorer: stubModel,
+        verifier: stubModel,
+        resolvedAt: '2026-11-22T01:00:00.000Z',
+      },
+    },
+  });
+
+  const approvalStore = createApprovalStore({ rootDir: runtimeRoot });
+  approvalStore.append({
+    approvalId: 'appr-read-e2e',
+    workspaceId: wsAlpha,
+    conversationId: convAlpha.id,
+    streamId: 'stream-read-e2e',
+    capabilityId: 'local.file.write',
+    summary: 'Write auth config',
+    state: 'open',
+    createdAt: '2026-11-22T01:05:00.000Z',
+  });
+
+  // Seed SQLite coordination read-model under <dataHome>/project-runtime/<wsAlpha>/.read-models/
+  const uuidDb = '11111111-2222-3333-4444-555555555555';
+  const uuidSid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const dbName = `coordination-${uuidDb}.sqlite`;
+  const readModelsDir = path.join(runtimeRoot, wsAlpha, '.read-models');
+  const pointerFile = path.join(readModelsDir, 'coordination-current.json');
+  mkdirSync(readModelsDir, { recursive: true });
+  mkdirSync(path.join(runtimeRoot, wsAlpha, 'coordination-v2'), { recursive: true });
+  writeFileSync(pointerFile, JSON.stringify({ schemaVersion: 1, file: dbName }), 'utf8');
+  const db = new DatabaseSync(path.join(readModelsDir, dbName));
+  db.exec('CREATE TABLE objects (bucket TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (bucket, id))');
+  const insertGrant = db.prepare("INSERT INTO objects (bucket, id, value) VALUES ('obligationGrants', ?, ?)");
+  for (const grant of [
+    {
+      grantId: 'g-match',
+      status: 'pending',
+      principal: { workspaceId: wsAlpha, parentConversationId: convAlpha.id },
+      items: [{
+        obligationId: 'obl-match',
+        sessionId: 'sess-read-e2e',
+        operationId: 'op-match',
+        actions: ['retire_follow_up'],
+      }],
+    },
+    {
+      grantId: 'g-legacy',
+      status: 'pending',
+      principal: { workspaceId: wsAlpha },
+      items: [
+        {
+          obligationId: 'obl-leg-owner',
+          sessionId: 'sess-read-e2e',
+          actions: ['retire_follow_up'],
+        },
+        {
+          obligationId: 'obl-leg-uuid',
+          sessionId: uuidSid,
+          title: uuidSid,
+          actions: ['retire_follow_up'],
+        },
+      ],
+    },
+    {
+      grantId: 'g-other',
+      status: 'pending',
+      principal: { workspaceId: wsAlpha, parentConversationId: 'other-conv' },
+      items: [{
+        obligationId: 'obl-other',
+        sessionId: uuidSid,
+        actions: ['retire_follow_up'],
+      }],
+    },
+  ]) {
+    insertGrant.run(grant.grantId, JSON.stringify(grant));
+  }
+  db.close();
+
+  // Stub JS BotDirectory to prove none of its read methods are called when Rust bridge is active.
+  const directoryMustNotBeCalled = () => {
+    throw new Error('JS BotDirectory must not be called when Rust bridge is active');
+  };
+  const stubDirectory = {
+    list: directoryMustNotBeCalled,
+    search: directoryMustNotBeCalled,
+    query: directoryMustNotBeCalled,
+    get: directoryMustNotBeCalled,
+    attention: directoryMustNotBeCalled,
+  };
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-bot-read-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const testModels = [{
+    id: 'anthropic:claude-sonnet-4-5',
+    provider: 'anthropic',
+    name: 'Anthropic',
+    model: 'claude-sonnet-4-5',
+    enabled: true,
+    apiKeyConfigured: true,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningEffortLevels: ['low', 'medium', 'high'],
+    defaultEffort: 'medium',
+  }];
+  let currentRecovery = { status: 'ready' };
+
+  const appService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    directory: stubDirectory,
+    profileStore,
+    listModels: () => testModels,
+    readModelRouting: () => ({}),
+    readAgentStatus: (wsId) => (wsId === wsAlpha ? 'thinking' : undefined),
+    readRecovery: () => currentRecovery,
+    debounceMs: 5,
+  });
+
+  try {
+    await client.start();
+
+    // 1. list (all active + agentStatus decoration, needsYouOnly, query via session title)
+    const listedAll = await appService.list({});
+    assert.equal(listedAll.ok, true);
+    assert.equal(listedAll.items.length, 2);
+    assert.equal(listedAll.items[0].workspaceId, wsAlpha);
+    assert.equal(listedAll.items[0].state.agentStatus, 'thinking');
+    assert.equal(listedAll.items[1].workspaceId, wsBeta);
+    assert.equal('agentStatus' in listedAll.items[1].state, false);
+
+    const listedNeeds = await appService.list({ needsYouOnly: true });
+    assert.equal(listedNeeds.ok, true);
+    assert.equal(listedNeeds.items.length, 1);
+    assert.equal(listedNeeds.items[0].workspaceId, wsAlpha);
+
+    const listedQuery = await appService.list({ query: 'SAML Handshake' });
+    assert.equal(listedQuery.ok, true);
+    assert.equal(listedQuery.items.length, 1);
+    assert.equal(listedQuery.items[0].workspaceId, wsAlpha);
+
+    // 2. listAttention (cards, scoped, error cases)
+    const attAll = await appService.listAttention({});
+    assert.equal(attAll.ok, true);
+    assert.ok(attAll.items.some((item) => (
+      item.workspaceId === wsAlpha
+      && item.card
+      && item.id === item.card.cardId
+      && !('approvalId' in item)
+    )));
+    const attScoped = await appService.listAttention({ workspaceId: wsAlpha });
+    assert.equal(attScoped.ok, true);
+    assert.ok(attScoped.items.length >= 1 && attScoped.items.every((item) => item.workspaceId === wsAlpha));
+    for (const badWs of [123, null, 'ws-missing', wsArchived]) {
+      assert.deepEqual(await appService.listAttention({ workspaceId: badWs }), { ok: false, code: 'NOT_FOUND' });
+    }
+
+    // 3. get (decorated with agentStatus, modelOptions, modelViews + error codes)
+    const gotAlpha = await appService.get({ workspaceId: wsAlpha });
+    assert.equal(gotAlpha.ok, true);
+    assert.equal(gotAlpha.item.workspaceId, wsAlpha);
+    assert.equal(gotAlpha.item.state.agentStatus, 'thinking');
+    assert.equal(gotAlpha.profile.displayName, 'Alpha Bot');
+    assert.equal(gotAlpha.path, workspace);
+    assert.ok(Array.isArray(gotAlpha.modelOptions) && gotAlpha.modelOptions.length === 1);
+    assert.ok(gotAlpha.modelViews && typeof gotAlpha.modelViews === 'object');
+    assert.deepEqual(await appService.get({ workspaceId: '../bad' }), { ok: false, code: 'INVALID_WORKSPACE' });
+    assert.deepEqual(await appService.get({ workspaceId: 'ws-missing' }), { ok: false, code: 'NOT_FOUND' });
+    assert.deepEqual(await appService.get({ workspaceId: wsArchived }), { ok: false, code: 'ARCHIVED' });
+
+    // 4. search returns both items (from Rust session-title match) and hits without touching directory.query
+    const searchSaml = await appService.search({ query: 'SAML Handshake' });
+    assert.equal(searchSaml.ok, true);
+    assert.equal(searchSaml.items.length, 1);
+    assert.equal(searchSaml.items[0].workspaceId, wsAlpha);
+    assert.ok(searchSaml.hits.some((h) => h.kind === 'task' && h.sessionId === 'sess-read-e2e'));
+
+    const searchOauth = await appService.search({ query: 'OAuth Callback' });
+    assert.equal(searchOauth.ok, true);
+    assert.ok(searchOauth.hits.some((h) => h.kind === 'message' && h.workspaceId === wsAlpha));
+
+    // 5. listObligationGrants: SQLite read-model, scoping, displayTitle/shortId, writer recovery, error cases
+    const oblOk = await appService.listObligationGrants({
+      workspaceId: wsAlpha,
+      parentConversationId: convAlpha.id,
+    });
+    assert.equal(oblOk.ok, true);
+    assert.deepEqual(oblOk.writer, { ok: true });
+    assert.equal('rawCount' in oblOk, false);
+    assert.equal('reasons' in oblOk, false);
+    assert.equal(oblOk.grants.length, 2);
+    const gMatch = oblOk.grants.find((g) => g.grantId === 'g-match');
+    const gLegacy = oblOk.grants.find((g) => g.grantId === 'g-legacy');
+    assert.ok(gMatch && gLegacy);
+    assert.equal(gMatch.items[0].displayTitle, 'Migrate SAML Handshake');
+    assert.equal(gMatch.items[0].shortId, null);
+    assert.equal(gLegacy.items[0].displayTitle, 'Migrate SAML Handshake');
+    assert.equal(gLegacy.items[1].displayTitle, null);
+    assert.equal(gLegacy.items[1].shortId, 'aaaaaaaa');
+
+    // Degraded recovery surfaces writer metadata alongside grants
+    currentRecovery = {
+      error: 'recovery_needed',
+      phase: 'inputs',
+      legacy: {
+        check: 'seal_mismatch',
+        seal: 'absent',
+        change: 'hash',
+        file: 'baseline',
+      },
+    };
+    const oblDegraded = await appService.listObligationGrants({
+      workspaceId: wsAlpha,
+      parentConversationId: convAlpha.id,
+    });
+    assert.equal(oblDegraded.ok, true);
+    assert.deepEqual(oblDegraded.writer, {
+      ok: false,
+      code: 'recovery_needed',
+      check: 'seal_mismatch',
+      seal: 'absent',
+      change: 'hash',
+      file: 'baseline',
+    });
+
+    // Corrupt pointer -> { ok: false, code: 'obligation_store_unreadable' } with no leaked cause
+    writeFileSync(pointerFile, JSON.stringify({ schemaVersion: 1, file: '../evil.sqlite' }), 'utf8');
+    const oblCorrupt = await appService.listObligationGrants({ workspaceId: wsAlpha });
+    assert.deepEqual(oblCorrupt, { ok: false, code: 'obligation_store_unreadable' });
+    assert.equal('cause' in oblCorrupt, false);
+
+    // Missing pointer with coordination-v2 present -> { ok: false, code: 'obligation_store_unreadable' }
+    rmSync(pointerFile);
+    const oblMissingPtr = await appService.listObligationGrants({ workspaceId: wsAlpha });
+    assert.deepEqual(oblMissingPtr, { ok: false, code: 'obligation_store_unreadable' });
+    assert.equal('cause' in oblMissingPtr, false);
   } finally {
     appService.dispose();
     await client.dispose();

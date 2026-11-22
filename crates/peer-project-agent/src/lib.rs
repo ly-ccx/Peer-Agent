@@ -9,6 +9,7 @@
 
 pub mod acceptance;
 pub mod attachments;
+pub mod cards;
 pub mod circuit_breaker;
 pub mod coordination_bridge;
 pub mod digest;
@@ -51,6 +52,10 @@ pub use attachments::{
     attachments_from_messages, load_local_image_attachment, materialize_image_attachments,
     normalize_input_attachments, normalize_user_upload, project_user_message_for_model,
 };
+pub use cards::{
+    CardResolution, ConfirmCardInput, TaskQuestionDraft, latest_task_question, project_cards,
+    project_waiting_user_question_cards, read_card_resolutions,
+};
 pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
     CircuitBreakerStore, FailureOutcome,
@@ -60,10 +65,11 @@ pub use coordination_bridge::{
 };
 pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
-    AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
-    BotListSession, BotRowState, FamiliarizeOffer, InteractionPage, MarkReadResult, QuestionState,
-    ReplyQuestionStatus, default_familiarize_offer, filter_bot_list, is_visible_bot_message,
-    project_bot_attention, project_bot_list_item, project_bot_list_message,
+    AttentionItem, AttentionKind, BotDetail, BotDirectory, BotListFilter, BotListItem,
+    BotListMessage, BotListSession, BotRowProjection, BotRowState, FamiliarizeOffer,
+    InteractionPage, MarkReadResult, QuestionState, ReplyQuestionStatus, default_familiarize_offer,
+    filter_bot_list, is_visible_bot_message, project_bot_attention,
+    project_bot_attention_with_cards, project_bot_list_item, project_bot_list_message,
     project_reply_questions, sort_bot_list,
 };
 pub use drafts::{
@@ -106,7 +112,9 @@ pub use objectives::{
 pub use obligation::{
     ExecutionObligationService, OBLIGATION_FORMAT_VERSION, OBLIGATION_GRANT_TTL_MS,
     ObligationClassification, canonical_grant_key, classify_execution_obligation,
-    host_resource_plan_from_plan, obligation_id_for, reconcile_unknown_outcome,
+    host_resource_plan_from_plan, inspect_unknown_outcome_advisory,
+    list_persisted_obligation_grants_enriched, obligation_display_title, obligation_id_for,
+    read_persisted_obligation_grants, reconcile_unknown_outcome, select_pending_grants,
 };
 pub use profile::{
     BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BotAvatar, BotProfile, BotProfileStore, CreateBotProfile,

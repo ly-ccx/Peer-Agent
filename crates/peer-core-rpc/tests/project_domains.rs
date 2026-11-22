@@ -1629,3 +1629,331 @@ async fn project_bot_diagnostics_history_drafts_and_evidence_roundtrip() {
     drop(client);
     server_handle.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn project_bot_list_attention_get_search_items_and_obligation_grants_roundtrip() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let repo_alpha = temp.path().join("repo-alpha");
+    let repo_beta = temp.path().join("repo-beta");
+    let repo_arch = temp.path().join("repo-arch");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&repo_alpha).unwrap();
+    fs::create_dir_all(&repo_beta).unwrap();
+    fs::create_dir_all(&repo_arch).unwrap();
+
+    let registry = ProjectRegistry::new(&home);
+    let ws_alpha = registry
+        .register(&repo_alpha.to_string_lossy(), None)
+        .unwrap()
+        .workspace_id;
+    let ws_beta = registry
+        .register(&repo_beta.to_string_lossy(), None)
+        .unwrap()
+        .workspace_id;
+    let ws_arch = registry
+        .register(&repo_arch.to_string_lossy(), None)
+        .unwrap()
+        .workspace_id;
+
+    let conv_store = ConversationStore::new(&home);
+    let profiles = BotProfileStore::new(&home);
+
+    let mut conv_ids = Vec::new();
+    for (ws, name, created_at) in [
+        (&ws_alpha, "Alpha Bot", "2026-11-22T02:00:00.000Z"),
+        (&ws_beta, "Beta Bot", "2026-11-22T02:05:00.000Z"),
+        (&ws_arch, "Archived Bot", "2026-11-22T01:50:00.000Z"),
+    ] {
+        let conv = conv_store
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: name,
+                    workspace_id: ws,
+                    workspace_path: None,
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap().to_owned();
+        profiles
+            .create(&CreateBotProfile {
+                workspace_id: ws,
+                display_name: name,
+                managed: false,
+                agent_conversation_id: &conv_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+        conv_ids.push(conv_id);
+    }
+    let conv_alpha = conv_ids[0].clone();
+    let conv_beta = conv_ids[1].clone();
+    profiles.archive(&ws_arch).unwrap();
+
+    // Child delegated session + plan for Alpha with distinctive title "Deploy OAuth Callback"
+    let child_alpha = conv_store
+        .create_project_conversation(
+            &NewProjectConversation {
+                id: None,
+                title: "Worker OAuth Callback",
+                workspace_id: &ws_alpha,
+                workspace_path: None,
+                role: "work_session",
+                parent_conversation_id: Some(&conv_alpha),
+                mode: "goal",
+                created_at: "2026-11-22T02:10:00.000Z",
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let child_alpha_id = child_alpha["id"].as_str().unwrap().to_owned();
+    conv_store
+        .append_classic_message(
+            &conv_alpha,
+            &json!({
+                "id": "msg-alpha-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Preparing OAuth Callback deploy verification",
+                "createdAt": "2099-01-01T00:00:00.000Z"
+            }),
+        )
+        .unwrap();
+    conv_store
+        .append_classic_message(
+            &conv_beta,
+            &json!({
+                "id": "msg-beta-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Routine heartbeat",
+                "createdAt": "2026-11-22T02:06:00.000Z"
+            }),
+        )
+        .unwrap();
+
+    let plans_dir = home.join("goal-plans");
+    fs::create_dir_all(&plans_dir).unwrap();
+    let delegated_plan = json!({
+        "planId": "plan-alpha-1",
+        "conversationId": child_alpha_id,
+        "title": "Migrate SAML Handshake",
+        "status": "executing",
+        "updatedAt": "2099-01-01T00:00:01.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_alpha,
+            "sessionId": "sess-alpha-1",
+            "parentConversationId": conv_alpha,
+        }
+    });
+    let plan_line = serde_json::to_string(&delegated_plan).unwrap();
+    fs::write(plans_dir.join("plan-alpha-1.json"), &plan_line).unwrap();
+    fs::write(plans_dir.join("index.jsonl"), format!("{plan_line}\n")).unwrap();
+
+    // Pending approval on ws_alpha so needsYou > 0 and attention item + card are emitted
+    ApprovalStore::new(&home)
+        .open(
+            &HostApproval {
+                approval_id: "appr-alpha-1",
+                workspace_id: Some(&ws_alpha),
+                conversation_id: &conv_alpha,
+                stream_id: "stream-alpha-1",
+                plan_id: None,
+                session_id: None,
+                capability_id: "local.file.write",
+                args_digest: &"c".repeat(64),
+                policy_revision: "rev-alpha",
+                created_at: "2026-11-22T02:14:00.000Z",
+                deadline_at: None,
+            },
+            None,
+        )
+        .unwrap();
+
+    let (mut client, server_handle) = spawn_server(&home).await;
+
+    // 1. project.bot.list
+    let list_all = client.call("project.bot.list", json!({})).await["result"].clone();
+    assert_eq!(list_all["ok"], true);
+    let all_items = list_all["items"].as_array().unwrap();
+    assert_eq!(all_items.len(), 2);
+    assert_eq!(all_items[0]["workspaceId"], ws_alpha);
+    assert_eq!(all_items[1]["workspaceId"], ws_beta);
+
+    let list_needs = client
+        .call("project.bot.list", json!({ "needsYouOnly": true }))
+        .await["result"]
+        .clone();
+    assert_eq!(list_needs["ok"], true);
+    assert_eq!(list_needs["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list_needs["items"][0]["workspaceId"], ws_alpha);
+
+    let list_query = client
+        .call("project.bot.list", json!({ "query": "SAML Handshake" }))
+        .await["result"]
+        .clone();
+    assert_eq!(list_query["ok"], true);
+    assert_eq!(list_query["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list_query["items"][0]["workspaceId"], ws_alpha);
+
+    // 2. project.bot.listAttention + card parity + error cases
+    let att_all = client.call("project.bot.listAttention", json!({})).await["result"].clone();
+    assert_eq!(att_all["ok"], true);
+    let att_items = att_all["items"].as_array().unwrap();
+    assert!(att_items.iter().any(|item| item["workspaceId"] == ws_alpha
+        && item["card"].is_object()
+        && item["id"] == item["card"]["cardId"]
+        && item.get("approvalId").is_none()));
+
+    let att_scoped = client
+        .call(
+            "project.bot.listAttention",
+            json!({ "workspaceId": ws_alpha }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(att_scoped["ok"], true);
+    assert!(
+        att_scoped["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["workspaceId"] == ws_alpha)
+    );
+
+    for bad_ws in [json!(123), json!(null), json!("ws-missing"), json!(ws_arch)] {
+        let err_res = client
+            .call(
+                "project.bot.listAttention",
+                json!({ "workspaceId": bad_ws }),
+            )
+            .await["result"]
+            .clone();
+        assert_eq!(err_res["ok"], false);
+        assert_eq!(err_res["code"], "NOT_FOUND");
+    }
+
+    // 3. project.bot.get + error cases
+    let got_alpha = client
+        .call("project.bot.get", json!({ "workspaceId": ws_alpha }))
+        .await["result"]
+        .clone();
+    assert_eq!(got_alpha["ok"], true);
+    assert_eq!(got_alpha["item"]["workspaceId"], ws_alpha);
+    assert_eq!(got_alpha["profile"]["displayName"], "Alpha Bot");
+    assert!(!got_alpha["path"].as_str().unwrap_or("").is_empty());
+
+    assert_eq!(
+        client
+            .call("project.bot.get", json!({ "workspaceId": "../bad" }))
+            .await["result"]["code"],
+        "INVALID_WORKSPACE"
+    );
+    assert_eq!(
+        client
+            .call("project.bot.get", json!({ "workspaceId": "ws-missing" }))
+            .await["result"]["code"],
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        client
+            .call("project.bot.get", json!({ "workspaceId": ws_arch }))
+            .await["result"]["code"],
+        "ARCHIVED"
+    );
+
+    // 4. Upgraded project.bot.search returns both items (matching session title) and hits
+    let search_saml = client
+        .call("project.bot.search", json!({ "query": "SAML Handshake" }))
+        .await["result"]
+        .clone();
+    assert_eq!(search_saml["ok"], true);
+    let s_items = search_saml["items"].as_array().unwrap();
+    assert_eq!(s_items.len(), 1);
+    assert_eq!(s_items[0]["workspaceId"], ws_alpha);
+    assert!(
+        search_saml["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["kind"] == "task" && h["sessionId"] == "sess-alpha-1")
+    );
+
+    let search_oauth = client
+        .call("project.bot.search", json!({ "query": "OAuth Callback" }))
+        .await["result"]
+        .clone();
+    assert_eq!(search_oauth["ok"], true);
+    assert!(
+        search_oauth["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["kind"] == "message" && h["workspaceId"] == ws_alpha)
+    );
+
+    // 5. project.bot.listObligationGrants (absent -> empty, invalid ws, missing pointer, corrupt pointer)
+    let obl_absent = client
+        .call(
+            "project.bot.listObligationGrants",
+            json!({ "workspaceId": ws_alpha }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(obl_absent["ok"], true);
+    assert_eq!(obl_absent["grants"], json!([]));
+    assert_eq!(obl_absent["rawCount"], 0);
+
+    let obl_bad = client
+        .call(
+            "project.bot.listObligationGrants",
+            json!({ "workspaceId": "../bad" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(obl_bad["ok"], false);
+    assert_eq!(obl_bad["code"], "obligation_store_unreadable");
+    assert_eq!(obl_bad["cause"], "obligation_store_unreadable");
+
+    let rt_alpha = home.join("project-runtime").join(&ws_alpha);
+    fs::create_dir_all(rt_alpha.join("coordination-v2")).unwrap();
+    let obl_missing_ptr = client
+        .call(
+            "project.bot.listObligationGrants",
+            json!({ "workspaceId": ws_alpha }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(obl_missing_ptr["ok"], false);
+    assert_eq!(obl_missing_ptr["code"], "obligation_store_unreadable");
+    assert_eq!(obl_missing_ptr["cause"], "coordination_index_missing");
+
+    fs::create_dir_all(rt_alpha.join(".read-models")).unwrap();
+    fs::write(
+        rt_alpha.join(".read-models/coordination-current.json"),
+        r#"{"schemaVersion":1,"file":"../evil.sqlite"}"#,
+    )
+    .unwrap();
+    let obl_corrupt_ptr = client
+        .call(
+            "project.bot.listObligationGrants",
+            json!({ "workspaceId": ws_alpha }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(obl_corrupt_ptr["ok"], false);
+    assert_eq!(obl_corrupt_ptr["code"], "obligation_store_unreadable");
+    assert_eq!(obl_corrupt_ptr["cause"], "coordination_index_corrupt");
+
+    let _ = client.call("core.shutdown", json!({})).await;
+    drop(client);
+    server_handle.await.unwrap().unwrap();
+}

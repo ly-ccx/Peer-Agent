@@ -4,7 +4,7 @@ use crate::{
     classic_goal::{self, ClassicGoalRegistry},
     classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
-    classic_usage, project, project_bot, project_bot_ops,
+    classic_usage, project, project_bot, project_bot_ops, project_bot_read,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -549,6 +549,14 @@ impl ServerContext {
             "project.profile.update" => project_bot::handle_profile_update(self, params),
             "project.access.read" => project_bot::handle_access_read(self, params),
             "project.access.update" => project_bot::handle_access_update(self, params),
+            "project.bot.list" => project_bot_read::handle_bot_list(self, params),
+            "project.bot.listAttention" => {
+                project_bot_read::handle_bot_list_attention(self, params)
+            }
+            "project.bot.get" => project_bot_read::handle_bot_get(self, params),
+            "project.bot.listObligationGrants" => {
+                project_bot_read::handle_bot_list_obligation_grants(self, params)
+            }
             "project.bot.markRead" => project_bot::handle_bot_mark_read(self, params),
             "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
             "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),

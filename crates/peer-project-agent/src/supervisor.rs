@@ -5,7 +5,7 @@
 //! Matches `packages/runtime-node/src/project-agent/session-supervisor.mjs` (ADR 80, 85, 88, 91, 103, 116).
 
 use crate::{
-    BotListSession, BotProfileStore, ProjectError, ProjectInbox,
+    BotListSession, BotProfileStore, ObjectiveStore, ProjectError, ProjectInbox,
     acceptance::{
         AcceptanceDecision, AcceptanceFacts, HostAuthorityFacts, compute_verification_verdict,
         decide_session_acceptance,
@@ -14,6 +14,7 @@ use crate::{
     memory::create_snapshot,
     now_iso,
     scheduler::{ExecutionScheduler, SelectionOutcome},
+    sha256_json,
     verifier::{VerifierOutcome, resolve_work_session_profile, run_independent_verifier},
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
@@ -64,6 +65,12 @@ struct PlanIndexMetaRow {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PhaseSummary {
+    phase: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DelegationOriginSummary {
     workspace_id: Option<String>,
     session_id: Option<String>,
@@ -74,12 +81,17 @@ struct DelegationOriginSummary {
     superseded_by: Option<String>,
     anchor_message_id: Option<String>,
     anchor_message_ids: Option<Vec<String>>,
+    agent_wait_message_id: Option<String>,
+    cancellation: Option<PhaseSummary>,
+    takeover: Option<PhaseSummary>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RunnerSummary {
     status: Option<String>,
+    blocked_reason: Option<String>,
+    waiting_on_user: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -171,42 +183,120 @@ fn extract_top_level_field<T: for<'de> Deserialize<'de>>(buf: &[u8], key: &str) 
         .ok()
 }
 
-fn derive_doc_status(doc: &PlanSummaryDoc, origin: &DelegationOriginSummary) -> String {
-    if origin
-        .superseded_by
-        .as_deref()
-        .is_some_and(|s| !s.is_empty())
-    {
+#[allow(clippy::too_many_arguments)]
+fn derive_status_fields(
+    plan_status: &str,
+    accepted: bool,
+    superseded: bool,
+    phase: Option<&str>,
+    agent_wait_msg: bool,
+    cancel_phase: Option<&str>,
+    takeover_phase: Option<&str>,
+    runner_status: Option<&str>,
+    runner_blocked_reason: Option<&str>,
+    runner_waiting_on_user: bool,
+) -> String {
+    if plan_status == "cancelled" || cancel_phase == Some("completed") {
+        return "cancelled".to_owned();
+    }
+    if plan_status == "failed" {
+        return "failed".to_owned();
+    }
+    if accepted {
+        return "accepted".to_owned();
+    }
+    if cancel_phase == Some("awaiting_outcome") || takeover_phase == Some("awaiting_outcome") {
+        return "awaiting_outcome".to_owned();
+    }
+    if cancel_phase == Some("stopping") {
+        return "stopping".to_owned();
+    }
+    if takeover_phase == Some("stopping") {
+        return "starting".to_owned();
+    }
+    if superseded && plan_status != "completed" {
         return "superseded".to_owned();
     }
-    if doc
+    if (phase == Some("paused") || runner_status == Some("paused")) && plan_status != "completed" {
+        return "paused".to_owned();
+    }
+    let needs_user = phase == Some("awaiting_approval")
+        || plan_status == "awaiting_approval"
+        || (runner_waiting_on_user && runner_status != Some("paused") && !superseded)
+        || (runner_status == Some("blocked")
+            && runner_blocked_reason == Some("manual_dod_confirmation_required"));
+    if needs_user || runner_status == Some("waiting_user") {
+        return "waiting_user".to_owned();
+    }
+    if runner_status == Some("budget_exhausted") {
+        return "waiting_user".to_owned();
+    }
+    if (runner_blocked_reason == Some("waiting_parent_agent")
+        || (agent_wait_msg && runner_status != Some("waiting_user")))
+        && phase != Some("paused")
+        && !superseded
+        && runner_status != Some("paused")
+    {
+        return "waiting_agent".to_owned();
+    }
+    if phase == Some("verifying") {
+        return "verifying".to_owned();
+    }
+    if runner_status == Some("blocked") {
+        return "waiting_agent".to_owned();
+    }
+    if plan_status == "completed" {
+        if matches!(
+            runner_status,
+            Some("running" | "resuming" | "compacting" | "exploring")
+        ) {
+            return "running".to_owned();
+        }
+        return "result_ready".to_owned();
+    }
+    if phase == Some("starting") {
+        return "starting".to_owned();
+    }
+    if phase == Some("queued")
+        || matches!(
+            plan_status,
+            "approved" | "accepted" | "paused" | "interrupted"
+        )
+    {
+        return "queued".to_owned();
+    }
+    "running".to_owned()
+}
+
+fn derive_doc_status(doc: &PlanSummaryDoc, origin: &DelegationOriginSummary) -> String {
+    let superseded = origin
+        .superseded_by
+        .as_deref()
+        .is_some_and(|s| !s.is_empty());
+    let accepted = doc
         .result_acceptance
         .as_ref()
         .and_then(|a| a.accepted_at.as_deref())
-        .is_some()
-    {
-        return "accepted".to_owned();
-    }
-    match doc.status.as_deref().unwrap_or("") {
-        "cancelled" => "cancelled".to_owned(),
-        "failed" => "failed".to_owned(),
-        "completed" => "result_ready".to_owned(),
-        "awaiting_approval" => "waiting_user".to_owned(),
-        _ => match origin.phase.as_deref().unwrap_or("queued") {
-            "paused" => "paused".to_owned(),
-            "awaiting_approval" => "waiting_user".to_owned(),
-            "verifying" => "verifying".to_owned(),
-            "running" => {
-                if doc.runner.as_ref().and_then(|r| r.status.as_deref()) == Some("waiting_user") {
-                    "waiting_user".to_owned()
-                } else {
-                    "running".to_owned()
-                }
-            }
-            "starting" => "starting".to_owned(),
-            _ => "queued".to_owned(),
-        },
-    }
+        .is_some();
+    let runner = doc.runner.as_ref();
+    derive_status_fields(
+        doc.status.as_deref().unwrap_or(""),
+        accepted,
+        superseded,
+        origin.phase.as_deref(),
+        origin
+            .agent_wait_message_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty()),
+        origin
+            .cancellation
+            .as_ref()
+            .and_then(|c| c.phase.as_deref()),
+        origin.takeover.as_ref().and_then(|t| t.phase.as_deref()),
+        runner.and_then(|r| r.status.as_deref()),
+        runner.and_then(|r| r.blocked_reason.as_deref()),
+        runner.and_then(|r| r.waiting_on_user) == Some(true),
+    )
 }
 
 fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
@@ -432,41 +522,505 @@ fn plan_approval_required(policy: &str, read_only: bool) -> bool {
 }
 
 fn derive_session_status(plan: &Value) -> String {
-    if plan["delegationOrigin"]["supersededBy"]
+    let origin = &plan["delegationOrigin"];
+    let runner = &plan["runner"];
+    let superseded = origin["supersededBy"]
         .as_str()
-        .is_some_and(|s| !s.is_empty())
-    {
-        return "superseded".to_owned();
-    }
-    if plan["resultAcceptance"]["acceptedAt"].as_str().is_some() {
-        return "accepted".to_owned();
-    }
-    match plan["status"].as_str().unwrap_or("") {
-        "cancelled" => "cancelled".to_owned(),
-        "failed" => "failed".to_owned(),
-        "completed" => "result_ready".to_owned(),
-        "awaiting_approval" => "waiting_user".to_owned(),
-        _ => match plan["delegationOrigin"]["phase"]
+        .is_some_and(|s| !s.is_empty());
+    let accepted = plan["resultAcceptance"]["acceptedAt"].as_str().is_some();
+    derive_status_fields(
+        plan["status"].as_str().unwrap_or(""),
+        accepted,
+        superseded,
+        origin["phase"].as_str(),
+        origin["agentWaitMessageId"]
             .as_str()
-            .unwrap_or("queued")
-        {
-            "paused" => "paused".to_owned(),
-            "awaiting_approval" => "waiting_user".to_owned(),
-            "verifying" => "verifying".to_owned(),
-            "running" => {
-                if plan["runner"]["status"] == "waiting_user" {
-                    "waiting_user".to_owned()
-                } else {
-                    "running".to_owned()
-                }
+            .is_some_and(|s| !s.is_empty()),
+        origin["cancellation"]["phase"].as_str(),
+        origin["takeover"]["phase"].as_str(),
+        runner["status"].as_str(),
+        runner["blockedReason"].as_str(),
+        runner["waitingOnUser"].as_bool() == Some(true),
+    )
+}
+
+fn is_manual_criterion_approved(plan: &Value, criterion_id: &str) -> bool {
+    let confirmations = plan["manualConfirmations"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if confirmations
+        .iter()
+        .any(|c| c["criterionId"].as_str() == Some(criterion_id) && c["decision"] == "confirmed")
+    {
+        return true;
+    }
+    let mut matches: Vec<&Value> = confirmations
+        .iter()
+        .filter(|c| {
+            c["kind"].as_str() == Some("manual_dod")
+                && c["criterionIds"]
+                    .as_array()
+                    .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(criterion_id)))
+        })
+        .collect();
+    matches.sort_by(|a, b| {
+        let da = a["decidedAt"].as_str().unwrap_or("");
+        let db = b["decidedAt"].as_str().unwrap_or("");
+        db.cmp(da)
+    });
+    matches.first().and_then(|c| c["decision"].as_str()) == Some("approve")
+}
+
+fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> bool {
+    let Some(criteria) = plan["successCriteria"].as_array() else {
+        return true;
+    };
+    if criteria.is_empty() {
+        return true;
+    }
+    let results = plan["criterionResults"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let reviews = plan["modelReviews"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let source_rev = plan["modelReviewSourceRevision"].as_str().unwrap_or("");
+    let verifier_runs = plan["runner"]["verifierRuns"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+
+    for criterion in criteria {
+        let Some(cid) = criterion["id"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let kind = criterion["kind"].as_str().unwrap_or("");
+        if kind == "model_review" {
+            let Some(review) = reviews
+                .iter()
+                .rev()
+                .find(|r| r["criterionId"].as_str() == Some(cid))
+            else {
+                return false;
+            };
+            let current =
+                !source_rev.is_empty() && review["sourceRevision"].as_str() == Some(source_rev);
+            let run_id = review["verifierRunId"].as_str().unwrap_or("");
+            let verified = current
+                && verifier_runs.iter().any(|run| {
+                    run["verifierRunId"].as_str() == Some(run_id)
+                        && run["status"].as_str() == Some("passed")
+                });
+            let evs: Vec<&str> = review["evidenceRefs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !verified
+                || review["passed"] != true
+                || evs.is_empty()
+                || !evs.iter().all(|r| known_refs.contains(*r))
+            {
+                return false;
             }
-            "starting" => "starting".to_owned(),
-            _ => "queued".to_owned(),
-        },
+            continue;
+        }
+        let is_auto = matches!(kind, "command" | "test" | "file-contains" | "file-exists");
+        if !is_auto && is_manual_criterion_approved(plan, cid) {
+            continue;
+        }
+        let Some(result) = results
+            .iter()
+            .find(|r| r["criterionId"].as_str() == Some(cid))
+        else {
+            return false;
+        };
+        if result["passed"] != true {
+            return false;
+        }
+        let single_ok = result["evidenceRef"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some_and(|r| known_refs.contains(r));
+        let multi_ok = result["evidenceRefs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .any(|r| known_refs.contains(r));
+        if !single_ok && !multi_ok {
+            return false;
+        }
+    }
+    true
+}
+
+fn completed_leaf_results(tasks: &[Value], out: &mut Vec<String>) {
+    for task in tasks {
+        if let Some(sub) = task["subtasks"].as_array().filter(|a| !a.is_empty()) {
+            completed_leaf_results(sub, out);
+        } else if task["status"].as_str() == Some("completed")
+            && let Some(res) = task["result"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        {
+            out.push(res.to_owned());
+        }
     }
 }
 
+fn visible_worker_result(message: &Value) -> String {
+    if let Some(segments) = message["segments"].as_array() {
+        for seg in segments.iter().rev() {
+            if seg["type"].as_str() == Some("text")
+                && let Some(content) = seg["content"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            {
+                return content.to_owned();
+            }
+        }
+        if !segments.is_empty() {
+            return String::new();
+        }
+    }
+    message["content"]
+        .as_str()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn authorizes_objective_auto_accept(raw: &str) -> bool {
+    use regex::Regex;
+    use std::sync::OnceLock;
+    static STRIP_RE: OnceLock<Regex> = OnceLock::new();
+    static DENY_RE: OnceLock<Regex> = OnceLock::new();
+    static ALLOW_RE: OnceLock<Regex> = OnceLock::new();
+
+    let strip_re = STRIP_RE.get_or_init(|| {
+        Regex::new(r#"(?m)```[\s\S]*?```|`[^`]*`|^[ \t]*>.*$|“[^”]*”|「[^」]*」|"[^"\n]*""#)
+            .expect("valid strip regex")
+    });
+    let clean = strip_re.replace_all(raw, "");
+    let deny_re = DENY_RE.get_or_init(|| {
+        Regex::new(r"(?i)(?:不要|别|不能|\bnot\b|don['’]?t|cannot|won['’]?t)")
+            .expect("valid deny regex")
+    });
+    if deny_re.is_match(&clean) {
+        return false;
+    }
+    let allow_re = ALLOW_RE.get_or_init(|| {
+        Regex::new(r"(?i)(?:允许|同意|可以|开启|启用).{0,12}自动签收|automatically accept|allow.{0,12}auto.{0,5}accept").expect("valid allow regex")
+    });
+    allow_re.is_match(&clean)
+}
+
 impl SessionSupervisor {
+    fn objective_acceptance_policy(&self, workspace_id: &str, objective_id: &str) -> &'static str {
+        let Ok(Some(item)) = ObjectiveStore::new(&self.data_home).get(workspace_id, objective_id)
+        else {
+            return "confirm";
+        };
+        if item.status != "active" || item.auto_accept != Some(true) {
+            return "confirm";
+        }
+        let Some(anchor_id) = item.auto_accept_approved_by.as_deref() else {
+            return "confirm";
+        };
+        let msgs = if let Ok(Some(page)) = self.conversations.read_conversation_window(
+            &item.project_agent_conversation_id,
+            None,
+            None,
+            true,
+        ) {
+            page["window"].as_array().cloned().unwrap_or_default()
+        } else {
+            self.conversations
+                .read_committed(&item.project_agent_conversation_id, None, 4 * 1024 * 1024)
+                .map(|s| s.history.messages)
+                .unwrap_or_default()
+        };
+        let authorized = msgs.iter().any(|row| {
+            row["id"].as_str() == Some(anchor_id)
+                && row["role"].as_str() == Some("user")
+                && row["kind"].as_str() == Some("user_input")
+                && row["content"]
+                    .as_str()
+                    .is_some_and(authorizes_objective_auto_accept)
+        });
+        if authorized { "auto" } else { "confirm" }
+    }
+
+    fn compute_human_gate(&self, plan: &Value, summary: &WorkSessionSummary) -> bool {
+        if plan["status"].as_str() != Some("completed") {
+            return false;
+        }
+        if plan["runner"]["enabled"].as_bool() == Some(true)
+            && plan["runner"]["status"].as_str() != Some("completed")
+        {
+            return false;
+        }
+        let evidence = self.indexed_evidence_refs_for_plan(plan);
+        if !close_gate_passed_for_list(plan, &evidence) {
+            return false;
+        }
+        let origin = &plan["delegationOrigin"];
+        let ws_id = summary.workspace_id.as_str();
+        let policy = if let Some(oid) = origin["objectiveId"].as_str().filter(|s| !s.is_empty()) {
+            self.objective_acceptance_policy(ws_id, oid)
+        } else if self
+            .profiles
+            .read(ws_id)
+            .is_some_and(|p| p.acceptance_policy_str() == "confirm")
+        {
+            "confirm"
+        } else {
+            "auto"
+        };
+
+        let independent_verifier = origin["independentVerifier"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let verification_below_floor = !matches!(
+            independent_verifier.as_deref(),
+            Some("passed" | "not_required")
+        );
+        let manual_pending = plan["successCriteria"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| {
+                let Some(cid) = c["id"].as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                    return false;
+                };
+                c["kind"].as_str() == Some("manual") && !is_manual_criterion_approved(plan, cid)
+            });
+
+        let anchor_id = origin["anchorMessageId"].as_str().unwrap_or("");
+        let parent_conv_id = origin["parentConversationId"].as_str().unwrap_or("");
+        let anchor_text = if !anchor_id.is_empty() && !parent_conv_id.is_empty() {
+            self.conversations
+                .read_committed(parent_conv_id, None, 4 * 1024 * 1024)
+                .ok()
+                .and_then(|snap| {
+                    snap.history
+                        .messages
+                        .into_iter()
+                        .find(|m| m["id"].as_str() == Some(anchor_id))
+                        .and_then(|m| m["content"].as_str().map(str::to_owned))
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let decision = decide_session_acceptance(
+            &AcceptanceFacts {
+                plan,
+                session_id: &summary.session_id,
+                evidence_index: &evidence,
+                host_authority: HostAuthorityFacts {
+                    independent_verifier,
+                    verifier_model: origin["verifierModel"].as_str().map(str::to_owned),
+                    same_family_as_worker: origin["sameFamilyAsWorker"].as_bool(),
+                },
+                policy,
+                reported: false,
+                read_only: summary.read_only,
+                changed_files: self.session_changed_files(plan),
+                manual_criteria_pending: manual_pending,
+                external_side_effects: false,
+                irreversible: false,
+                out_of_scope_write: false,
+                anchor_text: &anchor_text,
+                verification_below_floor,
+            },
+            false,
+        );
+        decision.mode == "confirm"
+    }
+
+    fn compute_completion_review_required(
+        &self,
+        plan: &Value,
+        summary: &WorkSessionSummary,
+    ) -> bool {
+        if matches!(
+            plan["delegationOrigin"]["phase"].as_str(),
+            Some("paused" | "superseded" | "queued" | "awaiting_approval")
+        ) || matches!(plan["status"].as_str(), Some("failed" | "cancelled"))
+            || plan["runner"]["status"].as_str() != Some("blocked")
+            || plan["runner"]["blockedReason"].as_str() != Some("manual_dod_confirmation_required")
+        {
+            return false;
+        }
+        let manual_ids: Vec<&str> = plan["successCriteria"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| c["kind"].as_str() == Some("manual"))
+            .filter_map(|c| c["id"].as_str().map(str::trim).filter(|s| !s.is_empty()))
+            .collect();
+        if manual_ids.is_empty() {
+            return false;
+        }
+        let child_msgs = if !summary.conversation_id.is_empty() {
+            if let Ok(Some(page)) = self.conversations.read_conversation_window(
+                &summary.conversation_id,
+                None,
+                None,
+                true,
+            ) {
+                page["window"].as_array().cloned().unwrap_or_default()
+            } else {
+                self.conversations
+                    .read_committed(&summary.conversation_id, None, 8 * 1024 * 1024)
+                    .map(|s| s.history.messages)
+                    .unwrap_or_default()
+            }
+        } else {
+            Vec::new()
+        };
+        let report_summary = child_msgs
+            .iter()
+            .rev()
+            .find_map(|m| {
+                if m["role"].as_str() == Some("assistant") && m["_compaction"].is_null() {
+                    let v = visible_worker_result(m);
+                    if !v.is_empty() {
+                        return Some(v);
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| {
+                let mut findings = Vec::new();
+                if let Some(tasks) = plan["tasks"].as_array() {
+                    completed_leaf_results(tasks, &mut findings);
+                }
+                findings.join("\n\n")
+            });
+        if report_summary.trim().is_empty() {
+            return false;
+        }
+        let confirmations = plan["manualConfirmations"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let non_approved: Vec<Value> = confirmations
+            .iter()
+            .filter(|row| row["decision"].as_str() != Some("approve"))
+            .cloned()
+            .collect();
+        let review_token = sha256_json(&json!([
+            plan["planId"],
+            plan["successCriteria"],
+            plan["criterionResults"],
+            plan["tasks"],
+            report_summary,
+            non_approved,
+        ]));
+        let expected_conf_id = format!("completion-review:{review_token}");
+        let all_criteria_approved = manual_ids.iter().all(|cid| {
+            confirmations
+                .iter()
+                .rev()
+                .find(|row| {
+                    row["criterionIds"]
+                        .as_array()
+                        .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(*cid)))
+                })
+                .and_then(|row| row["decision"].as_str())
+                == Some("approve")
+        });
+        let token_confirmed = confirmations.iter().any(|row| {
+            row["confirmationId"].as_str() == Some(expected_conf_id.as_str())
+                && row["decision"].as_str() == Some("approve")
+        });
+        !(all_criteria_approved && token_confirmed)
+    }
+
+    fn dependency_queue_reason(
+        plan: &Value,
+        workspace_id: &str,
+        summaries: &[WorkSessionSummary],
+    ) -> Option<String> {
+        let deps = plan["delegationOrigin"]["dependsOn"].as_array()?;
+        let mut by_session: HashMap<&str, &WorkSessionSummary> = HashMap::new();
+        for s in summaries {
+            if s.workspace_id == workspace_id && !s.session_id.is_empty() {
+                by_session.insert(s.session_id.as_str(), s);
+            }
+        }
+        let mut has_failed = false;
+        for dep in deps {
+            let Some(dep_id) = dep.as_str().filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let Some(found) = by_session.get(dep_id) else {
+                return Some("dependency_missing".to_owned());
+            };
+            if matches!(found.status.as_str(), "failed" | "cancelled") {
+                has_failed = true;
+            }
+        }
+        has_failed.then(|| "dependency_failed".to_owned())
+    }
+
+    fn to_bot_list_session(
+        &self,
+        summary: WorkSessionSummary,
+        all_summaries: &[WorkSessionSummary],
+    ) -> BotListSession {
+        let mut result_confirmation_required = None;
+        let mut completion_review_required = false;
+        let mut queue_reason = None;
+
+        if summary.status == "result_ready" && !summary.accepted {
+            result_confirmation_required = Some(match self.read_plan(&summary.plan_id) {
+                Ok(plan) => self.compute_human_gate(&plan, &summary),
+                Err(_) => true,
+            });
+        } else if summary.status == "waiting_user"
+            && let Ok(plan) = self.read_plan(&summary.plan_id)
+        {
+            if summary.phase == "queued" {
+                queue_reason =
+                    Self::dependency_queue_reason(&plan, &summary.workspace_id, all_summaries);
+            }
+            completion_review_required = self.compute_completion_review_required(&plan, &summary);
+        }
+
+        BotListSession {
+            session_id: summary.session_id,
+            title: summary.title,
+            status: summary.status,
+            updated_at: Some(summary.updated_at),
+            result_confirmation_required,
+            completion_review_required,
+            conversation_id: (!summary.conversation_id.is_empty())
+                .then_some(summary.conversation_id),
+            queue_reason,
+        }
+    }
+
     pub fn new(data_home: impl AsRef<Path>, concurrency: Option<usize>) -> Self {
         let home = data_home.as_ref().to_path_buf();
         Self {
@@ -675,23 +1229,17 @@ impl SessionSupervisor {
     }
 
     pub fn list_all_bot_sessions(&self) -> HashMap<String, Vec<BotListSession>> {
+        let summaries = self.all_delegated_summaries();
         let mut grouped: HashMap<String, Vec<BotListSession>> = HashMap::new();
-        for s in self.all_delegated_summaries() {
+        for s in &summaries {
             if s.workspace_id.is_empty() {
                 continue;
             }
-            let needs_confirm = (s.status == "result_ready" && !s.accepted).then_some(true);
+            let ws_id = s.workspace_id.clone();
             grouped
-                .entry(s.workspace_id.clone())
+                .entry(ws_id)
                 .or_default()
-                .push(BotListSession {
-                    session_id: s.session_id,
-                    title: s.title,
-                    status: s.status,
-                    updated_at: Some(s.updated_at),
-                    result_confirmation_required: needs_confirm,
-                    completion_review_required: false,
-                });
+                .push(self.to_bot_list_session(s.clone(), &summaries));
         }
         for sessions in grouped.values_mut() {
             sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -759,20 +1307,15 @@ impl SessionSupervisor {
     }
 
     pub fn list_bot_sessions(&self, workspace_id: &str) -> Vec<BotListSession> {
-        self.list_sessions(workspace_id)
-            .into_iter()
-            .map(|s| {
-                let needs_confirm = (s.status == "result_ready" && !s.accepted).then_some(true);
-                BotListSession {
-                    session_id: s.session_id,
-                    title: s.title,
-                    status: s.status,
-                    updated_at: Some(s.updated_at),
-                    result_confirmation_required: needs_confirm,
-                    completion_review_required: false,
-                }
-            })
-            .collect()
+        let all_summaries = self.all_delegated_summaries();
+        let mut items: Vec<BotListSession> = all_summaries
+            .iter()
+            .filter(|s| s.workspace_id == workspace_id)
+            .cloned()
+            .map(|s| self.to_bot_list_session(s, &all_summaries))
+            .collect();
+        items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        items
     }
 
     pub fn find_plan_by_session(&self, workspace_id: &str, session_id: &str) -> Option<Value> {
@@ -2382,5 +2925,111 @@ mod tests {
         assert_eq!(ws_large.len(), 2);
         assert_eq!(ws_large[0], sup.summarize(&large_compact_val));
         assert_eq!(ws_large[1], sup.summarize(&large_pretty_val));
+    }
+
+    #[test]
+    fn list_bot_sessions_computes_completion_review_and_dependency_queue_reasons() {
+        let dir = tempdir().unwrap();
+        let plans_dir = dir.path().join("goal-plans");
+        fs::create_dir_all(&plans_dir).unwrap();
+        let convs = ConversationStore::new(dir.path());
+        let child_conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: Some("conv-comp"),
+                    title: "ManualTask",
+                    workspace_id: "ws-s",
+                    workspace_path: Some("/tmp/s"),
+                    role: "work_session",
+                    parent_conversation_id: Some("parent-s"),
+                    mode: "goal",
+                    created_at: "2026-11-22T00:00:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let cid = child_conv["id"].as_str().unwrap().to_owned();
+        convs
+            .append_classic_message(
+                &cid,
+                &json!({
+                    "id": "worker-msg",
+                    "role": "assistant",
+                    "content": "Manual check ready"
+                }),
+            )
+            .unwrap();
+
+        let dep_failed_plan = json!({
+            "planId": "p-dep",
+            "conversationId": "conv-dep",
+            "title": "Failed Dep",
+            "status": "failed",
+            "updatedAt": "2026-11-22T00:01:00.000Z",
+            "delegationOrigin": {
+                "workspaceId": "ws-s",
+                "sessionId": "s-dep",
+                "phase": "failed"
+            }
+        });
+        let queued_blocked_plan = json!({
+            "planId": "p-qblk",
+            "conversationId": "conv-qblk",
+            "title": "Blocked Child",
+            "status": "executing",
+            "updatedAt": "2026-11-22T00:02:00.000Z",
+            "delegationOrigin": {
+                "workspaceId": "ws-s",
+                "sessionId": "s-qblk",
+                "phase": "queued",
+                "dependsOn": ["s-dep"]
+            },
+            "runner": { "status": "waiting_user", "blockedReason": "dependency_failed" }
+        });
+        let comp_plan = json!({
+            "planId": "p-comp",
+            "conversationId": cid,
+            "title": "Manual DoD Task",
+            "status": "executing",
+            "updatedAt": "2026-11-22T00:03:00.000Z",
+            "delegationOrigin": {
+                "workspaceId": "ws-s",
+                "sessionId": "s-comp",
+                "phase": "running"
+            },
+            "runner": {
+                "status": "blocked",
+                "blockedReason": "manual_dod_confirmation_required"
+            },
+            "successCriteria": [
+                { "id": "m1", "kind": "manual", "description": "Sign off" }
+            ],
+            "tasks": []
+        });
+
+        for p in [&dep_failed_plan, &queued_blocked_plan, &comp_plan] {
+            let pid = p["planId"].as_str().unwrap();
+            fs::write(
+                plans_dir.join(format!("{pid}.json")),
+                serde_json::to_string(p).unwrap(),
+            )
+            .unwrap();
+        }
+        fs::write(
+            plans_dir.join("index.jsonl"),
+            "{\"planId\":\"p-dep\"}\n{\"planId\":\"p-qblk\"}\n{\"planId\":\"p-comp\"}\n",
+        )
+        .unwrap();
+
+        let sup = SessionSupervisor::new(dir.path(), Some(1));
+        let rows = sup.list_bot_sessions("ws-s");
+        assert_eq!(rows.len(), 3);
+        let qblk = rows.iter().find(|r| r.session_id == "s-qblk").unwrap();
+        assert_eq!(qblk.status, "waiting_user");
+        assert_eq!(qblk.queue_reason.as_deref(), Some("dependency_failed"));
+        let comp = rows.iter().find(|r| r.session_id == "s-comp").unwrap();
+        assert_eq!(comp.status, "waiting_user");
+        assert!(comp.completion_review_required);
     }
 }

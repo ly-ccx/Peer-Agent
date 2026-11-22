@@ -163,13 +163,41 @@ export function createProjectAgentApplicationService({
     return { ...item, state: { ...item.state, agentStatus: status } };
   }
 
+  function observeAttentionItems(items) {
+    const byWorkspace = new Map();
+    for (const item of items) if (item.expiresAt && (!byWorkspace.has(item.workspaceId) || Date.parse(item.expiresAt) < Date.parse(byWorkspace.get(item.workspaceId)))) byWorkspace.set(item.workspaceId, item.expiresAt);
+    for (const [id, at] of byWorkspace) expiry.observe(id, at);
+  }
+
+  function decorateBotDetail(result) {
+    if (!result?.ok || !result.item) return result;
+    const providers = listModels().filter(model => model.enabled !== false);
+    return { ...result, item: withAgentStatus(result.item),
+      modelOptions: providers.map(projectModelRoutingMenuOption).filter(Boolean),
+      modelViews: projectBotModelViews({ providers, routing: readModelRouting(), projectPolicy: result.item.profile?.modelPolicy }),
+    };
+  }
+
   function list(payload = {}) {
     if (!open()) return disabled();
-    const items = typeof payload?.query === 'string' && payload.query.trim()
+    const hasQuery = typeof payload?.query === 'string' && payload.query.trim().length > 0;
+    const needsYouOnly = payload?.needsYouOnly === true;
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge.projectBotList({
+        ...(hasQuery ? { query: payload.query } : {}),
+        ...(needsYouOnly ? { needsYouOnly: true } : {}),
+      }).then((res) => {
+        if (!res?.ok) return res;
+        const items = Array.isArray(res.items) ? res.items : [];
+        if (!hasQuery && !needsYouOnly) expiry.retain(items.map(item => item.workspaceId));
+        return { ok: true, items: items.map(withAgentStatus) };
+      });
+    }
+    const items = hasQuery
       ? directory.search(payload.query)
       : directory.list();
-    if (typeof payload?.query !== 'string' || !payload.query.trim()) expiry.retain(items.map(item => item.workspaceId));
-    const filtered = payload?.needsYouOnly === true
+    if (!hasQuery) expiry.retain(items.map(item => item.workspaceId));
+    const filtered = needsYouOnly
       ? items.filter((item) => item.state.needsYou > 0)
       : items;
     return { ok: true, items: filtered.map(withAgentStatus) };
@@ -177,24 +205,31 @@ export function createProjectAgentApplicationService({
 
   function listAttention(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotListAttention(payload?.workspaceId !== undefined ? { workspaceId: payload.workspaceId } : {})
+        .then((res) => {
+          if (!res?.ok) return res;
+          const items = Array.isArray(res.items) ? res.items : [];
+          observeAttentionItems(items);
+          return { ok: true, items };
+        });
+    }
     if (payload.workspaceId !== undefined && (typeof payload.workspaceId !== 'string' || !directory.get(payload.workspaceId)?.ok)) return { ok: false, code: 'NOT_FOUND' };
     const items = directory.attention(payload.workspaceId);
     // Opening details can be the first read of a newly delivered decision.
-    const byWorkspace = new Map();
-    for (const item of items) if (item.expiresAt && (!byWorkspace.has(item.workspaceId) || Date.parse(item.expiresAt) < Date.parse(byWorkspace.get(item.workspaceId)))) byWorkspace.set(item.workspaceId, item.expiresAt);
-    for (const [id, at] of byWorkspace) expiry.observe(id, at);
+    observeAttentionItems(items);
     return { ok: true, items };
   }
 
   function get(payload = {}) {
     if (!open()) return disabled();
-    const result = directory.get(payload.workspaceId);
-    if (!result?.ok || !result.item) return result;
-    const providers = listModels().filter(model => model.enabled !== false);
-    return { ...result, item: withAgentStatus(result.item),
-      modelOptions: providers.map(projectModelRoutingMenuOption).filter(Boolean),
-      modelViews: projectBotModelViews({ providers, routing: readModelRouting(), projectPolicy: result.item.profile?.modelPolicy }),
-    };
+    if (classicCoreBridge?.isAvailable?.()) {
+      return classicCoreBridge
+        .projectBotGet({ workspaceId: payload?.workspaceId })
+        .then(decorateBotDetail);
+    }
+    return decorateBotDetail(directory.get(payload.workspaceId));
   }
 
   function readAvatar(payload = {}) {
@@ -466,7 +501,28 @@ export function createProjectAgentApplicationService({
     const parentConversationId = typeof payload.parentConversationId === 'string' ? payload.parentConversationId : undefined;
     const recovery = recoveryFact(workspaceId);
     const binding = obligationBinding(workspaceId);
+    const writer = recovery.code
+      ? { ok: false, code: recovery.code, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null }
+      : { ok: true };
     if (recovery.code) appendObligationLog({ event: 'recovery', workspaceId, code: recovery.code, phase: recovery.phase, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null });
+    if (classicCoreBridge?.isAvailable?.()) {
+      const res = await classicCoreBridge.projectBotListObligationGrants({
+        ...(workspaceId !== null ? { workspaceId } : {}),
+        ...(parentConversationId !== undefined ? { parentConversationId } : {}),
+      });
+      if (!res || res.ok === false) {
+        const code = res?.code || 'obligation_store_unreadable';
+        appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: 0, count: 0,
+          parent: parentHash(parentConversationId), code, reason: [res?.cause || code] });
+        return { ok: false, code };
+      }
+      const grants = Array.isArray(res.grants) ? res.grants : [];
+      const rawCount = typeof res.rawCount === 'number' ? res.rawCount : grants.length;
+      const reasons = Array.isArray(res.reasons) ? res.reasons : [];
+      appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: rawCount, count: grants.length,
+        parent: parentHash(parentConversationId), reason: reasons, code: null });
+      return { ok: true, grants, writer };
+    }
     const persisted = typeof readPersistedObligationGrants === 'function' ? readPersistedObligationGrants(workspaceId) : null;
     if (persisted && persisted.ok === false) {
       appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: 0, count: 0,
@@ -515,7 +571,7 @@ export function createProjectAgentApplicationService({
       parent: parentHash(parentConversationId),
       reason: selected.decisions.filter(item => item.reason !== 'parent_match' && item.reason !== 'unscoped').map(item => `${item.reason}:${item.grantId || ''}`),
       code: null });
-    return { ok: true, grants, writer: recovery.code ? { ok: false, code: recovery.code, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null } : { ok: true } };
+    return { ok: true, grants, writer };
   }
 
   /** ADR 127: read the per-bot unknown-outcome policy. Absent means ask; unsupported tiers surface, never downgrade. */
@@ -834,15 +890,15 @@ export function createProjectAgentApplicationService({
 
   function search(payload = {}) {
     if (!open()) return disabled();
-    const snapshot = typeof directory?.query === 'function' ? directory.query(payload.query) : null;
-    const items = snapshot?.items ?? (typeof directory?.search === 'function' ? directory.search(payload.query) : []);
     if (classicCoreBridge?.isAvailable?.()) {
       const query = typeof payload?.query === 'string' ? payload.query : '';
       return classicCoreBridge.projectBotSearch({ query }).then(
-        res => ({ ok: true, items, hits: Array.isArray(res?.hits) ? res.hits : [] }),
-        () => ({ ok: true, items, hits: [] }),
+        res => ({ ok: true, items: Array.isArray(res?.items) ? res.items : [], hits: Array.isArray(res?.hits) ? res.hits : [] }),
+        () => ({ ok: true, items: typeof directory?.search === 'function' ? directory.search(payload.query) : [], hits: [] }),
       );
     }
+    const snapshot = typeof directory?.query === 'function' ? directory.query(payload.query) : null;
+    const items = snapshot?.items ?? (typeof directory?.search === 'function' ? directory.search(payload.query) : []);
     let hits = [];
     if (searchIndex && typeof readSearchCorpus === 'function') {
       try {

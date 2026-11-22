@@ -4,7 +4,7 @@
 //! and `packages/runtime-node/src/project-agent/attention.mjs` (ADR 84, ADR 100).
 
 use crate::{
-    BotProfile, BotProfileStore, ProjectError, ProjectRegistry, atomic_write,
+    BotProfile, BotProfileStore, ProjectError, ProjectRegistry, atomic_write, cards,
     is_valid_workspace_id, now_iso, parse_iso_ms,
 };
 use peer_store::{ApprovalStore, ConversationStore};
@@ -33,6 +33,10 @@ pub struct BotListSession {
     pub result_confirmation_required: Option<bool>,
     #[serde(default)]
     pub completion_review_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,7 +102,7 @@ pub struct AttentionItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approval_id: Option<String>,
+    pub card: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -329,14 +333,35 @@ pub fn project_bot_attention(
     approvals: &[Value],
     now_ms: i64,
 ) -> Vec<AttentionItem> {
-    let mut items = Vec::new();
-    let mut seen_ids = HashSet::new();
+    project_bot_attention_with_cards(profile, messages, sessions, approvals, &[], &[], now_ms)
+}
+
+pub fn project_bot_attention_with_cards(
+    profile: &BotProfile,
+    messages: &[Value],
+    sessions: &[BotListSession],
+    approvals: &[Value],
+    task_question_cards: &[Value],
+    card_resolutions: &[cards::CardResolution],
+    now_ms: i64,
+) -> Vec<AttentionItem> {
     let sessions_by_id: HashMap<&str, &BotListSession> = sessions
         .iter()
         .map(|s| (s.session_id.as_str(), s))
         .collect();
-    let mut approval_sessions = HashSet::new();
+    let question_states = project_reply_questions(messages, now_ms);
+    let replies: Vec<&Value> = messages
+        .iter()
+        .filter(|msg| {
+            msg["id"]
+                .as_str()
+                .and_then(|id| question_states.get(id))
+                .is_some_and(|st| st.state == QuestionState::Open)
+        })
+        .collect();
 
+    let mut pending_approvals: Vec<&Value> = Vec::new();
+    let mut pending_sessions = HashSet::new();
     for approval in approvals {
         let state = approval["state"].as_str().unwrap_or("");
         if !matches!(state, "open" | "stale") {
@@ -359,72 +384,18 @@ pub fn project_bot_attention(
         {
             continue;
         }
-        let Some(approval_id) = approval["approvalId"].as_str().filter(|s| !s.is_empty()) else {
+        if approval["approvalId"].as_str().is_none_or(|s| s.is_empty()) {
             continue;
-        };
-        if let Some(sid) = session_id {
-            approval_sessions.insert(sid.to_owned());
         }
-        let item_id = format!("approval:{approval_id}");
-        if seen_ids.insert(item_id.clone()) {
-            let title = approval["summary"]
-                .as_str()
-                .or_else(|| approval["capabilityId"].as_str())
-                .unwrap_or("approval")
-                .chars()
-                .take(2000)
-                .collect();
-            items.push(AttentionItem {
-                id: item_id,
-                workspace_id: profile.workspace_id.clone(),
-                bot_name: profile.display_name.clone(),
-                kind: AttentionKind::Approval,
-                title,
-                created_at: approval["createdAt"].as_str().map(str::to_owned),
-                expires_at: approval["deadlineAt"].as_str().map(str::to_owned),
-                message_id: None,
-                session_id: session_id.map(str::to_owned),
-                approval_id: Some(approval_id.to_owned()),
-            });
+        if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
+            pending_sessions.insert(sid.to_owned());
         }
+        pending_approvals.push(approval);
     }
 
-    let question_states = project_reply_questions(messages, now_ms);
-    for msg in messages {
-        let Some(mid) = msg["id"].as_str() else {
-            continue;
-        };
-        if question_states
-            .get(mid)
-            .is_some_and(|st| st.state == QuestionState::Open)
-        {
-            let item_id = format!("question:{mid}");
-            if seen_ids.insert(item_id.clone()) {
-                let title = msg["question"]["prompt"]
-                    .as_str()
-                    .or_else(|| msg["content"].as_str())
-                    .unwrap_or("")
-                    .chars()
-                    .take(2000)
-                    .collect();
-                items.push(AttentionItem {
-                    id: item_id,
-                    workspace_id: profile.workspace_id.clone(),
-                    bot_name: profile.display_name.clone(),
-                    kind: AttentionKind::Question,
-                    title,
-                    created_at: msg["createdAt"].as_str().map(str::to_owned),
-                    expires_at: msg["question"]["expiresAt"].as_str().map(str::to_owned),
-                    message_id: Some(mid.to_owned()),
-                    session_id: None,
-                    approval_id: None,
-                });
-            }
-        }
-    }
-
+    let mut pending_confirmations: Vec<cards::ConfirmCardInput> = Vec::new();
     for session in sessions {
-        if approval_sessions.contains(&session.session_id) {
+        if pending_sessions.contains(&session.session_id) {
             continue;
         }
         let needs_confirm = session.status == "result_ready"
@@ -432,42 +403,155 @@ pub fn project_bot_attention(
                 .result_confirmation_required
                 .unwrap_or_else(|| profile.acceptance_policy_str() == "confirm");
         if needs_confirm {
-            let item_id = format!("confirm:{}", session.session_id);
-            if seen_ids.insert(item_id.clone()) {
-                items.push(AttentionItem {
-                    id: item_id,
-                    workspace_id: profile.workspace_id.clone(),
-                    bot_name: profile.display_name.clone(),
-                    kind: AttentionKind::Confirmation,
-                    title: session.title.clone(),
-                    created_at: session.updated_at.clone(),
-                    expires_at: None,
-                    message_id: None,
-                    session_id: Some(session.session_id.clone()),
-                    approval_id: None,
-                });
-            }
-        }
-        if session.completion_review_required {
-            let item_id = format!("completion:{}", session.session_id);
-            if seen_ids.insert(item_id.clone()) {
-                items.push(AttentionItem {
-                    id: item_id,
-                    workspace_id: profile.workspace_id.clone(),
-                    bot_name: profile.display_name.clone(),
-                    kind: AttentionKind::Confirmation,
-                    title: session.title.clone(),
-                    created_at: session.updated_at.clone(),
-                    expires_at: None,
-                    message_id: None,
-                    session_id: Some(session.session_id.clone()),
-                    approval_id: None,
-                });
-            }
+            pending_confirmations.push(cards::ConfirmCardInput {
+                session_id: session.session_id.clone(),
+                summary: session.title.clone(),
+                accepted: false,
+                needs_confirm: None,
+            });
         }
     }
 
-    items
+    let mut all_cards = cards::project_cards(
+        &profile.workspace_id,
+        &replies,
+        &pending_approvals,
+        &pending_confirmations,
+        &[],
+        card_resolutions,
+    )
+    .unwrap_or_default();
+
+    for card in task_question_cards {
+        if card["kind"].as_str() != Some("question") {
+            continue;
+        }
+        let Some(sid) = card["refs"]["sessionId"].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        if card["refs"]["replyMessageId"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+        {
+            continue;
+        }
+        if let Some(sess) = sessions_by_id.get(sid)
+            && TERMINAL_SESSION_STATUSES.contains(&sess.status.as_str())
+        {
+            continue;
+        }
+        all_cards.push(card.clone());
+    }
+
+    let mut items = Vec::new();
+    for card in all_cards {
+        if card["resolvedState"].as_str() == Some("resolved") {
+            continue;
+        }
+        let Some(actions) = card["actions"].as_array() else {
+            continue;
+        };
+        if actions.is_empty() {
+            continue;
+        }
+        let Some(card_id) = card["cardId"].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let reply_msg_id = card["refs"]["replyMessageId"].as_str();
+        let message = reply_msg_id.and_then(|rid| {
+            replies
+                .iter()
+                .copied()
+                .find(|m| m["id"].as_str().or_else(|| m["messageId"].as_str()) == Some(rid))
+        });
+        let card_approval_id = card["refs"]["approvalId"].as_str();
+        let approval = card_approval_id.and_then(|aid| {
+            pending_approvals
+                .iter()
+                .copied()
+                .find(|a| a["approvalId"].as_str() == Some(aid))
+        });
+
+        let kind = match card["kind"].as_str().unwrap_or("") {
+            "question" => AttentionKind::Question,
+            "confirm_result" => AttentionKind::Confirmation,
+            _ => AttentionKind::Approval,
+        };
+        let raw_title = message
+            .and_then(|m| {
+                m["question"]["prompt"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| m["questionContext"].as_str().filter(|s| !s.is_empty()))
+                    .or_else(|| m["content"].as_str().filter(|s| !s.is_empty()))
+            })
+            .or_else(|| card["content"].as_str().filter(|s| !s.is_empty()))
+            .unwrap_or("");
+        let title: String = raw_title.chars().take(2000).collect();
+
+        let created_at = message
+            .and_then(|m| m["createdAt"].as_str().filter(|s| !s.is_empty()))
+            .or_else(|| approval.and_then(|a| a["createdAt"].as_str().filter(|s| !s.is_empty())))
+            .map(str::to_owned);
+        let expires_at = message
+            .and_then(|m| {
+                m["question"]["expiresAt"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| approval.and_then(|a| a["deadlineAt"].as_str().filter(|s| !s.is_empty())))
+            .map(str::to_owned);
+        let message_id = message
+            .and_then(|m| m["id"].as_str().filter(|s| !s.is_empty()))
+            .map(str::to_owned);
+        let session_id = card["refs"]["sessionId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+
+        items.push(AttentionItem {
+            id: card_id.to_owned(),
+            workspace_id: profile.workspace_id.clone(),
+            bot_name: profile.display_name.clone(),
+            kind,
+            title,
+            created_at,
+            expires_at,
+            message_id,
+            session_id,
+            card: Some(card),
+        });
+    }
+
+    for session in sessions {
+        if session.completion_review_required && !pending_sessions.contains(&session.session_id) {
+            items.push(AttentionItem {
+                id: format!("completion:{}", session.session_id),
+                workspace_id: profile.workspace_id.clone(),
+                bot_name: profile.display_name.clone(),
+                kind: AttentionKind::Confirmation,
+                title: session.title.clone(),
+                created_at: None,
+                expires_at: None,
+                message_id: None,
+                session_id: Some(session.session_id.clone()),
+                card: None,
+            });
+        }
+    }
+
+    // Deduplicate preserving last entry for each `id`, matching JS `Map` insertion.
+    let mut index_by_id: HashMap<String, usize> = HashMap::new();
+    let mut deduped: Vec<AttentionItem> = Vec::with_capacity(items.len());
+    for item in items {
+        if let Some(&pos) = index_by_id.get(&item.id) {
+            deduped[pos] = item;
+        } else {
+            index_by_id.insert(item.id.clone(), deduped.len());
+            deduped.push(item);
+        }
+    }
+    deduped
 }
 
 pub fn project_bot_list_item(
@@ -503,9 +587,13 @@ pub fn project_bot_list_item(
     }
     let attention_expires_at = attention
         .iter()
-        .filter_map(|a| a.expires_at.as_deref())
-        .min()
-        .map(str::to_owned);
+        .filter_map(|a| {
+            a.expires_at
+                .as_deref()
+                .and_then(|s| parse_iso_ms(s).map(|ms| (ms, s)))
+        })
+        .min_by_key(|(ms, _)| *ms)
+        .map(|(_, s)| s.to_owned());
     BotListItem {
         workspace_id: profile.workspace_id.clone(),
         profile,
@@ -549,6 +637,20 @@ pub fn filter_bot_list(items: Vec<BotListItem>, filter: &BotListFilter) -> Vec<B
             hay.contains(&query)
         })
         .collect()
+}
+
+#[derive(Debug, Clone)]
+pub struct BotRowProjection {
+    pub item: BotListItem,
+    pub attention: Vec<AttentionItem>,
+    pub titles: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BotDetail {
+    pub item: BotListItem,
+    pub path: String,
+    pub profile: BotProfile,
 }
 
 pub struct BotDirectory {
@@ -616,6 +718,99 @@ impl BotDirectory {
         Ok(stamp)
     }
 
+    fn summary_messages_for_profile(&self, profile: &BotProfile) -> Vec<Value> {
+        let Some(conv_id) = profile
+            .agent_conversation_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        else {
+            return Vec::new();
+        };
+        if let Ok(Some(page)) = self
+            .conversations
+            .read_conversation_window(conv_id, None, None, true)
+        {
+            page["window"].as_array().cloned().unwrap_or_default()
+        } else {
+            self.conversations
+                .read_committed(conv_id, None, 8 * 1024 * 1024)
+                .map(|snap| snap.history.messages)
+                .unwrap_or_default()
+        }
+    }
+
+    fn workspace_path(&self, workspace_id: &str) -> String {
+        self.registry
+            .diagnostic_snapshot()
+            .ok()
+            .and_then(|rows| rows.into_iter().find(|e| e.workspace_id == workspace_id))
+            .map(|e| e.path)
+            .unwrap_or_default()
+    }
+
+    fn project_row(
+        &self,
+        profile: BotProfile,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+        now_ms: i64,
+    ) -> BotRowProjection {
+        let workspace_id = profile.workspace_id.clone();
+        let messages = self.summary_messages_for_profile(&profile);
+        let last_msg = messages
+            .iter()
+            .rev()
+            .find(|m| is_visible_bot_message(m) && message_kind(m) != "agent_activity")
+            .map(project_bot_list_message);
+        let sessions = sessions_by_workspace
+            .get(&workspace_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let approvals = self
+            .approvals
+            .list(Some(&workspace_id), None)
+            .unwrap_or_default();
+        let resolutions =
+            cards::read_card_resolutions(&self.data_home, &workspace_id).unwrap_or_default();
+        let waiting_sessions: Vec<&BotListSession> = sessions
+            .iter()
+            .filter(|s| s.status == "waiting_user")
+            .collect();
+        let task_question_cards = cards::project_waiting_user_question_cards(
+            &self.data_home,
+            &workspace_id,
+            &messages,
+            &waiting_sessions,
+            &resolutions,
+        );
+        let attention = project_bot_attention_with_cards(
+            &profile,
+            &messages,
+            sessions,
+            &approvals,
+            &task_question_cards,
+            &resolutions,
+            now_ms,
+        );
+        let cursor = self.read_cursor(&workspace_id);
+        let item = project_bot_list_item(
+            profile,
+            last_msg.as_ref(),
+            sessions,
+            &attention,
+            cursor.as_deref(),
+        );
+        let titles = sessions
+            .iter()
+            .filter(|s| !s.title.is_empty())
+            .map(|s| s.title.clone())
+            .collect();
+        BotRowProjection {
+            item,
+            attention,
+            titles,
+        }
+    }
+
     /// Parity `markRead` for Bot conversations: tracks `{ at, messageId }` idempotently
     /// based on the latest visible bot message, avoiding disk writes when unchanged.
     pub fn mark_read_bot(&self, workspace_id: &str) -> Result<MarkReadResult, ProjectError> {
@@ -624,22 +819,7 @@ impl BotDirectory {
             .read(workspace_id)
             .filter(BotProfile::is_active)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
-        let messages: Vec<Value> = match profile.agent_conversation_id.as_deref() {
-            Some(conv_id) if !conv_id.is_empty() => {
-                if let Ok(Some(page)) = self
-                    .conversations
-                    .read_conversation_window(conv_id, None, None, true)
-                {
-                    page["window"].as_array().cloned().unwrap_or_default()
-                } else {
-                    self.conversations
-                        .read_committed(conv_id, None, 8 * 1024 * 1024)
-                        .map(|snap| snap.history.messages)
-                        .unwrap_or_default()
-                }
-            }
-            _ => Vec::new(),
-        };
+        let messages = self.summary_messages_for_profile(&profile);
         let visible: Vec<&Value> = messages
             .iter()
             .filter(|m| is_visible_bot_message(m))
@@ -750,12 +930,12 @@ impl BotDirectory {
         })
     }
 
-    pub fn list(
+    pub fn project_rows(
         &self,
         sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
-    ) -> Vec<BotListItem> {
+    ) -> Vec<BotRowProjection> {
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
-        let mut items = Vec::new();
+        let mut out = Vec::new();
         for workspace_id in self.profiles.list_workspace_ids() {
             let Some(profile) = self.profiles.read(&workspace_id) else {
                 continue;
@@ -763,35 +943,101 @@ impl BotDirectory {
             if !profile.is_active() {
                 continue;
             }
-            let messages = self
-                .read_interactions(&workspace_id, 200, None)
-                .map(|p| p.messages)
-                .unwrap_or_default();
-            let last_msg = messages
-                .iter()
-                .rev()
-                .find(|m| message_kind(m) != "agent_activity")
-                .map(project_bot_list_message);
-            let sessions = sessions_by_workspace
-                .get(&workspace_id)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            let approvals = self
-                .approvals
-                .list(Some(&workspace_id), None)
-                .unwrap_or_default();
-            let attention =
-                project_bot_attention(&profile, &messages, sessions, &approvals, now_ms);
-            let cursor = self.read_cursor(&workspace_id);
-            items.push(project_bot_list_item(
-                profile,
-                last_msg.as_ref(),
-                sessions,
-                &attention,
-                cursor.as_deref(),
-            ));
+            out.push(self.project_row(profile, sessions_by_workspace, now_ms));
         }
-        sort_bot_list(items)
+        out
+    }
+
+    pub fn filter_projected_rows(
+        rows: Vec<BotRowProjection>,
+        query: Option<&str>,
+        needs_you_only: bool,
+    ) -> (Vec<BotListItem>, Vec<BotListItem>) {
+        let q = query
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty());
+        let mut catalog = Vec::with_capacity(rows.len());
+        let mut matched = Vec::new();
+        for row in rows {
+            let needs_you_ok = !needs_you_only || row.item.state.needs_you > 0;
+            let text_ok = match q.as_ref() {
+                None => true,
+                Some(text) => {
+                    row.item.profile.display_name.to_lowercase().contains(text)
+                        || row.item.preview.to_lowercase().contains(text)
+                        || row.titles.iter().any(|t| t.to_lowercase().contains(text))
+                }
+            };
+            if needs_you_ok && text_ok {
+                matched.push(row.item.clone());
+            }
+            catalog.push(row.item);
+        }
+        (sort_bot_list(matched), sort_bot_list(catalog))
+    }
+
+    pub fn query_items(
+        &self,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+        query: Option<&str>,
+        needs_you_only: bool,
+    ) -> Vec<BotListItem> {
+        let rows = self.project_rows(sessions_by_workspace);
+        Self::filter_projected_rows(rows, query, needs_you_only).0
+    }
+
+    pub fn list(
+        &self,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+    ) -> Vec<BotListItem> {
+        self.query_items(sessions_by_workspace, None, false)
+    }
+
+    pub fn get_bot(
+        &self,
+        workspace_id: &str,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+    ) -> Result<BotDetail, ProjectError> {
+        if !is_valid_workspace_id(workspace_id) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let Some(profile) = self.profiles.read(workspace_id) else {
+            return Err(ProjectError::code("NOT_FOUND"));
+        };
+        if !profile.is_active() {
+            return Err(ProjectError::code("ARCHIVED"));
+        }
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let row = self.project_row(profile.clone(), sessions_by_workspace, now_ms);
+        Ok(BotDetail {
+            item: row.item,
+            path: self.workspace_path(workspace_id),
+            profile,
+        })
+    }
+
+    pub fn list_attention(
+        &self,
+        workspace_id: Option<&str>,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+    ) -> Result<Vec<AttentionItem>, ProjectError> {
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        if let Some(ws) = workspace_id {
+            if !is_valid_workspace_id(ws) {
+                return Err(ProjectError::code("NOT_FOUND"));
+            }
+            let Some(profile) = self.profiles.read(ws).filter(BotProfile::is_active) else {
+                return Err(ProjectError::code("NOT_FOUND"));
+            };
+            return Ok(self
+                .project_row(profile, sessions_by_workspace, now_ms)
+                .attention);
+        }
+        Ok(self
+            .project_rows(sessions_by_workspace)
+            .into_iter()
+            .flat_map(|row| row.attention)
+            .collect())
     }
 
     pub fn find_active_bot_for_path(&self, workspace_path: &str) -> Option<BotProfile> {
@@ -1068,6 +1314,209 @@ mod tests {
         assert_eq!(
             directory.mark_read_bot("ws-mr").unwrap_err().code,
             "NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn query_get_and_list_attention_project_cards_session_titles_and_errors() {
+        let dir = tempdir().unwrap();
+        let profiles = BotProfileStore::new(dir.path());
+        let convs = ConversationStore::new(dir.path());
+        let reg = ProjectRegistry::new(dir.path());
+        let ws_dir = dir.path().join("repo-q");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let entry = reg.register(ws_dir.to_str().unwrap(), None).unwrap();
+        let ws_id = entry.workspace_id.clone();
+
+        let at = "2026-11-22T01:00:00.000Z";
+        let conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "QueryBot",
+                    workspace_id: &ws_id,
+                    workspace_path: Some(&entry.path),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap().to_owned();
+        profiles
+            .create(&CreateBotProfile {
+                workspace_id: &ws_id,
+                display_name: "AlphaBot",
+                managed: false,
+                agent_conversation_id: &conv_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+
+        let child_conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "ChildTask",
+                    workspace_id: &ws_id,
+                    workspace_path: Some(&entry.path),
+                    role: "work_session",
+                    parent_conversation_id: Some(&conv_id),
+                    mode: "goal",
+                    created_at: at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let child_conv_id = child_conv["id"].as_str().unwrap().to_owned();
+        convs
+            .append_classic_message(
+                &child_conv_id,
+                &json!({
+                    "id": "m-child-q",
+                    "role": "assistant",
+                    "segments": [{
+                        "tool": "request_user_input",
+                        "toolCallId": "q-1",
+                        "args": { "question": "Deploy now?", "options": ["Yes", "Hold"] }
+                    }]
+                }),
+            )
+            .unwrap();
+
+        convs
+            .append_classic_message(
+                &conv_id,
+                &json!({
+                    "id": "m-reply-q",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "content": "Choose env",
+                    "createdAt": "2026-11-22T01:05:00.000Z",
+                    "question": { "prompt": "Env?", "options": ["Prod", "Staging"], "expiresAt": "2099-01-01T00:00:00.000Z" }
+                }),
+            )
+            .unwrap();
+
+        let mut sessions_by_ws = HashMap::new();
+        sessions_by_ws.insert(
+            ws_id.clone(),
+            vec![
+                BotListSession {
+                    session_id: "sess-wait".into(),
+                    title: "UniqueMigrations".into(),
+                    status: "waiting_user".into(),
+                    updated_at: Some("2026-11-22T01:06:00.000Z".into()),
+                    result_confirmation_required: None,
+                    completion_review_required: false,
+                    conversation_id: Some(child_conv_id),
+                    queue_reason: None,
+                },
+                BotListSession {
+                    session_id: "sess-dep".into(),
+                    title: "BlockedDeploy".into(),
+                    status: "waiting_user".into(),
+                    updated_at: Some("2026-11-22T01:04:00.000Z".into()),
+                    result_confirmation_required: None,
+                    completion_review_required: false,
+                    conversation_id: None,
+                    queue_reason: Some("dependency_failed".into()),
+                },
+                BotListSession {
+                    session_id: "sess-comp".into(),
+                    title: "ManualReviewTask".into(),
+                    status: "waiting_user".into(),
+                    updated_at: Some("2026-11-22T01:03:00.000Z".into()),
+                    result_confirmation_required: None,
+                    completion_review_required: true,
+                    conversation_id: None,
+                    queue_reason: None,
+                },
+            ],
+        );
+
+        let directory = BotDirectory::new(dir.path());
+        // Session title matching in `query_items`
+        let matched = directory.query_items(&sessions_by_ws, Some("uniquemig"), false);
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].workspace_id, ws_id);
+        assert_eq!(
+            matched[0].state.attention_expires_at.as_deref(),
+            Some("2099-01-01T00:00:00.000Z")
+        );
+
+        let detail = directory.get_bot(&ws_id, &sessions_by_ws).unwrap();
+        assert_eq!(detail.path, entry.path);
+        assert_eq!(
+            directory
+                .get_bot("../bad", &sessions_by_ws)
+                .unwrap_err()
+                .code,
+            "INVALID_WORKSPACE"
+        );
+        assert_eq!(
+            directory
+                .get_bot("missing-id", &sessions_by_ws)
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+
+        let attn = directory
+            .list_attention(Some(&ws_id), &sessions_by_ws)
+            .unwrap();
+        assert_eq!(attn.len(), 4);
+        assert!(
+            attn.iter()
+                .any(|a| a.id == "card:question:reply:m-reply-q" && a.card.is_some())
+        );
+        assert!(
+            attn.iter()
+                .any(|a| a.id == "card:question:sess-wait:q-1" && a.card.is_some())
+        );
+        assert!(
+            attn.iter()
+                .any(|a| a.id == "card:question:sess-dep:dependency" && a.card.is_some())
+        );
+        assert!(
+            attn.iter()
+                .any(|a| a.id == "completion:sess-comp" && a.card.is_none())
+        );
+
+        // Dismiss reply question via cards.jsonl -> disappears from attention.
+        let rt_dir = dir.path().join("project-runtime").join(&ws_id);
+        fs::create_dir_all(&rt_dir).unwrap();
+        fs::write(
+            rt_dir.join("cards.jsonl"),
+            "{\"cardId\":\"card:question:reply:m-reply-q\",\"resolvedState\":\"resolved\",\"at\":\"2026-11-22T01:07:00.000Z\"}\n",
+        )
+        .unwrap();
+        let attn_after = directory
+            .list_attention(Some(&ws_id), &sessions_by_ws)
+            .unwrap();
+        assert_eq!(attn_after.len(), 3);
+        assert!(
+            !attn_after
+                .iter()
+                .any(|a| a.id == "card:question:reply:m-reply-q")
+        );
+
+        assert_eq!(
+            directory
+                .list_attention(Some("missing"), &sessions_by_ws)
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+
+        profiles.archive(&ws_id).unwrap();
+        assert_eq!(
+            directory.get_bot(&ws_id, &sessions_by_ws).unwrap_err().code,
+            "ARCHIVED"
         );
     }
 }

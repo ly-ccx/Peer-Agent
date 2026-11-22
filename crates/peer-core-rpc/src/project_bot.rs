@@ -1010,8 +1010,9 @@ pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value
     let data_home = &ctx.config.data_home;
     let supervisor = SessionSupervisor::new(data_home, None);
     let sessions_by_ws = supervisor.list_all_bot_sessions();
-    let bot_items = BotDirectory::new(data_home).list(&sessions_by_ws);
-    let bots: Vec<Value> = bot_items
+    let rows = BotDirectory::new(data_home).project_rows(&sessions_by_ws);
+    let (items, catalog) = BotDirectory::filter_projected_rows(rows, Some(query), false);
+    let bots: Vec<Value> = catalog
         .into_iter()
         .filter_map(|item| serde_json::to_value(item).ok())
         .collect();
@@ -1086,7 +1087,7 @@ pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value
         })
         .unwrap_or_default();
 
-    Ok(json!({ "ok": true, "hits": hits }))
+    Ok(json!({ "ok": true, "items": items, "hits": hits }))
 }
 
 #[cfg(test)]

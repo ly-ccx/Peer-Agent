@@ -2,16 +2,21 @@
 //! and bounded host unknown-outcome reconciliation (`execution-obligation.mjs`,
 //! `execution-obligation-kernel.mjs`, `unknown-outcome-reconciliation.mjs`, ADR 127).
 
-use crate::{CoordinationHub, ProjectError, SessionSupervisor, now_iso, parse_iso_ms, sha256_json};
+use crate::{
+    BotProfileStore, CoordinationHub, ProjectError, SessionSupervisor, is_valid_workspace_id,
+    now_iso, parse_iso_ms, sha256_json,
+};
 use peer_protocol::{
     NativeProcessRecorder, SessionExecutionIdentity, normalize_session_execution_identity,
 };
 use peer_runtime::recorder;
 use peer_store::{ExecutionResourceStore, HostClaimClosure, HostResourcePlan, ResourceError};
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeSet, HashMap},
+    fs,
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, OnceLock},
@@ -1781,6 +1786,372 @@ impl<'a> ExecutionObligationService<'a> {
     }
 }
 
+const CONFINED_CAPABILITIES: [&str; 5] = [
+    "local.file.read",
+    "local.file.list",
+    "local.file.search",
+    "local.file.write",
+    "local.file.edit",
+];
+const SETTLED_RECORDER_PROOFS: [&str; 3] = ["dead", "reused", "different_boot"];
+
+fn is_valid_coordination_sqlite_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("coordination-") else {
+        return false;
+    };
+    let Some(uuid_part) = rest.strip_suffix(".sqlite") else {
+        return false;
+    };
+    uuid_part.len() == 36
+        && uuid_part
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'-'))
+}
+
+fn is_grant_uuid(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    bytes.iter().enumerate().all(|(i, &b)| match i {
+        8 | 13 | 18 | 23 => b == b'-',
+        _ => b.is_ascii_hexdigit(),
+    })
+}
+
+/// Read persisted pending obligation grants from `<data_home>/project-runtime/<ws>/.read-models/`.
+/// Mirrors `packages/runtime-node/src/project-agent/execution-obligation.mjs#readPersistedObligationGrants`.
+pub fn read_persisted_obligation_grants(
+    data_home: &Path,
+    workspace_id: &str,
+) -> Result<Vec<Value>, (&'static str, &'static str)> {
+    if workspace_id.is_empty() || !is_valid_workspace_id(workspace_id) {
+        return Err(("obligation_store_unreadable", "obligation_store_unreadable"));
+    }
+    let dir = data_home.join("project-runtime").join(workspace_id);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let pointer_file = dir.join(".read-models").join("coordination-current.json");
+    let ledger_exists =
+        dir.join("coordination-v2").exists() || dir.join("coordination.jsonl").exists();
+    if !pointer_file.exists() {
+        return if ledger_exists {
+            Err(("obligation_store_unreadable", "coordination_index_missing"))
+        } else {
+            Ok(Vec::new())
+        };
+    }
+    let raw = fs::read_to_string(&pointer_file)
+        .map_err(|_| ("obligation_store_unreadable", "coordination_index_corrupt"))?;
+    let pointer: Value = serde_json::from_str(&raw)
+        .map_err(|_| ("obligation_store_unreadable", "coordination_index_corrupt"))?;
+    if pointer["schemaVersion"].as_u64() != Some(1) {
+        return Err(("obligation_store_unreadable", "coordination_index_corrupt"));
+    }
+    let Some(file_name) = pointer["file"].as_str() else {
+        return Err(("obligation_store_unreadable", "coordination_index_corrupt"));
+    };
+    if !is_valid_coordination_sqlite_name(file_name) {
+        return Err(("obligation_store_unreadable", "coordination_index_corrupt"));
+    }
+    let sqlite_file = dir.join(".read-models").join(file_name);
+    if !sqlite_file.exists() {
+        return Err(("obligation_store_unreadable", "coordination_index_missing"));
+    }
+    let conn = Connection::open_with_flags(
+        &sqlite_file,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+    let mut stmt = conn
+        .prepare("SELECT value FROM objects WHERE bucket = 'obligationGrants'")
+        .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+    let mut rows = stmt
+        .query([])
+        .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+    let mut grants = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?
+    {
+        let raw_val: String = row
+            .get(0)
+            .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+        let parsed: Value = serde_json::from_str(&raw_val)
+            .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+        if parsed["status"].as_str() == Some("pending") {
+            grants.push(parsed);
+        }
+    }
+    Ok(grants)
+}
+
+/// Filter pending grants to `parent_conversation_id` (retaining legacy unscoped grants when owned).
+/// Mirrors `execution-obligation.mjs#selectPendingGrants` + reason reporting in `project-agent-application-service.mjs`.
+pub fn select_pending_grants<F>(
+    grants: &[Value],
+    parent_conversation_id: Option<&str>,
+    owns_session: F,
+) -> (Vec<Value>, Vec<String>)
+where
+    F: Fn(&Value) -> bool,
+{
+    let mut kept = Vec::new();
+    let mut reasons = Vec::new();
+    for grant in grants {
+        let parent = grant["principal"]["parentConversationId"]
+            .as_str()
+            .unwrap_or("");
+        let gid = grant["grantId"].as_str().unwrap_or("");
+        if parent_conversation_id.is_none_or(|pcid| parent == pcid) {
+            kept.push(grant.clone());
+            continue;
+        }
+        if parent.is_empty() && owns_session(grant) {
+            kept.push(grant.clone());
+            reasons.push(format!("legacy_session_owner:{gid}"));
+            continue;
+        }
+        let reason = if !parent.is_empty() {
+            "parent_mismatch"
+        } else {
+            "legacy_unverified"
+        };
+        reasons.push(format!("{reason}:{gid}"));
+    }
+    (kept, reasons)
+}
+
+/// Compute display-only title and shortId fallback without mutating the grant.
+/// Mirrors `execution-obligation.mjs#obligationDisplayTitle`.
+pub fn obligation_display_title(
+    item: &Value,
+    projected_title: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let session_id = item["sessionId"].as_str().unwrap_or("");
+    let usable = |v: &str| !v.is_empty() && v != session_id && !is_grant_uuid(v);
+    let stored = item["title"].as_str().map(str::trim).unwrap_or("");
+    if usable(stored) {
+        return (Some(stored.to_owned()), None);
+    }
+    let projected = projected_title.map(str::trim).unwrap_or("");
+    if usable(projected) {
+        return (Some(projected.to_owned()), None);
+    }
+    let compact: String = session_id
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .take(8)
+        .collect();
+    let short_id = if compact.is_empty() {
+        "unknown".to_owned()
+    } else {
+        compact
+    };
+    (None, Some(short_id))
+}
+
+fn evaluate_claim_unknown_envelope(
+    store: &ExecutionResourceStore,
+    claim: &Value,
+) -> Result<(String, Value), String> {
+    let mut seen_calls = HashMap::<String, ()>::new();
+    let mut unknown_calls = Vec::new();
+    if let Some(arr) = claim["evidenceCalls"].as_array() {
+        for c in arr {
+            if let Some(id) = c.as_str().filter(|s| !s.is_empty())
+                && seen_calls.insert(id.to_owned(), ()).is_none()
+            {
+                unknown_calls.push(id.to_owned());
+            }
+        }
+    }
+    if unknown_calls.is_empty() {
+        return Err("no_unknown_calls".into());
+    }
+    if claim["handles"]
+        .as_object()
+        .is_some_and(|map| map.values().any(|h| h["state"].as_str() != Some("ended")))
+    {
+        return Err("open_handles".into());
+    }
+    let claim_id = claim["claimId"].as_str().unwrap_or("");
+    let rows = store
+        .reconciliation_evidence_for(claim_id)
+        .unwrap_or_default();
+    let Some(evidence) = rows.last() else {
+        return Err("reconciliation_missing".into());
+    };
+    if evidence["claimRevision"].as_i64() != claim["revision"].as_i64()
+        || claim["revision"].as_i64().is_none()
+    {
+        return Err("reconciliation_stale".into());
+    }
+    let verdict = evidence["verdict"].as_str().unwrap_or("");
+    if !matches!(verdict, "no_effect_observed" | "effect_observed") {
+        return Err(format!("verdict_{verdict}"));
+    }
+    let probes = evidence["probes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let recorder_proof = probes
+        .iter()
+        .find(|p| p["kind"].as_str() == Some("process"))
+        .and_then(|p| p["result"].as_str())
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|v| v["recorderProof"].as_str().map(str::to_owned));
+    if !recorder_proof
+        .as_deref()
+        .is_some_and(|rp| SETTLED_RECORDER_PROOFS.contains(&rp))
+    {
+        return Err("recorder_not_proven_dead".into());
+    }
+    for call_id in &unknown_calls {
+        let receipt_ref = format!("receipt:{call_id}");
+        let cap_id = probes
+            .iter()
+            .find(|p| {
+                p["kind"].as_str() == Some("receipt")
+                    && p["ref"].as_str() == Some(receipt_ref.as_str())
+            })
+            .and_then(|p| p["result"].as_str())
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .and_then(|v| v["capabilityId"].as_str().map(str::to_owned));
+        if !cap_id
+            .as_deref()
+            .is_some_and(|c| CONFINED_CAPABILITIES.contains(&c))
+        {
+            return Err("capability_not_confined".into());
+        }
+    }
+    Ok((verdict.to_owned(), evidence["evidenceDigest"].clone()))
+}
+
+/// Fresh read-only advisory unknown-outcome facts (ADR 127 UO-06b); never frozen onto a grant.
+/// Mirrors `unknown-outcome-resolution.mjs#inspect` + `execution-obligation.mjs#inspect`.
+pub fn inspect_unknown_outcome_advisory(data_home: &Path, plan: &Value) -> Option<Value> {
+    let origin = plan.get("delegationOrigin").filter(|v| v.is_object())?;
+    let host_plan = host_resource_plan_from_plan(plan)?;
+    let store = ExecutionResourceStore::open_existing(data_home).ok()?;
+    let claims = store.claims_for(&host_plan).ok()?;
+    let claim = claims.first()?;
+    if !matches!(claim["state"].as_str(), Some("draining" | "reconciling")) {
+        return None;
+    }
+    let ws_id = origin["workspaceId"].as_str().unwrap_or("");
+    let policy_tier = match BotProfileStore::new(data_home).read_unknown_outcome_policy(ws_id) {
+        Ok(val) => val["tier"].as_str().unwrap_or("ask").to_owned(),
+        Err(err) if err.code == "NOT_FOUND" => "ask".to_owned(),
+        Err(err) => err.code.to_lowercase(),
+    };
+    let reconciliation = match evaluate_claim_unknown_envelope(&store, claim) {
+        Ok((verdict, evidence_digest)) => json!({
+            "eligible": true,
+            "verdict": verdict,
+            "evidenceDigest": evidence_digest,
+        }),
+        Err(reason) => json!({
+            "eligible": false,
+            "reason": reason,
+        }),
+    };
+    Some(json!({
+        "policyTier": policy_tier,
+        "reconciliation": reconciliation,
+    }))
+}
+
+/// Lease-free read-only persisted obligation grant listing + display/unknownOutcome decoration.
+pub fn list_persisted_obligation_grants_enriched(
+    data_home: &Path,
+    workspace_id: &str,
+    parent_conversation_id: Option<&str>,
+) -> Value {
+    let raw = match read_persisted_obligation_grants(data_home, workspace_id) {
+        Ok(rows) => rows,
+        Err((code, cause)) => {
+            return json!({
+                "ok": false,
+                "code": code,
+                "cause": cause,
+            });
+        }
+    };
+    let supervisor = SessionSupervisor::new(data_home, None);
+    let plans = supervisor.list_workspace_plans(workspace_id);
+    let plan_by_session: HashMap<&str, &Value> = plans
+        .iter()
+        .filter_map(|p| {
+            p["delegationOrigin"]["sessionId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|sid| (sid, p))
+        })
+        .collect();
+
+    let (selected, reasons) = select_pending_grants(&raw, parent_conversation_id, |grant| {
+        let Some(pcid) = parent_conversation_id else {
+            return false;
+        };
+        grant["items"].as_array().is_some_and(|items| {
+            items.iter().any(|item| {
+                item["sessionId"]
+                    .as_str()
+                    .and_then(|sid| plan_by_session.get(sid))
+                    .is_some_and(|p| {
+                        p["delegationOrigin"]["workspaceId"].as_str() == Some(workspace_id)
+                            && p["delegationOrigin"]["parentConversationId"].as_str() == Some(pcid)
+                    })
+            })
+        })
+    });
+
+    let enriched: Vec<Value> = selected
+        .into_iter()
+        .map(|mut grant| {
+            if let Some(items) = grant.get_mut("items").and_then(Value::as_array_mut) {
+                for item in items.iter_mut() {
+                    let sid = item["sessionId"].as_str().unwrap_or("");
+                    let matching_plan = plan_by_session.get(sid).copied();
+                    let projected_title = matching_plan.and_then(|p| p["title"].as_str());
+                    let (title, short_id) = obligation_display_title(item, projected_title);
+                    let close_claim = item["actions"]
+                        .as_array()
+                        .is_some_and(|acts| acts.iter().any(|a| a.as_str() == Some("close_claim")));
+                    let unknown_outcome = if close_claim {
+                        matching_plan.and_then(|p| inspect_unknown_outcome_advisory(data_home, p))
+                    } else {
+                        None
+                    };
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.insert(
+                            "displayTitle".into(),
+                            title.map(Value::String).unwrap_or(Value::Null),
+                        );
+                        obj.insert(
+                            "shortId".into(),
+                            short_id.map(Value::String).unwrap_or(Value::Null),
+                        );
+                        if let Some(uo) = unknown_outcome {
+                            obj.insert("unknownOutcome".into(), uo);
+                        }
+                    }
+                }
+            }
+            grant
+        })
+        .collect();
+
+    json!({
+        "ok": true,
+        "grants": enriched,
+        "rawCount": raw.len(),
+        "reasons": reasons,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2031,5 +2402,245 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(replayed["replayed"], true);
+    }
+
+    #[tokio::test]
+    async fn read_persisted_obligation_grants_handles_absent_corrupt_scoping_titles_and_advisory_facts()
+     {
+        let home = tempdir().unwrap();
+
+        // 1. Absent runtime dir -> empty ok
+        let empty = list_persisted_obligation_grants_enriched(home.path(), "ws-none", None);
+        assert_eq!(empty["ok"], true);
+        assert_eq!(empty["grants"].as_array().unwrap().len(), 0);
+
+        // 2. Ledger exists without pointer -> coordination_index_missing
+        let rt_missing = home.path().join("project-runtime/ws-no-ptr");
+        fs::create_dir_all(rt_missing.join("coordination-v2")).unwrap();
+        let err_missing = read_persisted_obligation_grants(home.path(), "ws-no-ptr").unwrap_err();
+        assert_eq!(
+            err_missing,
+            ("obligation_store_unreadable", "coordination_index_missing")
+        );
+
+        // 3. Corrupt pointer (path traversal / schemaVersion)
+        let models_dir = rt_missing.join(".read-models");
+        fs::create_dir_all(&models_dir).unwrap();
+        fs::write(
+            models_dir.join("coordination-current.json"),
+            r#"{"schemaVersion":1,"file":"../evil.sqlite"}"#,
+        )
+        .unwrap();
+        let err_corrupt = read_persisted_obligation_grants(home.path(), "ws-no-ptr").unwrap_err();
+        assert_eq!(
+            err_corrupt,
+            ("obligation_store_unreadable", "coordination_index_corrupt")
+        );
+
+        // 4. Full valid SQLite read model + scoping + UUID title fallback + fresh advisory unknownOutcome
+        let ws = tempdir().unwrap();
+        let ws_dir_git = Command::new("git")
+            .args(["init"])
+            .current_dir(ws.path())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .unwrap();
+        assert!(ws_dir_git.status.success());
+
+        let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+        let (entry, prof) = host.bind_workspace(ws.path(), Some("ReadOblBot")).unwrap();
+        let ws_id = entry.workspace_id.clone();
+        let conv_id = prof.agent_conversation_id.unwrap();
+        host.ensure_lease(&ws_id).unwrap();
+        host.submit_user_input(&ws_id, "in-ro1", "Run confined file task", None)
+            .unwrap();
+        host.inputs()
+            .consume(&ws_id, &conv_id, host.conversations(), true)
+            .unwrap();
+
+        let spawned = host
+            .supervisor()
+            .spawn_session(
+                SpawnSessionRequest {
+                    workspace_id: ws_id.clone(),
+                    workspace_path: ws.path().to_path_buf(),
+                    parent_conversation_id: conv_id.clone(),
+                    anchor_message_ids: vec![input_message_id("in-ro1").unwrap()],
+                    input_id: "in-ro1".into(),
+                    surface: "tui".into(),
+                    title: "Clean up temp files".into(),
+                    brief: "Cleanup".into(),
+                    kind: "code".into(),
+                    read_only: false,
+                    required_capabilities: vec!["local.file.write".into()],
+                    success_criteria: vec![SpawnCriterion {
+                        id: Some("c1".into()),
+                        kind: "file-exists".into(),
+                        description: "ok".into(),
+                        command: None,
+                        path: Some("Cargo.toml".into()),
+                        expect: None,
+                    }],
+                    priority: "normal".into(),
+                    depends_on: vec![],
+                    supersedes: None,
+                    objective_id: None,
+                    isolation: "none".into(),
+                    worker_model_selection: json!({}),
+                },
+                true,
+            )
+            .unwrap();
+        host.supervisor()
+            .control_session(&ws_id, &spawned.session_id, "cancel", "stop", true)
+            .unwrap();
+        let plan = host
+            .supervisor()
+            .find_plan_by_session(&ws_id, &spawned.session_id)
+            .unwrap();
+        let host_plan = host_resource_plan_from_plan(&plan).unwrap();
+        let mut rstore = ExecutionResourceStore::initialize(home.path(), None).unwrap();
+        let _resv = rstore
+            .reserve(
+                &host_plan,
+                peer_store::ResourceReservation {
+                    host_epoch: "epoch-ro",
+                    scopes: &[],
+                    record_conflict: false,
+                },
+                "2026-11-22T01:00:00.000Z",
+            )
+            .unwrap();
+        rstore
+            .activate(&host_plan, "epoch-ro", "2026-11-22T01:00:01.000Z")
+            .unwrap();
+        rstore
+            .protect(
+                &host_plan,
+                Some("epoch-ro"),
+                Some("op-ro"),
+                "draining",
+                &["call-ro-1".into()],
+                "2026-11-22T01:00:02.000Z",
+            )
+            .unwrap();
+        let claim = rstore.claims_for(&host_plan).unwrap().pop().unwrap();
+        let claim_id = claim["claimId"].as_str().unwrap().to_owned();
+        let work = json!({
+            "budget": {
+                "uncertainDispatches": [{
+                    "toolCallId": "call-ro-1",
+                    "capabilityId": "local.file.write"
+                }]
+            }
+        });
+        let mut plan_with_rec = plan.clone();
+        plan_with_rec["executionControl"] = json!({
+            "recorder": {
+                "bootId": "boot-prior-000",
+                "pid": 999999u64,
+                "pidStart": "macos-v2:1:0",
+                "hostId": "test-host",
+                "acquiredAt": "2026-11-22T01:00:00.000Z"
+            }
+        });
+        reconcile_unknown_outcome(home.path(), &plan_with_rec, &claim_id, Some(&work))
+            .await
+            .unwrap();
+
+        // Write coordination-current SQLite read model directly (works even while lease dropped or inactive).
+        host.release_lease(&ws_id).unwrap();
+        let db_uuid = "11111111-2222-3333-4444-555555555555";
+        let db_name = format!("coordination-{db_uuid}.sqlite");
+        let ws_models = home
+            .path()
+            .join("project-runtime")
+            .join(&ws_id)
+            .join(".read-models");
+        fs::create_dir_all(&ws_models).unwrap();
+        fs::write(
+            ws_models.join("coordination-current.json"),
+            serde_json::to_string(&json!({ "schemaVersion": 1, "file": db_name })).unwrap(),
+        )
+        .unwrap();
+        let sqlite_path = ws_models.join(&db_name);
+        let conn = Connection::open(&sqlite_path).unwrap();
+        conn.execute(
+            "CREATE TABLE objects (bucket TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (bucket, id))",
+            [],
+        )
+        .unwrap();
+        let uuid_sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let grants = vec![
+            json!({
+                "grantId": "g-match",
+                "status": "pending",
+                "principal": { "workspaceId": ws_id, "parentConversationId": conv_id },
+                "items": [{
+                    "obligationId": "obl-1",
+                    "sessionId": spawned.session_id,
+                    "operationId": "op-ro",
+                    "actions": ["close_claim", "acknowledge_unknown"]
+                }]
+            }),
+            json!({
+                "grantId": "g-legacy",
+                "status": "pending",
+                "principal": { "workspaceId": ws_id },
+                "items": [{
+                    "obligationId": "obl-2",
+                    "sessionId": spawned.session_id,
+                    "title": uuid_sid,
+                    "actions": ["retire_follow_up"]
+                }]
+            }),
+            json!({
+                "grantId": "g-other",
+                "status": "pending",
+                "principal": { "workspaceId": ws_id, "parentConversationId": "other-conv" },
+                "items": [{ "obligationId": "obl-3", "sessionId": uuid_sid, "actions": ["retire_follow_up"] }]
+            }),
+        ];
+        for g in &grants {
+            conn.execute(
+                "INSERT INTO objects VALUES ('obligationGrants', ?, ?)",
+                [
+                    g["grantId"].as_str().unwrap(),
+                    &serde_json::to_string(g).unwrap(),
+                ],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let listed = list_persisted_obligation_grants_enriched(home.path(), &ws_id, Some(&conv_id));
+        assert_eq!(listed["ok"], true);
+        assert_eq!(listed["rawCount"], 3);
+        let returned = listed["grants"].as_array().unwrap();
+        assert_eq!(returned.len(), 2);
+
+        let g_match = returned.iter().find(|g| g["grantId"] == "g-match").unwrap();
+        assert_eq!(g_match["items"][0]["displayTitle"], "Clean up temp files");
+        assert_eq!(g_match["items"][0]["shortId"], Value::Null);
+        assert_eq!(g_match["items"][0]["unknownOutcome"]["policyTier"], "ask");
+        assert_eq!(
+            g_match["items"][0]["unknownOutcome"]["reconciliation"]["eligible"],
+            true
+        );
+
+        let reasons: Vec<&str> = listed["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(reasons.contains(&"legacy_session_owner:g-legacy"));
+        assert!(reasons.contains(&"parent_mismatch:g-other"));
+
+        // UUID fallback for obligation_display_title when no projected title matches
+        let (title_opt, short_opt) =
+            obligation_display_title(&json!({ "sessionId": uuid_sid, "title": uuid_sid }), None);
+        assert_eq!(title_opt, None);
+        assert_eq!(short_opt.as_deref(), Some("aaaaaaaa"));
     }
 }
