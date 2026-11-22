@@ -140,7 +140,19 @@ pub fn default_familiarize_offer() -> FamiliarizeOffer {
 pub struct InteractionPage {
     pub messages: Vec<Value>,
     pub next_cursor: Option<String>,
+    pub source_version: String,
     pub familiarize_offer: Option<FamiliarizeOffer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReadConversationOptions {
+    pub limit: Option<usize>,
+    pub before: Option<String>,
+    pub kinds: Option<Vec<String>>,
+    pub latest: bool,
+    pub presentation_only: bool,
+    pub process_for: Option<String>,
+    pub view: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -876,6 +888,7 @@ impl BotDirectory {
         let profile = self
             .profiles
             .read(workspace_id)
+            .filter(|p| p.is_active())
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
         let familiarize_offer = (before_message_id.is_none() && profile.familiarize.is_none())
             .then(default_familiarize_offer);
@@ -883,6 +896,7 @@ impl BotDirectory {
             return Ok(InteractionPage {
                 messages: Vec::new(),
                 next_cursor: None,
+                source_version: "0".to_owned(),
                 familiarize_offer,
             });
         };
@@ -895,6 +909,7 @@ impl BotDirectory {
                 return Ok(InteractionPage {
                     messages: Vec::new(),
                     next_cursor: None,
+                    source_version: "0".to_owned(),
                     familiarize_offer,
                 });
             }
@@ -926,8 +941,440 @@ impl BotDirectory {
         Ok(InteractionPage {
             messages: page,
             next_cursor,
+            source_version: snapshot.source_revision,
             familiarize_offer,
         })
+    }
+
+    fn read_parent_messages(&self, conv_id: Option<&str>) -> Result<Vec<Value>, ProjectError> {
+        let Some(cid) = conv_id.filter(|s| !s.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        match self
+            .conversations
+            .read_committed(cid, None, 8 * 1024 * 1024)
+        {
+            Ok(s) => Ok(s.history.messages),
+            Err(peer_store::StoreError::NotFound) => Ok(Vec::new()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn resolve_process_messages(
+        messages: Vec<Value>,
+        cards: &[Value],
+        process_for: &str,
+    ) -> (Vec<Value>, Option<String>) {
+        let card = cards
+            .iter()
+            .find(|c| c["cardId"].as_str() == Some(process_for));
+        let card_turn_id = card
+            .and_then(|c| c["refs"]["turnId"].as_str())
+            .filter(|s| !s.is_empty());
+        let card_kind = card.and_then(|c| c["kind"].as_str());
+
+        let target_idx = messages
+            .iter()
+            .position(|m| m["id"].as_str() == Some(process_for) && message_kind(m) != "agent_turn")
+            .or_else(|| {
+                card_turn_id.and_then(|tid| {
+                    messages.iter().position(|m| {
+                        m["turnId"].as_str() == Some(tid)
+                            && m["card"].as_str().is_some()
+                            && m["card"].as_str() == card_kind
+                    })
+                })
+            })
+            .or_else(|| {
+                messages.iter().rposition(|m| {
+                    m["turnId"].as_str() == Some(process_for) && message_kind(m) != "agent_turn"
+                })
+            })
+            .or_else(|| {
+                messages
+                    .iter()
+                    .position(|m| m["id"].as_str() == Some(process_for))
+            });
+
+        let mut turn_idx = target_idx.and_then(|ti| {
+            messages[ti]["turnId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .and_then(|tid| {
+                    messages.iter().position(|m| {
+                        m["id"].as_str() == Some(tid) && message_kind(m) == "agent_turn"
+                    })
+                })
+        });
+
+        if let Some(ti) = target_idx
+            && message_kind(&messages[ti]) == "agent_reply"
+            && messages[ti]["turnId"].as_str().is_none_or(str::is_empty)
+        {
+            turn_idx = None;
+            for (idx, m) in messages.iter().enumerate() {
+                if idx == ti {
+                    break;
+                }
+                let k = message_kind(m);
+                if k == "user_input" {
+                    turn_idx = None;
+                } else if k == "agent_turn" {
+                    turn_idx = Some(idx);
+                }
+            }
+        }
+
+        let process_message_id =
+            target_idx.and_then(|ti| messages[ti]["id"].as_str().map(str::to_owned));
+        let narrowed = messages
+            .into_iter()
+            .enumerate()
+            .filter(|(idx, _)| Some(*idx) == target_idx || Some(*idx) == turn_idx)
+            .map(|(_, m)| m)
+            .collect();
+        (narrowed, process_message_id)
+    }
+
+    fn decorate_page_message(
+        &self,
+        message: &Value,
+        workspace_id: &str,
+        by_card: &HashMap<&str, &Value>,
+        by_reply: &HashMap<&str, Vec<&Value>>,
+        sessions_cache: &mut Option<HashMap<String, Value>>,
+    ) -> Value {
+        let mut out = message.clone();
+        let Some(obj) = out.as_object_mut() else {
+            return out;
+        };
+        let kind = message_kind(message);
+        let msg_id = message["id"].as_str().unwrap_or("");
+
+        let has_sources = message["sources"].as_array().is_some_and(|a| !a.is_empty());
+        let has_states = message["meta"]
+            .get("sessionStates")
+            .is_some_and(|v| !v.is_null() && v != false);
+        if kind == "agent_reply" && (has_sources || has_states) {
+            let map = sessions_cache.get_or_insert_with(|| {
+                crate::session_projection::list_sessions_projected(
+                    &self.data_home,
+                    Some(workspace_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .into_iter()
+                .filter_map(|s| {
+                    let id = s["sessionId"]
+                        .as_str()
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_owned)?;
+                    Some((id, s))
+                })
+                .collect()
+            });
+            let src_arr = message["sources"]
+                .as_array()
+                .or_else(|| message["meta"]["sources"].as_array());
+            let mut seen_sids = HashSet::new();
+            let mut refreshed_states = Vec::new();
+            if let Some(arr) = src_arr {
+                for sid in arr
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    if !seen_sids.insert(sid) {
+                        continue;
+                    }
+                    if refreshed_states.len() >= 20 {
+                        break;
+                    }
+                    if let Some(session) = map.get(sid) {
+                        let mut st = serde_json::Map::new();
+                        st.insert("sessionId".into(), json!(sid));
+                        st.insert("status".into(), session["status"].clone());
+                        if let Some(sr) =
+                            session["sourceRevision"].as_str().filter(|s| !s.is_empty())
+                        {
+                            st.insert("sourceRevision".into(), json!(sr));
+                        }
+                        if let Some(orv) = session["observationRevision"]
+                            .as_str()
+                            .filter(|s| !s.is_empty())
+                        {
+                            st.insert("observationRevision".into(), json!(orv));
+                        }
+                        refreshed_states.push(Value::Object(st));
+                    }
+                }
+            }
+            let mut meta_obj = message["meta"].as_object().cloned().unwrap_or_default();
+            meta_obj.insert("sessionStates".into(), Value::Array(refreshed_states));
+            obj.insert("meta".into(), Value::Object(meta_obj));
+        }
+
+        let has_cards = message
+            .get("cards")
+            .is_some_and(|v| !v.is_null() && v != false);
+        let reply_cards = if kind == "agent_reply" {
+            by_reply.get(msg_id)
+        } else {
+            None
+        };
+        if has_cards || reply_cards.is_some() {
+            let mut merged: Vec<Value> = Vec::new();
+            let mut index_by_id: HashMap<String, usize> = HashMap::new();
+            if let Some(existing) = message["cards"].as_array() {
+                for c in existing {
+                    let Some(cid) = c["cardId"].as_str() else {
+                        continue;
+                    };
+                    let val = by_card.get(cid).copied().unwrap_or(c).clone();
+                    if let Some(&pos) = index_by_id.get(cid) {
+                        merged[pos] = val;
+                    } else {
+                        index_by_id.insert(cid.to_owned(), merged.len());
+                        merged.push(val);
+                    }
+                }
+            }
+            if let Some(rcs) = reply_cards {
+                for &rc in rcs {
+                    let Some(cid) = rc["cardId"].as_str() else {
+                        continue;
+                    };
+                    if let Some(&pos) = index_by_id.get(cid) {
+                        merged[pos] = rc.clone();
+                    } else {
+                        index_by_id.insert(cid.to_owned(), merged.len());
+                        merged.push(rc.clone());
+                    }
+                }
+            }
+            obj.insert("cards".into(), Value::Array(merged));
+        }
+
+        out
+    }
+
+    /// Canonical readConversation entry point serving default paginated view, `view: "cards"`,
+    /// `view: "interactions"` (coordination-isolated), and `processFor` trace drilldown.
+    pub fn read_conversation(&self, workspace_id: &str, opts: &ReadConversationOptions) -> Value {
+        let Some(profile) = self.profiles.read(workspace_id).filter(|p| p.is_active()) else {
+            return json!({ "ok": false, "code": "NOT_FOUND" });
+        };
+
+        let before = opts.before.as_deref().filter(|s| !s.is_empty());
+        if let Some(pf) = opts.process_for.as_deref()
+            && (pf.trim().is_empty() || pf.encode_utf16().count() > 500 || opts.presentation_only)
+        {
+            return json!({ "ok": false, "code": "INVALID_INPUT" });
+        }
+
+        if opts.process_for.is_none() && opts.view.as_deref() == Some("interactions") {
+            let size = opts.limit.filter(|&l| l > 0).unwrap_or(50).min(100);
+            return match self.read_interactions(workspace_id, size, before) {
+                Ok(page) => {
+                    let mut out = json!({
+                        "ok": true,
+                        "messages": page.messages,
+                        "nextCursor": page.next_cursor,
+                        "sourceVersion": page.source_version,
+                    });
+                    if let Some(offer) = page.familiarize_offer {
+                        out.as_object_mut()
+                            .unwrap()
+                            .insert("familiarizeOffer".into(), json!(offer));
+                    }
+                    out
+                }
+                Err(err) => json!({ "ok": false, "code": err.code }),
+            };
+        }
+
+        let parent_messages =
+            match self.read_parent_messages(profile.agent_conversation_id.as_deref()) {
+                Ok(msgs) => msgs,
+                Err(err) => return json!({ "ok": false, "code": err.code }),
+            };
+
+        if opts.process_for.is_none() && opts.view.as_deref() == Some("cards") {
+            return match cards::project_workspace_cards(
+                &self.data_home,
+                workspace_id,
+                &parent_messages,
+                &now_iso(),
+            ) {
+                Ok(projected) => json!({ "ok": true, "cards": projected }),
+                Err(err) => json!({ "ok": false, "cards": [], "code": err.code }),
+            };
+        }
+
+        let projected_cards = match cards::project_workspace_cards(
+            &self.data_home,
+            workspace_id,
+            &parent_messages,
+            &now_iso(),
+        ) {
+            Ok(c) => c,
+            Err(err) => return json!({ "ok": false, "code": err.code }),
+        };
+
+        let mut process_message_id: Option<String> = None;
+        let filtered: Vec<Value> = if let Some(pf) = opts.process_for.as_deref() {
+            let (narrowed, pmid) =
+                Self::resolve_process_messages(parent_messages, &projected_cards, pf);
+            process_message_id = pmid;
+            narrowed
+        } else {
+            let allowed: Option<HashSet<&str>> = opts
+                .kinds
+                .as_ref()
+                .map(|ks| ks.iter().map(String::as_str).collect());
+            parent_messages
+                .into_iter()
+                .filter(|m| {
+                    if let Some(set) = allowed.as_ref() {
+                        set.contains(message_kind(m))
+                    } else {
+                        is_visible_bot_message(m) || message_kind(m) == "agent_turn"
+                    }
+                })
+                .collect()
+        };
+
+        let size = opts.limit.filter(|&l| l > 0).unwrap_or(50).min(100);
+        let mut start = 0usize;
+        let mut end = filtered.len();
+        if let Some(cursor) = before {
+            let idx = filtered
+                .iter()
+                .position(|m| m["id"].as_str() == Some(cursor));
+            if opts.latest {
+                end = idx.unwrap_or(filtered.len());
+            } else {
+                start = idx.map_or(0, |i| i + 1);
+            }
+        }
+        if opts.latest {
+            start = end.saturating_sub(size);
+        }
+
+        let mut by_card: HashMap<&str, &Value> = HashMap::new();
+        let mut by_reply: HashMap<&str, Vec<&Value>> = HashMap::new();
+        for card in &projected_cards {
+            if let Some(cid) = card["cardId"].as_str().filter(|s| !s.is_empty()) {
+                by_card.insert(cid, card);
+            }
+            if let Some(rid) = card["refs"]["replyMessageId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+            {
+                by_reply.entry(rid).or_default().push(card);
+            }
+        }
+
+        let slice_end = if opts.latest {
+            end
+        } else {
+            (start + size).min(filtered.len())
+        };
+        let mut sessions_cache: Option<HashMap<String, Value>> = None;
+        let mut page: Vec<Value> = filtered[start..slice_end]
+            .iter()
+            .map(|m| {
+                self.decorate_page_message(
+                    m,
+                    workspace_id,
+                    &by_card,
+                    &by_reply,
+                    &mut sessions_cache,
+                )
+            })
+            .collect();
+
+        let next_cursor: Value = if opts.latest {
+            if start > 0 {
+                page.first()
+                    .and_then(|m| m["id"].as_str())
+                    .map(|s| json!(s))
+                    .unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            }
+        } else if start + size < filtered.len() {
+            page.last()
+                .and_then(|m| m["id"].as_str())
+                .map(|s| json!(s))
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+
+        if before.is_none() && opts.process_for.is_none() {
+            let mut present: HashSet<&str> = HashSet::new();
+            for m in &filtered {
+                if let Some(arr) = m["cards"].as_array() {
+                    for c in arr {
+                        if let Some(cid) = c["cardId"].as_str() {
+                            present.insert(cid);
+                        }
+                    }
+                }
+            }
+            for card in &projected_cards {
+                let cid = card["cardId"].as_str().unwrap_or("");
+                let has_reply = card["refs"]["replyMessageId"]
+                    .as_str()
+                    .is_some_and(|s| !s.is_empty());
+                if !has_reply
+                    && !present.contains(cid)
+                    && card["resolvedState"].as_str() != Some("resolved")
+                {
+                    page.push(json!({
+                        "id": cid,
+                        "role": "assistant",
+                        "kind": "system_card",
+                        "content": "",
+                        "cards": [card],
+                    }));
+                }
+            }
+        }
+
+        let active_reply_question_id = projected_cards
+            .iter()
+            .find(|c| {
+                c["kind"].as_str() == Some("question")
+                    && c["resolvedState"].as_str() != Some("resolved")
+                    && c["refs"]["replyMessageId"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty())
+            })
+            .and_then(|c| c["refs"]["replyMessageId"].as_str())
+            .map(|s| json!(s))
+            .unwrap_or(Value::Null);
+
+        let mut out = json!({
+            "ok": true,
+            "messages": page,
+            "nextCursor": next_cursor,
+            "activeReplyQuestionId": active_reply_question_id,
+        });
+        if let Some(map) = out.as_object_mut() {
+            if opts.process_for.is_some() {
+                map.insert("processMessageId".into(), json!(process_message_id));
+            } else if before.is_none() && profile.familiarize.is_none() {
+                map.insert(
+                    "familiarizeOffer".into(),
+                    json!(default_familiarize_offer()),
+                );
+            }
+        }
+        out
     }
 
     pub fn project_rows(
@@ -1518,5 +1965,212 @@ mod tests {
             directory.get_bot(&ws_id, &sessions_by_ws).unwrap_err().code,
             "ARCHIVED"
         );
+    }
+
+    #[test]
+    fn read_conversation_covers_default_cards_interactions_isolation_and_process_for() {
+        let dir = tempdir().unwrap();
+        let data_home = dir.path();
+        let ws = "ws-read-conv";
+        let convs = ConversationStore::new(data_home);
+        let at = "2026-11-22T01:00:00.000Z";
+        let conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: Some("conv-read-parent"),
+                    title: "Read Conv Bot",
+                    workspace_id: ws,
+                    workspace_path: Some("/tmp/read-conv"),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap().to_owned();
+
+        let profiles = BotProfileStore::new(data_home);
+        let (mut profile, _) = profiles
+            .create(&CreateBotProfile {
+                workspace_id: ws,
+                display_name: "ReadConvBot",
+                managed: false,
+                agent_conversation_id: &conv_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+        profile.readme_offer = Some(json!({ "offered": true }));
+        profiles.save(profile).unwrap();
+
+        convs
+            .append_classic_message(
+                &conv_id,
+                &json!({
+                    "id": "u-1",
+                    "role": "user",
+                    "kind": "user_input",
+                    "content": "Check status",
+                    "createdAt": "2026-11-22T01:01:00.000Z",
+                }),
+            )
+            .unwrap();
+        convs
+            .append_classic_message(
+                &conv_id,
+                &json!({
+                    "id": "turn-1",
+                    "role": "assistant",
+                    "kind": "agent_turn",
+                    "content": "",
+                    "rounds": [{ "idx": 1 }],
+                    "createdAt": "2026-11-22T01:02:00.000Z",
+                }),
+            )
+            .unwrap();
+        convs
+            .append_classic_message(
+                &conv_id,
+                &json!({
+                    "id": "r-1",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "turnId": "turn-1",
+                    "content": "Choose env",
+                    "sources": ["sess-live"],
+                    "question": { "options": ["Prod", "Dev"], "prompt": "Which?" },
+                    "cards": [{ "cardId": "card:question:reply:r-1", "resolvedState": "open" }],
+                    "createdAt": "2026-11-22T01:03:00.000Z",
+                }),
+            )
+            .unwrap();
+
+        let directory = BotDirectory::new(data_home);
+
+        // Missing/archived workspace check
+        assert_eq!(
+            directory.read_conversation("missing-ws", &ReadConversationOptions::default()),
+            json!({ "ok": false, "code": "NOT_FOUND" })
+        );
+
+        // processFor invalid input checks
+        assert_eq!(
+            directory.read_conversation(
+                ws,
+                &ReadConversationOptions {
+                    process_for: Some("   ".to_owned()),
+                    ..Default::default()
+                }
+            ),
+            json!({ "ok": false, "code": "INVALID_INPUT" })
+        );
+        assert_eq!(
+            directory.read_conversation(
+                ws,
+                &ReadConversationOptions {
+                    process_for: Some("r-1".to_owned()),
+                    presentation_only: true,
+                    ..Default::default()
+                }
+            ),
+            json!({ "ok": false, "code": "INVALID_INPUT" })
+        );
+
+        // Default view (without coordination-v2 dir -> empty coordination snapshot ok)
+        let def = directory.read_conversation(ws, &ReadConversationOptions::default());
+        assert_eq!(def["ok"], true);
+        assert_eq!(def["activeReplyQuestionId"], "r-1");
+        assert!(def["familiarizeOffer"].is_object());
+        let msgs = def["messages"].as_array().unwrap();
+        // u-1, turn-1 (kept in default view for client disposition), r-1, plus standalone readme_offer card
+        assert_eq!(msgs.len(), 4);
+        let r1 = msgs.iter().find(|m| m["id"] == "r-1").unwrap();
+        assert_eq!(r1["meta"]["sessionStates"], json!([]));
+        assert_eq!(r1["cards"][0]["cardId"], "card:question:reply:r-1");
+        let sys_card = msgs.last().unwrap();
+        assert_eq!(sys_card["kind"], "system_card");
+        assert_eq!(
+            sys_card["cards"][0]["cardId"],
+            format!("card:readme_offer:{ws}")
+        );
+
+        // view: "cards"
+        let cards_res = directory.read_conversation(
+            ws,
+            &ReadConversationOptions {
+                view: Some("cards".to_owned()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(cards_res["ok"], true);
+        assert_eq!(cards_res["cards"].as_array().unwrap().len(), 2);
+
+        // processFor trace drilldown
+        let proc_res = directory.read_conversation(
+            ws,
+            &ReadConversationOptions {
+                process_for: Some("r-1".to_owned()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(proc_res["ok"], true);
+        assert_eq!(proc_res["processMessageId"], "r-1");
+        let proc_ids: Vec<&str> = proc_res["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        assert_eq!(proc_ids, vec!["turn-1", "r-1"]);
+
+        // Simulate missing SQLite coordination read-model pointer while coordination-v2 exists
+        fs::create_dir_all(
+            data_home
+                .join("project-runtime")
+                .join(ws)
+                .join("coordination-v2"),
+        )
+        .unwrap();
+        let def_err = directory.read_conversation(ws, &ReadConversationOptions::default());
+        assert_eq!(
+            def_err,
+            json!({ "ok": false, "code": "coordination_index_missing" })
+        );
+        let cards_err = directory.read_conversation(
+            ws,
+            &ReadConversationOptions {
+                view: Some("cards".to_owned()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            cards_err,
+            json!({ "ok": false, "cards": [], "code": "coordination_index_missing" })
+        );
+
+        // view: "interactions" MUST stay isolated from coordination SQLite failure!
+        let inter_res = directory.read_conversation(
+            ws,
+            &ReadConversationOptions {
+                view: Some("interactions".to_owned()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(inter_res["ok"], true);
+        assert!(
+            inter_res["sourceVersion"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+        );
+        assert!(inter_res["familiarizeOffer"].is_object());
+        let inter_ids: Vec<&str> = inter_res["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        assert_eq!(inter_ids, vec!["u-1", "r-1"]);
     }
 }

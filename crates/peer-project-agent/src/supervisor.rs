@@ -668,7 +668,7 @@ fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> boo
     true
 }
 
-fn completed_leaf_results(tasks: &[Value], out: &mut Vec<String>) {
+pub(crate) fn completed_leaf_results(tasks: &[Value], out: &mut Vec<String>) {
     for task in tasks {
         if let Some(sub) = task["subtasks"].as_array().filter(|a| !a.is_empty()) {
             completed_leaf_results(sub, out);
@@ -683,7 +683,7 @@ fn completed_leaf_results(tasks: &[Value], out: &mut Vec<String>) {
     }
 }
 
-fn visible_worker_result(message: &Value) -> String {
+pub(crate) fn visible_worker_result(message: &Value) -> String {
     if let Some(segments) = message["segments"].as_array() {
         for seg in segments.iter().rev() {
             if seg["type"].as_str() == Some("text")
@@ -767,7 +767,7 @@ impl SessionSupervisor {
         if authorized { "auto" } else { "confirm" }
     }
 
-    fn compute_human_gate(&self, plan: &Value, summary: &WorkSessionSummary) -> bool {
+    pub(crate) fn compute_human_gate(&self, plan: &Value, summary: &WorkSessionSummary) -> bool {
         if plan["status"].as_str() != Some("completed") {
             return false;
         }
@@ -957,7 +957,7 @@ impl SessionSupervisor {
         !(all_criteria_approved && token_confirmed)
     }
 
-    fn dependency_queue_reason(
+    pub(crate) fn dependency_queue_reason(
         plan: &Value,
         workspace_id: &str,
         summaries: &[WorkSessionSummary],
@@ -1104,7 +1104,7 @@ impl SessionSupervisor {
         Ok(())
     }
 
-    fn all_delegated_summaries(&self) -> Vec<WorkSessionSummary> {
+    pub(crate) fn all_delegated_summaries(&self) -> Vec<WorkSessionSummary> {
         let Some(cur_index_stamp) = file_stamp(&self.index_file()) else {
             if let Ok(mut cache) = self.plan_cache.lock() {
                 cache.index_stamp = None;
@@ -1228,6 +1228,62 @@ impl SessionSupervisor {
             .collect()
     }
 
+    pub(crate) fn list_delegated_plans(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Vec<(WorkSessionSummary, Value)> {
+        let mut items = Vec::new();
+        for summary in self.all_delegated_summaries() {
+            if workspace_id.is_some_and(|ws| summary.workspace_id != ws) {
+                continue;
+            }
+            if let Ok(plan) = self.read_plan(&summary.plan_id) {
+                items.push((summary, plan));
+            }
+        }
+        items.sort_by(|a, b| b.0.updated_at.cmp(&a.0.updated_at));
+        items
+    }
+
+    pub(crate) fn child_conversation_messages(&self, conversation_id: &str) -> Vec<Value> {
+        if conversation_id.trim().is_empty() {
+            return Vec::new();
+        }
+        if let Ok(Some(page)) =
+            self.conversations
+                .read_conversation_window(conversation_id, None, None, true)
+        {
+            page["window"].as_array().cloned().unwrap_or_default()
+        } else {
+            self.conversations
+                .read_committed(conversation_id, None, 8 * 1024 * 1024)
+                .map(|s| s.history.messages)
+                .unwrap_or_default()
+        }
+    }
+
+    pub(crate) fn conversation_created_at(&self, conversation_id: &str) -> String {
+        if conversation_id.trim().is_empty() {
+            return String::new();
+        }
+        self.conversations
+            .read_metadata(conversation_id)
+            .ok()
+            .and_then(|snap| snap.metadata)
+            .and_then(|m| m["createdAt"].as_str().map(str::to_owned))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn list_retained_unknowns(&self, plan: &Value) -> Vec<Value> {
+        let Ok(rstore) = peer_store::ExecutionResourceStore::open_existing(&self.data_home) else {
+            return Vec::new();
+        };
+        let Some(host_plan) = crate::host_resource_plan_from_plan(plan) else {
+            return Vec::new();
+        };
+        rstore.retained_unknowns(&host_plan).unwrap_or_default()
+    }
+
     pub fn list_all_bot_sessions(&self) -> HashMap<String, Vec<BotListSession>> {
         let summaries = self.all_delegated_summaries();
         let mut grouped: HashMap<String, Vec<BotListSession>> = HashMap::new();
@@ -1248,7 +1304,7 @@ impl SessionSupervisor {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn summarize(&self, plan: &Value) -> WorkSessionSummary {
+    pub(crate) fn summarize(&self, plan: &Value) -> WorkSessionSummary {
         let origin = &plan["delegationOrigin"];
         let anchor_message_ids = origin["anchorMessageIds"]
             .as_array()

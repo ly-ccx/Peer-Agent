@@ -557,6 +557,11 @@ impl ServerContext {
             "project.bot.listObligationGrants" => {
                 project_bot_read::handle_bot_list_obligation_grants(self, params)
             }
+            "project.bot.readConversation" => {
+                project_bot_read::handle_bot_read_conversation(self, params)
+            }
+            "project.bot.listSessions" => project_bot_read::handle_bot_list_sessions(self, params),
+            "project.bot.getSession" => project_bot_read::handle_bot_get_session(self, params),
             "project.bot.markRead" => project_bot::handle_bot_mark_read(self, params),
             "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
             "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),

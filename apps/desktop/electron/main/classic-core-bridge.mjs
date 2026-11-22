@@ -1076,6 +1076,18 @@ export function createClassicCoreBridge({
     return requireClient().request('project.bot.listObligationGrants', params || {});
   }
 
+  async function projectBotReadConversation(params = {}) {
+    return requireClient().request('project.bot.readConversation', params || {});
+  }
+
+  async function projectBotListSessions(params = {}) {
+    return requireClient().request('project.bot.listSessions', params || {});
+  }
+
+  async function projectBotGetSession(params = {}) {
+    return requireClient().request('project.bot.getSession', params || {});
+  }
+
   return Object.freeze({
     isAvailable,
     canHandleChatSend,
@@ -1170,6 +1182,9 @@ export function createClassicCoreBridge({
     projectBotListAttention,
     projectBotGet,
     projectBotListObligationGrants,
+    projectBotReadConversation,
+    projectBotListSessions,
+    projectBotGetSession,
     handleNotification,
     handleUnexpectedExit,
     createHostHandlers,

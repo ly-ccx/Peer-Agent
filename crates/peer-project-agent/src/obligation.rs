@@ -1819,18 +1819,24 @@ fn is_grant_uuid(value: &str) -> bool {
     })
 }
 
-/// Read persisted pending obligation grants from `<data_home>/project-runtime/<ws>/.read-models/`.
-/// Mirrors `packages/runtime-node/src/project-agent/execution-obligation.mjs#readPersistedObligationGrants`.
-pub fn read_persisted_obligation_grants(
+pub type CoordinationBuckets = HashMap<String, HashMap<String, Value>>;
+
+/// Read specified object buckets from `<data_home>/project-runtime/<ws>/.read-models/coordination-current.json`.
+pub fn read_coordination_read_model_buckets(
     data_home: &Path,
     workspace_id: &str,
-) -> Result<Vec<Value>, (&'static str, &'static str)> {
+    buckets: &[&str],
+) -> Result<CoordinationBuckets, (&'static str, &'static str)> {
     if workspace_id.is_empty() || !is_valid_workspace_id(workspace_id) {
         return Err(("obligation_store_unreadable", "obligation_store_unreadable"));
     }
     let dir = data_home.join("project-runtime").join(workspace_id);
+    let mut out: HashMap<String, HashMap<String, Value>> = buckets
+        .iter()
+        .map(|&b| (b.to_owned(), HashMap::new()))
+        .collect();
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok(out);
     }
     let pointer_file = dir.join(".read-models").join("coordination-current.json");
     let ledger_exists =
@@ -1839,7 +1845,7 @@ pub fn read_persisted_obligation_grants(
         return if ledger_exists {
             Err(("obligation_store_unreadable", "coordination_index_missing"))
         } else {
-            Ok(Vec::new())
+            Ok(out)
         };
     }
     let raw = fs::read_to_string(&pointer_file)
@@ -1859,32 +1865,66 @@ pub fn read_persisted_obligation_grants(
     if !sqlite_file.exists() {
         return Err(("obligation_store_unreadable", "coordination_index_missing"));
     }
+    if buckets.is_empty() {
+        return Ok(out);
+    }
     let conn = Connection::open_with_flags(
         &sqlite_file,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+    let placeholders = vec!["?"; buckets.len()].join(", ");
+    let sql = format!("SELECT bucket, id, value FROM objects WHERE bucket IN ({placeholders})");
     let mut stmt = conn
-        .prepare("SELECT value FROM objects WHERE bucket = 'obligationGrants'")
+        .prepare(&sql)
         .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
     let mut rows = stmt
-        .query([])
+        .query(rusqlite::params_from_iter(buckets.iter().copied()))
         .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
-    let mut grants = Vec::new();
     while let Some(row) = rows
         .next()
         .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?
     {
-        let raw_val: String = row
+        let bucket: String = row
             .get(0)
+            .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+        let id: String = row
+            .get(1)
+            .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
+        let raw_val: String = row
+            .get(2)
             .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
         let parsed: Value = serde_json::from_str(&raw_val)
             .map_err(|_| ("obligation_store_unreadable", "obligation_store_unreadable"))?;
-        if parsed["status"].as_str() == Some("pending") {
-            grants.push(parsed);
-        }
+        out.entry(bucket).or_default().insert(id, parsed);
     }
-    Ok(grants)
+    Ok(out)
+}
+
+/// Read coordination SQLite read-model buckets, mapping readiness failures to `ProjectError`.
+pub fn read_coordination_snapshot_readonly(
+    data_home: &Path,
+    workspace_id: &str,
+    buckets: &[&str],
+) -> Result<HashMap<String, HashMap<String, Value>>, ProjectError> {
+    read_coordination_read_model_buckets(data_home, workspace_id, buckets)
+        .map_err(|(_, cause)| ProjectError::code(cause))
+}
+
+/// Read persisted pending obligation grants from `<data_home>/project-runtime/<ws>/.read-models/`.
+/// Mirrors `packages/runtime-node/src/project-agent/execution-obligation.mjs#readPersistedObligationGrants`.
+pub fn read_persisted_obligation_grants(
+    data_home: &Path,
+    workspace_id: &str,
+) -> Result<Vec<Value>, (&'static str, &'static str)> {
+    let mut buckets =
+        read_coordination_read_model_buckets(data_home, workspace_id, &["obligationGrants"])?;
+    Ok(buckets
+        .remove("obligationGrants")
+        .unwrap_or_default()
+        .into_values()
+        .filter(|parsed| parsed["status"].as_str() == Some("pending"))
+        .collect())
 }
 
 /// Filter pending grants to `parent_conversation_id` (retaining legacy unscoped grants when owned).

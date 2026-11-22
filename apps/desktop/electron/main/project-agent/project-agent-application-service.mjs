@@ -434,9 +434,11 @@ export function createProjectAgentApplicationService({
 
   function readConversation(payload = {}) {
     if (!open()) return disabled();
-    const result = payload.processFor && typeof directory.readProcess === 'function' ? directory.readProcess(payload.workspaceId, payload)
-      : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
-        ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
+    const result = classicCoreBridge?.isAvailable?.()
+      ? classicCoreBridge.projectBotReadConversation(payload)
+      : payload.processFor && typeof directory.readProcess === 'function' ? directory.readProcess(payload.workspaceId, payload)
+        : payload.view === 'interactions' && typeof directory.readInteractions === 'function'
+          ? directory.readInteractions(payload.workspaceId, payload) : directory.readConversation(payload.workspaceId, payload);
     const decorate = page => {
       page = { ...page, recoveryAttention: recoveryControl?.needsAttention?.(payload.workspaceId) === true };
       const status = readRecovery(payload.workspaceId);
@@ -458,11 +460,13 @@ export function createProjectAgentApplicationService({
 
   function listSessions(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) return classicCoreBridge.projectBotListSessions(payload);
     return { ok: true, sessions: sessions.list(payload) };
   }
 
   async function getSession(payload = {}) {
     if (!open()) return disabled();
+    if (classicCoreBridge?.isAvailable?.()) return classicCoreBridge.projectBotGetSession(payload);
     const session = await sessions.get(payload);
     if (!session) return { ok: false, code: 'NOT_FOUND' };
     return { ok: true, session };

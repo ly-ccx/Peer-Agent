@@ -2596,3 +2596,336 @@ test('E2E: project-agent list, listAttention, get, search items+hits, and listOb
     cleanup();
   }
 });
+
+test('C4b-2b-2b-1 readConversation (4 modes + cards), listSessions, and getSession route through Rust peer-native binary', async () => {
+  const binaryPath = resolveTestBinary();
+  assert.equal(existsSync(binaryPath), true, `expected peer-native binary at ${binaryPath}`);
+
+  const { dataHome, workspace, cleanup } = makeTempDirs();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const ws = registry.ensureForPath(workspace).workspaceId;
+
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const conv = conversationStore.createConversation({
+    title: 'Projection Bot',
+    role: 'project_agent',
+    workspaceId: ws,
+    workspacePath: workspace,
+    mode: 'project_agent',
+  });
+  conversationStore.appendMessage(conv.id, {
+    id: 'm-user-1',
+    role: 'user',
+    kind: 'user_input',
+    content: 'Implement feature X',
+    createdAt: '2026-11-22T01:00:00.000Z',
+  });
+  conversationStore.appendMessage(conv.id, {
+    id: 'm-turn-1',
+    role: 'assistant',
+    kind: 'agent_turn',
+    turnKind: 'user',
+    content: '',
+    meta: { workId: 'work-conv-e2e' },
+    createdAt: '2026-11-22T01:00:10.000Z',
+  });
+  conversationStore.appendMessage(conv.id, {
+    id: 'm-reply-1',
+    role: 'assistant',
+    kind: 'agent_reply',
+    turnId: 'm-turn-1',
+    sources: ['sess-conv-e2e'],
+    content: 'Working on manual verification',
+    question: { prompt: 'Approve deploy?', options: ['Ship', 'Hold'] },
+    cards: [{ cardId: 'card:question:reply:m-reply-1', resolvedState: 'open' }],
+    createdAt: '2026-11-22T01:00:20.000Z',
+  });
+  conversationStore.appendMessage(conv.id, {
+    id: 'm-unavail-1',
+    role: 'assistant',
+    kind: 'system_card',
+    card: 'agent_unavailable',
+    turnId: 'm-turn-fail-1',
+    content: '代理暂时不可用：上游连接重置',
+    meta: { workId: 'work-unavail-e2e' },
+    createdAt: '2026-11-22T01:00:30.000Z',
+  });
+  conversationStore.appendMessage(conv.id, {
+    id: 'm-stop-1',
+    role: 'assistant',
+    kind: 'system_card',
+    card: 'agent_stopped',
+    turnId: 'm-turn-stop-1',
+    content: '用户暂停',
+    createdAt: '2026-11-22T01:00:40.000Z',
+  });
+
+  const parentHist = conversationStore.getPersistedConversationHistory(conv.id);
+  const childConv = conversationStore.createChildConversation({
+    parentConversationId: conv.id,
+    role: 'work_session',
+    anchorMessageId: 'm-user-1',
+    delegation: { sessionId: 'sess-conv-e2e', anchorMessageId: 'm-user-1', inputId: 'in-conv-e2e' },
+    runtimeState: {
+      conversationId: conv.id,
+      contentRevision: parentHist.contentRevision,
+      status: 'idle',
+    },
+    capturedAt: '2026-11-22T01:00:05.000Z',
+    backgroundMessageIds: ['m-user-1'],
+    confirmMissing: true,
+    title: 'Verify Feature X',
+    workspaceId: ws,
+    workspacePath: workspace,
+  });
+  conversationStore.appendMessage(childConv.id, {
+    id: 'child-msg-1',
+    role: 'assistant',
+    kind: 'agent_reply',
+    content: 'Feature X report ready for manual DoD signoff.',
+    createdAt: '2026-11-22T01:00:15.000Z',
+  });
+
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  profileStore.create({ workspaceId: ws, displayName: 'Projection Bot', agentConversationId: conv.id });
+  profileStore.save({ workspaceId: ws, readmeOffer: { offered: true } });
+
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const stubModel = {
+    modelProviderId: 'anthropic:claude-sonnet-4-5',
+    providerId: 'anthropic',
+    modelId: 'claude-sonnet-4-5',
+    family: 'claude',
+  };
+  goalPlanStore.createPlan({
+    planId: 'plan-conv-e2e',
+    conversationId: childConv.id,
+    title: 'Verify Feature X',
+    goal: 'Manual verification flow',
+    status: 'executing',
+    updatedAt: '2099-01-01T00:00:01.000Z',
+    successCriteria: [{ id: 'c-man-1', kind: 'manual', description: 'Check screenshot visually' }],
+    delegationOrigin: {
+      workspaceId: ws,
+      sessionId: 'sess-conv-e2e',
+      workId: 'work-conv-e2e',
+      parentConversationId: conv.id,
+      anchorMessageId: 'm-user-1',
+      inputId: 'in-conv-e2e',
+      phase: 'running',
+      independentVerifier: 'passed',
+      verifierModel: 'openai:gpt-5',
+      sameFamilyAsWorker: false,
+      modelSelection: {
+        worker: stubModel,
+        explorer: stubModel,
+        verifier: stubModel,
+        resolvedAt: '2026-11-22T01:00:00.000Z',
+      },
+    },
+    tasks: [{ taskId: 't-1', title: 'Implement', status: 'completed', result: 'Done', evidenceRefs: ['ev-1'] }],
+  });
+  goalPlanStore.setRunnerState('plan-conv-e2e', {
+    enabled: true,
+    status: 'blocked',
+    blockedReason: 'manual_dod_confirmation_required',
+  });
+  goalPlanStore.revisePlan(
+    'plan-conv-e2e',
+    { hostVerification: { verdictRef: 'verdict:sess-conv-e2e:passed', outcome: 'passed', checks: [] } },
+    { reason: 'test verification', changedBy: 'system' },
+  );
+
+  // Conflicted memories
+  const memDir = path.join(dataHome, 'projects', ws, 'memory');
+  mkdirSync(memDir, { recursive: true });
+  writeFileSync(
+    path.join(memDir, 'items.jsonl'),
+    [
+      JSON.stringify({
+        id: 'mem-a',
+        scope: 'project',
+        kind: 'fact',
+        text: 'Prefer port 3000',
+        trust: 'stated',
+        sourceRefs: ['r1'],
+        pinned: false,
+        status: 'conflicted',
+        confirmedCount: 1,
+        createdAt: '2026-11-22T01:00:00Z',
+        updatedAt: '2026-11-22T01:00:00Z',
+        workspaceId: ws,
+        conflictId: 'conf-port',
+      }),
+      JSON.stringify({
+        id: 'mem-b',
+        scope: 'project',
+        kind: 'fact',
+        text: 'Prefer port 4000',
+        trust: 'stated',
+        sourceRefs: ['r2'],
+        pinned: false,
+        status: 'conflicted',
+        confirmedCount: 1,
+        createdAt: '2026-11-22T01:00:01Z',
+        updatedAt: '2026-11-22T01:00:01Z',
+        workspaceId: ws,
+        conflictId: 'conf-port',
+      }),
+    ].join('\n') + '\n',
+    'utf8',
+  );
+
+  // Checkpoint + SQLite coordination read-model
+  const ckptRef = `${'c'.repeat(64)}.json`;
+  const ckptDir = path.join(runtimeRoot, ws, 'checkpoints');
+  mkdirSync(ckptDir, { recursive: true });
+  writeFileSync(
+    path.join(ckptDir, ckptRef),
+    JSON.stringify({
+      job: { workId: 'work-unavail-e2e' },
+      outcome: { rounds: [], providerCheckpoint: { id: 'cp-1' } },
+    }),
+    'utf8',
+  );
+
+  const uuidDb = '22222222-3333-4444-5555-666666666666';
+  const dbName = `coordination-${uuidDb}.sqlite`;
+  const rmDir = path.join(runtimeRoot, ws, '.read-models');
+  const pointerFile = path.join(rmDir, 'coordination-current.json');
+  mkdirSync(rmDir, { recursive: true });
+  mkdirSync(path.join(runtimeRoot, ws, 'coordination-v2'), { recursive: true });
+  writeFileSync(pointerFile, JSON.stringify({ schemaVersion: 1, file: dbName }), 'utf8');
+  const db = new DatabaseSync(path.join(rmDir, dbName));
+  db.exec('CREATE TABLE objects (bucket TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (bucket, id))');
+  const insertObj = db.prepare('INSERT INTO objects (bucket, id, value) VALUES (?, ?, ?)');
+  insertObj.run('works', 'work-unavail-e2e', JSON.stringify({
+    workId: 'work-unavail-e2e',
+    workspaceId: ws,
+    state: 'blocked_system',
+    checkpointRef: ckptRef,
+    recovery: {
+      failedTurnId: 'm-turn-fail-1',
+      failureKind: 'transient',
+      deadlineAt: '2099-01-01T00:05:00Z',
+    },
+  }));
+  insertObj.run('agentRequests', 'req-e2e-1', JSON.stringify({
+    requestId: 'req-e2e-1',
+    sessionId: 'sess-conv-e2e',
+    status: 'open',
+    sequence: 1,
+    kind: 'question',
+  }));
+  db.close();
+
+  const mustNotBeCalled = () => {
+    throw new Error('JS BotDirectory / sessions fallback must not be called when Rust bridge is active');
+  };
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    clientInfo: { name: 'peer-desktop-bot-conv-sessions-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const appService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    directory: {
+      readConversation: mustNotBeCalled,
+      readInteractions: mustNotBeCalled,
+      readProcess: mustNotBeCalled,
+    },
+    sessions: {
+      list: mustNotBeCalled,
+      get: mustNotBeCalled,
+    },
+    profileStore,
+    recoveryControl: { needsAttention: (wsId) => wsId === ws },
+    readRecovery: () => ({ status: 'ready' }),
+    readActivity: (wsId) => ({ phase: 'idle', workspaceId: wsId }),
+    debounceMs: 5,
+  });
+
+  try {
+    await client.start();
+
+    // 1. Default readConversation (decorated with recoveryAttention + activity)
+    const convDefault = await appService.readConversation({ workspaceId: ws });
+    assert.equal(convDefault.ok, true);
+    assert.equal(convDefault.recoveryAttention, true);
+    assert.deepEqual(convDefault.activity, { phase: 'idle', workspaceId: ws });
+    assert.equal(convDefault.activeReplyQuestionId, 'm-reply-1');
+    assert.ok(convDefault.familiarizeOffer);
+    const replyMsg = convDefault.messages.find((m) => m.id === 'm-reply-1');
+    assert.ok(replyMsg);
+    assert.equal(replyMsg.meta.sessionStates[0].sessionId, 'sess-conv-e2e');
+    const sysCards = convDefault.messages.filter((m) => m.kind === 'system_card').flatMap((m) => m.cards || []);
+    const unavailCard = sysCards.find((c) => c.kind === 'agent_unavailable');
+    assert.ok(unavailCard && unavailCard.recoveryAction.canContinue === true);
+    assert.ok(sysCards.some((c) => c.kind === 'agent_stopped'));
+    assert.ok(sysCards.some((c) => c.kind === 'readme_offer'));
+    assert.ok(sysCards.some((c) => c.kind === 'memory_conflict'));
+    assert.ok(sysCards.some((c) => c.kind === 'completion_review'));
+
+    // 2. view: 'cards'
+    const convCards = await appService.readConversation({ workspaceId: ws, view: 'cards' });
+    assert.equal(convCards.ok, true);
+    assert.ok(convCards.cards.length >= 6);
+
+    // 3. processFor
+    const convProc = await appService.readConversation({ workspaceId: ws, processFor: 'm-reply-1' });
+    assert.equal(convProc.ok, true);
+    assert.equal(convProc.processMessageId, 'm-reply-1');
+    assert.deepEqual(convProc.messages.map((m) => m.id), ['m-turn-1', 'm-reply-1']);
+
+    // 4. listSessions
+    const sessionsByWork = await appService.listSessions({ workspaceId: ws, workId: 'work-conv-e2e' });
+    assert.equal(sessionsByWork.ok, true);
+    assert.equal(sessionsByWork.sessions.length, 1);
+    assert.equal(sessionsByWork.sessions[0].sessionId, 'sess-conv-e2e');
+    const sessionsEmpty = await appService.listSessions({ workspaceId: ws, status: 'accepted' });
+    assert.deepEqual(sessionsEmpty, { ok: true, sessions: [] });
+
+    // 5. getSession (summary + detail: 'report' + NOT_FOUND)
+    const gotSession = await appService.getSession({ sessionId: 'sess-conv-e2e', detail: 'report' });
+    assert.equal(gotSession.ok, true);
+    assert.equal(gotSession.session.sessionId, 'sess-conv-e2e');
+    assert.equal(gotSession.session.completionReviewRequired, true);
+    assert.ok(gotSession.session.report);
+    assert.ok(gotSession.session.report.verification);
+    assert.equal(gotSession.session.report.agentSupervision.requests.length, 1);
+    assert.equal(gotSession.session.report.agentSupervision.requests[0].requestId, 'req-e2e-1');
+    assert.deepEqual(await appService.getSession({ sessionId: 'does-not-exist' }), {
+      ok: false,
+      code: 'NOT_FOUND',
+    });
+
+    // 6. Missing coordination pointer breaks cards view (and decorates recovery), while interactions stays isolated!
+    rmSync(pointerFile);
+    const brokenCards = await appService.readConversation({ workspaceId: ws, view: 'cards' });
+    assert.equal(brokenCards.ok, false);
+    assert.equal(brokenCards.code, 'coordination_index_missing');
+    assert.ok(brokenCards.recovery && brokenCards.recovery.code === 'coordination_index_missing');
+
+    const isolatedInteractions = await appService.readConversation({ workspaceId: ws, view: 'interactions' });
+    assert.equal(isolatedInteractions.ok, true);
+    assert.ok(typeof isolatedInteractions.sourceVersion === 'string' && isolatedInteractions.sourceVersion.length > 0);
+    assert.ok(isolatedInteractions.messages.some((m) => m.id === 'm-reply-1'));
+    assert.equal(isolatedInteractions.messages.some((m) => m.id === 'm-turn-1'), false);
+  } finally {
+    appService.dispose();
+    await client.dispose();
+    cleanup();
+  }
+});

@@ -114,6 +114,14 @@ pub fn verdict_ref_for(session_id: &str, outcome: &str) -> String {
     format!("verdict:{id}:{out}")
 }
 
+pub fn is_handoff_conflict(handoff: &Value) -> bool {
+    handoff["status"].as_str() == Some("stopped")
+        && !matches!(
+            handoff["stoppedReason"].as_str(),
+            Some("acceptance_required" | "handoff_confirmation_required")
+        )
+}
+
 pub fn handoff_question_id(
     accepted_at: &str,
     conflict: bool,

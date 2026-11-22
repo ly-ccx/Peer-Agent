@@ -1957,3 +1957,276 @@ async fn project_bot_list_attention_get_search_items_and_obligation_grants_round
     drop(client);
     server_handle.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn project_bot_read_conversation_and_sessions_roundtrip() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+
+    let registry = ProjectRegistry::new(home);
+    let alpha_dir = home.join("repos/alpha");
+    fs::create_dir_all(&alpha_dir).unwrap();
+    let alpha_entry = registry
+        .register(&alpha_dir.to_string_lossy(), None)
+        .unwrap();
+    let ws_id = alpha_entry.workspace_id.clone();
+
+    let conv_store = peer_store::ConversationStore::new(home);
+    let conv = conv_store
+        .create_project_conversation(
+            &peer_store::NewProjectConversation {
+                id: Some("conv-parent-read"),
+                title: "Parent",
+                workspace_id: &ws_id,
+                workspace_path: Some(&alpha_entry.path),
+                role: "project_agent",
+                parent_conversation_id: None,
+                mode: "project_agent",
+                created_at: "2026-11-22T01:00:00.000Z",
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let conv_id = conv["id"].as_str().unwrap().to_owned();
+
+    let child_conv = conv_store
+        .create_project_conversation(
+            &peer_store::NewProjectConversation {
+                id: Some("conv-child-read"),
+                title: "Child",
+                workspace_id: &ws_id,
+                workspace_path: Some(&alpha_entry.path),
+                role: "work_session",
+                parent_conversation_id: Some(&conv_id),
+                mode: "goal",
+                created_at: "2026-11-22T01:01:00.000Z",
+            },
+            None,
+            None,
+        )
+        .unwrap();
+    let child_id = child_conv["id"].as_str().unwrap().to_owned();
+    conv_store
+        .append_classic_message(
+            &child_id,
+            &json!({
+                "id": "c-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Manual check ready",
+                "createdAt": "2026-11-22T01:02:00.000Z",
+            }),
+        )
+        .unwrap();
+
+    conv_store
+        .append_classic_message(
+            &conv_id,
+            &json!({
+                "id": "u-1",
+                "role": "user",
+                "kind": "user_input",
+                "content": "Please proceed",
+                "createdAt": "2026-11-22T01:02:10.000Z",
+            }),
+        )
+        .unwrap();
+    conv_store
+        .append_classic_message(
+            &conv_id,
+            &json!({
+                "id": "t-1",
+                "role": "assistant",
+                "kind": "agent_turn",
+                "content": "",
+                "createdAt": "2026-11-22T01:02:20.000Z",
+            }),
+        )
+        .unwrap();
+    conv_store
+        .append_classic_message(
+            &conv_id,
+            &json!({
+                "id": "r-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "turnId": "t-1",
+                "sources": ["sess-rpc-1"],
+                "content": "Done!",
+                "createdAt": "2026-11-22T01:02:30.000Z",
+            }),
+        )
+        .unwrap();
+
+    let profiles = peer_project_agent::BotProfileStore::new(home);
+    let (mut profile, _) = profiles
+        .create(&peer_project_agent::CreateBotProfile {
+            workspace_id: &ws_id,
+            display_name: "AlphaBot",
+            managed: false,
+            agent_conversation_id: &conv_id,
+            avatar_salt: "",
+        })
+        .unwrap();
+    profile.readme_offer = Some(json!({ "offered": true }));
+    profiles.save(profile).unwrap();
+
+    let plan_dir = home.join("goal-plans");
+    fs::create_dir_all(&plan_dir).unwrap();
+    let plan = json!({
+        "planId": "plan-rpc-1",
+        "conversationId": child_id,
+        "title": "RPC Session Task",
+        "goal": "Manual verification",
+        "status": "executing",
+        "createdAt": "2026-11-22T01:01:00.000Z",
+        "updatedAt": "2026-11-22T01:03:00.000Z",
+        "successCriteria": [{ "id": "c-man", "kind": "manual", "description": "Inspect output" }],
+        "runner": { "status": "blocked", "blockedReason": "manual_dod_confirmation_required" },
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-rpc-1",
+            "workId": "work-rpc-1",
+            "parentConversationId": conv_id,
+            "phase": "running",
+        },
+        "tasks": [],
+    });
+    fs::write(
+        plan_dir.join("plan-rpc-1.json"),
+        serde_json::to_string(&plan).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        plan_dir.join("index.jsonl"),
+        format!("{}\n", serde_json::to_string(&plan).unwrap()),
+    )
+    .unwrap();
+
+    let (mut client, server_handle) = spawn_server(home).await;
+
+    // 1. project.bot.listSessions
+    let listed = client
+        .call(
+            "project.bot.listSessions",
+            json!({ "workspaceId": ws_id, "workId": "work-rpc-1" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(listed["ok"], true);
+    assert_eq!(listed["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["sessions"][0]["sessionId"], "sess-rpc-1");
+
+    // 2. project.bot.getSession with detail: "report" and NOT_FOUND
+    let sess = client
+        .call(
+            "project.bot.getSession",
+            json!({ "sessionId": "sess-rpc-1", "detail": "report" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(sess["ok"], true);
+    assert_eq!(sess["session"]["sessionId"], "sess-rpc-1");
+    assert_eq!(sess["session"]["completionReviewRequired"], true);
+    assert!(sess["session"]["report"].is_object());
+    assert_eq!(sess["session"]["report"]["summary"], "Manual check ready");
+
+    let missing_sess = client
+        .call(
+            "project.bot.getSession",
+            json!({ "sessionId": "nonexistent" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(missing_sess, json!({ "ok": false, "code": "NOT_FOUND" }));
+
+    // 3. project.bot.readConversation (default, cards, processFor)
+    let conv_def = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(conv_def["ok"], true);
+    let r1 = conv_def["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "r-1")
+        .unwrap();
+    assert_eq!(r1["meta"]["sessionStates"][0]["sessionId"], "sess-rpc-1");
+
+    let conv_cards = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "view": "cards" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(conv_cards["ok"], true);
+    assert!(
+        conv_cards["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["kind"] == "completion_review")
+    );
+    assert!(
+        conv_cards["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["kind"] == "readme_offer")
+    );
+
+    let conv_proc = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "processFor": "r-1" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(conv_proc["ok"], true);
+    assert_eq!(conv_proc["processMessageId"], "r-1");
+    assert_eq!(conv_proc["messages"].as_array().unwrap().len(), 2);
+
+    // 4. Missing coordination index breaks default/cards, but view: "interactions" stays isolated!
+    fs::create_dir_all(
+        home.join("project-runtime")
+            .join(&ws_id)
+            .join("coordination-v2"),
+    )
+    .unwrap();
+    let cards_err = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "view": "cards" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(
+        cards_err,
+        json!({ "ok": false, "cards": [], "code": "coordination_index_missing" })
+    );
+
+    let inter_ok = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "view": "interactions" }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(inter_ok["ok"], true);
+    assert!(
+        inter_ok["sourceVersion"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+    assert_eq!(inter_ok["messages"].as_array().unwrap().len(), 2);
+
+    let _ = client.call("core.shutdown", json!({})).await;
+    drop(client);
+    server_handle.await.unwrap().unwrap();
+}

@@ -31,6 +31,7 @@ pub mod reply;
 pub mod runner;
 pub mod scheduler;
 pub mod search_index;
+pub mod session_projection;
 pub mod supervisor;
 pub mod system_context;
 pub mod verifier;
@@ -45,7 +46,7 @@ pub use acceptance::{
     AcceptanceDecision, AcceptanceFacts, CHANGED_FILE_CONFIRM_LIMIT, HostAuthorityFacts,
     VerificationCheck, VerificationVerdict, anchor_requests_review, compute_verification_verdict,
     decide_session_acceptance, evaluate_acceptance_close_gate, handoff_question_id,
-    verdict_ref_for,
+    is_handoff_conflict, verdict_ref_for,
 };
 pub use attachments::{
     INPUT_ATTACHMENT_LIMIT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_ATTACHMENT_BYTES,
@@ -54,7 +55,7 @@ pub use attachments::{
 };
 pub use cards::{
     CardResolution, ConfirmCardInput, TaskQuestionDraft, latest_task_question, project_cards,
-    project_waiting_user_question_cards, read_card_resolutions,
+    project_waiting_user_question_cards, project_workspace_cards, read_card_resolutions,
 };
 pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
@@ -67,8 +68,8 @@ pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
     AttentionItem, AttentionKind, BotDetail, BotDirectory, BotListFilter, BotListItem,
     BotListMessage, BotListSession, BotRowProjection, BotRowState, FamiliarizeOffer,
-    InteractionPage, MarkReadResult, QuestionState, ReplyQuestionStatus, default_familiarize_offer,
-    filter_bot_list, is_visible_bot_message, project_bot_attention,
+    InteractionPage, MarkReadResult, QuestionState, ReadConversationOptions, ReplyQuestionStatus,
+    default_familiarize_offer, filter_bot_list, is_visible_bot_message, project_bot_attention,
     project_bot_attention_with_cards, project_bot_list_item, project_bot_list_message,
     project_reply_questions, sort_bot_list,
 };
@@ -114,6 +115,7 @@ pub use obligation::{
     ObligationClassification, canonical_grant_key, classify_execution_obligation,
     host_resource_plan_from_plan, inspect_unknown_outcome_advisory,
     list_persisted_obligation_grants_enriched, obligation_display_title, obligation_id_for,
+    read_coordination_read_model_buckets, read_coordination_snapshot_readonly,
     read_persisted_obligation_grants, reconcile_unknown_outcome, select_pending_grants,
 };
 pub use profile::{
@@ -141,6 +143,12 @@ pub use scheduler::{
 pub use search_index::{
     ConversationSearchDocument, ConversationSearchHit, ConversationSearchIndex,
     collect_conversation_search_documents,
+};
+pub use session_projection::{
+    FollowUpProjection, LifecycleDecision, build_session_report, build_verification_detail,
+    decide_lifecycle, get_session_projected, list_sessions_projected,
+    project_completion_review_for_plan, session_observation_revision, supervision_recovery,
+    verification_content_hash,
 };
 pub use supervisor::{
     SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
