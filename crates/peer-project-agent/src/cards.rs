@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::Path,
 };
 
@@ -655,6 +656,47 @@ pub fn read_card_resolutions(
         });
     }
     Ok(records)
+}
+
+/// Append a non-authoritative card resolution line to `<data_home>/project-runtime/<ws>/cards.jsonl`.
+pub fn append_card_resolution(
+    data_home: &Path,
+    workspace_id: &str,
+    resolution: &CardResolution,
+) -> Result<(), ProjectError> {
+    if !is_valid_workspace_id(workspace_id) {
+        return Err(ProjectError::code("INVALID_WORKSPACE"));
+    }
+    let card_id = bounded_id(Some(&resolution.card_id), CARD_ID_MAX);
+    if card_id.is_empty() || !matches!(resolution.resolved_state.as_str(), "open" | "resolved") {
+        return Err(ProjectError::code("INVALID_INPUT"));
+    }
+    let runtime_dir = data_home.join("project-runtime").join(workspace_id);
+    fs::create_dir_all(&runtime_dir).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+    let file = runtime_dir.join("cards.jsonl");
+    let _lock =
+        peer_store::DirectoryLock::acquire(&file, std::time::Duration::from_millis(500), None)?;
+    let normalized = CardResolution {
+        card_id,
+        resolved_state: resolution.resolved_state.clone(),
+        at: if resolution.at.trim().is_empty() {
+            now_iso()
+        } else {
+            resolution.at.clone()
+        },
+        resolution: resolution.resolution.clone(),
+    };
+    let line = serde_json::to_string(&normalized)
+        .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
+    let mut f = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+    writeln!(f, "{line}").map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+    f.sync_all()
+        .map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+    Ok(())
 }
 
 fn finish_projected_cards(built: Vec<DraftCard>, resolutions: &[CardResolution]) -> Vec<Value> {
@@ -2750,5 +2792,28 @@ mod tests {
             .expect("completion_review card");
         assert_eq!(crv["content"], "Review Task");
         assert_eq!(crv["actions"][0]["id"], "confirm_completion");
+    }
+
+    #[test]
+    fn append_card_resolution_persists_and_reads_back() {
+        let dir = tempdir().unwrap();
+        let ws = "ws-append-card";
+        append_card_resolution(
+            dir.path(),
+            ws,
+            &CardResolution {
+                card_id: "card:memory_conflict:c1".to_owned(),
+                resolved_state: "resolved".to_owned(),
+                at: String::new(),
+                resolution: "dismissed".to_owned(),
+            },
+        )
+        .unwrap();
+        let rows = read_card_resolutions(dir.path(), ws).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].card_id, "card:memory_conflict:c1");
+        assert_eq!(rows[0].resolved_state, "resolved");
+        assert_eq!(rows[0].resolution, "dismissed");
+        assert!(!rows[0].at.is_empty());
     }
 }

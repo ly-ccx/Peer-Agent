@@ -1492,6 +1492,21 @@ impl BotDirectory {
         let profile = self.profiles.read(&entry.workspace_id)?;
         profile.is_active().then_some(profile)
     }
+
+    pub fn question_state(&self, workspace_id: &str, question_id: &str) -> Option<QuestionState> {
+        let profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)?;
+        let conv_id = profile.agent_conversation_id?;
+        let snap = self
+            .conversations
+            .read_committed(&conv_id, None, 8 * 1024 * 1024)
+            .ok()?;
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let states = project_reply_questions(&snap.history.messages, now_ms);
+        states.get(question_id).map(|s| s.state)
+    }
 }
 
 #[cfg(test)]

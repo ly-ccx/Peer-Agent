@@ -4,7 +4,8 @@ use crate::{
     classic_goal::{self, ClassicGoalRegistry},
     classic_llm, classic_mcp, classic_skills,
     classic_streams::ClassicStreamRegistry,
-    classic_usage, project, project_bot, project_bot_ops, project_bot_read,
+    classic_usage, project, project_bot, project_bot_live, project_bot_ops, project_bot_read,
+    project_host::ProjectHostRuntime,
     protocol::{
         CapabilitiesListResult, CoreCapabilitiesSummary, DEFAULT_REVERSE_TIMEOUT,
         ExternalCapabilityManifest, InitializeParams, InitializeResult, MAX_FRAME_BYTES,
@@ -264,6 +265,33 @@ impl Drop for BackgroundCounterGuard {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct LocalBackgroundSpawner {
+    local_tx: mpsc::UnboundedSender<LocalJob>,
+    active_background: Arc<AtomicUsize>,
+    background_done: Arc<Notify>,
+}
+
+impl LocalBackgroundSpawner {
+    pub(crate) fn spawn<F>(&self, spawn_fn: F) -> Result<(), RpcError>
+    where
+        F: FnOnce(BackgroundCounterGuard) + Send + 'static,
+    {
+        let guard = BackgroundCounterGuard {
+            counter: Arc::clone(&self.active_background),
+            notify: Arc::clone(&self.background_done),
+        };
+        self.active_background.fetch_add(1, Ordering::SeqCst);
+        let res = self.local_tx.send(Box::new(move || {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
+        }));
+        if res.is_err() {
+            return Err(RpcError::shutting_down());
+        }
+        Ok(())
+    }
+}
+
 pub struct ServerContext {
     pub config: CoreServerConfig,
     pub started_at: Instant,
@@ -273,6 +301,7 @@ pub struct ServerContext {
     pub runtime: Arc<NativeConversationRuntime>,
     pub streams: ClassicStreamRegistry,
     pub goals: ClassicGoalRegistry,
+    pub project_host: Arc<ProjectHostRuntime>,
     local_tx: mpsc::UnboundedSender<LocalJob>,
     active_background: Arc<AtomicUsize>,
     background_done: Arc<Notify>,
@@ -302,18 +331,12 @@ impl ServerContext {
     where
         F: FnOnce(BackgroundCounterGuard) + Send + 'static,
     {
-        let guard = BackgroundCounterGuard {
-            counter: Arc::clone(&self.active_background),
-            notify: Arc::clone(&self.background_done),
-        };
-        self.active_background.fetch_add(1, Ordering::SeqCst);
-        let res = self.local_tx.send(Box::new(move || {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
-        }));
-        if res.is_err() {
-            return Err(RpcError::shutting_down());
+        LocalBackgroundSpawner {
+            local_tx: self.local_tx.clone(),
+            active_background: Arc::clone(&self.active_background),
+            background_done: Arc::clone(&self.background_done),
         }
-        Ok(())
+        .spawn(spawn_fn)
     }
 
     async fn drain_background(&self) {
@@ -577,6 +600,35 @@ impl ServerContext {
                 project_bot_ops::handle_bot_write_input_draft(self, params)
             }
             "project.bot.readEvidence" => project_bot_ops::handle_bot_read_evidence(self, params),
+            "project.bot.hostConfigure" => {
+                project_bot_live::handle_host_configure(self, params).await
+            }
+            "project.bot.hostStatus" => project_bot_live::handle_host_status(self, params),
+            "project.bot.create" => project_bot_live::handle_create(self, params).await,
+            "project.bot.delete" => project_bot_live::handle_delete(self, params).await,
+            "project.bot.submitInput" => project_bot_live::handle_submit_input(self, params).await,
+            "project.bot.stopResponse" => project_bot_live::handle_stop_response(self, params),
+            "project.bot.cancelSession" => project_bot_live::handle_cancel_session(self, params),
+            "project.bot.resumeSession" => {
+                project_bot_live::handle_resume_session(self, params).await
+            }
+            "project.bot.decideObligation" => {
+                project_bot_live::handle_decide_obligation(self, params).await
+            }
+            "project.bot.requestClaimClosure" => {
+                project_bot_live::handle_request_claim_closure(self, params).await
+            }
+            "project.bot.decideApproval" => {
+                project_bot_live::handle_decide_approval(self, params).await
+            }
+            "project.bot.startFamiliarize" => {
+                project_bot_live::handle_start_familiarize(self, params)
+            }
+            "project.bot.confirmResult" => project_bot_live::handle_confirm_result(self, params),
+            "project.bot.acceptReadme" => project_bot_live::handle_accept_readme(self, params),
+            "project.bot.retry" => project_bot_live::handle_retry(self, params).await,
+            "project.bot.takeoverHost" => project_bot_live::handle_takeover_host(self, params),
+            "project.bot.recovery" => project_bot_live::handle_recovery(self, params).await,
             _ => Err(RpcError::method_not_found(method)),
         }
     }
@@ -625,6 +677,23 @@ where
         &config.data_home,
         access.clone(),
     ));
+    let active_background = Arc::new(AtomicUsize::new(0));
+    let background_done = Arc::new(Notify::new());
+    let spawner = LocalBackgroundSpawner {
+        local_tx: local_tx.clone(),
+        active_background: Arc::clone(&active_background),
+        background_done: Arc::clone(&background_done),
+    };
+    let project_host = Arc::new(
+        ProjectHostRuntime::new(
+            config.data_home.clone(),
+            &config.version,
+            peer.clone(),
+            spawner,
+            config.model_loader.clone(),
+        )
+        .map_err(|err| io::Error::other(err.detail))?,
+    );
     let context = Arc::new(ServerContext {
         config,
         started_at: Instant::now(),
@@ -634,9 +703,10 @@ where
         runtime,
         streams: ClassicStreamRegistry::new(),
         goals: ClassicGoalRegistry::new(),
+        project_host,
         local_tx,
-        active_background: Arc::new(AtomicUsize::new(0)),
-        background_done: Arc::new(Notify::new()),
+        active_background,
+        background_done,
     });
     let mut tasks = JoinSet::new();
 
@@ -818,6 +888,7 @@ where
 
     drop(line_reader);
     shutdown.cancel();
+    context.project_host.begin_shutdown();
     context.goals.cancel_all();
     context.streams.cancel_all();
     peer.fail_all_pending("Core server shutting down");
@@ -831,6 +902,10 @@ where
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
     }
+    let shutting_down = context
+        .snapshot_capabilities()
+        .is_ok_and(|(_, draining, _)| draining);
+    context.project_host.release_all_leases();
     drop(context);
     drop(peer);
     let _ = local_thread.join();
@@ -838,6 +913,15 @@ where
 
     match (loop_result, flush_result) {
         (Err(err), _) => Err(err),
+        (Ok(()), Err(flush_err))
+            if shutting_down
+                && matches!(
+                    flush_err.kind(),
+                    io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof
+                ) =>
+        {
+            Ok(())
+        }
         (Ok(()), Err(flush_err)) => Err(flush_err),
         (Ok(()), Ok(())) => Ok(()),
     }

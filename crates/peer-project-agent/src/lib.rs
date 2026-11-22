@@ -12,6 +12,7 @@ pub mod attachments;
 pub mod cards;
 pub mod circuit_breaker;
 pub mod coordination_bridge;
+pub mod coordination_recovery;
 pub mod digest;
 pub mod directory;
 pub mod drafts;
@@ -54,8 +55,9 @@ pub use attachments::{
     normalize_input_attachments, normalize_user_upload, project_user_message_for_model,
 };
 pub use cards::{
-    CardResolution, ConfirmCardInput, TaskQuestionDraft, latest_task_question, project_cards,
-    project_waiting_user_question_cards, project_workspace_cards, read_card_resolutions,
+    CardResolution, ConfirmCardInput, TaskQuestionDraft, append_card_resolution,
+    latest_task_question, project_cards, project_waiting_user_question_cards,
+    project_workspace_cards, read_card_resolutions,
 };
 pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
@@ -63,6 +65,10 @@ pub use circuit_breaker::{
 };
 pub use coordination_bridge::{
     CommitAgentMessageRequest, CoordinationHub, coordination_work_id, sha256_hex, sha256_json,
+};
+pub use coordination_recovery::{
+    execute_recovery_restore, execute_recovery_retain, inspect_coordination_fork, inspect_recovery,
+    needs_recovery_attention, occupied_recovery_view,
 };
 pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
@@ -266,6 +272,12 @@ pub fn is_uuid_v4(value: &str) -> bool {
 pub fn now_iso() -> String {
     let now = OffsetDateTime::now_utc();
     format_iso(now).unwrap_or_else(|| "1970-01-01T00:00:00.000Z".into())
+}
+
+/// Host timestamp offset from `OffsetDateTime::now_utc()` by `offset_ms` milliseconds.
+pub fn now_iso_offset_ms(offset_ms: i64) -> String {
+    let target = OffsetDateTime::now_utc() + time::Duration::milliseconds(offset_ms);
+    format_iso(target).unwrap_or_else(now_iso)
 }
 
 pub fn format_iso(dt: OffsetDateTime) -> Option<String> {

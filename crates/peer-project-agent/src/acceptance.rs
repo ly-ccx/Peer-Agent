@@ -180,6 +180,34 @@ fn collect_plan_evidence_refs(plan: &Value) -> Vec<String> {
     refs
 }
 
+/// Evaluates whether a manual criterion has a confirming latest `manualConfirmations` entry.
+/// Supports both TS canonical `{ kind: "manual_dod", decision: "approve", criterionIds: [...] }`
+/// (sorted by `decidedAt` descending with array-index tie-breaker) and legacy `{ criterionId, decision: "confirmed" }`.
+pub fn is_manual_criterion_confirmed(manual_confirmations: &[Value], criterion_id: &str) -> bool {
+    let mut matches: Vec<(usize, &Value)> = manual_confirmations
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            let kind_ok = row.get("kind").is_none()
+                || row["kind"].is_null()
+                || row["kind"].as_str() == Some("manual_dod");
+            let matches_criterion = row["criterionIds"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(criterion_id)))
+                || row["criterionId"].as_str() == Some(criterion_id);
+            kind_ok && matches_criterion
+        })
+        .collect();
+    matches.sort_by(|(idx_a, row_a), (idx_b, row_b)| {
+        let ts_a = row_a["decidedAt"].as_str().unwrap_or("");
+        let ts_b = row_b["decidedAt"].as_str().unwrap_or("");
+        ts_b.cmp(ts_a).then_with(|| idx_b.cmp(idx_a))
+    });
+    matches
+        .first()
+        .is_some_and(|(_, row)| matches!(row["decision"].as_str(), Some("approve" | "confirmed")))
+}
+
 /// Evaluates whether every leaf task is completed with indexed host Evidence and
 /// all required automatic/model_review criteria pass against the host Evidence index.
 pub fn evaluate_acceptance_close_gate(
@@ -228,10 +256,7 @@ pub fn evaluate_acceptance_close_gate(
             let kind = criterion["kind"].as_str().unwrap_or("");
             match kind {
                 "manual" => {
-                    let confirmed = manual_confirmations.iter().any(|c| {
-                        c["criterionId"].as_str() == Some(cid) && c["decision"] == "confirmed"
-                    });
-                    if !confirmed {
+                    if !is_manual_criterion_confirmed(manual_confirmations, cid) {
                         unmet.push(format!("criterion:{cid}:manual_pending"));
                     }
                 }
@@ -523,5 +548,38 @@ mod tests {
                 .reasons
                 .contains(&"changed_files_over_limit".to_owned())
         );
+    }
+
+    #[test]
+    fn manual_criterion_confirmed_supports_canonical_latest_and_legacy_formats() {
+        let canonical = vec![json!({
+            "confirmationId": "completion-review:tok-1",
+            "kind": "manual_dod",
+            "decision": "approve",
+            "criterionIds": ["m1"],
+            "decidedAt": "2026-11-22T01:00:00.000Z",
+        })];
+        assert!(is_manual_criterion_confirmed(&canonical, "m1"));
+        assert!(!is_manual_criterion_confirmed(&canonical, "m2"));
+
+        // Later reject overrides earlier approve by decidedAt
+        let overridden = vec![
+            canonical[0].clone(),
+            json!({
+                "confirmationId": "completion-review:tok-2",
+                "kind": "manual_dod",
+                "decision": "reject",
+                "criterionIds": ["m1"],
+                "decidedAt": "2026-11-22T02:00:00.000Z",
+            }),
+        ];
+        assert!(!is_manual_criterion_confirmed(&overridden, "m1"));
+
+        // Legacy test fixture format still supported
+        let legacy = vec![json!({
+            "criterionId": "m1",
+            "decision": "confirmed",
+        })];
+        assert!(is_manual_criterion_confirmed(&legacy, "m1"));
     }
 }

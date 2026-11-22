@@ -42,6 +42,15 @@ impl HostIdentity {
     fn owns(&self, record: &HostLeaseRecord) -> bool {
         self.host_id == record.host_id && self.pid == record.pid
     }
+    pub fn host_id(&self) -> &str {
+        &self.host_id
+    }
+    pub fn surface(&self) -> HostSurface {
+        self.surface
+    }
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
 }
 
 struct Snapshot {
@@ -290,6 +299,9 @@ impl LeaseToken {
     }
     pub(crate) fn directory(&self) -> Result<&Path, StoreError> {
         self.path.parent().ok_or(StoreError::InvalidInput)
+    }
+    pub fn workspace_dir(&self) -> Option<&Path> {
+        self.path.parent()
     }
     pub fn record(&self) -> &HostLeaseRecord {
         &self.record

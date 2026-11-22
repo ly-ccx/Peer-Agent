@@ -33,7 +33,7 @@ use peer_store::{ConversationStore, EvidenceIndexStore, HostToolEvidence};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -90,6 +90,8 @@ pub struct RunTurnOptions<'a> {
     pub holds_lease: bool,
 }
 
+type ActivityListener = Arc<dyn Fn(ProjectAgentActivity, String) + Send + Sync>;
+
 pub struct ProjectAgentRunner {
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
@@ -97,7 +99,9 @@ pub struct ProjectAgentRunner {
     breaker_store: CircuitBreakerStore,
     last_workspace_id: Mutex<Option<String>>,
     retry_delays_ms: Mutex<Vec<u64>>,
-    activity: Mutex<Option<ProjectAgentActivity>>,
+    activities: Mutex<HashMap<String, ProjectAgentActivity>>,
+    statuses: Mutex<HashMap<String, String>>,
+    activity_listener: Mutex<Option<ActivityListener>>,
 }
 
 impl ProjectAgentRunner {
@@ -118,12 +122,35 @@ impl ProjectAgentRunner {
             coordination,
             last_workspace_id: Mutex::new(None),
             retry_delays_ms: Mutex::new(SAME_PROVIDER_RETRY_DELAYS_MS.to_vec()),
-            activity: Mutex::new(None),
+            activities: Mutex::new(HashMap::new()),
+            statuses: Mutex::new(HashMap::new()),
+            activity_listener: Mutex::new(None),
         }
     }
 
     pub fn current_activity(&self) -> Option<ProjectAgentActivity> {
-        self.activity.lock().ok().and_then(|g| g.clone())
+        let ws = self.last_workspace_id.lock().ok().and_then(|g| g.clone())?;
+        self.activity_for(&ws)
+    }
+
+    pub fn activity_for(&self, workspace_id: &str) -> Option<ProjectAgentActivity> {
+        self.activities
+            .lock()
+            .ok()
+            .and_then(|g| g.get(workspace_id).cloned())
+    }
+
+    pub fn status_for(&self, workspace_id: &str) -> Option<String> {
+        self.statuses
+            .lock()
+            .ok()
+            .and_then(|g| g.get(workspace_id).cloned())
+    }
+
+    pub fn set_activity_listener(&self, listener: Option<ActivityListener>) {
+        if let Ok(mut guard) = self.activity_listener.lock() {
+            *guard = listener;
+        }
     }
 
     /// Override transient retry backoff delays (primarily for deterministic fast tests).
@@ -145,9 +172,39 @@ impl ProjectAgentRunner {
         }
     }
 
-    fn set_activity_phase(&self, phase: &str, text: Option<&str>, finished: bool) {
-        if let Ok(mut guard) = self.activity.lock()
-            && let Some(ref mut act) = *guard
+    fn status_for_phase(phase: &str) -> &'static str {
+        match phase {
+            "error" => "error",
+            "done" | "stopped" | "idle" => "idle",
+            "waiting_provider" => "waiting_provider",
+            _ => "thinking",
+        }
+    }
+
+    fn init_activity(&self, activity: ProjectAgentActivity) {
+        let status = Self::status_for_phase(&activity.phase).to_owned();
+        let ws = activity.workspace_id.clone();
+        if let Ok(mut guard) = self.activities.lock() {
+            guard.insert(ws.clone(), activity.clone());
+        }
+        if let Ok(mut guard) = self.statuses.lock() {
+            guard.insert(ws, status.clone());
+        }
+        let listener = self.activity_listener.lock().ok().and_then(|g| g.clone());
+        if let Some(cb) = listener {
+            cb(activity, status);
+        }
+    }
+
+    fn set_activity_phase(
+        &self,
+        workspace_id: &str,
+        phase: &str,
+        text: Option<&str>,
+        finished: bool,
+    ) {
+        let updated = if let Ok(mut guard) = self.activities.lock()
+            && let Some(act) = guard.get_mut(workspace_id)
         {
             act.revision += 1;
             act.phase = phase.to_owned();
@@ -156,6 +213,19 @@ impl ProjectAgentRunner {
             }
             if finished {
                 act.finished_at = Some(now_iso());
+            }
+            Some(act.clone())
+        } else {
+            None
+        };
+        if let Some(act) = updated {
+            let status = Self::status_for_phase(phase).to_owned();
+            if let Ok(mut guard) = self.statuses.lock() {
+                guard.insert(workspace_id.to_owned(), status.clone());
+            }
+            let listener = self.activity_listener.lock().ok().and_then(|g| g.clone());
+            if let Some(cb) = listener {
+                cb(act, status);
             }
         }
     }
@@ -678,6 +748,7 @@ impl ProjectAgentRunner {
     async fn call_model_with_retry(
         &self,
         model: &NativeModel,
+        workspace_id: &str,
         conversation_id: &str,
         system_prompt: &str,
         live_messages: &[Value],
@@ -709,7 +780,7 @@ impl ProjectAgentRunner {
                     async |delta| {
                         match delta {
                             ModelDelta::Thinking(_) => {
-                                self.set_activity_phase("thinking", None, false);
+                                self.set_activity_phase(workspace_id, "thinking", None, false);
                             }
                             ModelDelta::Text(chunk) => {
                                 if !chunk.is_empty()
@@ -719,7 +790,12 @@ impl ProjectAgentRunner {
                                     if avail > 0 {
                                         buf.push_str(clip_utf8_bytes(chunk, avail));
                                     }
-                                    self.set_activity_phase("responding", Some(&buf), false);
+                                    self.set_activity_phase(
+                                        workspace_id,
+                                        "responding",
+                                        Some(&buf),
+                                        false,
+                                    );
                                 }
                             }
                         }
@@ -737,7 +813,7 @@ impl ProjectAgentRunner {
                         Err(code) => return Err(ModelError::new(code)),
                     };
                     // Discard any partial text emitted before retrying so the live pane resets cleanly.
-                    self.set_activity_phase("thinking", Some(""), false);
+                    self.set_activity_phase(workspace_id, "waiting_provider", Some(""), false);
                     tokio::select! {
                         biased;
                         _ = cancel.cancelled() => return Err(ModelError::new("CANCELLED")),
@@ -1035,19 +1111,17 @@ impl ProjectAgentRunner {
             .flat_map(|i| i.quote_refs.iter().cloned())
             .collect();
 
-        if let Ok(mut guard) = self.activity.lock() {
-            *guard = Some(ProjectAgentActivity {
-                workspace_id: opts.workspace_id.to_owned(),
-                conversation_id: opts.conversation_id.to_owned(),
-                turn_id: turn_id.clone(),
-                revision: 1,
-                started_at: now_str.clone(),
-                finished_at: None,
-                reply_to: current_input_anchors.clone(),
-                phase: "thinking".into(),
-                reply_text: String::new(),
-            });
-        }
+        self.init_activity(ProjectAgentActivity {
+            workspace_id: opts.workspace_id.to_owned(),
+            conversation_id: opts.conversation_id.to_owned(),
+            turn_id: turn_id.clone(),
+            revision: 1,
+            started_at: now_str.clone(),
+            finished_at: None,
+            reply_to: current_input_anchors.clone(),
+            phase: "thinking".into(),
+            reply_text: String::new(),
+        });
 
         let profile = BotProfileStore::new(&self.data_home).read(opts.workspace_id);
         let bot_name = profile
@@ -1310,10 +1384,11 @@ impl ProjectAgentRunner {
                 final_end = TurnEndKind::UserStopped;
                 break;
             }
-            self.set_activity_phase("thinking", None, false);
+            self.set_activity_phase(opts.workspace_id, "thinking", None, false);
             let mut model_turn = match self
                 .call_model_with_retry(
                     model,
+                    opts.workspace_id,
                     opts.conversation_id,
                     &system_prompt,
                     &live_messages,
@@ -1353,6 +1428,7 @@ impl ProjectAgentRunner {
                             match self
                                 .call_model_with_retry(
                                     model,
+                                    opts.workspace_id,
                                     opts.conversation_id,
                                     &system_prompt,
                                     &live_messages,
@@ -1482,7 +1558,7 @@ impl ProjectAgentRunner {
                 let call_id = format!("tc-{}", uuid::Uuid::new_v4());
                 let started_at = now_iso();
                 let started_ms = parse_iso_ms(&started_at).unwrap_or(0);
-                self.set_activity_phase("tool", None, false);
+                self.set_activity_phase(opts.workspace_id, "tool", None, false);
 
                 let cap_id = projection
                     .capability(&call.name)
@@ -1646,10 +1722,11 @@ impl ProjectAgentRunner {
                 .map(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty())
                 .unwrap_or(false);
         if needs_synthesis {
-            self.set_activity_phase("thinking", None, false);
+            self.set_activity_phase(opts.workspace_id, "thinking", None, false);
             match self
                 .call_model_with_retry(
                     model,
+                    opts.workspace_id,
                     opts.conversation_id,
                     &system_prompt,
                     &live_messages,
@@ -1689,27 +1766,25 @@ impl ProjectAgentRunner {
         let _ = admission_task.await;
 
         let live_partial = self
-            .activity
-            .lock()
-            .ok()
-            .and_then(|g| g.as_ref().map(|a| a.reply_text.trim().to_owned()))
+            .activity_for(opts.workspace_id)
+            .map(|a| a.reply_text.trim().to_owned())
             .unwrap_or_default();
         let snapshot = turn_state.lock().map(|s| s.clone()).unwrap_or_default();
         if let Some(msg_id) = snapshot.reply_committed_id {
             final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
-            self.set_activity_phase("done", None, true);
+            self.set_activity_phase(opts.workspace_id, "done", None, true);
         } else if !snapshot.waiting_session_ids.is_empty() {
             final_end = TurnEndKind::AwaitingChildren {
                 session_ids: snapshot.waiting_session_ids,
             };
-            self.set_activity_phase("done", None, true);
+            self.set_activity_phase(opts.workspace_id, "done", None, true);
         } else {
             let phase = match final_end {
                 TurnEndKind::UserStopped => "stopped",
                 TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
                 _ => "done",
             };
-            self.set_activity_phase(phase, None, true);
+            self.set_activity_phase(opts.workspace_id, phase, None, true);
         }
 
         match &final_end {
@@ -1883,5 +1958,63 @@ impl ProjectAgentRunner {
             spawned_session_ids: snapshot.spawned_session_ids,
             tool_calls: total_tool_calls,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+    use tempfile::tempdir;
+
+    #[test]
+    fn per_workspace_activity_and_listener_emit_status_transitions() {
+        let dir = tempdir().unwrap();
+        let sup = Arc::new(SessionSupervisor::new(dir.path(), None));
+        let runner = ProjectAgentRunner::new(dir.path(), sup);
+        let events: Arc<StdMutex<Vec<(String, String, u64)>>> = Arc::new(StdMutex::new(Vec::new()));
+        let events_cb = Arc::clone(&events);
+        runner.set_activity_listener(Some(Arc::new(move |act, status| {
+            events_cb
+                .lock()
+                .unwrap()
+                .push((act.workspace_id, status, act.revision));
+        })));
+
+        runner.init_activity(ProjectAgentActivity {
+            workspace_id: "ws-a".into(),
+            conversation_id: "conv-a".into(),
+            turn_id: "turn-a".into(),
+            revision: 1,
+            started_at: "2026-11-22T00:00:00.000Z".into(),
+            finished_at: None,
+            reply_to: vec![],
+            phase: "thinking".into(),
+            reply_text: String::new(),
+        });
+        runner.init_activity(ProjectAgentActivity {
+            workspace_id: "ws-b".into(),
+            conversation_id: "conv-b".into(),
+            turn_id: "turn-b".into(),
+            revision: 1,
+            started_at: "2026-11-22T00:00:00.000Z".into(),
+            finished_at: None,
+            reply_to: vec![],
+            phase: "waiting_provider".into(),
+            reply_text: String::new(),
+        });
+        runner.set_activity_phase("ws-a", "responding", Some("hello"), false);
+        runner.set_activity_phase("ws-a", "done", None, true);
+
+        assert_eq!(runner.status_for("ws-a").as_deref(), Some("idle"));
+        assert_eq!(
+            runner.status_for("ws-b").as_deref(),
+            Some("waiting_provider")
+        );
+        assert_eq!(runner.activity_for("ws-a").unwrap().reply_text, "hello");
+        let log = events.lock().unwrap();
+        assert_eq!(log.len(), 4);
+        assert_eq!(log[2], ("ws-a".to_owned(), "thinking".to_owned(), 2));
+        assert_eq!(log[3], ("ws-a".to_owned(), "idle".to_owned(), 3));
     }
 }

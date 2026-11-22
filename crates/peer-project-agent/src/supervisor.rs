@@ -549,27 +549,7 @@ fn is_manual_criterion_approved(plan: &Value, criterion_id: &str) -> bool {
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    if confirmations
-        .iter()
-        .any(|c| c["criterionId"].as_str() == Some(criterion_id) && c["decision"] == "confirmed")
-    {
-        return true;
-    }
-    let mut matches: Vec<&Value> = confirmations
-        .iter()
-        .filter(|c| {
-            c["kind"].as_str() == Some("manual_dod")
-                && c["criterionIds"]
-                    .as_array()
-                    .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(criterion_id)))
-        })
-        .collect();
-    matches.sort_by(|a, b| {
-        let da = a["decidedAt"].as_str().unwrap_or("");
-        let db = b["decidedAt"].as_str().unwrap_or("");
-        db.cmp(da)
-    });
-    matches.first().and_then(|c| c["decision"].as_str()) == Some("approve")
+    crate::acceptance::is_manual_criterion_confirmed(confirmations, criterion_id)
 }
 
 fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> bool {
@@ -1052,6 +1032,10 @@ impl SessionSupervisor {
         let path = self.plan_file(plan_id);
         let raw = fs::read_to_string(&path).map_err(|_| ProjectError::code("NOT_FOUND"))?;
         serde_json::from_str(&raw).map_err(|_| ProjectError::code("GOAL_SOURCE_INVALID"))
+    }
+
+    pub fn save_plan_json(&self, plan: &Value) -> Result<(), ProjectError> {
+        self.write_plan(plan)
     }
 
     fn write_plan(&self, plan: &Value) -> Result<(), ProjectError> {
@@ -2193,14 +2177,7 @@ impl SessionSupervisor {
             .flatten()
             .any(|c| {
                 let cid = c["id"].as_str().unwrap_or("");
-                c["kind"] == "manual"
-                    && !plan["manualConfirmations"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|m| {
-                            m["criterionId"].as_str() == Some(cid) && m["decision"] == "confirmed"
-                        })
+                c["kind"] == "manual" && !is_manual_criterion_approved(&plan, cid)
             });
         let verifier_state = independent_verifier
             .map(str::to_owned)
@@ -2525,6 +2502,32 @@ impl SessionSupervisor {
         plan["updatedAt"] = json!(at);
         self.write_plan(&plan)?;
         Ok(self.summarize(&plan))
+    }
+
+    pub fn cancel_workspace_sessions(
+        &self,
+        workspace_id: &str,
+        reason: &str,
+        holds_lease: bool,
+    ) -> Result<Vec<String>, ProjectError> {
+        if !holds_lease {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
+        let mut cancelled = Vec::new();
+        for plan in self.list_workspace_plans(workspace_id) {
+            let status = plan["status"].as_str().unwrap_or("");
+            if matches!(status, "completed" | "failed" | "cancelled")
+                || !plan["resultAcceptance"]["acceptedAt"].is_null()
+            {
+                continue;
+            }
+            let Some(sid) = plan["delegationOrigin"]["sessionId"].as_str() else {
+                continue;
+            };
+            self.control_session(workspace_id, sid, "cancel", reason, holds_lease)?;
+            cancelled.push(sid.to_owned());
+        }
+        Ok(cancelled)
     }
 
     pub fn control_session(

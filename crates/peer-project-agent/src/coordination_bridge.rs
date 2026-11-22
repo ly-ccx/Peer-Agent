@@ -8,12 +8,339 @@
 use crate::{ProjectError, memory_secret_reason, now_iso, parse_iso_ms};
 use peer_runtime::coordination::NativeCoordinationReducer;
 use peer_store::{CoordinationError, CoordinationSnapshot, CoordinationStore, LeaseToken};
+use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
+    fs,
     sync::Mutex,
 };
+
+const READ_MODEL_BUCKETS: &[&str] = &[
+    "sessionControls",
+    "sessionControlHeads",
+    "obligationDispositions",
+    "obligationGrants",
+    "obligationHeads",
+    "obligationResults",
+    "events",
+    "works",
+    "deliveries",
+    "mandates",
+    "decisions",
+    "transitions",
+    "inputBindings",
+    "intentDecisions",
+    "agentMessages",
+    "agentRequests",
+    "agentCommands",
+    "workNotes",
+    "contextWindows",
+];
+
+const SUPERVISION_BUCKETS: &[&str] = &[
+    "agentMessages",
+    "agentRequests",
+    "agentCommands",
+    "workNotes",
+    "contextWindows",
+];
+
+fn is_valid_read_model_filename(name: &str) -> bool {
+    name.len() == 56
+        && name.starts_with("coordination-")
+        && name.ends_with(".sqlite")
+        && name[13..49]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f' | b'-'))
+}
+
+fn read_model_already_current(pointer_file: &std::path::Path, snap: &CoordinationSnapshot) -> bool {
+    let Ok(raw) = fs::read_to_string(pointer_file) else {
+        return false;
+    };
+    let Ok(pointer) = serde_json::from_str::<Value>(&raw) else {
+        return false;
+    };
+    if pointer["schemaVersion"].as_u64() != Some(1)
+        || pointer["generation"].as_str() != Some(snap.generation.as_str())
+    {
+        return false;
+    }
+    let Some(filename) = pointer["file"].as_str() else {
+        return false;
+    };
+    if !is_valid_read_model_filename(filename) {
+        return false;
+    }
+    let Some(models_dir) = pointer_file.parent() else {
+        return false;
+    };
+    let sqlite_path = models_dir.join(filename);
+    if !sqlite_path.is_file() {
+        return false;
+    }
+    let Ok(conn) = Connection::open_with_flags(
+        &sqlite_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return false;
+    };
+    let Ok(mut stmt) =
+        conn.prepare("SELECT id, value FROM meta WHERE id IN ('revision', 'eventHash')")
+    else {
+        return false;
+    };
+    let mut rows = match stmt.query([]) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    let mut rev: Option<u64> = None;
+    let mut hash: Option<String> = None;
+    while let Ok(Some(row)) = rows.next() {
+        let Ok(id) = row.get::<_, String>(0) else {
+            return false;
+        };
+        let Ok(val_raw) = row.get::<_, String>(1) else {
+            return false;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&val_raw) else {
+            return false;
+        };
+        match id.as_str() {
+            "revision" => rev = parsed.as_u64(),
+            "eventHash" => hash = parsed.as_str().map(str::to_owned),
+            _ => {}
+        }
+    }
+    rev == snap.state["revision"].as_u64() && hash.as_deref() == Some(snap.hash.as_str())
+}
+
+fn sync_read_model_index(
+    store: &CoordinationStore,
+    snap: &CoordinationSnapshot,
+) -> Result<(), ProjectError> {
+    let Some(ws_dir) = store.lease().workspace_dir() else {
+        return Ok(());
+    };
+    let models_dir = ws_dir.join(".read-models");
+    let pointer_file = models_dir.join("coordination-current.json");
+    if read_model_already_current(&pointer_file, snap) {
+        return Ok(());
+    }
+
+    let map_io =
+        |err: std::io::Error| ProjectError::new("coordination_index_write_failed", err.to_string());
+    let map_sql = |err: rusqlite::Error| {
+        ProjectError::new("coordination_index_write_failed", err.to_string())
+    };
+
+    fs::create_dir_all(&models_dir).map_err(map_io)?;
+    let filename = format!("coordination-{}.sqlite", uuid::Uuid::new_v4());
+    let tmp_path = models_dir.join(format!("{filename}.tmp"));
+    let published = models_dir.join(&filename);
+
+    {
+        let mut conn = Connection::open(&tmp_path).map_err(map_sql)?;
+        conn.execute_batch(
+            "PRAGMA busy_timeout=3000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL;\
+            CREATE TABLE IF NOT EXISTS objects (bucket TEXT, id TEXT, value TEXT NOT NULL, PRIMARY KEY(bucket,id));\
+            CREATE TABLE IF NOT EXISTS meta (id TEXT PRIMARY KEY, value TEXT NOT NULL);\
+            CREATE TABLE IF NOT EXISTS observations (workId TEXT, id TEXT, PRIMARY KEY(workId,id));\
+            CREATE TABLE IF NOT EXISTS dispatches (workId TEXT, attemptId TEXT, callId TEXT, value TEXT, PRIMARY KEY(workId,attemptId,callId));\
+            CREATE TABLE IF NOT EXISTS supervision_index (bucket TEXT NOT NULL,id TEXT NOT NULL,recipientConversationId TEXT,sessionId TEXT,workId TEXT,conversationId TEXT,parentConversationId TEXT,sequence INTEGER NOT NULL,pending INTEGER NOT NULL,PRIMARY KEY(bucket,id));\
+            CREATE INDEX IF NOT EXISTS supervision_recipientConversationId ON supervision_index(bucket,recipientConversationId,sequence DESC,id DESC);\
+            CREATE INDEX IF NOT EXISTS supervision_pending_recipientConversationId ON supervision_index(bucket,recipientConversationId,sequence DESC,id DESC) WHERE pending=1;\
+            CREATE INDEX IF NOT EXISTS supervision_sessionId ON supervision_index(bucket,sessionId,sequence DESC,id DESC);\
+            CREATE INDEX IF NOT EXISTS supervision_pending_sessionId ON supervision_index(bucket,sessionId,sequence DESC,id DESC) WHERE pending=1;\
+            CREATE INDEX IF NOT EXISTS supervision_workId ON supervision_index(bucket,workId,sequence DESC,id DESC);\
+            CREATE INDEX IF NOT EXISTS supervision_pending_workId ON supervision_index(bucket,workId,sequence DESC,id DESC) WHERE pending=1;\
+            CREATE INDEX IF NOT EXISTS supervision_conversationId ON supervision_index(bucket,conversationId,sequence DESC,id DESC);\
+            CREATE INDEX IF NOT EXISTS supervision_pending_conversationId ON supervision_index(bucket,conversationId,sequence DESC,id DESC) WHERE pending=1;\
+            CREATE INDEX IF NOT EXISTS supervision_parentConversationId ON supervision_index(bucket,parentConversationId,sequence DESC,id DESC);\
+            CREATE INDEX IF NOT EXISTS supervision_pending_parentConversationId ON supervision_index(bucket,parentConversationId,sequence DESC,id DESC) WHERE pending=1;\
+            CREATE INDEX IF NOT EXISTS supervision_work_conversation ON supervision_index(bucket,workId,conversationId,sequence DESC,id DESC);\
+            CREATE UNIQUE INDEX IF NOT EXISTS supervision_open_request ON supervision_index(sessionId) WHERE bucket='agentRequests' AND pending=1;",
+        )
+        .map_err(map_sql)?;
+
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(map_sql)?;
+        {
+            let mut ins_obj = tx
+                .prepare("INSERT OR REPLACE INTO objects VALUES (?,?,?)")
+                .map_err(map_sql)?;
+            let mut ins_obs = tx
+                .prepare("INSERT OR IGNORE INTO observations VALUES (?,?)")
+                .map_err(map_sql)?;
+            let mut ins_disp = tx
+                .prepare("INSERT OR IGNORE INTO dispatches VALUES (?,?,?,?)")
+                .map_err(map_sql)?;
+            let mut ins_sup = tx
+                .prepare("INSERT OR REPLACE INTO supervision_index VALUES (?,?,?,?,?,?,?,?,?)")
+                .map_err(map_sql)?;
+
+            let fallback_seq = snap.state["revision"].as_i64().unwrap_or(0);
+            for bucket in READ_MODEL_BUCKETS {
+                let Some(map) = snap.state.get(*bucket).and_then(Value::as_object) else {
+                    continue;
+                };
+                for (id, original) in map {
+                    let mut val = original.clone();
+                    if *bucket == "works"
+                        && let Some(obs) = val["budget"]["observations"].as_object()
+                    {
+                        for obs_key in obs.keys() {
+                            ins_obs.execute(params![id, obs_key]).map_err(map_sql)?;
+                        }
+                        if let Some(budget) = val.get_mut("budget").and_then(Value::as_object_mut) {
+                            budget.shift_remove("observations");
+                        }
+                    }
+                    if *bucket == "works"
+                        && let Some(attempt_id_str) = val["attemptId"].as_str()
+                        && let Some(attempts) = val["budget"]["attempts"].as_object()
+                    {
+                        for (attempt_id, attempt) in attempts {
+                            if attempt["role"].as_str() != Some("project_agent") {
+                                continue;
+                            }
+                            if let Some(pending) = attempt["pendingTools"].as_array() {
+                                for call in pending {
+                                    if let Some(call_id) = call["toolCallId"].as_str() {
+                                        let dval = json!({
+                                            "turnId": attempt_id_str,
+                                            "epoch": "",
+                                            "at": "",
+                                        });
+                                        ins_disp
+                                            .execute(params![
+                                                id,
+                                                attempt_id,
+                                                call_id,
+                                                dval.to_string(),
+                                            ])
+                                            .map_err(map_sql)?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let encoded = serde_json::to_string(&val).unwrap_or_else(|_| "{}".to_owned());
+                    ins_obj
+                        .execute(params![*bucket, id, encoded])
+                        .map_err(map_sql)?;
+
+                    if SUPERVISION_BUCKETS.contains(bucket) {
+                        let seq = val["sequence"].as_i64().unwrap_or(fallback_seq);
+                        let pending = i64::from(match *bucket {
+                            "agentMessages" => {
+                                val["deliveryIntent"].as_str() == Some("ensure_turn")
+                                    && matches!(
+                                        val["deliveryReceipt"]["delivery"].as_str(),
+                                        None | Some("queued")
+                                    )
+                            }
+                            "agentCommands" => {
+                                val["admission"].as_str() == Some("pending")
+                                    || matches!(val["effect"].as_str(), Some("pending" | "unknown"))
+                            }
+                            "agentRequests" => val["status"].as_str() == Some("open"),
+                            _ => false,
+                        });
+                        ins_sup
+                            .execute(params![
+                                *bucket,
+                                id,
+                                val["recipientConversationId"].as_str(),
+                                val["sessionId"].as_str(),
+                                val["workId"].as_str(),
+                                val["conversationId"].as_str(),
+                                val["parentConversationId"].as_str(),
+                                seq,
+                                pending,
+                            ])
+                            .map_err(map_sql)?;
+                    }
+                }
+            }
+
+            let mut ins_meta = tx
+                .prepare("INSERT OR REPLACE INTO meta VALUES (?,?)")
+                .map_err(map_sql)?;
+            ins_meta
+                .execute(params!["generation", json!(snap.generation).to_string()])
+                .map_err(map_sql)?;
+            ins_meta
+                .execute(params!["revision", snap.state["revision"].to_string()])
+                .map_err(map_sql)?;
+            ins_meta
+                .execute(params!["eventHash", json!(snap.hash).to_string()])
+                .map_err(map_sql)?;
+            ins_meta
+                .execute(params![
+                    "minimumFormatVersion",
+                    json!(snap.minimum_writer_version).to_string(),
+                ])
+                .map_err(map_sql)?;
+            if let Some(last_rec) = snap
+                .state
+                .get("lastRecovery")
+                .filter(|v| !v.is_null() && **v != false)
+            {
+                ins_meta
+                    .execute(params!["lastRecovery", last_rec.to_string()])
+                    .map_err(map_sql)?;
+            }
+        }
+        tx.commit().map_err(map_sql)?;
+    }
+
+    if let Err(err) = fs::rename(&tmp_path, &published) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(map_io(err));
+    }
+    let ptr_tmp = models_dir.join(format!(
+        "coordination-current.json.{}.tmp",
+        uuid::Uuid::new_v4()
+    ));
+    let ptr_bytes = serde_json::to_vec(&json!({
+        "schemaVersion": 1,
+        "generation": snap.generation,
+        "file": filename,
+    }))
+    .unwrap_or_default();
+    fs::write(&ptr_tmp, ptr_bytes).map_err(map_io)?;
+    if let Err(err) = fs::rename(&ptr_tmp, &pointer_file) {
+        let _ = fs::remove_file(&ptr_tmp);
+        return Err(map_io(err));
+    }
+
+    if let Ok(rd) = fs::read_dir(&models_dir) {
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("coordination-") && name.contains(".sqlite") && name != filename {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn append_and_sync(
+    store: &mut CoordinationStore,
+    snap: &CoordinationSnapshot,
+    event: &Value,
+    now_ms: i64,
+) -> Result<CoordinationSnapshot, ProjectError> {
+    let next = store
+        .append(snap, event, now_ms, &NativeCoordinationReducer, None)
+        .map_err(map_coord_err)?;
+    sync_read_model_index(store, &next)?;
+    Ok(next)
+}
 
 const MAX_CONTEXT_NOTES: usize = 8;
 const MAX_NOTE_CLIP_CHARS: usize = 2_000;
@@ -96,6 +423,25 @@ impl CoordinationHub {
             .unwrap_or(false)
     }
 
+    pub fn lease_epoch(&self, workspace_id: &str) -> Option<String> {
+        self.stores.lock().ok().and_then(|g| {
+            g.get(workspace_id).map(|s| {
+                let rec = s.lease().record();
+                format!("{}:{}:{}", rec.host_id, rec.pid, rec.acquired_at)
+            })
+        })
+    }
+
+    pub fn owned_workspaces(&self) -> Vec<String> {
+        let mut list: Vec<String> = self
+            .stores
+            .lock()
+            .map(|g| g.keys().cloned().collect())
+            .unwrap_or_default();
+        list.sort();
+        list
+    }
+
     pub fn takeover_requested(&self, workspace_id: &str) -> bool {
         self.stores
             .lock()
@@ -138,6 +484,7 @@ impl CoordinationHub {
                 .checkpoint_head(&snap, &NativeCoordinationReducer, None)
                 .map_err(map_coord_err)?;
         }
+        sync_read_model_index(store, &snap)?;
         Ok(snap)
     }
 
@@ -169,9 +516,7 @@ impl CoordinationHub {
             .get_mut(workspace_id)
             .ok_or_else(|| ProjectError::code("LEASE_REQUIRED"))?;
         let snap = Self::ensure_prepared_locked(store)?;
-        store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)
+        append_and_sync(store, &snap, &event, now_ms)
     }
 
     pub fn read_state(&self, workspace_id: &str) -> Result<Value, ProjectError> {
@@ -250,9 +595,7 @@ impl CoordinationHub {
                 }
             })
         };
-        let next = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let next = append_and_sync(store, &snap, &event, now_ms)?;
         Ok(next.state["works"][work_id].clone())
     }
 
@@ -366,9 +709,7 @@ impl CoordinationHub {
                 "at": now_iso(),
             }
         });
-        let next = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let next = append_and_sync(store, &snap, &event, now_ms)?;
         Ok((next.state["workNotes"][&note_id].clone(), false))
     }
 
@@ -475,9 +816,7 @@ impl CoordinationHub {
             "operationId": operation_id,
             "window": window_val,
         });
-        let next = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let next = append_and_sync(store, &snap, &event, now_ms)?;
         Ok((next.state["contextWindows"][&window_id].clone(), false))
     }
 
@@ -682,9 +1021,7 @@ impl CoordinationHub {
             event["answer"] = ans.clone();
         }
 
-        let next = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let next = append_and_sync(store, &snap, &event, now_ms)?;
         Ok((next.state["agentMessages"][&message_id].clone(), false))
     }
 
@@ -803,9 +1140,7 @@ impl CoordinationHub {
             "conversationId": conversation_id,
             "messageIds": unobserved,
         });
-        let _ = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let _ = append_and_sync(store, &snap, &event, now_ms)?;
         Ok(())
     }
 
@@ -908,9 +1243,7 @@ impl CoordinationHub {
             "receipt": receipt,
             "transition": transition,
         });
-        let next = store
-            .append(&snap, &event, now_ms, &NativeCoordinationReducer, None)
-            .map_err(map_coord_err)?;
+        let next = append_and_sync(store, &snap, &event, now_ms)?;
         Ok(next.state["mandates"][work_id].clone())
     }
 }
@@ -942,8 +1275,17 @@ mod tests {
 
     #[test]
     fn coordination_hub_persists_notes_handoff_messages_and_mandates() {
-        let (_dir, hub) = test_hub_with_lease("ws-coord-1");
+        let (dir, hub) = test_hub_with_lease("ws-coord-1");
         let work_id = coordination_work_id("conv-main", &["in-1".into()]);
+
+        hub.ensure_snapshot("ws-coord-1").unwrap();
+        let initial_buckets = crate::read_coordination_read_model_buckets(
+            dir.path(),
+            "ws-coord-1",
+            &["works", "agentMessages"],
+        )
+        .unwrap();
+        assert!(initial_buckets["works"].is_empty());
 
         let w = hub
             .ensure_work(
@@ -956,6 +1298,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(w["workId"], work_id);
+        let synced_works =
+            crate::read_coordination_read_model_buckets(dir.path(), "ws-coord-1", &["works"])
+                .unwrap();
+        assert_eq!(synced_works["works"][&work_id]["workId"], work_id);
 
         // Secret note is rejected
         assert_eq!(
@@ -1058,6 +1404,13 @@ mod tests {
             .unwrap();
         let inbox_msgs = hub.read_agent_messages_for_context("ws-coord-1", "conv-main");
         assert_eq!(inbox_msgs.len(), 1);
+        let synced_msgs = crate::read_coordination_read_model_buckets(
+            dir.path(),
+            "ws-coord-1",
+            &["agentMessages"],
+        )
+        .unwrap();
+        assert_eq!(synced_msgs["agentMessages"].len(), 1);
         assert_eq!(inbox_msgs[0]["deliveryReceipt"]["delivery"], "queued");
         let mid = msg["messageId"].as_str().unwrap().to_owned();
         hub.mark_agent_messages_observed("ws-coord-1", "conv-main", &[mid])

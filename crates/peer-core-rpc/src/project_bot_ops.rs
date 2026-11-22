@@ -661,11 +661,16 @@ pub fn handle_bot_continue_history(
         history_snapshot_id: Some(captured.snapshot_id.clone()),
         history_confirmed: captured.requires_missing_confirmation.then_some(true),
     }) {
-        Ok(input) => Ok(json!({
-            "ok": true,
-            "input": input,
-            "snapshot": { "snapshotId": captured.snapshot_id },
-        })),
+        Ok(input) => {
+            if ctx.project_host.is_enabled() {
+                ctx.project_host.wake_workspace(workspace_id);
+            }
+            Ok(json!({
+                "ok": true,
+                "input": input,
+                "snapshot": { "snapshotId": captured.snapshot_id },
+            }))
+        }
         Err(err) => Ok(json!({
             "ok": false,
             "code": "INVALID_INPUT",
