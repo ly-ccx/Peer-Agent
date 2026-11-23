@@ -1561,9 +1561,7 @@ export function LlmSettingsPanel({
             <SettingsDisclosureContent expanded={!collapsed} id={`llm-models-${g.groupId}`}>
               <div className="llm-group-body">
                 <div className="llm-service-connection-details">
-                  <span>{groupChannel.label}</span>
                   <span>{wireLabel(head.resolvedWire || groupChannel.defaultWire, i18n.locale)}</span>
-                  <span>{accessMethodLabel(head, zh)}</span>
                   {head.apiKeyConfigured && head.apiKeyMasked ? <span>{head.apiKeyMasked}</span> : null}
                   {isOAuthMethod(head.authMethod) && head.oauthStatus?.accountId ? <span>{head.oauthStatus.accountId}</span> : null}
                   {quotaSummary ? <span>{quotaSummary}</span> : null}
