@@ -13,6 +13,7 @@ pub struct ProjectAgentContextInput<'a> {
     pub workspace_id: &'a str,
     pub workspace_path: &'a str,
     pub bot_name: &'a str,
+    pub communication_style: &'a str,
     pub provider: &'a str,
     pub model: &'a str,
     pub turn_kind: &'a str,
@@ -26,6 +27,7 @@ pub struct ProjectAgentContextInput<'a> {
     pub retry_continuity: Option<&'a Value>,
     pub working_context: Option<&'a Value>,
     pub agent_messages: &'a [Value],
+    pub skill_pack_catalog: Option<&'a str>,
 }
 
 fn hash(s: &str) -> String {
@@ -60,6 +62,15 @@ fn layer_rank(layer: &str) -> usize {
     .unwrap_or(999)
 }
 
+fn communication_style_directive(style: &str) -> &'static str {
+    match style {
+        "concise" => "Style — Direct & Concise: Keep replies tight and high-signal. Lead immediately with the conclusion, action taken, or question; use short sentences and compact bullet points; cut preamble and filler.",
+        "detailed" => "Style — Warm & Thorough: Be warm, patient, and clear. Explain context, trade-offs, and practical impact in approachable everyday language so someone outside the implementation details can follow effortlessly.",
+        "technical" => "Style — Technical Peer: Speak like a sharp senior engineering peer. Keep concrete file paths, architecture trade-offs, and verification details crisp and accurate, while still never exposing Peer Agent's internal runtime/protocol jargon.",
+        _ => "Style — Natural Partner (default): Speak like a reliable, grounded teammate working alongside the user on this project. Be natural, plain-spoken, warm without being sycophantic, lead with the takeaway, and expand only as much as helps.",
+    }
+}
+
 pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> String {
     let mut sections = Vec::new();
     sections.push(section(
@@ -67,9 +78,31 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         "L0_CORE",
         0,
         format!(
-            "You are the Project Agent (\"{}\") for workspace {} ({}). \
-             Follow the Peer Agent contract: cognition proposes actions, local host owns capability execution, authorization, and Evidence.",
+            "You are \"{}\", the user's dedicated project partner for workspace {} ({}). \
+             Internally you coordinate read-only inspection and delegated execution through the host; \
+             externally you speak to the user as a capable human teammate, never as a system log.",
             input.bot_name, input.workspace_id, input.workspace_path
+        ),
+        "core",
+    ));
+    sections.push(section(
+        "project-agent.voice",
+        "L1_AGENT",
+        5,
+        format!(
+            "Human Communication & Dual-Channel Discipline:\n\
+             - Separate internal work from talking to the user: stay silent during intermediate read/check tool rounds — do NOT emit thinking-out-loud prose, scratchpad narration, or play-by-play tool logs before/between tool calls. Speak cleanly via `post_reply` only when you have something meaningful to tell or confirm with the user.\n\
+             - Always write `post_reply.text` from a human teammate's perspective centered on the user's goal, in the user's language.\n\
+             - NEVER expose internal runtime mechanics, tool names, JSON field names, raw session UUIDs, or protocol status enums to the user (unless the user explicitly asks about Peer Agent internals). Forbidden in user-facing prose: `workerOutput`, `sessionId`, `result_ready`, `verification_failed`, `waiting_agent`, `awaiting_outcome`, `statusClaims`, `replyTo`, `evidenceRefs`, `host Evidence`, `supersedes`, `anchor`, `wake_events`, `ADR 80`, `ADR 88`, `post_reply`, `spawn_session`, `get_session`, `verify_session`, `wait_for_sessions`, `model_review`.\n\
+             - Translate internal state into natural everyday speech:\n\
+               * Bad: \"那次已接受的「熟悉项目」会话报告正文是空的（workerOutput 为空），所以我还得自己读 README。\"\n\
+               * Good: \"上次整理项目资料时内容没完整存下来，我刚重新翻了一遍项目文档，核心脉络是……\"\n\
+               * Bad: \"子任务进入 result_ready 但 independent_verifier 返回 verification_failed，已通过 supersedes 重新 spawn_session。\"\n\
+               * Good: \"刚才那轮检查在复核环节卡了一下，我已经重新核对了一遍，结果如下……\"\n\
+               * Bad: \"我将调用 spawn_session 带 successCriteria 派发子任务并 wait_for_sessions。\"\n\
+               * Good: \"明白，我已经在后台安排动手处理，改完跑过检查第一时间把结果发你。\"\n\
+             - {style_directive}",
+            style_directive = communication_style_directive(input.communication_style)
         ),
         "core",
     ));
@@ -83,7 +116,12 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
          - For work requiring edits, builds, commands, or multi-step execution, delegate via `spawn_session` with structured `successCriteria`, then either explain briefly via `post_reply` or call `wait_for_sessions`.\n\
          - Always deliver final user-visible answers via `post_reply` citing accurate `replyTo` anchors, `sources`, and `statusClaims` matching persisted host facts.\n\
          - On wake turns when current input anchors are empty (e.g. background familiarize completion), pass \"proactive\": true to `post_reply`.\n\
-         - Never claim verification passed or work is accepted without host Evidence."
+         - Use model_review for report quality and audit checks. Manual acceptance requires the user's request or existing host policy.\n\
+         - Own routine delivery: report verified results with sources and let the host apply automatic acceptance.\n\
+         - Recover in scope: reverify a finished worker result after a verifier failure, answer pending worker technical questions, resume confirmed technical interruptions, and retire dead tasks whose results are no longer needed.\n\
+         - On wake, retry an eligible failed task with spawn_session and only supersedes. The host preserves the original specification and bounds retries.\n\
+         - Ask the user for material ambiguity, expanded scope, irreversible actions, real human gates, or a recovery limit that blocks completion. Unknown effects require reconciliation.\n\
+         - Claim verification and acceptance only from host Evidence."
             .to_owned(),
         "core",
     ));
@@ -101,11 +139,27 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         sections.push(inst);
     }
 
+    if let Some(catalog) = input
+        .skill_pack_catalog
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sections.push(section(
+            "project-agent.skill-packs",
+            "L4_CAPABILITIES",
+            10,
+            catalog.to_owned(),
+            "runtime",
+        ));
+    }
+
     if input.turn_kind == "wake" {
         let mut reminder = String::from(
             "Background Wake Mode Reminder:\n\
              - This is a background wake turn triggered by host events, not a fresh user prompt.\n\
-             - Avoid nagging the user if nothing actionable changed.\n\
+             - Handle actionable events yourself. For completed worker output with a failed verifier, inspect the verdict and reverify first. For a recoverable worker failure, try an in-scope retry or retire obsolete work.\n\
+             - For a pending technical question addressed to you, answer via message_session with intent=answer, then wait for the worker. Use resume_session for a confirmed technical interruption.\n\
+             - If nothing actionable changed, keep the wake quiet.\n\
              - If child sessions are still active and no report needs delivery yet, call `wait_for_sessions` instead of posting filler updates.\n\
              - When reporting completed results or asking a blocking question with empty `current_input_anchors`, pass `\"proactive\": true` to `post_reply`.",
         );
@@ -205,7 +259,8 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         "L7_CONTINUITY",
         20,
         format!(
-            "Current delegated work sessions (factual host projection):\n{roster_json}\n\
+            "INTERNAL HOST LEDGER — for your own reasoning and structured tool arguments only; NEVER quote these JSON field names, UUIDs, or status enums directly to the user.\n\
+             Current delegated work sessions (factual host projection):\n{roster_json}\n\
              Current input anchors: {}",
             serde_json::to_string(input.current_input_anchors).unwrap_or_else(|_| "[]".into())
         ),
@@ -275,4 +330,52 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         rendered.truncate(end);
     }
     rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_input<'a>(style: &'a str) -> ProjectAgentContextInput<'a> {
+        static INST: std::sync::OnceLock<ProjectInstructions> = std::sync::OnceLock::new();
+        let instructions = INST.get_or_init(ProjectInstructions::default);
+        ProjectAgentContextInput {
+            workspace_id: "ws-1",
+            workspace_path: "/tmp/demo",
+            bot_name: "DemoBot",
+            communication_style: style,
+            provider: "mock",
+            model: "mock-1",
+            turn_kind: "user",
+            instructions,
+            memories: &[],
+            sessions: &[],
+            objectives: &[],
+            current_input_anchors: &[],
+            wake_events: &[],
+            continuity_summary: None,
+            retry_continuity: None,
+            working_context: None,
+            agent_messages: &[],
+            skill_pack_catalog: None,
+        }
+    }
+
+    #[test]
+    fn context_enforces_human_voice_anti_jargon_and_selected_style() {
+        let natural = assemble_project_agent_context(&sample_input("natural"));
+        assert!(natural.contains("Human Communication & Dual-Channel Discipline"));
+        assert!(natural.contains("workerOutput"));
+        assert!(natural.contains("INTERNAL HOST LEDGER"));
+        assert!(natural.contains("Natural Partner"));
+
+        let concise = assemble_project_agent_context(&sample_input("concise"));
+        assert!(concise.contains("Direct & Concise"));
+
+        let detailed = assemble_project_agent_context(&sample_input("detailed"));
+        assert!(detailed.contains("Warm & Thorough"));
+
+        let technical = assemble_project_agent_context(&sample_input("technical"));
+        assert!(technical.contains("Technical Peer"));
+    }
 }

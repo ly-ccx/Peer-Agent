@@ -25,6 +25,8 @@ pub const BOT_AVATAR_COLORS: [&str; 8] = [
     "#6474e5", "#f36d63", "#f4ad45", "#61b68c", "#a884e5", "#e774ad", "#55bac7", "#a8a59f",
 ];
 
+pub const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BotAvatar {
@@ -87,6 +89,8 @@ pub struct BotProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proactivity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub communication_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_approval: Option<String>,
@@ -129,6 +133,13 @@ impl BotProfile {
 
     pub fn is_memory_enabled(&self) -> bool {
         self.memory_enabled != Some(false)
+    }
+
+    pub fn communication_style_str(&self) -> &str {
+        match self.communication_style.as_deref() {
+            Some(style @ ("natural" | "concise" | "detailed" | "technical")) => style,
+            _ => "natural",
+        }
     }
 
     pub fn acceptance_policy_str(&self) -> &str {
@@ -348,6 +359,7 @@ impl BotProfileStore {
             managed: input.managed,
             agent_conversation_id: Some(conv.to_owned()),
             proactivity: Some("inherit".to_owned()),
+            communication_style: None,
             memory_enabled: None,
             plan_approval: None,
             acceptance_policy: None,

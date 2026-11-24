@@ -269,17 +269,28 @@ impl ProjectRegistry {
         let norm = normalize_path(new_folder).ok_or_else(|| ProjectError::code("INVALID_PATH"))?;
         let real = resolve_real_path(&norm);
         let (mut doc, mut dirty) = self.read_doc();
-        let Some(entry) = doc
-            .projects
-            .iter_mut()
-            .find(|e| e.workspace_id == workspace_id)
-        else {
+        if !doc.projects.iter().any(|e| e.workspace_id == workspace_id) {
             if dirty {
                 self.write_doc(&doc)?;
             }
             return Ok(None);
-        };
+        }
+        if doc.projects.iter().any(|other| {
+            other.workspace_id != workspace_id
+                && (other.path == norm
+                    || other.real_path == real
+                    || other.path == real
+                    || other.real_path == norm)
+        }) {
+            return Err(ProjectError::code("PATH_TAKEN"));
+        }
+        let entry = doc
+            .projects
+            .iter_mut()
+            .find(|e| e.workspace_id == workspace_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
         if entry.path != norm || entry.real_path != real {
+            entry.previous_paths.retain(|p| p != &norm);
             if entry.path != norm && !entry.previous_paths.contains(&entry.path) {
                 entry.previous_paths.push(entry.path.clone());
             }
@@ -329,5 +340,63 @@ mod tests {
             "CORRUPT_REGISTRY"
         );
         assert_eq!(fs::read_to_string(reg.file_path()).unwrap(), "{broken");
+    }
+
+    #[test]
+    fn update_path_preserves_id_tracks_previous_paths_and_rejects_collisions() {
+        let dir = tempdir().unwrap();
+        let ws_a = dir.path().join("repo-a");
+        let ws_b = dir.path().join("repo-b");
+        let ws_moved = dir.path().join("repo-a-moved");
+        fs::create_dir_all(&ws_a).unwrap();
+        fs::create_dir_all(&ws_b).unwrap();
+        fs::create_dir_all(&ws_moved).unwrap();
+
+        let reg = ProjectRegistry::new(dir.path());
+        let entry_a = reg.register(ws_a.to_str().unwrap(), None).unwrap();
+        let entry_b = reg.register(ws_b.to_str().unwrap(), None).unwrap();
+
+        // Unknown workspace returns Ok(None).
+        assert_eq!(
+            reg.update_path(
+                &uuid::Uuid::new_v4().to_string(),
+                ws_moved.to_str().unwrap()
+            )
+            .unwrap(),
+            None
+        );
+
+        // Collision with another workspace fails with PATH_TAKEN and keeps registry valid.
+        let conflict = reg
+            .update_path(&entry_a.workspace_id, ws_b.to_str().unwrap())
+            .unwrap_err();
+        assert_eq!(conflict.code, "PATH_TAKEN");
+        assert_eq!(reg.diagnostic_snapshot().unwrap().len(), 2);
+        assert_eq!(
+            reg.get(&entry_a.workspace_id).unwrap().unwrap().path,
+            entry_a.path
+        );
+
+        // Valid move keeps workspace_id, updates path/real_path, and records previous path.
+        let moved = reg
+            .update_path(&entry_a.workspace_id, &format!("{}/", ws_moved.display()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.workspace_id, entry_a.workspace_id);
+        assert_eq!(moved.path, ws_moved.to_string_lossy());
+        assert_eq!(moved.real_path, resolve_real_path(&moved.path));
+        assert_eq!(moved.previous_paths, vec![entry_a.path.clone()]);
+
+        // Moving back deduplicates previous_paths cleanly.
+        let moved_back = reg
+            .update_path(&entry_a.workspace_id, ws_a.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved_back.path, entry_a.path);
+        assert_eq!(moved_back.previous_paths, vec![moved.path]);
+        assert_eq!(
+            reg.get(&entry_b.workspace_id).unwrap().unwrap().path,
+            entry_b.path
+        );
     }
 }

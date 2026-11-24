@@ -19,7 +19,7 @@ use peer_protocol::{HostSurface, approval_args_digest};
 use peer_runtime::{
     CancellationToken,
     model::NativeModel,
-    model_catalog::resolve_role_model,
+    model_catalog::{has_role_model_config, resolve_role_model},
     model_config::load_model,
     session_host::{LocalPermissionDecision, PermissionInput},
 };
@@ -287,6 +287,22 @@ impl ProjectHostRuntime {
 
         if let Some(workspaces) = params.get("workspaces").and_then(Value::as_array) {
             for item in workspaces {
+                let managed = item.get("managed").and_then(Value::as_bool) == Some(true);
+                let name = item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                if let Some(existing_id) = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    && let Ok(Some(existing)) = self.host.registry().get(existing_id)
+                {
+                    let _ = self.host.ensure_bot(&existing.workspace_id, managed, name);
+                    continue;
+                }
                 let Some(path_str) = item
                     .as_str()
                     .or_else(|| item.get("path").and_then(Value::as_str))
@@ -295,13 +311,7 @@ impl ProjectHostRuntime {
                 else {
                     continue;
                 };
-                let name = item
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty());
                 if let Ok(entry) = self.host.registry().register(path_str, None) {
-                    let managed = item.get("managed").and_then(Value::as_bool) == Some(true);
                     let _ = self.host.ensure_bot(&entry.workspace_id, managed, name);
                 }
             }
@@ -735,12 +745,27 @@ impl ProjectHostRuntime {
             );
         }
 
-        let tick_res =
-            Box::pin(
-                self.host
-                    .tick_foreground(workspace_id, &bot_model, worker_sel, &turn_cancel),
-            )
-            .await;
+        let profile = self.host.profiles().read(workspace_id);
+        let verifier_model = if has_role_model_config(
+            &self.data_home,
+            "verifier",
+            profile.as_ref().and_then(|p| p.model_policy.as_ref()),
+        ) {
+            self.load_model_for_role(workspace_id, "verifier", &turn_cancel)
+                .await
+                .ok()
+                .map(|(model, _)| model)
+        } else {
+            None
+        };
+        let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
+            workspace_id,
+            &bot_model,
+            verifier_model.as_ref(),
+            worker_sel,
+            &turn_cancel,
+        ))
+        .await;
 
         if let Ok(mut turns) = self.active_turns.lock() {
             turns.remove(workspace_id);
@@ -814,46 +839,134 @@ impl ProjectHostRuntime {
         }
     }
 
+    pub async fn verify_session_now(
+        self: &Arc<Self>,
+        workspace_id: &str,
+        session_id: &str,
+        focus: Option<&str>,
+    ) -> Result<Value, peer_project_agent::ProjectError> {
+        if !self.is_enabled() || !self.host.holds_lease(workspace_id) {
+            return Err(peer_project_agent::ProjectError::code("LEASE_REQUIRED"));
+        }
+        let Some(plan) = self
+            .host
+            .supervisor()
+            .find_plan_by_session(workspace_id, session_id)
+        else {
+            return Err(peer_project_agent::ProjectError::code("NOT_FOUND"));
+        };
+        let cancel = self
+            .loop_cancel
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| self.peer.shutdown_child_token())
+            .child_token();
+        let profile = self.host.profiles().read(workspace_id);
+        let model = if has_role_model_config(
+            &self.data_home,
+            "verifier",
+            profile.as_ref().and_then(|p| p.model_policy.as_ref()),
+        ) {
+            match self.load_model_for_role(workspace_id, "verifier", &cancel).await {
+                Ok((m, _)) => m,
+                Err(_) => self
+                    .load_model_for_role(workspace_id, "project_agent", &cancel)
+                    .await
+                    .map(|(m, _)| m)
+                    .map_err(|_| peer_project_agent::ProjectError::code("MODEL_UNAVAILABLE"))?,
+            }
+        } else {
+            self.load_model_for_role(workspace_id, "project_agent", &cancel)
+                .await
+                .map(|(m, _)| m)
+                .map_err(|_| peer_project_agent::ProjectError::code("MODEL_UNAVAILABLE"))?
+        };
+        let host = Arc::clone(&self.host);
+        let ws = workspace_id.to_owned();
+        let focus_owned = focus.map(str::to_owned);
+        let runtime = tokio::runtime::Handle::current();
+        self.emit_changed(vec![workspace_id.to_owned()]);
+        let result = tokio::task::spawn_blocking(move || {
+            runtime.block_on(host.supervisor().reverify_session(
+                plan,
+                focus_owned.as_deref(),
+                &model,
+                &cancel,
+                || host.holds_lease(&ws),
+            ))
+        })
+        .await
+        .map_err(|_| peer_project_agent::ProjectError::code("verifier_task_failed"))??;
+        self.emit_conversation_changed(workspace_id, None);
+        self.emit_changed(vec![workspace_id.to_owned()]);
+        Ok(result)
+    }
+
     async fn run_worker_task(
         self: &Arc<Self>,
         workspace_id: &str,
         session_id: &str,
         cancel: &CancellationToken,
     ) {
-        let worker_res = self
+        match self
             .load_model_for_role(workspace_id, "session_worker", cancel)
-            .await;
-        if let Ok((worker_model, _)) = worker_res {
-            let verifier_model = self
-                .load_model_for_role(workspace_id, "verifier", cancel)
+            .await
+        {
+            Ok((worker_model, _)) => {
+                let verifier_model = self
+                    .load_model_for_role(workspace_id, "verifier", cancel)
+                    .await
+                    .ok()
+                    .map(|(m, _)| m);
+                let plan_id = self
+                    .host
+                    .supervisor()
+                    .find_plan_by_session(workspace_id, session_id)
+                    .and_then(|p| p["planId"].as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                let mut permission = BotApprovalPermissionInput {
+                    workspace_id: workspace_id.to_owned(),
+                    session_id: session_id.to_owned(),
+                    plan_id,
+                    data_home: self.data_home.clone(),
+                    peer: self.peer.clone(),
+                    live_approvals: Arc::clone(&self.live_approvals),
+                    shutdown: cancel.clone(),
+                };
+                if let Err(err) = Box::pin(self.host.run_promoted_session(
+                    workspace_id,
+                    session_id,
+                    &worker_model,
+                    verifier_model.as_ref(),
+                    &mut permission,
+                    peer_project_agent::DEFAULT_WORKER_MAX_TURNS,
+                    cancel,
+                ))
                 .await
-                .ok()
-                .map(|(m, _)| m);
-            let plan_id = self
-                .host
-                .supervisor()
-                .find_plan_by_session(workspace_id, session_id)
-                .and_then(|p| p["planId"].as_str().map(str::to_owned))
-                .unwrap_or_default();
-            let mut permission = BotApprovalPermissionInput {
-                workspace_id: workspace_id.to_owned(),
-                session_id: session_id.to_owned(),
-                plan_id,
-                data_home: self.data_home.clone(),
-                peer: self.peer.clone(),
-                live_approvals: Arc::clone(&self.live_approvals),
-                shutdown: cancel.clone(),
-            };
-            let _ = Box::pin(self.host.run_promoted_session(
-                workspace_id,
-                session_id,
-                &worker_model,
-                verifier_model.as_ref(),
-                &mut permission,
-                16,
-                cancel,
-            ))
-            .await;
+                    && !cancel.is_cancelled()
+                    && err.code != "LEASE_HELD_BY_OTHER"
+                {
+                    let _ = self.host.supervisor().fail_session(
+                        workspace_id,
+                        session_id,
+                        err.code,
+                        &err.detail,
+                        self.host.holds_lease(workspace_id),
+                    );
+                }
+            }
+            Err(err_msg) => {
+                if !cancel.is_cancelled() {
+                    let _ = self.host.supervisor().fail_session(
+                        workspace_id,
+                        session_id,
+                        "WORKER_MODEL_UNAVAILABLE",
+                        &err_msg,
+                        self.host.holds_lease(workspace_id),
+                    );
+                }
+            }
         }
         if let Ok(mut active) = self.active_workers.lock() {
             active.remove(session_id);

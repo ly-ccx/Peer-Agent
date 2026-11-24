@@ -1428,20 +1428,17 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
     assert_eq!(live_dec["ok"], true, "live approve failed: {live_dec}");
     assert_eq!(live_dec["approval"]["state"], "approved");
 
-    // File must be written on disk
+    // The file can become visible before the worker has finished writing it.
+    let output_path = ws_dir.join("hello.txt");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if ws_dir.join("hello.txt").exists() {
-            assert_eq!(
-                fs::read_to_string(ws_dir.join("hello.txt")).unwrap(),
-                "approved-content\n"
-            );
-            break;
+        match fs::read_to_string(&output_path) {
+            Ok(content) if content == "approved-content\n" => break,
+            observed => assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for approved contents in hello.txt: {observed:?}"
+            ),
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for hello.txt"
-        );
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
 
@@ -2063,6 +2060,159 @@ async fn recovery_inspect_restore_and_retain_all_over_rpc() {
     );
     assert_eq!(retained["view"]["works"], json!([]));
     assert_eq!(retained["view"]["sessions"], json!([]));
+
+    client.shutdown(handle).await;
+}
+
+#[tokio::test]
+async fn bot_get_reports_path_exists_and_rebind_folder_preserves_bot_and_clears_managed() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_a = temp.path().join("bot-a");
+    let ws_b = temp.path().join("bot-b");
+    let ws_next = temp.path().join("bot-a-rebound");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&ws_a).unwrap();
+    fs::create_dir_all(&ws_b).unwrap();
+    fs::create_dir_all(&ws_next).unwrap();
+
+    let (mut client, handle) = spawn_live_server(&home, None).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({ "enabled": true, "heartbeatIntervalMs": 60 }),
+        )
+        .await;
+
+    let created_a = client
+        .call(
+            "project.bot.create",
+            json!({
+                "workspacePath": ws_a.to_str().unwrap(),
+                "displayName": "Bot A",
+                "managed": true,
+                "startFamiliarize": false,
+            }),
+        )
+        .await;
+    assert_eq!(created_a["ok"], true, "create A failed: {created_a}");
+    let ws_a_id = created_a["workspaceId"].as_str().unwrap().to_owned();
+    let conv_a_id = created_a["profile"]["agentConversationId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let created_b = client
+        .call(
+            "project.bot.create",
+            json!({
+                "workspacePath": ws_b.to_str().unwrap(),
+                "displayName": "Bot B",
+                "managed": false,
+                "startFamiliarize": false,
+            }),
+        )
+        .await;
+    assert_eq!(created_b["ok"], true, "create B failed: {created_b}");
+
+    // Existing folder -> pathExists: true
+    let got_before = client
+        .call("project.bot.get", json!({ "workspaceId": ws_a_id }))
+        .await;
+    assert_eq!(got_before["ok"], true);
+    assert_eq!(got_before["path"], ws_a.to_str().unwrap());
+    assert_eq!(got_before["pathExists"], true);
+
+    // Removing the directory causes pathExists: false
+    fs::remove_dir_all(&ws_a).unwrap();
+    let got_missing = client
+        .call("project.bot.get", json!({ "workspaceId": ws_a_id }))
+        .await;
+    assert_eq!(got_missing["ok"], true);
+    assert_eq!(got_missing["pathExists"], false);
+
+    // Reject missing target folder & path conflict
+    let err_missing = client
+        .call(
+            "project.bot.rebindFolder",
+            json!({
+                "workspaceId": ws_a_id,
+                "workspacePath": temp.path().join("does-not-exist").to_str().unwrap(),
+            }),
+        )
+        .await;
+    assert_eq!(err_missing["ok"], false);
+    assert_eq!(err_missing["code"], "FOLDER_NOT_FOUND");
+
+    let err_taken = client
+        .call(
+            "project.bot.rebindFolder",
+            json!({
+                "workspaceId": ws_a_id,
+                "workspacePath": ws_b.to_str().unwrap(),
+            }),
+        )
+        .await;
+    assert_eq!(err_taken["ok"], false);
+    assert_eq!(err_taken["code"], "PATH_TAKEN");
+
+    // Rebinding managed bot to ws_next preserves ID/conversation, clears managed, updates path
+    let rebound = client
+        .call(
+            "project.bot.rebindFolder",
+            json!({
+                "workspaceId": ws_a_id,
+                "workspacePath": ws_next.to_str().unwrap(),
+            }),
+        )
+        .await;
+    assert_eq!(rebound["ok"], true, "rebind failed: {rebound}");
+    assert_eq!(rebound["workspaceId"], ws_a_id);
+    assert_eq!(rebound["path"], ws_next.to_str().unwrap());
+    assert_eq!(rebound["previousPath"], ws_a.to_str().unwrap());
+    assert_eq!(rebound["pathExists"], true);
+    assert_eq!(rebound["unchanged"], false);
+    assert_eq!(rebound["profile"]["managed"], false);
+    assert_eq!(rebound["profile"]["agentConversationId"], conv_a_id);
+
+    let reg_entry = peer_project_agent::ProjectRegistry::new(&home)
+        .get(&ws_a_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reg_entry.path, ws_next.to_str().unwrap());
+    assert_eq!(
+        reg_entry.previous_paths,
+        vec![ws_a.to_str().unwrap().to_owned()]
+    );
+
+    let conv_meta = peer_store::ConversationStore::new(&home)
+        .read_metadata(&conv_a_id)
+        .unwrap()
+        .metadata
+        .unwrap();
+    assert_eq!(conv_meta["workspacePath"], ws_next.to_str().unwrap());
+
+    let got_after = client
+        .call("project.bot.get", json!({ "workspaceId": ws_a_id }))
+        .await;
+    assert_eq!(got_after["ok"], true);
+    assert_eq!(got_after["path"], ws_next.to_str().unwrap());
+    assert_eq!(got_after["pathExists"], true);
+    assert_eq!(got_after["profile"]["managed"], false);
+
+    // Idempotent rebind to same path
+    let idempotent = client
+        .call(
+            "project.bot.rebindFolder",
+            json!({
+                "workspaceId": ws_a_id,
+                "workspacePath": ws_next.to_str().unwrap(),
+            }),
+        )
+        .await;
+    assert_eq!(idempotent["ok"], true);
+    assert_eq!(idempotent["unchanged"], true);
+    assert_eq!(idempotent["pathExists"], true);
 
     client.shutdown(handle).await;
 }

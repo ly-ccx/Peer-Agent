@@ -16,11 +16,16 @@ use crate::{
         ComposeReplyInput, SessionStatusFact, StatusClaim, Surfacing, SurfacingEvent,
         compose_reply, decide_surfacing, resolve_user_anchors,
     },
+    skill_packs::{
+        ACTIVATE_SKILL_PACK_CAPABILITY, ACTIVATE_SKILL_PACK_TOOL, all_skill_pack_ids,
+        find_skill_pack,
+    },
 };
 use peer_protocol::{ExecutionResourceScope, interactive_result::InteractiveOwner};
 use peer_runtime::{
     CancellationToken,
     capability::{CapabilityError as HostError, ProviderPermission},
+    model::NativeModel,
     providers::{CapabilityProvider, EffectFuture, EffectOutcome, PreparedEffect, ProviderCall},
 };
 use peer_store::ConversationStore;
@@ -42,6 +47,7 @@ pub struct TurnExecutionState {
     pub current_input_id: String,
     pub quote_session_ids: Vec<String>,
     pub valid_user_message_ids: HashSet<String>,
+    pub answered_user_message_ids: HashSet<String>,
     pub user_anchor_candidates: Vec<UserAnchorCandidate>,
     pub unreported_anchor_sessions: Vec<(String, String)>,
     pub prior_report_fact_keys: HashSet<String>,
@@ -51,6 +57,7 @@ pub struct TurnExecutionState {
     pub work_id: String,
     pub waiting_session_ids: Vec<String>,
     pub spawned_session_ids: Vec<String>,
+    pub activated_packs: Vec<String>,
     pub memory_learned: Vec<String>,
     pub memory_used: Vec<String>,
     pub holds_lease: bool,
@@ -71,6 +78,7 @@ pub struct ProjectCapabilityProvider {
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
     coordination: Arc<CoordinationHub>,
+    verifier_model: Option<NativeModel>,
     state: Arc<Mutex<TurnExecutionState>>,
 }
 
@@ -98,8 +106,14 @@ impl ProjectCapabilityProvider {
             data_home: data_home.as_ref().to_path_buf(),
             supervisor,
             coordination,
+            verifier_model: None,
             state,
         }
+    }
+
+    pub(crate) fn with_verifier_model(mut self, model: NativeModel) -> Self {
+        self.verifier_model = Some(model);
+        self
     }
 
     fn manifest(name: &str, cap_id: &str, description: &str, schema: Value) -> (String, Value) {
@@ -123,17 +137,31 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "spawn_session",
                 "local.delegation.spawn_session",
-                "Delegate a scoped work task to an isolated child session with structured success criteria.",
+                "Delegate a new task from a current user input with title, brief, kind, readOnly and successCriteria. On wake, supply only supersedes to retry an eligible failed task with its original specification.",
                 json!({
                     "type": "object",
-                    "required": ["anchorMessageIds", "title", "brief", "successCriteria", "kind", "readOnly", "requiredCapabilities"],
+                    "anyOf": [{"required": ["title", "brief", "successCriteria", "kind", "readOnly"]}, {"required": ["supersedes"]}],
                     "properties": {
-                        "anchorMessageIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                        "anchorMessageIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                            "description": "Optional on normal user turns (host auto-anchors to current user input when omitted)."
+                        },
                         "title": {"type": "string", "maxLength": 60},
                         "brief": {"type": "string", "maxLength": 4000},
                         "kind": {"type": "string", "enum": ["code", "research", "docs", "ui", "ops", "other"]},
                         "readOnly": {"type": "boolean"},
-                        "requiredCapabilities": {"type": "array", "items": {"type": "string"}},
+                        "capabilityPreset": {
+                            "type": "string",
+                            "enum": ["read_only", "code_edit", "code_edit_and_shell", "web_research"],
+                            "description": "High-level capability intent preset (preferred over raw requiredCapabilities). Ignored for write/shell when readOnly=true."
+                        },
+                        "requiredCapabilities": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional explicit worker capability IDs (host derives safe capabilities automatically from readOnly, capabilityPreset, and successCriteria when omitted)."
+                        },
                         "priority": {"type": "string", "enum": ["high", "normal", "low"]},
                         "dependsOn": {"type": "array", "items": {"type": "string"}},
                         "supersedes": {"type": "string"},
@@ -148,7 +176,11 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                                 "required": ["kind", "description"],
                                 "properties": {
                                     "id": {"type": "string"},
-                                    "kind": {"type": "string", "enum": ["command", "test", "file-contains", "file-exists", "model_review", "manual"]},
+                                    "kind": {
+                                        "type": "string",
+                                        "enum": ["command", "test", "file-contains", "file-exists", "model_review"],
+                                        "description": "Use command/test/file-exists/file-contains for mechanical checks, and model_review for report completeness, audit, or quality checks (verified automatically by the independent verifier without requiring manual user sign-off)."
+                                    },
                                     "description": {"type": "string"},
                                     "command": {"type": "string"},
                                     "path": {"type": "string"},
@@ -191,7 +223,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "cancel_session",
                 "local.delegation.cancel_session",
-                "Cancel an active or queued delegated work session.",
+                "Cancel or dismiss an active, queued, failed, verification-failed, unaccepted result_ready, or stale cancelled delegated work session so it leaves the active follow-up list. Dead/failed/verification-failed sessions may be cancelled autonomously without waiting for a user turn.",
                 json!({
                     "type": "object",
                     "required": ["sessionId", "reason"],
@@ -235,7 +267,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "message_session",
                 "local.delegation.message_session",
-                "Send an answer or amendment to an open delegated work session.",
+                "Send a user-authorized answer or amendment. On wake, answer only a pending technical question directed to this parent Bot.",
                 json!({
                     "type": "object",
                     "required": ["sessionId", "text", "intent"],
@@ -250,13 +282,14 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "verify_session",
                 "local.delegation.verify_session",
-                "Evaluate host Evidence verification verdict and acceptance status for a completed session.",
+                "Inspect acceptance or run bounded independent read-only verification for a completed session. A missing or failed verdict, force, or focus requests a new check.",
                 json!({
                     "type": "object",
                     "required": ["sessionId"],
                     "properties": {
                         "sessionId": {"type": "string"},
-                        "focus": {"type": "string", "maxLength": 500}
+                        "focus": {"type": "string", "maxLength": 500},
+                        "force": {"type": "boolean"}
                     },
                     "additionalProperties": false
                 }),
@@ -277,17 +310,30 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "post_reply",
                 "local.delegation.post_reply",
-                "Deliver an anchored canonical reply to the user with host-verified session status claims.",
+                "Speak to the user in natural, human-friendly language as their project partner. Keep structured provenance in `sources`/`statusClaims`, never as raw protocol jargon inside `text`.",
                 json!({
                     "type": "object",
                     "required": ["text"],
                     "properties": {
-                        "replyTo": {"type": "array", "items": {"type": "string"}},
-                        "text": {"type": "string", "maxLength": 2000},
+                        "replyTo": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "User message IDs from Current input anchors being answered. May be omitted on normal user turns to auto-anchor to the current user message; on wake turns when anchors are empty, pass proactive: true."
+                        },
+                        "text": {
+                            "type": "string",
+                            "maxLength": 8000,
+                            "description": "Your direct message spoken to the user. Write naturally like a human teammate: lead with clear conclusions in the user's language, and never expose internal tool names, JSON fields (like workerOutput), raw session UUIDs, or protocol status enums (like result_ready / verification_failed / supersedes)."
+                        },
                         "proactive": {"type": "boolean"},
-                        "sources": {"type": "array", "items": {"type": "string"}},
+                        "sources": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Raw delegated work session UUIDs belonging to this project (NEVER file paths or directory names). Omit or pass [] when not citing delegated sessions."
+                        },
                         "statusClaims": {
                             "type": "array",
+                            "description": "Optional explicit status claims for cited sessions (host fills omitted claims from persisted host facts, while still rejecting any explicit claim that disagrees with host state).",
                             "items": {
                                 "type": "object",
                                 "required": ["sessionId", "status"],
@@ -503,7 +549,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "resume_session",
                 "local.delegation.resume_session",
-                "Resume a paused or waiting delegated work session anchored to a user message.",
+                "Resume a delegated work session. On wake, only host-confirmed recoverable technical interruptions with settled effects can resume.",
                 json!({
                     "type": "object",
                     "required": ["sessionId"],
@@ -779,6 +825,28 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                     "additionalProperties": false
                 }),
             ),
+            Self::manifest(
+                ACTIVATE_SKILL_PACK_TOOL,
+                ACTIVATE_SKILL_PACK_CAPABILITY,
+                "Activate one or more on-demand Project Agent capability packs to unlock their tools and receive their usage guide.",
+                json!({
+                    "type": "object",
+                    "required": ["packs"],
+                    "properties": {
+                        "packs": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "string",
+                                "enum": all_skill_pack_ids()
+                            },
+                            "description": "Capability pack IDs to activate for the remainder of this turn."
+                        }
+                    },
+                    "additionalProperties": false
+                }),
+            ),
         ]
     }
 
@@ -803,6 +871,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             data_home: self.data_home.clone(),
             supervisor: Arc::clone(&self.supervisor),
             coordination: Arc::clone(&self.coordination),
+            verifier_model: self.verifier_model.clone(),
             state: Arc::clone(&self.state),
         }))
     }
@@ -814,6 +883,7 @@ struct PreparedProjectEffect {
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
     coordination: Arc<CoordinationHub>,
+    verifier_model: Option<NativeModel>,
     state: Arc<Mutex<TurnExecutionState>>,
 }
 
@@ -847,7 +917,9 @@ impl PreparedEffect for PreparedProjectEffect {
                     not_dispatched: true,
                 };
             }
-            let res = if matches!(
+            let res = if self.capability == "local.delegation.verify_session" {
+                self.verify_session(&cancel).await
+            } else if matches!(
                 self.capability.as_str(),
                 "local.delegation.inspect_execution_obligation"
                     | "local.delegation.request_obligation_authorization"
@@ -912,6 +984,73 @@ impl PreparedEffect for PreparedProjectEffect {
     }
 }
 
+impl PreparedProjectEffect {
+    async fn verify_session(&self, cancel: &CancellationToken) -> Result<Value, CapFailure> {
+        let sid = self.args["sessionId"]
+            .as_str()
+            .ok_or_else(|| ProjectError::code("invalid_input"))?;
+        let focus = self.args["focus"]
+            .as_str()
+            .map(str::trim)
+            .filter(|focus| !focus.is_empty());
+        if focus.is_some_and(|text| text.chars().count() > 500) {
+            return Err(ProjectError::code("invalid_input").into());
+        }
+        let (workspace, plan) = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
+            if !state.holds_lease {
+                return Err(ProjectError::code("LEASE_REQUIRED").into());
+            }
+            check_quote_scope(&state, sid)?;
+            let plan =
+                self.supervisor
+                    .plan_for_bot(&state.workspace_id, &state.conversation_id, sid)?;
+            (state.workspace_id.clone(), plan)
+        };
+        let origin = &plan["delegationOrigin"];
+        let force = self.args["force"] == true || focus.is_some();
+        let missing_or_failed = origin["independentVerifier"] == "failed"
+            || origin["independentVerifier"] == "missing"
+            || origin["independentVerifier"].is_null()
+            || plan["verificationReport"]["passed"] == false;
+        if (force || missing_or_failed)
+            && let Some(model) = &self.verifier_model
+        {
+            // Ordinary conversation execution is local-thread only. Keep it on a
+            // blocking-pool thread while the provider effect stays Send.
+            let epoch = self
+                .coordination
+                .lease_epoch(&workspace)
+                .ok_or_else(|| ProjectError::code("LEASE_REQUIRED"))?;
+            let coordination = Arc::clone(&self.coordination);
+            let runtime = tokio::runtime::Handle::current();
+            let supervisor = Arc::clone(&self.supervisor);
+            let focus = focus.map(str::to_owned);
+            let model = model.clone();
+            let child = cancel.child_token();
+            let _cancel_on_drop = child.clone().drop_guard();
+            return Ok(tokio::task::spawn_blocking(move || {
+                runtime.block_on(supervisor.reverify_session(
+                    plan,
+                    focus.as_deref(),
+                    &model,
+                    &child,
+                    || coordination.holds_generation(&workspace, &epoch),
+                ))
+            })
+            .await
+            .map_err(|_| ProjectError::code("verifier_task_failed"))??);
+        }
+        let decision = self
+            .supervisor
+            .settle_session(&workspace, sid, false, false, None, true)?;
+        Ok(json!({"ok": true, "sessionId": sid, "decision": decision, "reverified": false}))
+    }
+}
+
 fn check_quote_scope(state: &TurnExecutionState, target_session: &str) -> Result<(), ProjectError> {
     if !state.quote_session_ids.is_empty()
         && !state.quote_session_ids.iter().any(|s| s == target_session)
@@ -965,7 +1104,7 @@ fn execute_post_reply(
                 .collect()
         })
         .unwrap_or_default();
-    let reply_to = if raw_reply_to.is_empty() {
+    let mut reply_to = if raw_reply_to.is_empty() {
         if !proactive && state.kind == "user" && !state.current_input_anchors.is_empty() {
             state.current_input_anchors.clone()
         } else {
@@ -974,7 +1113,7 @@ fn execute_post_reply(
     } else {
         resolve_anchors_for_state(&raw_reply_to, state)?
     };
-    let sources: Vec<String> = args["sources"]
+    let raw_sources: Vec<String> = args["sources"]
         .as_array()
         .map(|a| {
             a.iter()
@@ -983,7 +1122,7 @@ fn execute_post_reply(
                 .collect()
         })
         .unwrap_or_default();
-    let status_claims: Vec<StatusClaim> = args["statusClaims"]
+    let mut status_claims: Vec<StatusClaim> = args["statusClaims"]
         .as_array()
         .map(|a| {
             a.iter()
@@ -1020,6 +1159,71 @@ fn execute_post_reply(
             }
         })
         .collect();
+
+    // Normalize optional `session:` prefix when it matches a real project session,
+    // deduplicate sources, merge any claimed real project session IDs, and auto-fill
+    // omitted statusClaims from persisted host facts while preserving strict rejection
+    // of explicit mismatched claims and forged sources.
+    let mut sources: Vec<String> = Vec::new();
+    let mut seen_sources = HashSet::new();
+    for raw in raw_sources {
+        let trimmed = raw.trim();
+        let normalized = if project_session_ids.contains(trimmed) {
+            trimmed.to_owned()
+        } else if let Some(stripped) = trimmed.strip_prefix("session:")
+            && project_session_ids.contains(stripped)
+        {
+            stripped.to_owned()
+        } else {
+            raw
+        };
+        if seen_sources.insert(normalized.clone()) {
+            sources.push(normalized);
+        }
+    }
+    for claim in &mut status_claims {
+        if !project_session_ids.contains(&claim.session_id)
+            && let Some(stripped) = claim.session_id.trim().strip_prefix("session:")
+            && project_session_ids.contains(stripped)
+        {
+            claim.session_id = stripped.to_owned();
+        }
+        if project_session_ids.contains(&claim.session_id)
+            && seen_sources.insert(claim.session_id.clone())
+        {
+            sources.push(claim.session_id.clone());
+        }
+    }
+    let explicit_claim_ids: HashSet<String> =
+        status_claims.iter().map(|c| c.session_id.clone()).collect();
+    for sid in &sources {
+        if !explicit_claim_ids.contains(sid)
+            && let Some(fact) = session_facts.iter().find(|f| f.session_id == *sid)
+        {
+            status_claims.push(StatusClaim {
+                session_id: sid.clone(),
+                status: fact.status.clone(),
+            });
+        }
+    }
+    // When a wake turn posts a reply citing sessions whose originating user input has not yet
+    // received any agent_reply (e.g. after `wait_for_sessions`), inherit those unanswered
+    // anchors automatically so the user message transitions cleanly to replied.
+    if state.kind == "wake" && reply_to.is_empty() && !sources.is_empty() {
+        let mut seen_reply_to = HashSet::new();
+        for sid in &sources {
+            if let Some(sess) = sessions.iter().find(|s| s.session_id == *sid) {
+                for anc in &sess.anchor_message_ids {
+                    if state.valid_user_message_ids.contains(anc)
+                        && !state.answered_user_message_ids.contains(anc)
+                        && seen_reply_to.insert(anc.clone())
+                    {
+                        reply_to.push(anc.clone());
+                    }
+                }
+            }
+        }
+    }
 
     let profiles = BotProfileStore::new(data_home);
     let proactivity = profiles
@@ -1183,14 +1387,16 @@ fn execute_search_conversation(
             .map(str::to_owned)
             .collect()
     });
-    let snap = ConversationStore::new(data_home)
-        .read_committed(&state.conversation_id, None, 4 * 1024 * 1024)
-        .map_err(ProjectError::from)?;
+    let messages = crate::read_full_conversation_messages(
+        &ConversationStore::new(data_home),
+        &state.conversation_id,
+    )
+    .map_err(ProjectError::from)?;
 
     let mut docs = Vec::new();
     let mut row_by_id: std::collections::HashMap<String, (&str, Value)> =
         std::collections::HashMap::new();
-    for m in snap.history.messages.iter().rev() {
+    for m in messages.iter().rev() {
         if m["meta"]["compaction"].is_object()
             || matches!(m["kind"].as_str(), Some("compaction" | "agent_turn"))
         {
@@ -1475,13 +1681,24 @@ fn spawn_from_args(
     supervisor: &SessionSupervisor,
     coordination: &CoordinationHub,
 ) -> Result<crate::WorkSessionSummary, CapFailure> {
-    let raw_anchors: Vec<String> = args["anchorMessageIds"]
-        .as_array()
-        .ok_or_else(|| ProjectError::code("invalid_input"))?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect();
+    let mut raw_anchors: Vec<String> = match args.get("anchorMessageIds") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        Some(_) => return Err(ProjectError::code("invalid_input").into()),
+    };
+    if raw_anchors.is_empty()
+        && args.get("anchorMessageIds").is_none_or(Value::is_null)
+        && state.kind == "user"
+        && !state.current_input_anchors.is_empty()
+    {
+        raw_anchors = state.current_input_anchors.clone();
+    }
     if raw_anchors.is_empty() {
         return Err(ProjectError::code("invalid_anchor").into());
     }
@@ -1489,9 +1706,37 @@ fn spawn_from_args(
     if let Some(sup) = args["supersedes"].as_str() {
         check_quote_scope(state, sup)?;
     }
-    let criteria: Vec<SpawnCriterion> = serde_json::from_value(args["successCriteria"].clone())
-        .map_err(|_| ProjectError::code("invalid_input"))?;
-    let required_caps: Vec<String> = args["requiredCapabilities"]
+    let mut criteria: Vec<SpawnCriterion> = serde_json::from_value(args["successCriteria"].clone())
+        .map_err(|err| {
+            ProjectError::new("invalid_input", format!("invalid successCriteria: {err}"))
+        })?;
+    let anchor_text = supervisor.anchor_text_for_ids(&state.conversation_id, &anchors);
+    let user_requested_manual = crate::acceptance::anchor_requests_review(&anchor_text);
+    for c in &mut criteria {
+        // Model-generated criteria must not invent human-blocking `manual` gates unless
+        // the user's anchor message explicitly requested manual review/confirmation
+        // (mirrors `criterion-authority.mjs`). Promote unauthorized `manual` -> `model_review`
+        // so the independent verifier checks it automatically.
+        if c.kind.eq_ignore_ascii_case("manual") && !user_requested_manual {
+            c.kind = "model_review".to_owned();
+        }
+        if c.description.trim().is_empty() {
+            c.description = if let Some(cmd) = c.command.as_deref().filter(|s| !s.trim().is_empty())
+            {
+                let clipped: String = cmd.trim().chars().take(120).collect();
+                format!("Run command: {clipped}")
+            } else if let Some(path) = c.path.as_deref().filter(|s| !s.trim().is_empty()) {
+                format!("Verify {} on {}", c.kind, path.trim())
+            } else if let Some(exp) = c.expect.as_deref().filter(|s| !s.trim().is_empty()) {
+                let clipped: String = exp.trim().chars().take(120).collect();
+                format!("Verify {}: {clipped}", c.kind)
+            } else {
+                format!("Verify {} criterion", c.kind)
+            };
+        }
+    }
+    let read_only = args["readOnly"].as_bool().unwrap_or(true);
+    let mut required_caps: Vec<String> = args["requiredCapabilities"]
         .as_array()
         .map(|a| {
             a.iter()
@@ -1500,6 +1745,51 @@ fn spawn_from_args(
                 .collect()
         })
         .unwrap_or_default();
+    if required_caps.is_empty()
+        && let Some(preset) = args["capabilityPreset"].as_str().map(str::trim)
+    {
+        let preset_caps: &[&str] = match (preset, read_only) {
+            ("read_only", _) | ("code_edit", true) | ("code_edit_and_shell", true) => &[
+                "local.file.read",
+                "local.file.list",
+                "local.file.search",
+                "local.git.query",
+            ],
+            ("code_edit", false) => &[
+                "local.file.read",
+                "local.file.list",
+                "local.file.search",
+                "local.git.query",
+                "local.file.write",
+                "local.file.edit",
+            ],
+            ("code_edit_and_shell", false) => &[
+                "local.file.read",
+                "local.file.list",
+                "local.file.search",
+                "local.git.query",
+                "local.file.write",
+                "local.file.edit",
+                "local.shell.exec",
+                "local.shell.stop",
+            ],
+            ("web_research", true) => &[
+                "local.file.read",
+                "local.file.list",
+                "local.file.search",
+                "local.git.query",
+            ],
+            ("web_research", false) => &[
+                "local.file.read",
+                "local.file.list",
+                "local.file.search",
+                "local.git.query",
+                "local.web.fetch",
+            ],
+            _ => return Err(ProjectError::code("invalid_input").into()),
+        };
+        required_caps = preset_caps.iter().map(|s| (*s).to_owned()).collect();
+    }
     let depends_on: Vec<String> = args["dependsOn"]
         .as_array()
         .map(|a| {
@@ -1520,7 +1810,7 @@ fn spawn_from_args(
             title: args["title"].as_str().unwrap_or("").to_owned(),
             brief: args["brief"].as_str().unwrap_or("").to_owned(),
             kind: args["kind"].as_str().unwrap_or("other").to_owned(),
-            read_only: args["readOnly"].as_bool().unwrap_or(true),
+            read_only,
             required_capabilities: required_caps,
             success_criteria: criteria,
             priority: args["priority"].as_str().unwrap_or("normal").to_owned(),
@@ -1642,12 +1932,12 @@ fn execute_continuity_capability(
                 .map(str::trim)
                 .filter(|s| !s.is_empty());
             let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
-            let snap = ConversationStore::new(data_home)
-                .read_committed(conv_id, None, 4 * 1024 * 1024)
-                .map_err(ProjectError::from)?;
+            let messages =
+                crate::read_full_conversation_messages(&ConversationStore::new(data_home), conv_id)
+                    .map_err(ProjectError::from)?;
             let mut matches = Vec::new();
             let mut seen_before = before.is_none();
-            for m in snap.history.messages.iter().rev() {
+            for m in messages.iter().rev() {
                 let id = m["id"].as_str().unwrap_or("");
                 if !seen_before {
                     if Some(id) == before {
@@ -2034,15 +2324,22 @@ fn execute_project_capability(
     }
     match capability {
         "local.delegation.spawn_session" => {
-            if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::new(
-                    "current_user_required",
-                    "Historical user messages cannot authorize new tasks during an ordinary wake.",
+            let (spawned, retry_count) = if state.current_input_anchors.is_empty() {
+                let predecessor = args["supersedes"]
+                    .as_str()
+                    .filter(|_| state.kind == "wake")
+                    .ok_or_else(|| ProjectError::code("current_user_required"))?;
+                check_quote_scope(&state, predecessor)?;
+                let (spawned, count) = supervisor.retry_session(&state, predecessor, args)?;
+                state.spawned_session_ids.push(spawned.session_id.clone());
+                (spawned, Some(count))
+            } else {
+                (
+                    spawn_from_args(args, &mut state, supervisor, coordination)?,
+                    None,
                 )
-                .into());
-            }
-            let spawned = spawn_from_args(args, &mut state, supervisor, coordination)?;
-            Ok(json!({
+            };
+            let mut result = json!({
                 "ok": true,
                 "sessionId": spawned.session_id,
                 "planId": spawned.plan_id,
@@ -2050,7 +2347,13 @@ fn execute_project_capability(
                 "phase": spawned.phase,
                 "queued": spawned.phase == "queued",
                 "approvalId": spawned.approval_id,
-            }))
+            });
+            if let Some(count) = retry_count {
+                result["autoRetryCount"] = json!(count);
+                result["maxAutoRetries"] =
+                    json!(crate::supervisor::autonomy::MAX_AUTONOMOUS_RETRIES);
+            }
+            Ok(result)
         }
         "local.delegation.list_sessions" => {
             let status_filter = args["status"].as_str();
@@ -2071,40 +2374,94 @@ fn execute_project_capability(
             if args["detail"].as_str() == Some("summary") {
                 Ok(json!({ "ok": true, "session": report.summary }))
             } else {
-                Ok(json!({ "ok": true, "session": report.summary, "report": report }))
+                // Keep report payload compact and non-redundant so normal session reports
+                // stay inline without triggering unnecessary multi-round read_tool_result paging.
+                let brief_preview: String = if report.task_brief.chars().count() > 400 {
+                    let head: String = report.task_brief.chars().take(400).collect();
+                    format!("{head}…")
+                } else {
+                    report.task_brief.clone()
+                };
+                let ev_total = report.evidence_refs.len();
+                let ev_refs: Vec<&String> = report.evidence_refs.iter().take(12).collect();
+                let worker_out: String = if report.worker_output.chars().count() > 3800 {
+                    let head: String = report.worker_output.chars().take(3800).collect();
+                    format!(
+                        "{head}\n…[truncated; total {} chars]",
+                        report.worker_output.chars().count()
+                    )
+                } else {
+                    report.worker_output.clone()
+                };
+                let mut compact_report = json!({
+                    "taskBrief": brief_preview,
+                    "evidenceRefs": ev_refs,
+                    "changedFiles": report.changed_files,
+                    "verdictOutcome": report.verdict_outcome,
+                    "independentVerifier": report.independent_verifier,
+                    "workerOutput": worker_out,
+                });
+                if let Some(ref question) = report.pending_agent_question {
+                    compact_report["pendingAgentQuestion"] = json!(question);
+                }
+                if ev_total > 12 {
+                    compact_report["evidenceRefCount"] = json!(ev_total);
+                }
+                if let Some(ref fc) = report.failure_code {
+                    compact_report["failureCode"] = json!(fc);
+                }
+                if let Some(ref fd) = report.failure_detail {
+                    compact_report["failureDetail"] = json!(fd);
+                }
+                Ok(json!({ "ok": true, "session": report.summary, "report": compact_report }))
             }
         }
         "local.delegation.cancel_session" => {
-            if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required").into());
-            }
             let sid = args["sessionId"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
-            check_quote_scope(&state, sid)?;
+            let autonomous_cleanup =
+                supervisor.is_dead_or_invalid_session(&state.workspace_id, sid);
+            if !autonomous_cleanup && state.current_input_anchors.is_empty() {
+                return Err(ProjectError::code("current_user_required").into());
+            }
+            if !autonomous_cleanup {
+                check_quote_scope(&state, sid)?;
+            }
             let reason = args["reason"].as_str().unwrap_or("cancelled");
-            let updated =
-                supervisor.control_session(&state.workspace_id, sid, "cancel", reason, true)?;
+            let updated = if autonomous_cleanup && state.current_input_anchors.is_empty() {
+                supervisor.cleanup_session(&state.workspace_id, sid, reason, true)?
+            } else {
+                supervisor.control_session(&state.workspace_id, sid, "cancel", reason, true)?
+            };
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
         "local.delegation.control_work" => {
-            if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required").into());
-            }
             let sid = args["sessionId"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
             let action = args["action"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
-            check_quote_scope(&state, sid)?;
-            let updated = supervisor.control_session(
-                &state.workspace_id,
-                sid,
-                action,
-                "user_control",
-                true,
-            )?;
+            let autonomous_cleanup = action == "cancel"
+                && supervisor.is_dead_or_invalid_session(&state.workspace_id, sid);
+            if !autonomous_cleanup && state.current_input_anchors.is_empty() {
+                return Err(ProjectError::code("current_user_required").into());
+            }
+            if !autonomous_cleanup {
+                check_quote_scope(&state, sid)?;
+            }
+            let updated = if autonomous_cleanup && state.current_input_anchors.is_empty() {
+                supervisor.cleanup_session(&state.workspace_id, sid, "bot_cleanup", true)?
+            } else {
+                supervisor.control_session(
+                    &state.workspace_id,
+                    sid,
+                    action,
+                    "user_control",
+                    true,
+                )?
+            };
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
         "local.delegation.reprioritize_session" => {
@@ -2123,9 +2480,6 @@ fn execute_project_capability(
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "priority": updated.priority }))
         }
         "local.delegation.message_session" => {
-            if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required").into());
-            }
             let sid = args["sessionId"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
@@ -2136,14 +2490,17 @@ fn execute_project_capability(
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
             check_quote_scope(&state, sid)?;
-            let updated =
-                supervisor.message_session(&state.workspace_id, sid, text, intent, true)?;
+            let updated = if state.current_input_anchors.is_empty() {
+                if state.kind != "wake" || intent != "answer" {
+                    return Err(ProjectError::code("current_user_required").into());
+                }
+                supervisor.answer_worker(&state.workspace_id, &state.conversation_id, sid, text)?
+            } else {
+                supervisor.message_session(&state.workspace_id, sid, text, intent, true)?
+            };
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
         "local.delegation.resume_session" => {
-            if state.current_input_anchors.is_empty() {
-                return Err(ProjectError::code("current_user_required").into());
-            }
             let sid = args["sessionId"]
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
@@ -2155,7 +2512,18 @@ fn execute_project_capability(
                 let _ = resolve_anchors_for_state(&[raw_anchor.to_owned()], &state)?;
             }
             check_quote_scope(&state, sid)?;
-            let updated = supervisor.resume_session(&state.workspace_id, sid, true)?;
+            let updated = if state.current_input_anchors.is_empty() {
+                if state.kind != "wake" {
+                    return Err(ProjectError::code("current_user_required").into());
+                }
+                supervisor.resume_technical_session(
+                    &state.workspace_id,
+                    &state.conversation_id,
+                    sid,
+                )?
+            } else {
+                supervisor.resume_session(&state.workspace_id, sid, true)?
+            };
             Ok(json!({
                 "ok": true,
                 "sessionId": updated.session_id,
@@ -2181,14 +2549,6 @@ fn execute_project_capability(
         ),
         "local.delegation.coordinate_work" => {
             execute_coordinate_work(args, supervisor, coordination, &mut state, tool_call_id)
-        }
-        "local.delegation.verify_session" => {
-            let sid = args["sessionId"]
-                .as_str()
-                .ok_or_else(|| ProjectError::code("invalid_input"))?;
-            let decision =
-                supervisor.settle_session(&state.workspace_id, sid, false, false, None, true)?;
-            Ok(json!({ "ok": true, "sessionId": sid, "decision": decision }))
         }
         "local.delegation.wait_for_sessions" => {
             let sids: Vec<String> = args["sessionIds"]
@@ -2445,6 +2805,61 @@ fn execute_project_capability(
                     "action": action,
                 }))
             }
+        }
+        cap if cap == ACTIVATE_SKILL_PACK_CAPABILITY => {
+            let raw_packs = args["packs"]
+                .as_array()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            if raw_packs.is_empty() || raw_packs.len() > 4 {
+                return Err(ProjectError::code("invalid_input").into());
+            }
+            let mut specs = Vec::with_capacity(raw_packs.len());
+            let mut seen_req = HashSet::new();
+            for item in raw_packs {
+                let raw_id = item
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| ProjectError::code("invalid_input"))?;
+                let Some(spec) = find_skill_pack(raw_id) else {
+                    return Err(CapFailure {
+                        err: ProjectError::new(
+                            "invalid_skill_pack",
+                            format!("Unknown capability pack: {raw_id}"),
+                        ),
+                        extra: Some(json!({
+                            "unknownPack": raw_id,
+                            "availablePacks": all_skill_pack_ids(),
+                        })),
+                    });
+                };
+                if seen_req.insert(spec.id) {
+                    specs.push(spec);
+                }
+            }
+            let mut activated = Vec::new();
+            let mut already_active = Vec::new();
+            let mut unlocked_capabilities = Vec::new();
+            let mut guides = serde_json::Map::new();
+            for spec in specs {
+                if state.activated_packs.iter().any(|p| p == spec.id) {
+                    already_active.push(spec.id);
+                } else {
+                    state.activated_packs.push(spec.id.to_owned());
+                    activated.push(spec.id);
+                }
+                for cap_id in spec.capabilities {
+                    unlocked_capabilities.push(*cap_id);
+                }
+                guides.insert(spec.id.to_owned(), json!(spec.guide));
+            }
+            Ok(json!({
+                "ok": true,
+                "activated": activated,
+                "alreadyActive": already_active,
+                "unlockedCapabilities": unlocked_capabilities,
+                "guides": guides,
+            }))
         }
         cap if cap == INTERACTIVE_INSPECT_CAPABILITY => {
             let owner = InteractiveOwner {

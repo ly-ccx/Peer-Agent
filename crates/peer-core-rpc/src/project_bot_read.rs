@@ -9,8 +9,8 @@
 
 use crate::{protocol::RpcError, server::ServerContext};
 use peer_project_agent::{
-    BotDirectory, ReadConversationOptions, SessionSupervisor, get_session_projected,
-    list_persisted_obligation_grants_enriched, list_sessions_projected,
+    BotDirectory, ListSessionsQuery, ReadConversationOptions, SessionSupervisor,
+    get_session_projected, list_persisted_obligation_grants_enriched, list_sessions_paged,
 };
 use serde_json::{Value, json};
 
@@ -49,12 +49,17 @@ pub fn handle_bot_get(ctx: &ServerContext, params: Value) -> Result<Value, RpcEr
     let data_home = &ctx.config.data_home;
     let sessions_by_ws = SessionSupervisor::new(data_home, None).list_all_bot_sessions();
     match BotDirectory::new(data_home).get_bot(workspace_id, &sessions_by_ws) {
-        Ok(detail) => Ok(json!({
-            "ok": true,
-            "item": detail.item,
-            "path": detail.path,
-            "profile": detail.profile,
-        })),
+        Ok(detail) => {
+            let path_exists =
+                !detail.path.is_empty() && std::path::Path::new(&detail.path).is_dir();
+            Ok(json!({
+                "ok": true,
+                "item": detail.item,
+                "path": detail.path,
+                "pathExists": path_exists,
+                "profile": detail.profile,
+            }))
+        }
         Err(err) => Ok(json!({ "ok": false, "code": err.code })),
     }
 }
@@ -138,20 +143,47 @@ pub fn handle_bot_list_sessions(ctx: &ServerContext, params: Value) -> Result<Va
         .get("status")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty());
+    let scope = params
+        .get("scope")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let category = params
+        .get("category")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let search_query = params
+        .get("query")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty());
+    let cursor = params
+        .get("cursor")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty());
     let limit = params
         .get("limit")
         .and_then(Value::as_u64)
         .and_then(|n| usize::try_from(n).ok());
 
-    let sessions = list_sessions_projected(
+    let paged = list_sessions_paged(
         &ctx.config.data_home,
-        workspace_id,
-        work_id,
-        session_ids.as_deref(),
-        status,
-        limit,
+        &ListSessionsQuery {
+            workspace_id,
+            work_id,
+            session_ids: session_ids.as_deref(),
+            status,
+            scope,
+            category,
+            search_query,
+            cursor,
+            limit,
+        },
     );
-    Ok(json!({ "ok": true, "sessions": sessions }))
+    Ok(json!({
+        "ok": true,
+        "sessions": paged.sessions,
+        "totalCount": paged.total_count,
+        "nextCursor": paged.next_cursor,
+    }))
 }
 
 pub fn handle_bot_get_session(ctx: &ServerContext, params: Value) -> Result<Value, RpcError> {

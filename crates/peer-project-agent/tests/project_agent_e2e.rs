@@ -1,11 +1,11 @@
 use peer_project_agent::{
     CircuitBreakerStore, CreateObjectiveRequest, LeaseStatus, MemoryEpisode, MemoryFilter,
     NativeProjectHost, ObjectiveBudget, ProjectCapabilityProvider, PublishInteractiveRequest,
-    QuestionState, RECOVERY_PHASES, STALL_WINDOW_MS, SessionSupervisor, SpawnCriterion,
-    SpawnSessionRequest, TurnEndKind, TurnExecutionState, WriteCuratedMemoryRequest,
-    WriteMemoryRequest, assess_same_cause, assess_stall, bot_list_json,
-    build_cleanup_expected_digest, host_resource_plan_from_plan, input_message_id,
-    load_local_image_attachment, normalize_user_upload, objective_action_card_id,
+    QuestionState, RECOVERY_PHASES, ReadConversationOptions, STALL_WINDOW_MS, SessionSupervisor,
+    SpawnCriterion, SpawnSessionRequest, ToolProjectionMode, TurnEndKind, TurnExecutionState,
+    WriteCuratedMemoryRequest, WriteMemoryRequest, assess_same_cause, assess_stall, bot_list_json,
+    build_cleanup_expected_digest, host_resource_plan_from_plan, hydrate_agent_turn_record,
+    input_message_id, load_local_image_attachment, normalize_user_upload, objective_action_card_id,
     project_reply_questions, read_retry_continuity, reconcile_unknown_outcome,
     task_result_references,
 };
@@ -616,6 +616,23 @@ async fn stale_approval_recovery_and_lease_handoff() {
         .expect("approval exists");
     assert_eq!(before["state"], ApprovalState::Open.as_str());
 
+    // Reproduce the desktop-wide startup sweep writing a stale row without a
+    // decider before the next project host acquires the workspace.
+    let mut stale = before;
+    stale["state"] = json!("stale");
+    stale["decidedAt"] = json!(peer_project_agent::now_iso());
+    let mut approval_log = fs::OpenOptions::new()
+        .append(true)
+        .open(
+            home.path()
+                .join("project-runtime")
+                .join(&entry.workspace_id)
+                .join("approvals.jsonl"),
+        )
+        .unwrap();
+    writeln!(approval_log, "{stale}").unwrap();
+    drop(approval_log);
+
     // Host A releases lease (clean exit / crash handoff)
     host_a.close();
 
@@ -647,20 +664,61 @@ async fn stale_approval_recovery_and_lease_handoff() {
     assert!(report.held_lease);
     assert_eq!(report.bot_turns_run, 1);
 
-    // Open approval was marked stale during recovery
-    let after = host_b
+    // The stale audit row stays intact. Recovery binds a fresh open approval
+    // to the same pending plan without starting its worker.
+    let rows = host_b
         .approvals()
         .list(Some(&entry.workspace_id), None)
-        .unwrap()
-        .into_iter()
-        .find(|a| a["approvalId"].as_str() == Some(approval_id.as_str()))
-        .expect("approval exists after recovery");
-    assert_eq!(after["state"], ApprovalState::Stale.as_str());
+        .unwrap();
+    let stale = rows
+        .iter()
+        .find(|a| a["approvalId"] == approval_id)
+        .unwrap();
+    assert_eq!(stale["state"], ApprovalState::Stale.as_str());
+    let repaired = host_b.supervisor().read_plan(&spawned.plan_id).unwrap();
+    let fresh_id = repaired["delegationOrigin"]["planApprovalId"]
+        .as_str()
+        .unwrap();
+    assert_ne!(fresh_id, approval_id);
+    assert_eq!(
+        rows.iter().find(|a| a["approvalId"] == fresh_id).unwrap()["state"],
+        ApprovalState::Open.as_str()
+    );
+    assert_eq!(repaired["status"], "awaiting_approval");
     let reply = host_b
         .find_reply_for_input(&entry.workspace_id, input_id)
         .unwrap()
         .unwrap();
     assert_eq!(reply["content"], "Recovered cleanly and ready.");
+    host_b.close();
+    let host_c = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    host_c.ensure_lease(&entry.workspace_id).unwrap();
+    host_c
+        .recover_workspace_barrier(&entry.workspace_id, &cancel)
+        .await
+        .unwrap();
+    let retained = host_c.supervisor().read_plan(&spawned.plan_id).unwrap();
+    assert_eq!(retained["delegationOrigin"]["planApprovalId"], fresh_id);
+    assert_eq!(
+        host_c
+            .approvals()
+            .list(Some(&entry.workspace_id), None)
+            .unwrap()
+            .len(),
+        2
+    );
+    let denied = host_c
+        .supervisor()
+        .decide_plan_approval(&entry.workspace_id, fresh_id, false, true)
+        .unwrap();
+    assert_eq!(denied.status, "cancelled");
+    let denied = host_c.supervisor().read_plan(&spawned.plan_id).unwrap();
+    assert_eq!(denied["approval"]["decision"], "denied");
+    assert_eq!(
+        denied["delegationOrigin"]["cancellation"]["phase"],
+        "completed"
+    );
+    host_c.close();
 }
 
 #[tokio::test]
@@ -668,6 +726,8 @@ async fn memory_and_objective_tools_through_governed_provider_with_chinese_fts_a
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
     let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    // Explicitly test Full projection mode compatibility (including legacy memory_write).
+    host.set_tool_projection_mode(ToolProjectionMode::Full);
     let (entry, profile) = host.bind_workspace(ws.path(), Some("MemoryBot")).unwrap();
     let input_id = "in-mem-1";
     let anchor = input_message_id(input_id).unwrap();
@@ -1360,13 +1420,62 @@ async fn bot_turn_records_canonical_usage_ledger_and_durable_agent_turn_with_str
         .iter()
         .find(|m| m["id"] == turn_id && m["kind"] == "agent_turn")
         .expect("durable agent_turn message persisted");
-    assert!(turn_rec["rounds"].as_array().is_some_and(|r| !r.is_empty()));
+    assert_eq!(turn_rec["traceRef"].as_str(), Some(turn_id.as_str()));
+    assert!(
+        turn_rec.get("rounds").is_none(),
+        "compact agent_turn stub in JSONL must offload rounds to sidecar file"
+    );
+    assert!(
+        turn_rec.get("publicUpdates").is_none(),
+        "compact agent_turn stub in JSONL must offload publicUpdates to sidecar file"
+    );
     assert!(turn_rec["meta"]["diagnosticTiming"]["startedAt"].is_string());
     assert!(turn_rec["meta"]["diagnosticTiming"]["finishedAt"].is_string());
-    assert!(turn_rec["publicUpdates"].as_array().is_some_and(|u| {
-        u.iter()
-            .any(|p| p["text"].as_str().unwrap_or("").contains("Preparing reply"))
+
+    let trace_file = home
+        .path()
+        .join("project-runtime")
+        .join(&entry.workspace_id)
+        .join("turns")
+        .join(format!("{turn_id}.json"));
+    assert!(
+        trace_file.is_file(),
+        "offloaded agent_turn trace file must exist at {}",
+        trace_file.display()
+    );
+
+    let dir_read = host.directory().read_conversation(
+        &entry.workspace_id,
+        &ReadConversationOptions {
+            kinds: Some(vec!["agent_turn".into()]),
+            ..Default::default()
+        },
+    );
+    let hydrated = dir_read["messages"]
+        .as_array()
+        .and_then(|arr| arr.iter().find(|m| m["id"] == turn_id))
+        .expect("hydrated agent_turn from directory");
+    assert!(hydrated["rounds"].as_array().is_some_and(|r| {
+        r.iter()
+            .any(|round| round["text"].as_str().unwrap_or("").contains("Preparing reply"))
     }));
+    // Dual-channel isolation: companion scratchpad emitted alongside a tool call stays in
+    // diagnostic `rounds` and must not leak into user-facing `publicUpdates`.
+    assert!(
+        hydrated["publicUpdates"]
+            .as_array()
+            .is_some_and(|u| u.is_empty()),
+        "tool-round scratchpad text must stay out of publicUpdates; got {:?}",
+        hydrated["publicUpdates"]
+    );
+
+    let mut manual_hydrated = turn_rec.clone();
+    hydrate_agent_turn_record(home.path(), &entry.workspace_id, &mut manual_hydrated);
+    assert!(
+        manual_hydrated["rounds"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty())
+    );
 }
 
 #[tokio::test]
@@ -1662,6 +1771,14 @@ async fn objective_full_lifecycle_and_conversation_search_redacts_secrets() {
     .unwrap();
 
     let server = start_mock_server(vec![
+        // 0. Activate objectives skill pack on demand (blank workspace starts in Progressive mode)
+        Box::new(|_| {
+            sse_tool_call(
+                "obj-0",
+                "activate_skill_pack",
+                &json!({ "packs": ["objectives"] }),
+            )
+        }),
         // 1. create_objective using raw inputId anchor
         Box::new(|_| {
             sse_tool_call(
@@ -2337,6 +2454,22 @@ async fn working_context_notes_handoff_and_work_history_redaction_via_coordinati
 
     let server = start_mock_server(vec![
         // 1. Verify Phase-3 tools projected & write initial note (rev 0 -> 1)
+        // 0. Activate continuity, coordination, and memory skill packs on demand
+        Box::new(|req| {
+            let initial_tools = tool_names_from_request(req);
+            assert!(initial_tools.iter().any(|t| t == "activate_skill_pack"));
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !initial_tools.iter().any(|t| t == forbidden),
+                    "project_agent must never project {forbidden}"
+                );
+            }
+            sse_tool_call(
+                "wc-0",
+                "activate_skill_pack",
+                &json!({ "packs": ["continuity", "coordination", "memory"] }),
+            )
+        }),
         Box::new(|req| {
             let tools = tool_names_from_request(req);
             for required in [
@@ -2802,10 +2935,19 @@ async fn send_agent_message_and_coordinate_work_query_and_control_through_coordi
                 }),
             )
         }),
+        // 1.5. Activate coordination skill pack before send_agent_message / coordinate_work
+        Box::new(move |req| {
+            let sid = extract_spawned_session_id(req).expect("spawned sessionId");
+            *sid_writer.lock().unwrap() = Some(sid);
+            sse_tool_call(
+                "coord-1b",
+                "activate_skill_pack",
+                &json!({ "packs": ["coordination"] }),
+            )
+        }),
         // 2. send_agent_message (mailbox_only)
         Box::new(move |req| {
             let sid = extract_spawned_session_id(req).expect("spawned sessionId");
-            *sid_writer.lock().unwrap() = Some(sid.clone());
             sse_tool_call(
                 "coord-2",
                 "send_agent_message",
@@ -3103,6 +3245,13 @@ async fn coordination_v2_state_survives_host_restart_and_lease_handoff() {
         .unwrap();
 
     let server_a = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "ra-0",
+                "activate_skill_pack",
+                &json!({ "packs": ["continuity"] }),
+            )
+        }),
         Box::new(|_| {
             sse_tool_call(
                 "ra-1",
@@ -4863,5 +5012,3233 @@ async fn interactive_result_slash_result_lookup_from_task_evidence_refs() {
     let wrong_locator = host.read_task_result(&ws_id, &sid, &other_locator);
     assert_eq!(wrong_locator.unwrap_err().code, "interactive_scope_denied");
 
+    host.close();
+}
+
+#[tokio::test]
+async fn fallback_reply_store_failure_reports_failed_and_preserves_pending_input_cursor() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("FailSafeBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let cancel = CancellationToken::new();
+    let input_id = "in-persist-fail";
+    host.submit_user_input(&ws_id, input_id, "Reply cleanly", None)
+        .unwrap();
+
+    let index_path = home.path().join("conversations/index.jsonl");
+    let conv_id_clone = conv_id.clone();
+    let server = start_mock_server(vec![Box::new(move |_req| {
+        // Sabotage index.jsonl messageCount after consume() wrote the user input so
+        // persist_fallback_reply fails with StoreError::CommitUncertain on commit.
+        let mut rows: Vec<Value> = fs::read_to_string(&index_path)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let row = rows.iter_mut().find(|r| r["id"] == conv_id_clone).unwrap();
+        row["messageCount"] = json!(999);
+        let edited: String = rows.iter().map(|r| format!("{r}\n")).collect();
+        fs::write(&index_path, edited).unwrap();
+        sse_text("Fallback reply that cannot be persisted")
+    })]);
+
+    let model = mock_model(&server.endpoint);
+    let report = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(report.inputs_consumed, 1);
+    assert_eq!(report.bot_turns_run, 1);
+    assert!(
+        matches!(
+            report.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::Failed { code }) if code == "STORE_COMMIT_UNCERTAIN"
+        ),
+        "expected Failed(STORE_COMMIT_UNCERTAIN), got {:?}",
+        report.last_turn
+    );
+
+    let cursor_path = home
+        .path()
+        .join(format!("project-runtime/{ws_id}/input-cursor.json"));
+    let cursor: Value = serde_json::from_slice(&fs::read(&cursor_path).unwrap()).unwrap();
+    assert_eq!(cursor["inputId"], input_id);
+    assert!(cursor.get("executedInputId").is_none_or(Value::is_null));
+    assert!(
+        !cursor["completedInputIds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|v| v == input_id)
+    );
+
+    host.close();
+}
+
+#[tokio::test]
+async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_leak() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Test repo\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("SynthBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let cancel = CancellationToken::new();
+    let input_id = "in-synth-dsml-1";
+    host.submit_user_input(&ws_id, input_id, "Inspect repository", None)
+        .unwrap();
+
+    let mut handlers: Vec<ScriptHandler> = (0..14)
+        .map(|idx| {
+            Box::new(move |req: &Value| {
+                if idx == 13 {
+                    let sys_text = req["messages"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|m| m["role"] == "system")
+                        .filter_map(|m| m["content"].as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(
+                        sys_text.contains("FINAL TOOL ROUND NOTICE"),
+                        "final tool round must receive FINAL TOOL ROUND NOTICE: {sys_text}"
+                    );
+                }
+                sse_tool_call(
+                    &format!("tc-synth-{idx}"),
+                    "list_files",
+                    &json!({"path": "."}),
+                )
+            }) as ScriptHandler
+        })
+        .collect();
+    // Request 15: Synthesis attempt 1 sees disabled tools + explicit synthesis prompt, simulates DeepSeek DSML leak.
+    handlers.push(Box::new(|req| {
+        assert!(
+            req.get("tools")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty),
+            "synthesis request must not advertise tools: {:?}",
+            req.get("tools")
+        );
+        let msgs = req["messages"].as_array().expect("messages array");
+        let sys_text = msgs
+            .iter()
+            .filter(|m| m["role"] == "system")
+            .filter_map(|m| m["content"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            sys_text.contains("FINAL SYNTHESIS OVERRIDE"),
+            "synthesis system prompt override missing: {sys_text}"
+        );
+        assert!(
+            sys_text.contains("Do NOT mention internal tool names"),
+            "synthesis system prompt must prohibit leaking internal tool names: {sys_text}"
+        );
+        let last_user = msgs
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user")
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or("");
+        assert!(
+            last_user.contains("tools are disabled"),
+            "synthesis prompt must tell model tools are disabled: {last_user}"
+        );
+        sse_text(
+            "\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"read_file\">\n<｜DSML｜ parameter name=\"path\" string=\"true\">README.md</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>",
+        )
+    }));
+    // Request 16: Synthesis attempt 2 must use flattened plain-text history (zero tool/tool_calls entries).
+    handlers.push(Box::new(|req| {
+        let msgs = req["messages"].as_array().expect("messages array");
+        assert!(
+            !msgs.iter().any(|m| m["role"] == "tool"),
+            "flattened synthesis retry must strip role=tool messages"
+        );
+        assert!(
+            !msgs.iter().any(|m| m
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty())),
+            "flattened synthesis retry must strip assistant tool_calls"
+        );
+        let flattened_obs = msgs
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .filter_map(|m| m["content"].as_str())
+            .any(|c| c.contains("[Tool execution observations") && c.contains("list_files"));
+        assert!(
+            flattened_obs,
+            "flattened synthesis retry must preserve compact tool observations"
+        );
+        sse_text("已查看工作区根目录（README.md），已达到单轮工具上限。")
+    }));
+
+    let server = start_mock_server(handlers);
+    let model = mock_model(&server.endpoint);
+    let report = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(report.bot_turns_run, 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 16);
+    assert!(matches!(
+        report.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    let reply = host
+        .find_reply_for_input(&ws_id, input_id)
+        .unwrap()
+        .expect("clean reply persisted");
+    assert_eq!(
+        reply["content"],
+        "已查看工作区根目录（README.md），已达到单轮工具上限。"
+    );
+
+    let store = peer_store::ConversationStore::new(home.path());
+    let snap = store.read_committed(&conv_id, None, 1024 * 1024).unwrap();
+    assert!(
+        snap.history
+            .messages
+            .iter()
+            .filter(|m| m["kind"] == "agent_reply")
+            .all(|m| !m["content"].as_str().unwrap_or("").contains("<｜DSML｜")),
+        "no persisted agent_reply may contain raw DSML markup"
+    );
+
+    host.close();
+}
+
+#[tokio::test]
+async fn main_loop_retries_and_rejects_persistent_dsml_protocol_leak() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("LeakGuardBot"))
+        .unwrap();
+    let ws_id = entry.workspace_id.clone();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let cancel = CancellationToken::new();
+    let input_id = "in-dsml-reject-1";
+    host.submit_user_input(&ws_id, input_id, "Check files", None)
+        .unwrap();
+
+    let leak_payload = "<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"list_files\">\n<｜DSML｜ parameter name=\"path\" string=\"true\">.</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>";
+    let p1 = leak_payload.to_owned();
+    let p2 = leak_payload.to_owned();
+    let p3 = leak_payload.to_owned();
+    let server = start_mock_server(vec![
+        Box::new(move |_| sse_text(&p1)),
+        Box::new(move |req| {
+            let msgs = req["messages"].as_array().unwrap();
+            assert!(
+                !msgs.iter().any(|m| m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("<｜DSML｜ calls>")),
+                "leaked DSML output must not be echoed into repair history"
+            );
+            sse_text(&p2)
+        }),
+        Box::new(move |_| sse_text(&p3)),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let report = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    assert!(
+        matches!(
+            report.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::Failed { code }) if code == "unsupported_tool_response"
+        ),
+        "expected Failed(unsupported_tool_response), got {:?}",
+        report.last_turn
+    );
+    assert!(
+        host.find_reply_for_input(&ws_id, input_id)
+            .unwrap()
+            .is_none(),
+        "pure DSML response must never be persisted as agent_reply"
+    );
+
+    host.close();
+}
+
+#[tokio::test]
+async fn user_turn_succeeds_and_spawns_session_when_history_exceeds_four_megabytes() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Large history test\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("HistoryBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let cancel = CancellationToken::new();
+    // Seed initial turn so the conversation exists cleanly in index.jsonl.
+    let seed_input = "in-seed-4mb";
+    let seed_anchor = input_message_id(seed_input).unwrap();
+    host.submit_user_input(&ws_id, seed_input, "Initial task context", None)
+        .unwrap();
+    let seed_server = start_mock_server(vec![Box::new(move |_| {
+        sse_tool_call(
+            "tc-seed",
+            "post_reply",
+            &json!({ "replyTo": [seed_anchor.clone()], "text": "Initial ready." }),
+        )
+    })]);
+    let seed_model = mock_model(&seed_server.endpoint);
+    let _ = host
+        .tick_foreground(&ws_id, &seed_model, json!({}), &cancel)
+        .await
+        .unwrap();
+
+    // Push conversation JSONL cleanly past the 4 MiB boundary using large agent_turn rows.
+    let conv_store = peer_store::ConversationStore::new(home.path());
+    let big_payload = "X".repeat(190_000);
+    for idx in 0..24 {
+        let turn_id = format!("turn-bloat-{idx}");
+        conv_store
+            .append_message_idempotent(
+                &conv_id,
+                &json!({
+                    "id": turn_id,
+                    "role": "assistant",
+                    "kind": "agent_turn",
+                    "turnId": turn_id,
+                    "content": "",
+                    "rounds": [{
+                        "text": "",
+                        "toolCalls": [{
+                            "name": "read_file",
+                            "input": { "path": "README.md" },
+                            "result": { "ok": true, "blob": big_payload }
+                        }]
+                    }],
+                    "createdAt": "2026-11-22T12:00:00.000Z"
+                }),
+                "2026-11-22T12:00:00.000Z",
+                None,
+            )
+            .unwrap();
+    }
+    let jsonl_bytes = fs::metadata(home.path().join(format!("conversations/{conv_id}.jsonl")))
+        .unwrap()
+        .len();
+    assert!(
+        jsonl_bytes > 4 * 1024 * 1024,
+        "expected conversation JSONL > 4 MiB, got {jsonl_bytes} bytes"
+    );
+
+    let rerun_id = "in-rerun-4mb";
+    let rerun_anchor = input_message_id(rerun_id).unwrap();
+    let rerun_anchor_spawn = rerun_anchor.clone();
+    let rerun_anchor_reply = rerun_anchor.clone();
+    host.submit_user_input(&ws_id, rerun_id, "重跑", None)
+        .unwrap();
+
+    let server = start_mock_server(vec![
+        Box::new(move |req| {
+            let msgs = req["messages"].as_array().expect("messages array");
+            let user_contents: Vec<&str> = msgs
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect();
+            assert!(
+                user_contents.contains(&"重跑"),
+                "4+ MiB history must preserve user input '重跑', saw {user_contents:?}"
+            );
+            assert!(
+                !user_contents
+                    .iter()
+                    .any(|c| c.contains("Review current project status")),
+                "must NOT inject empty-history wake prompt when user history exists: {user_contents:?}"
+            );
+            sse_tool_call(
+                "tc-spawn-4mb",
+                "spawn_session",
+                &json!({
+                    "anchorMessageIds": [rerun_anchor_spawn.clone()],
+                    "title": "验证超过4MB对话仍可派发任务",
+                    "brief": "Read README.md and confirm.",
+                    "kind": "research",
+                    "readOnly": true,
+                    "requiredCapabilities": ["local.file.read"],
+                    "successCriteria": [{
+                        "id": "c1",
+                        "kind": "file-exists",
+                        "path": "README.md",
+                        "description": "README exists"
+                    }]
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let sid = extract_spawned_session_id(req).expect("spawned sessionId in tool output");
+            sse_tool_call(
+                "tc-reply-4mb",
+                "post_reply",
+                &json!({
+                    "replyTo": [rerun_anchor_reply.clone()],
+                    "sources": [sid.clone()],
+                    "statusClaims": [{ "sessionId": sid, "status": "queued" }],
+                    "text": "已重新派发任务。"
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let report = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(report.bot_turns_run, 1);
+    let turn = report.last_turn.as_ref().expect("last_turn present");
+    assert_eq!(
+        turn.spawned_session_ids.len(),
+        1,
+        "expected spawn_session to succeed even when conversation JSONL exceeds 4 MiB"
+    );
+    assert!(matches!(turn.end, TurnEndKind::ReplyCommitted { .. }));
+    let reply = host
+        .find_reply_for_input(&ws_id, rerun_id)
+        .unwrap()
+        .expect("reply persisted for >4MiB turn");
+    assert_eq!(reply["content"], "已重新派发任务。");
+
+    host.close();
+}
+
+#[tokio::test]
+async fn project_agent_runner_executes_git_query_without_native_process_owner_unknown() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Git Query Repo\n").unwrap();
+    for args in [
+        &["init"][..],
+        &["config", "user.email", "test@example.com"][..],
+        &["config", "user.name", "Test User"][..],
+        &["add", "README.md"][..],
+        &["commit", "-m", "initial commit"][..],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(ws.path())
+            .status()
+            .expect("run git setup");
+        assert!(status.success(), "git setup {:?} failed", args);
+    }
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("GitBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let cancel = CancellationToken::new();
+    let input_id = "in-git-query-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&ws_id, input_id, "Check git repository status", None)
+        .unwrap();
+
+    let server = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "tc-git-1",
+                "git_query",
+                &json!({ "operation": "snapshot", "path": "." }),
+            )
+        }),
+        Box::new(move |req| {
+            let tool_msg = req["messages"]
+                .as_array()
+                .and_then(|arr| arr.iter().rfind(|m| m["role"] == "tool"))
+                .expect("tool response for git_query");
+            let parsed: Value = serde_json::from_str(tool_msg["content"].as_str().unwrap_or("{}"))
+                .unwrap_or_default();
+            assert_ne!(
+                parsed.get("reason").and_then(Value::as_str),
+                Some("native_process_owner_unknown"),
+                "git_query must not fail with native_process_owner_unknown: {parsed}"
+            );
+            assert_eq!(
+                parsed.get("kind").and_then(Value::as_str),
+                Some("local_git_observation"),
+                "expected local_git_observation from git_query, got: {parsed}"
+            );
+            sse_tool_call(
+                "tc-post-git",
+                "post_reply",
+                &json!({ "replyTo": [anchor.clone()], "text": "Git 状态已读取。" }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let report = host
+        .tick_foreground(&ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(report.bot_turns_run, 1);
+    assert!(matches!(
+        report.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    host.close();
+}
+
+#[tokio::test]
+async fn progressive_skill_pack_projection_preserves_prefix_and_enforces_security_ceiling() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("ProgBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+
+    let input_id = "in-prog-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(
+        &ws_id,
+        input_id,
+        "Remember our preferred release cadence",
+        None,
+    )
+    .unwrap();
+
+    let initial_tools_slot: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let initial_tools_writer = Arc::clone(&initial_tools_slot);
+    let initial_tools_reader = Arc::clone(&initial_tools_slot);
+    let anchor_clone = anchor.clone();
+
+    let server = start_mock_server(vec![
+        // Round 1: blank workspace starts with 14 Tier-1 core tools + skill pack catalog.
+        Box::new(move |req| {
+            let sys = req["messages"]
+                .as_array()
+                .and_then(|arr| arr.iter().find(|m| m["role"] == "system"))
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or("");
+            assert!(
+                sys.contains("On-Demand Capability Packs"),
+                "Progressive mode must inject compact skill-pack catalog"
+            );
+            assert!(sys.contains("- memory:"));
+            assert!(sys.contains("- objectives:"));
+
+            let tools = tool_names_from_request(req);
+            assert_eq!(
+                tools.len(),
+                14,
+                "blank workspace in Progressive mode must project exactly 14 core tools, got {:?}",
+                tools
+            );
+            assert!(tools.iter().any(|t| t == "activate_skill_pack"));
+            assert!(!tools.iter().any(|t| t == "memory_remember"));
+            assert!(!tools.iter().any(|t| t == "memory_write"));
+            assert!(!tools.iter().any(|t| t == "create_objective"));
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "project_agent must never project {forbidden}"
+                );
+            }
+            *initial_tools_writer.lock().unwrap() = tools;
+
+            sse_tool_call(
+                "prog-1",
+                "activate_skill_pack",
+                &json!({ "packs": ["memory", "objectives"] }),
+            )
+        }),
+        // Round 2: prefix stays byte-identical, unlocked tools append strictly at the tail.
+        Box::new(move |req| {
+            let activate_out = last_tool_result_json(req).expect("activate_skill_pack output");
+            assert_eq!(activate_out["ok"], true);
+            assert_eq!(activate_out["activated"], json!(["memory", "objectives"]));
+            assert!(activate_out["guides"]["memory"].as_str().is_some());
+            assert!(activate_out["guides"]["objectives"].as_str().is_some());
+
+            let tools = tool_names_from_request(req);
+            let initial = initial_tools_reader.lock().unwrap().clone();
+            assert_eq!(
+                &tools[..initial.len()],
+                &initial[..],
+                "KV-cache stability: prefix tool order must remain identical after activation"
+            );
+            let tail = &tools[initial.len()..];
+            assert!(tail.iter().any(|t| t == "memory_remember"));
+            assert!(tail.iter().any(|t| t == "memory_list"));
+            assert!(tail.iter().any(|t| t == "memory_forget"));
+            assert!(tail.iter().any(|t| t == "create_objective"));
+            assert!(
+                !tools.iter().any(|t| t == "memory_write"),
+                "duplicate legacy memory_write stays hidden in Progressive mode"
+            );
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "project_agent must never project {forbidden}"
+                );
+            }
+
+            sse_tool_call(
+                "prog-2",
+                "memory_remember",
+                &json!({
+                    "kind": "preference",
+                    "text": "Prefer weekly Friday releases"
+                }),
+            )
+        }),
+        // Round 3: commit reply
+        Box::new(move |req| {
+            let mem_out = last_tool_result_json(req).expect("memory_remember output");
+            assert_eq!(mem_out["ok"], true);
+            sse_tool_call(
+                "prog-3",
+                "post_reply",
+                &json!({
+                    "replyTo": [anchor_clone],
+                    "text": "已记住每周五发布的偏好。"
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&ws_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.bot_turns_run, 1);
+    assert!(matches!(
+        tick.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    let memories = host.memory().list(&MemoryFilter {
+        workspace_id: Some(&ws_id),
+        ..Default::default()
+    });
+    assert_eq!(memories.len(), 1);
+    assert!(memories[0].text.contains("Friday"));
+}
+
+#[tokio::test]
+async fn phase1_ergonomics_auto_anchor_spawn_preset_and_post_reply_session_prefix_and_long_text() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Ergonomics\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("ErgoBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    // Turn 1: omit anchorMessageIds & requiredCapabilities in spawn_session (use capabilityPreset),
+    // then cite "session:<sid>" without statusClaims and >2000-char text in post_reply.
+    let input_id = "in-ergo-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&ws_id, input_id, "Inspect repo layout", None)
+        .unwrap();
+
+    let sid_slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let sid_writer = Arc::clone(&sid_slot);
+    let long_body = format!("任务已派发。{}", "详细说明内容。".repeat(350));
+    assert!(
+        long_body.chars().count() > 2100 && long_body.chars().count() < 8000,
+        "test body must exercise >2000 relaxed TEXT_MAX"
+    );
+    let long_body_clone = long_body.clone();
+
+    let server_1 = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "ergo-spawn",
+                "spawn_session",
+                &json!({
+                    "title": "Read README",
+                    "brief": "Inspect README.md",
+                    "kind": "research",
+                    "readOnly": true,
+                    "capabilityPreset": "read_only",
+                    "successCriteria": [{
+                        "kind": "file-exists",
+                        "path": "README.md",
+                        "description": "README exists"
+                    }]
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let sid = extract_spawned_session_id(req).expect("spawn_session succeeded");
+            *sid_writer.lock().unwrap() = Some(sid.clone());
+            sse_tool_call(
+                "ergo-reply",
+                "post_reply",
+                &json!({
+                    "text": long_body_clone,
+                    "sources": [format!("session:{sid}")]
+                }),
+            )
+        }),
+    ]);
+
+    let model_1 = mock_model(&server_1.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick_1 = host
+        .tick_foreground(&ws_id, &model_1, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick_1.bot_turns_run, 1);
+    assert!(matches!(
+        tick_1.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    let spawned_sid = sid_slot.lock().unwrap().clone().expect("captured sid");
+    let sessions = host.supervisor().list_sessions(&ws_id);
+    let sess = sessions
+        .iter()
+        .find(|s| s.session_id == spawned_sid)
+        .expect("spawned session exists");
+    assert_eq!(
+        sess.anchor_message_ids,
+        vec![anchor.clone()],
+        "spawn_session must auto-anchor to current user input when omitted"
+    );
+
+    let reply = host
+        .find_reply_for_input(&ws_id, input_id)
+        .unwrap()
+        .expect("long post_reply committed");
+    assert_eq!(reply["content"], long_body);
+    assert_eq!(reply["meta"]["sources"], json!([spawned_sid.clone()]));
+    assert_eq!(
+        reply["meta"]["sessionStates"][0]["sessionId"],
+        json!(spawned_sid.clone())
+    );
+    assert_eq!(
+        reply["meta"]["sessionStates"][0]["status"],
+        json!("queued"),
+        "post_reply must auto-fill the actual session status at reply commit time"
+    );
+    assert!(
+        matches!(sess.status.as_str(), "queued" | "running"),
+        "spawned session should be queued or running, got {}",
+        sess.status
+    );
+
+    // Turn 2: explicit wrong statusClaims and forged sources must STILL be rejected strictly.
+    let input_2 = "in-ergo-2";
+    host.submit_user_input(&ws_id, input_2, "Check truthfulness guards", None)
+        .unwrap();
+    let sid_for_mismatch = spawned_sid.clone();
+    let server_2 = start_mock_server(vec![
+        // Attempt 1: explicit status_claim_mismatch ("accepted" when actual status is "queued")
+        Box::new(move |_| {
+            sse_tool_call(
+                "ergo-bad-claim",
+                "post_reply",
+                &json!({
+                    "text": "任务已完成。",
+                    "sources": [sid_for_mismatch],
+                    "statusClaims": [{ "sessionId": sid_for_mismatch, "status": "accepted" }]
+                }),
+            )
+        }),
+        // Attempt 2: forged source path
+        Box::new(|req| {
+            let err_out = last_tool_result_json(req).expect("mismatch error");
+            assert_eq!(err_out["ok"], false);
+            assert_eq!(err_out["error"], "status_claim_mismatch");
+            sse_tool_call(
+                "ergo-forged",
+                "post_reply",
+                &json!({
+                    "text": "引用假路径。",
+                    "sources": ["src/does-not-exist.rs"]
+                }),
+            )
+        }),
+        // Attempt 3: honest reply succeeds
+        Box::new(|req| {
+            let err_out = last_tool_result_json(req).expect("forged_sources error");
+            assert_eq!(err_out["ok"], false);
+            assert_eq!(err_out["error"], "forged_sources");
+            sse_tool_call(
+                "ergo-ok",
+                "post_reply",
+                &json!({
+                    "text": "已如实确认状态。"
+                }),
+            )
+        }),
+    ]);
+
+    let model_2 = mock_model(&server_2.endpoint);
+    let tick_2 = host
+        .tick_foreground(&ws_id, &model_2, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick_2.bot_turns_run, 1);
+    assert!(matches!(
+        tick_2.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    let _ = (&conv_id, &mut perm);
+}
+
+#[tokio::test]
+async fn wake_turn_host_fallback_reports_failed_session_when_model_yields_without_post_reply() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("WakeFailBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let input_id = "in-wake-fail-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": anchor.clone(),
+                "role": "user",
+                "kind": "user_input",
+                "inputId": input_id,
+                "content": "Run UI patch",
+                "createdAt": "2026-11-22T00:00:00.000Z"
+            }),
+            "2026-11-22T00:00:00.000Z",
+            None,
+        )
+        .unwrap();
+    // Mark user input handled by spawning directly and failing it so the wake turn runs alone.
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: ws_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id.clone(),
+                anchor_message_ids: vec![anchor.clone()],
+                input_id: input_id.into(),
+                surface: "tui".into(),
+                title: "降级摘要条样式".into(),
+                brief: "Update provider-settings.css".into(),
+                kind: "ui".into(),
+                read_only: false,
+                required_capabilities: vec!["local.file.edit".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: None,
+                    kind: "manual".into(),
+                    description: "Check spacing".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({}),
+            },
+            true,
+        )
+        .unwrap();
+    // Drain the initial user input by posting a quick ack, then fail the session to enqueue wake event.
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "reply-ack-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "已派发任务。",
+                "replyTo": [anchor.clone()],
+                "createdAt": "2026-11-22T00:00:01.000Z"
+            }),
+            "2026-11-22T00:00:01.000Z",
+            None,
+        )
+        .unwrap();
+    // Drain user_inputs via inbox consume or simply fail session and run runner directly for wake turn.
+    assert!(
+        host.supervisor()
+            .fail_session(
+                &ws_id,
+                &spawned.session_id,
+                "provider_502",
+                "Upstream gateway 502 while applying CSS patch",
+                true,
+            )
+            .unwrap()
+    );
+
+    // Mock model returns plain text without calling post_reply on both initial wake round and delivery repair round.
+    let server = start_mock_server(vec![
+        Box::new(|_| sse_text("I see the task failed.")),
+        Box::new(|_| sse_text("Still not calling post_reply.")),
+    ]);
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+
+    let wake_events = vec![json!({
+        "eventId": "ev-fail-1",
+        "kind": "session_ended",
+        "payload": {
+            "sessionId": spawned.session_id,
+            "status": "failed",
+            "error": "provider_502"
+        }
+    })];
+    let outcome = host
+        .runner()
+        .run_turn(
+            &peer_project_agent::RunTurnOptions {
+                workspace_id: &ws_id,
+                workspace_path: ws.path(),
+                conversation_id: &conv_id,
+                kind: "wake",
+                user_inputs: &[],
+                wake_events: &wake_events,
+                worker_model_selection: json!({}),
+                holds_lease: true,
+            },
+            &model,
+            &cancel,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(outcome.end, TurnEndKind::ReplyCommitted { .. }),
+        "host-side wake fallback must commit visible failure notification, got {:?}",
+        outcome.end
+    );
+
+    let msgs = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let fallback = msgs
+        .iter()
+        .find(|m| m["kind"] == "agent_reply" && m["meta"]["fallback"].as_bool() == Some(true))
+        .expect("host fallback failure reply persisted");
+    let content = fallback["content"].as_str().unwrap_or("");
+    assert!(content.contains("降级摘要条样式"));
+    assert!(content.contains("Upstream gateway 502"));
+    assert_eq!(fallback["meta"]["sources"], json!([spawned.session_id]));
+    assert_eq!(fallback["meta"]["sessionStates"][0]["status"], "failed");
+    assert_eq!(fallback["replyTo"], json!([anchor]));
+}
+
+#[tokio::test]
+async fn worker_exhausting_turn_budget_synthesizes_final_report_and_resolves_multi_repo_criteria() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    // Simulate a multi-repo parent workspace (`peer-dev` containing `RepoA/` and `RepoB/`).
+    let css_dir = ws.path().join("RepoA/src");
+    fs::create_dir_all(&css_dir).unwrap();
+    fs::create_dir_all(ws.path().join("RepoB")).unwrap();
+    fs::write(
+        css_dir.join("panel.css"),
+        ".strip { padding: 12px; background: none; }\n",
+    )
+    .unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("WrapBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    assert!(matches!(
+        host.ensure_lease(&ws_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: ws_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec!["input-wrap-1".into()],
+                input_id: "wrap-1".into(),
+                surface: "tui".into(),
+                title: "Verify panel CSS".into(),
+                brief: "Check RepoA/src/panel.css".into(),
+                kind: "ui".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into(), "local.file.list".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c1".into()),
+                    kind: "file-contains".into(),
+                    description: "panel.css removes background".into(),
+                    command: None,
+                    // Intentionally relative to RepoA/ rather than ws root:
+                    path: Some("src/panel.css".into()),
+                    expect: Some("background: none;".into()),
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({}),
+            },
+            true,
+        )
+        .unwrap();
+
+    let promoted = host.supervisor().promote_queued(&ws_id, true).unwrap();
+    assert_eq!(promoted.start, vec![spawned.session_id.clone()]);
+
+    // max_turns = 2:
+    // Turn 1: list_files -> consumes turn 1
+    // Turn 2: read_file  -> consumes turn 2 -> hits agent_loop_exhausted!
+    // Turn 3 (host graceful wrap-up): tools must be empty ([]), model returns final summary.
+    let server = start_mock_server(vec![
+        Box::new(|req| {
+            let user_prompt = req["messages"]
+                .as_array()
+                .and_then(|arr| arr.iter().find(|m| m["role"] == "user"))
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or("");
+            assert!(
+                user_prompt.contains("Turn budget: 2 turns"),
+                "worker prompt must advertise turn budget"
+            );
+            sse_tool_call("w-1", "list_files", &json!({ "path": "RepoA/src" }))
+        }),
+        Box::new(|_| {
+            sse_tool_call(
+                "w-2",
+                "read_file",
+                &json!({ "path": "RepoA/src/panel.css" }),
+            )
+        }),
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(
+                tools.is_empty(),
+                "graceful wrap-up turn must disable tools, got {:?}",
+                tools
+            );
+            sse_text(
+                "Verified RepoA/src/panel.css contains `background: none;` and `padding: 12px;`.",
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let outcome = host
+        .run_promoted_session(
+            &ws_id,
+            &spawned.session_id,
+            &model,
+            None,
+            &mut perm,
+            2,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.status, "completed");
+    assert!(outcome.content.contains("RepoA/src/panel.css"));
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &spawned.session_id)
+        .expect("plan persisted");
+    assert_eq!(plan["status"], "completed");
+    assert_eq!(plan["criterionResults"][0]["passed"], true);
+    assert_eq!(plan["delegationOrigin"]["independentVerifier"], "passed");
+}
+
+#[tokio::test]
+async fn spawn_omitting_criterion_description_wait_keeps_live_activity_and_wake_shows_visible_activity()
+ {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Check\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("WaitVisBot")).unwrap();
+    let ws_id = entry.workspace_id.clone();
+
+    let input_id = "in-wait-vis-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&ws_id, input_id, "跑检查", None)
+        .unwrap();
+
+    let sid_slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let sid_writer = Arc::clone(&sid_slot);
+
+    // Turn 1: spawn_session with a command criterion omitting `description`, then wait_for_sessions.
+    let server_1 = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "wv-spawn",
+                "spawn_session",
+                &json!({
+                    "title": "只跑类型检查",
+                    "brief": "Run check",
+                    "kind": "ops",
+                    "readOnly": true,
+                    "successCriteria": [{
+                        "id": "c1",
+                        "kind": "command",
+                        "command": "echo ok",
+                        "expect": "ok"
+                    }]
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let sid = extract_spawned_session_id(req)
+                .expect("spawn_session succeeds without criterion description");
+            *sid_writer.lock().unwrap() = Some(sid.clone());
+            sse_tool_call(
+                "wv-wait",
+                "wait_for_sessions",
+                &json!({ "sessionIds": [sid] }),
+            )
+        }),
+    ]);
+
+    let model_1 = mock_model(&server_1.endpoint);
+    let cancel = CancellationToken::new();
+    let fg = host
+        .tick_foreground(&ws_id, &model_1, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg.bot_turns_run, 1);
+    assert!(matches!(
+        fg.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::AwaitingChildren { .. })
+    ));
+
+    // Activity must remain live (not disposed to a blank orphan row) while awaiting child session.
+    let waiting_act = host
+        .runner()
+        .activity_for(&ws_id)
+        .expect("activity stays live during wait_for_sessions");
+    assert_eq!(waiting_act.phase, "tool");
+    assert!(waiting_act.finished_at.is_none());
+    assert_eq!(waiting_act.segments[0]["name"], "wait_for_sessions");
+    assert_eq!(waiting_act.segments[0]["status"], "running");
+
+    // Capture activity updates during the subsequent wake turn answering the unanswered input.
+    type WakeActivityLog = Arc<Mutex<Vec<(String, Vec<String>)>>>;
+    let wake_activities: WakeActivityLog = Arc::new(Mutex::new(Vec::new()));
+    let wake_cb = Arc::clone(&wake_activities);
+    host.runner()
+        .set_activity_listener(Some(Arc::new(move |act, _status| {
+            wake_cb
+                .lock()
+                .unwrap()
+                .push((act.phase.clone(), act.reply_to.clone()));
+        })));
+
+    let sid = sid_slot.lock().unwrap().clone().expect("spawned sid");
+    let sid_for_get = sid.clone();
+    let sid_for_reply = sid.clone();
+    // Run worker + wake turn: worker replies, then wake turn runs with visible activity
+    // and posts a proactive wake reply citing `sources: [sid]` WITHOUT explicit `replyTo`
+    // (proving automatic unanswered-anchor inheritance).
+    let server_2 = start_mock_server(vec![
+        // Worker reply (completes immediately)
+        Box::new(|_| sse_text("Checks passed clean.")),
+        // Wake turn round 1: get_session(detail="report")
+        Box::new(move |_| {
+            sse_tool_call(
+                "wv-get",
+                "get_session",
+                &json!({ "sessionId": sid_for_get, "detail": "report" }),
+            )
+        }),
+        // Wake turn round 2: proactive wake reply omitting replyTo -> auto-anchors to unanswered user input
+        Box::new(move |req| {
+            let out = last_tool_result_json(req).expect("get_session report output");
+            assert_eq!(out["ok"], true);
+            assert!(
+                out["report"]["workerOutput"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("Checks passed")
+            );
+            assert!(
+                out["report"].get("summary").is_none(),
+                "summary must not be duplicated inside report"
+            );
+            sse_tool_call(
+                "wv-reply",
+                "post_reply",
+                &json!({
+                    "proactive": true,
+                    "sources": [sid_for_reply],
+                    "text": "检查全部通过。"
+                }),
+            )
+        }),
+    ]);
+
+    let model_2 = mock_model(&server_2.endpoint);
+    let mut perm = AutoAllowPermission;
+    let worker_out = host
+        .run_promoted_session(&ws_id, &sid, &model_2, None, &mut perm, 8, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(worker_out.status, "completed");
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &sid)
+        .expect("completed plan");
+    assert_eq!(plan["progress"]["completed"], 1);
+    assert_eq!(plan["progress"]["percent"], 100);
+
+    let tick2 = host
+        .tick_foreground(&ws_id, &model_2, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick2.wake_turns_run, 1);
+
+    let reply = host
+        .find_reply_for_input(&ws_id, input_id)
+        .unwrap()
+        .expect("proactive wake reply must auto-anchor to unanswered user input");
+    assert_eq!(reply["replyTo"], json!([anchor]));
+
+    // Verify failed-verification result_ready projects `verification_failed` (never stuck "正在核对结果").
+    let failed_ver_plan = json!({
+        "planId": "plan-vf",
+        "status": "completed",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-vf",
+            "phase": "completed",
+            "independentVerifier": "failed"
+        },
+        "verificationReport": {
+            "passed": false,
+            "error": "git_read_permission_denied"
+        }
+    });
+    let lc = peer_project_agent::decide_lifecycle(&failed_ver_plan, false, false, None, None);
+    assert_eq!(lc.status, "result_ready");
+    assert_eq!(lc.follow_up.owner, "bot");
+    assert_eq!(lc.follow_up.reason, "verification_failed");
+
+    let captured = wake_activities.lock().unwrap().clone();
+    assert!(
+        captured.iter().any(|(phase, reply_to)| phase == "thinking"
+            && reply_to.contains(&input_message_id(input_id).unwrap())),
+        "wake turn answering an unanswered user input must emit visible live activity anchored to that input, got {:?}",
+        captured
+    );
+    assert!(
+        captured.iter().any(|(phase, _)| phase == "done"),
+        "wake turn must finish cleanly in done phase, got {:?}",
+        captured
+    );
+}
+
+#[tokio::test]
+async fn independent_verifier_handles_missing_parent_read_and_repairs_unindexed_ref_without_tools()
+{
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "peer verifier repair\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("RepairBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-rep-1", "Check readme", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let anchor = input_message_id("in-rep-1").unwrap();
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![anchor],
+                input_id: "in-rep-1".into(),
+                surface: "desktop".into(),
+                title: "Verify readme with repair".into(),
+                brief: "Read readme.md and confirm contents.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into(), "local.file.list".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-review".into()),
+                    kind: "model_review".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                    description: "Verify readme mentions verifier repair".into(),
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    let promoted = host
+        .supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+    assert_eq!(promoted.start, vec![spawned.session_id.clone()]);
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Read readme.md and verified contents.")),
+    ]);
+
+    let verifier_server = start_mock_server(vec![
+        // Attempt 0 Turn 1: probe a multi-level nonexistent path (previously crashed with file_parent_unavailable!)
+        Box::new(|_| {
+            sse_tool_call(
+                "v-missing-parent",
+                "list_files",
+                &json!({ "path": "nonexistent_parent/shell-artifacts" }),
+            )
+        }),
+        // Attempt 0 Turn 2: confirm prior tool failed recoverably, then read readme.md
+        Box::new(|req| {
+            let msgs_str = serde_json::to_string(&req["messages"]).unwrap();
+            assert!(
+                msgs_str.contains("file_unavailable"),
+                "expected recoverable file_unavailable tool result, got {msgs_str}"
+            );
+            sse_tool_call("v-read", "read_file", &json!({ "path": "readme.md" }))
+        }),
+        // Attempt 0 Turn 3: emit passed: true with string missingEvidence + 1 valid worker ref + 1 raw file path
+        Box::new(|req| {
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs line");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            let report = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": ["minor caveat emitted as string"],
+                "risks": [],
+                "evidenceRefs": [known[0], "/raw/workspace/readme.md"],
+                "summary": "Verified readme.md cleanly."
+            });
+            sse_text(&serde_json::to_string(&report).unwrap())
+        }),
+        // Attempt 1 (tool-less format repair on SAME conversation): verify tools disabled and exact bad ref named
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(
+                tools.is_empty(),
+                "Attempt 1 format repair must be strictly tool-less, got {:?}",
+                tools
+            );
+            let last_user = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "user")
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or("");
+            assert!(
+                last_user.contains("/raw/workspace/readme.md"),
+                "repair prompt must name the exact unindexed ref, got {last_user}"
+            );
+            let marker = "Valid indexed evidenceRefs (cite ONLY exact strings from this list): ";
+            let line = last_user
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("valid indexed refs line in repair prompt");
+            let valid: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            assert!(!valid.is_empty(), "expected non-empty valid refs list");
+            let repaired = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": ["minor caveat emitted as string"],
+                "risks": [],
+                "evidenceRefs": [valid[0]],
+                "summary": "Verified readme.md cleanly after removing raw path ref."
+            });
+            sse_text(&serde_json::to_string(&repaired).unwrap())
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .expect("plan");
+    assert_eq!(plan["delegationOrigin"]["independentVerifier"], "passed");
+    assert_eq!(plan["verificationReport"]["passed"], true);
+    assert_eq!(
+        plan["verificationReport"]["missingEvidence"][0]["reason"],
+        "minor caveat emitted as string"
+    );
+    assert!(
+        plan["delegationOrigin"]["verifierConversationId"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "verifierConversationId must be persisted"
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn independent_verifier_rejects_fabricated_refs_after_repair_and_records_conversation_id() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "peer strict refs\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("StrictBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-str-1", "Check readme", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let anchor = input_message_id("in-str-1").unwrap();
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![anchor],
+                input_id: "in-str-1".into(),
+                surface: "desktop".into(),
+                title: "Reject fabricated refs".into(),
+                brief: "Read readme.md.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-review".into()),
+                    kind: "model_review".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                    description: "Verify readme".into(),
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    host.supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Done.")),
+    ]);
+    let fake_report = json!({
+        "passed": true,
+        "failedCriteria": [],
+        "missingEvidence": [],
+        "risks": [],
+        "evidenceRefs": ["tool-result://call-fabricated-999"],
+        "summary": "Claimed pass with fabricated ref."
+    });
+    let fake_json = serde_json::to_string(&fake_report).unwrap();
+    let fake_json_2 = fake_json.clone();
+    let verifier_server = start_mock_server(vec![
+        Box::new(move |_| sse_text(&fake_json)),
+        Box::new(move |req| {
+            assert!(tool_names_from_request(req).is_empty());
+            sse_text(&fake_json_2)
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .expect("plan");
+    assert_eq!(plan["delegationOrigin"]["independentVerifier"], "failed");
+    assert_eq!(
+        plan["verificationReport"]["error"],
+        "verifier_report_invalid"
+    );
+    assert!(
+        plan["delegationOrigin"]["verifierConversationId"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
+        "verifierConversationId must still be recorded on invalid report"
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn command_and_manual_criteria_reach_human_gate_and_confirm_cleanly() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "pr 334 verified\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("GateBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-gate-1", "Reopen clean PR", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let anchor = input_message_id("in-gate-1").unwrap();
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id.clone(),
+                anchor_message_ids: vec![anchor],
+                input_id: "in-gate-1".into(),
+                surface: "desktop".into(),
+                title: "Reopen clean PR".into(),
+                brief: "Verify PR diff and report.".into(),
+                kind: "code".into(),
+                read_only: false,
+                required_capabilities: vec!["local.file.read".into(), "local.shell.exec".into()],
+                success_criteria: vec![
+                    SpawnCriterion {
+                        id: Some("c1".into()),
+                        kind: "command".into(),
+                        command: Some("git diff --name-only".into()),
+                        path: None,
+                        expect: None,
+                        description: "Diff only touches 2 files".into(),
+                    },
+                    SpawnCriterion {
+                        id: Some("c2".into()),
+                        kind: "manual".into(),
+                        command: None,
+                        path: None,
+                        expect: None,
+                        description: "User confirms PR link and summary".into(),
+                    },
+                ],
+                priority: "high".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    host.supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("PR #334 created cleanly.")),
+    ]);
+    let verifier_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("v-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|req| {
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            let report = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [known[0]],
+                "summary": "All command criteria verified."
+            });
+            sse_text(&serde_json::to_string(&report).unwrap())
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .expect("plan");
+    assert_eq!(plan["delegationOrigin"]["independentVerifier"], "passed");
+    assert_eq!(plan["criterionResults"][0]["criterionId"], "c1");
+    assert_eq!(plan["criterionResults"][0]["passed"], true);
+    assert!(plan["criterionResults"][0]["evidenceRef"].is_string());
+    assert!(
+        plan["runner"]["verifierRuns"]
+            .as_array()
+            .is_some_and(|runs| runs.iter().any(|r| r["status"] == "passed"))
+    );
+
+    // Watchdog & lifecycle must treat `phase == verifying` as `verifying` (never premature `result_ready`).
+    let mut verifying_plan = plan.clone();
+    verifying_plan["delegationOrigin"]["phase"] = json!("verifying");
+    let wf = peer_project_agent::watch_facts_from_plan(&verifying_plan).expect("watch facts");
+    assert_eq!(wf.status, "verifying");
+
+    // Projected session must surface human gate (`awaiting_human_gate`), NOT stuck `正在核对结果`.
+    let projected = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&entry.workspace_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let sess = projected
+        .iter()
+        .find(|s| s["sessionId"] == spawned.session_id)
+        .expect("projected session");
+    assert_eq!(sess["status"], "result_ready");
+    assert_eq!(sess["resultConfirmationRequired"], true);
+    assert_eq!(sess["followUp"]["owner"], "user");
+    assert_eq!(sess["followUp"]["reason"], "awaiting_human_gate");
+
+    // Explicit user confirmation settles manual criterion + accepts the session.
+    let accepted = host
+        .confirm_session_result(&entry.workspace_id, &spawned.session_id, None)
+        .unwrap();
+    assert!(accepted.close_gate_passed);
+    assert_eq!(accepted.accepted_by.as_deref(), Some("user"));
+
+    let projected_after = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&entry.workspace_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let sess_after = projected_after
+        .iter()
+        .find(|s| s["sessionId"] == spawned.session_id)
+        .expect("projected session after confirm");
+    assert_eq!(sess_after["status"], "accepted");
+    assert_eq!(sess_after["followUp"]["owner"], "none");
+    assert_eq!(sess_after["followUp"]["reason"], "settled");
+
+    // Legacy verified plan compatibility: empty `criterionResults` + passing `verificationReport`
+    // still unlocks `awaiting_human_gate` and settles cleanly on user confirm.
+    let mut legacy_plan = plan;
+    legacy_plan["planId"] = json!("plan-legacy-verified");
+    legacy_plan["delegationOrigin"]["sessionId"] = json!("sess-legacy-verified");
+    legacy_plan["criterionResults"] = json!([]);
+    legacy_plan["resultAcceptance"] = Value::Null;
+    legacy_plan["manualConfirmations"] = json!([]);
+    let plans_dir = home.path().join("goal-plans");
+    fs::write(
+        plans_dir.join("plan-legacy-verified.json"),
+        serde_json::to_string(&legacy_plan).unwrap(),
+    )
+    .unwrap();
+    let idx_path = plans_dir.join("index.jsonl");
+    let mut idx_content = fs::read_to_string(&idx_path).unwrap_or_default();
+    idx_content.push_str("{\"planId\":\"plan-legacy-verified\"}\n");
+    fs::write(&idx_path, idx_content).unwrap();
+
+    let legacy_proj = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&entry.workspace_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let legacy_sess = legacy_proj
+        .iter()
+        .find(|s| s["sessionId"] == "sess-legacy-verified")
+        .expect("legacy projected session");
+    assert_eq!(legacy_sess["resultConfirmationRequired"], true);
+    assert_eq!(legacy_sess["followUp"]["owner"], "user");
+    assert_eq!(legacy_sess["followUp"]["reason"], "awaiting_human_gate");
+    let legacy_confirmed = host
+        .confirm_session_result(&entry.workspace_id, "sess-legacy-verified", None)
+        .unwrap();
+    assert_eq!(legacy_confirmed.accepted_by.as_deref(), Some("user"));
+
+    host.close();
+}
+
+#[tokio::test]
+async fn command_and_model_review_session_auto_accepts_under_auto_policy() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "auto accept check\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("AutoBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-auto-1", "Run check", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let anchor = input_message_id("in-auto-1").unwrap();
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![anchor],
+                input_id: "in-auto-1".into(),
+                surface: "desktop".into(),
+                title: "Command and review".into(),
+                brief: "Read readme and verify.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into()],
+                success_criteria: vec![
+                    SpawnCriterion {
+                        id: Some("c-cmd".into()),
+                        kind: "command".into(),
+                        command: Some("echo ok".into()),
+                        path: None,
+                        expect: None,
+                        description: "Command passes".into(),
+                    },
+                    SpawnCriterion {
+                        id: Some("c-rev".into()),
+                        kind: "model_review".into(),
+                        command: None,
+                        path: None,
+                        expect: None,
+                        description: "Review passes".into(),
+                    },
+                ],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    host.supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Checked readme.")),
+    ]);
+    let verifier_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("v-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|req| {
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            let report = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [known[0]],
+                "summary": "Verified."
+            });
+            sse_text(&serde_json::to_string(&report).unwrap())
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    host.run_promoted_session(
+        &entry.workspace_id,
+        &spawned.session_id,
+        &worker_model,
+        Some(&verifier_model),
+        &mut perm,
+        8,
+        &cancel,
+    )
+    .await
+    .unwrap();
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .expect("plan");
+    assert!(plan["modelReviewSourceRevision"].is_string());
+    assert_eq!(
+        plan["modelReviews"][0]["sourceRevision"],
+        plan["modelReviewSourceRevision"]
+    );
+    assert!(plan["modelReviews"][0]["verifierRunId"].is_string());
+
+    // Reporting the session settles it automatically under `auto` policy.
+    let decision = host
+        .supervisor()
+        .settle_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            true,
+            false,
+            None,
+            true,
+        )
+        .unwrap();
+    assert!(decision.close_gate_passed);
+    assert_eq!(decision.accepted_by.as_deref(), Some("policy"));
+    host.close();
+}
+
+#[tokio::test]
+async fn model_invented_manual_criterion_promotes_to_model_review_and_auto_accepts_on_post_reply() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "clean pr 334\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("AutoBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let ws_id = entry.workspace_id.clone();
+
+    // Ordinary user input ("2") — user did NOT ask to review or manually confirm.
+    host.submit_user_input(&ws_id, "in-auto-manual-1", "2", None)
+        .unwrap();
+
+    let spawned_sid: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let sid_capture = Arc::clone(&spawned_sid);
+
+    let bot_server = start_mock_server(vec![
+        // Main bot calls spawn_session with model-invented `kind: "manual"` and a brief containing "确认一下"
+        Box::new(|_| {
+            sse_tool_call(
+                "sp-1",
+                "spawn_session",
+                &json!({
+                    "title": "Reopen clean PR",
+                    "brief": "先用 gh auth status 确认一下可用，然后创建新 PR。",
+                    "kind": "code",
+                    "readOnly": false,
+                    "capabilityPreset": "code_edit_and_shell",
+                    "successCriteria": [
+                        { "id": "c1", "kind": "command", "command": "echo ok", "description": "Command ok" },
+                        { "id": "c2", "kind": "manual", "description": "Report includes PR URL and exit codes" }
+                    ]
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let tool_msg = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "tool")
+                .and_then(|m| m["content"].as_str())
+                .unwrap();
+            let parsed: Value = serde_json::from_str(tool_msg).unwrap();
+            let sid = parsed["sessionId"].as_str().unwrap().to_owned();
+            *sid_capture.lock().unwrap() = Some(sid.clone());
+            sse_tool_call(
+                "ack-1",
+                "post_reply",
+                &json!({ "text": format!("已派发任务 {sid}。") }),
+            )
+        }),
+    ]);
+
+    let bot_model = mock_model(&bot_server.endpoint);
+    let cancel = CancellationToken::new();
+    let tick1 = host
+        .tick_foreground(&ws_id, &bot_model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick1.bot_turns_run, 1);
+
+    let sid = spawned_sid.lock().unwrap().clone().expect("spawned sid");
+    let plan_before = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &sid)
+        .expect("plan");
+    // Unauthorized model-invented `manual` must have been normalized to `model_review`!
+    assert_eq!(plan_before["successCriteria"][1]["kind"], "model_review");
+
+    host.supervisor().promote_queued(&ws_id, true).unwrap();
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Opened PR #334 cleanly.")),
+    ]);
+    let verifier_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("v-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|req| {
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            let report = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [known[0]],
+                "summary": "Verified c1 and c2."
+            });
+            sse_text(&serde_json::to_string(&report).unwrap())
+        }),
+    ]);
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let mut perm = AutoAllowPermission;
+    host.run_promoted_session(
+        &ws_id,
+        &sid,
+        &worker_model,
+        Some(&verifier_model),
+        &mut perm,
+        8,
+        &cancel,
+    )
+    .await
+    .unwrap();
+
+    // Wake turn delivers report via post_reply -> MUST auto-accept without asking user to confirm!
+    let sid_for_reply = sid.clone();
+    let wake_server = start_mock_server(vec![Box::new(move |_| {
+        sse_tool_call(
+            "wake-reply",
+            "post_reply",
+            &json!({
+                "proactive": true,
+                "sources": [sid_for_reply],
+                "text": "PR #334 已创建并通过独立核验。"
+            }),
+        )
+    })]);
+    let wake_model = mock_model(&wake_server.endpoint);
+    let tick2 = host
+        .tick_foreground(&ws_id, &wake_model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick2.wake_turns_run, 1);
+
+    let projected = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&ws_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let sess = projected
+        .iter()
+        .find(|s| s["sessionId"] == sid)
+        .expect("projected session");
+    assert_eq!(
+        sess["status"], "accepted",
+        "ordinary task under auto policy must auto-accept on post_reply, not wait for user confirmation"
+    );
+    assert_eq!(sess["followUp"]["owner"], "none");
+    assert_eq!(sess["followUp"]["reason"], "settled");
+    host.close();
+}
+
+#[tokio::test]
+async fn cancel_session_retires_verification_failed_and_stale_cancelled_autonomously_on_wake() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "cancel test\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("CleanupBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let ws_id = entry.workspace_id.clone();
+
+    let plans_dir = home.path().join("goal-plans");
+    fs::create_dir_all(&plans_dir).unwrap();
+
+    let vf_plan = json!({
+        "planId": "plan-vf-cancel",
+        "conversationId": "conv-vf-cancel",
+        "title": "核验未通过待清理",
+        "goal": "Test cancel",
+        "status": "completed",
+        "updatedAt": "2026-11-23T02:00:00.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-vf-cancel",
+            "phase": "completed",
+            "independentVerifier": "failed"
+        },
+        "verificationReport": {
+            "passed": false,
+            "error": "file_parent_unavailable"
+        },
+        "tasks": [{ "taskId": "t1", "status": "completed" }]
+    });
+    let stale_cancel_plan = json!({
+        "planId": "plan-stale-cancel",
+        "conversationId": "conv-stale-cancel",
+        "title": "只读熟悉旧取消",
+        "goal": "Legacy cancel without receipt",
+        "status": "cancelled",
+        "updatedAt": "2026-10-07T03:00:00.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-stale-cancel",
+            "phase": "paused"
+        },
+        "runner": { "enabled": true, "status": "paused" },
+        "tasks": []
+    });
+    let active_plan = json!({
+        "planId": "plan-active-keep",
+        "conversationId": "conv-active-keep",
+        "title": "正在排队中的任务",
+        "goal": "Active queued",
+        "status": "accepted",
+        "updatedAt": "2026-11-23T02:01:00.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-active-keep",
+            "phase": "queued"
+        },
+        "tasks": [{ "taskId": "t1", "status": "pending" }]
+    });
+    let accepted_plan = json!({
+        "planId": "plan-accepted-keep",
+        "conversationId": "conv-accepted-keep",
+        "title": "已签收任务",
+        "goal": "Already accepted",
+        "status": "completed",
+        "updatedAt": "2026-11-23T02:02:00.000Z",
+        "delegationOrigin": {
+            "workspaceId": ws_id,
+            "sessionId": "sess-accepted-keep",
+            "phase": "accepted"
+        },
+        "resultAcceptance": {
+            "acceptedAt": "2026-11-23T02:02:00.000Z",
+            "acceptedBy": "policy"
+        },
+        "tasks": [{ "taskId": "t1", "status": "completed" }]
+    });
+
+    for p in [&vf_plan, &stale_cancel_plan, &active_plan, &accepted_plan] {
+        let pid = p["planId"].as_str().unwrap();
+        fs::write(
+            plans_dir.join(format!("{pid}.json")),
+            serde_json::to_string(p).unwrap(),
+        )
+        .unwrap();
+    }
+    fs::write(
+        plans_dir.join("index.jsonl"),
+        "{\"planId\":\"plan-vf-cancel\"}\n{\"planId\":\"plan-stale-cancel\"}\n{\"planId\":\"plan-active-keep\"}\n{\"planId\":\"plan-accepted-keep\"}\n",
+    )
+    .unwrap();
+
+    // Before cancellation: both `vf` and `stale_cancel` are in current list and marked `cancelable: true`.
+    let before = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&ws_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let vf_before = before
+        .iter()
+        .find(|s| s["sessionId"] == "sess-vf-cancel")
+        .unwrap();
+    assert_eq!(vf_before["followUp"]["inCurrentList"], true);
+    assert_eq!(vf_before["followUp"]["reason"], "verification_failed");
+    assert_eq!(vf_before["cancelable"], true);
+    let stale_before = before
+        .iter()
+        .find(|s| s["sessionId"] == "sess-stale-cancel")
+        .unwrap();
+    assert_eq!(stale_before["followUp"]["inCurrentList"], true);
+    assert_eq!(stale_before["followUp"]["reason"], "stop_unconfirmed");
+    assert_eq!(stale_before["cancelable"], true);
+
+    // Enqueue a wake event (NO user turn!) so the bot runs autonomously on a wake turn.
+    host.inbox()
+        .append(
+            &ws_id,
+            &[json!({
+                "eventId": "ev-vf-wake-1",
+                "kind": "report_available",
+                "workspaceId": ws_id,
+                "sessionId": "sess-vf-cancel",
+                "at": "2026-11-23T02:05:00.000Z",
+                "payload": { "planId": "plan-vf-cancel", "status": "completed" }
+            })],
+        )
+        .unwrap();
+
+    let wake_server = start_mock_server(vec![
+        // Activate `session_ops` skill pack
+        Box::new(|_| {
+            sse_tool_call(
+                "act-1",
+                "activate_skill_pack",
+                &json!({ "pack": "session_ops" }),
+            )
+        }),
+        // Autonomously cancel `sess-vf-cancel` (verification_failed) on wake turn
+        Box::new(|_| {
+            sse_tool_call(
+                "c-vf",
+                "cancel_session",
+                &json!({ "sessionId": "sess-vf-cancel", "reason": "核验未通过，清理无效任务" }),
+            )
+        }),
+        // Autonomously settle `sess-stale-cancel` (stale stop_unconfirmed) on wake turn
+        Box::new(|req| {
+            let last_tool = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "tool")
+                .and_then(|m| m["content"].as_str())
+                .unwrap();
+            assert!(
+                last_tool.contains(r#""ok":true"#),
+                "expected autonomous cancel of verification_failed session to succeed, got {last_tool}"
+            );
+            sse_tool_call(
+                "c-stale",
+                "cancel_session",
+                &json!({ "sessionId": "sess-stale-cancel", "reason": "确认清理旧取消任务" }),
+            )
+        }),
+        // Safety check: attempting to autonomously cancel an active queued task on a wake turn MUST still be denied!
+        Box::new(|req| {
+            let last_tool = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "tool")
+                .and_then(|m| m["content"].as_str())
+                .unwrap();
+            assert!(
+                last_tool.contains(r#""ok":true"#),
+                "expected autonomous settle of stale cancelled session to succeed, got {last_tool}"
+            );
+            sse_tool_call(
+                "c-active",
+                "cancel_session",
+                &json!({ "sessionId": "sess-active-keep", "reason": "should be blocked on wake" }),
+            )
+        }),
+        // Confirm active queued cancel returned current_user_required, then post reply
+        Box::new(|req| {
+            let last_tool = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "tool")
+                .and_then(|m| m["content"].as_str())
+                .unwrap();
+            assert!(
+                last_tool.contains("current_user_required"),
+                "active queued session must still require a user turn to cancel, got {last_tool}"
+            );
+            sse_tool_call(
+                "wake-done",
+                "post_reply",
+                &json!({ "proactive": true, "text": "已清理 2 条无效任务。" }),
+            )
+        }),
+    ]);
+
+    let wake_model = mock_model(&wake_server.endpoint);
+    let cancel = CancellationToken::new();
+    let tick = host
+        .tick_foreground(&ws_id, &wake_model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.wake_turns_run, 1);
+
+    // Already-accepted session must still refuse cancel with `session_already_completed`.
+    let acc_err = host
+        .supervisor()
+        .control_session(&ws_id, "sess-accepted-keep", "cancel", "nope", true)
+        .unwrap_err();
+    assert_eq!(acc_err.code, "session_already_completed");
+
+    // Verify both cleaned sessions left the current follow-up list cleanly.
+    let after = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&ws_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    for sid in ["sess-vf-cancel", "sess-stale-cancel"] {
+        let s = after.iter().find(|r| r["sessionId"] == sid).unwrap();
+        assert_eq!(s["status"], "cancelled");
+        assert_eq!(s["followUp"]["inCurrentList"], false);
+        assert_eq!(s["followUp"]["reason"], "stop_confirmed");
+        let plan = host.supervisor().find_plan_by_session(&ws_id, sid).unwrap();
+        assert_eq!(
+            plan["delegationOrigin"]["cancellation"]["initiator"],
+            "project_agent"
+        );
+        assert!(plan["delegationOrigin"]["cancellation"]["disposition"].is_null());
+        assert_eq!(s["cancelable"], false);
+    }
+    host.close();
+}
+
+fn spawn_autonomy_fixture(
+    host: &NativeProjectHost,
+    workspace_id: &str,
+    parent_id: &str,
+    workspace_path: &std::path::Path,
+) -> peer_project_agent::WorkSessionSummary {
+    host.submit_user_input(
+        workspace_id,
+        "auto-input",
+        "Check the project readme.",
+        None,
+    )
+    .unwrap();
+    host.inputs()
+        .consume(workspace_id, parent_id, host.conversations(), true)
+        .unwrap();
+    host.inputs()
+        .mark_executed(workspace_id, &["auto-input".to_owned()], &[], true)
+        .unwrap();
+    host.supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: workspace_id.into(),
+                workspace_path: workspace_path.into(),
+                parent_conversation_id: parent_id.into(),
+                anchor_message_ids: vec![input_message_id("auto-input").unwrap()],
+                input_id: "auto-input".into(),
+                surface: "desktop".into(),
+                title: "Check the readme".into(),
+                brief: "Check whether readme.md exists.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("readme".into()),
+                    kind: "file-exists".into(),
+                    description: "readme.md exists".into(),
+                    path: Some("readme.md".into()),
+                    expect: None,
+                    command: None,
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "auto".into(),
+                worker_model_selection: json!({}),
+            },
+            true,
+        )
+        .unwrap()
+}
+
+fn latest_autonomy_tool_result(req: &Value) -> &str {
+    req["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "tool")
+        .and_then(|m| m["content"].as_str())
+        .unwrap()
+}
+
+#[tokio::test]
+async fn autonomy_wake_retry_inherits_scope_retires_predecessor_and_promotes_immediately() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("RetryBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    host.ensure_lease(&ws_id).unwrap();
+    let old = spawn_autonomy_fixture(
+        &host,
+        &ws_id,
+        &profile.agent_conversation_id.unwrap(),
+        ws.path(),
+    );
+    host.supervisor()
+        .fail_session(&ws_id, &old.session_id, "model_timeout", "fixture", true)
+        .unwrap();
+    let sid = old.session_id.clone();
+    let same_sid = sid.clone();
+    let repeated_sid = sid.clone();
+    let retired_sid = sid.clone();
+    let replacement = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let observed = replacement.clone();
+
+    let wake = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "escalate",
+                "spawn_session",
+                &json!({
+                    "supersedes": sid, "readOnly": false
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            assert!(latest_autonomy_tool_result(req).contains("retry_capability_escalation"));
+            sse_tool_call("retry", "spawn_session", &json!({"supersedes": same_sid}))
+        }),
+        Box::new(move |req| {
+            let result: Value = serde_json::from_str(latest_autonomy_tool_result(req)).unwrap();
+            assert_eq!(result["autoRetryCount"], 1, "{result}");
+            *observed.lock().unwrap() = result["sessionId"].as_str().unwrap().to_owned();
+            sse_tool_call(
+                "duplicate-retry",
+                "spawn_session",
+                &json!({"supersedes": repeated_sid}),
+            )
+        }),
+        Box::new(move |req| {
+            assert!(latest_autonomy_tool_result(req).contains("session_already_superseded"));
+            sse_tool_call(
+                "ops-pack",
+                "activate_skill_pack",
+                &json!({"pack":"session_ops"}),
+            )
+        }),
+        Box::new(move |_| {
+            sse_tool_call(
+                "retired-cleanup",
+                "cancel_session",
+                &json!({"sessionId":retired_sid,"reason":"Already replaced by the host"}),
+            )
+        }),
+        Box::new(move |req| {
+            assert!(latest_autonomy_tool_result(req).contains(r#""ok":true"#));
+            sse_tool_call(
+                "wait-retry",
+                "wait_for_sessions",
+                &json!({"sessionIds": [replacement.lock().unwrap().as_str()]}),
+            )
+        }),
+    ]);
+    let cancel = CancellationToken::new();
+    let tick = host
+        .tick_foreground(&ws_id, &mock_model(&wake.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.promoted_session_ids.len(), 1);
+    let new_sid = &tick.promoted_session_ids[0];
+    let new = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, new_sid)
+        .unwrap();
+    let previous = host.supervisor().read_plan(&old.plan_id).unwrap();
+    assert_eq!(previous["delegationOrigin"]["supersededBy"], *new_sid);
+    assert_eq!(previous["status"], "failed");
+    assert!(previous["delegationOrigin"]["cancellation"].is_null());
+    for key in [
+        "readOnly",
+        "requiredCapabilities",
+        "inputId",
+        "anchorMessageIds",
+        "parentConversationId",
+        "isolation",
+        "dependsOn",
+    ] {
+        assert_eq!(
+            new["delegationOrigin"][key],
+            previous["delegationOrigin"][key]
+        );
+    }
+    assert_eq!(new["successCriteria"], previous["successCriteria"]);
+    assert_eq!(new["deliveryBinding"], previous["deliveryBinding"]);
+    let projected = peer_project_agent::list_sessions_projected(
+        home.path(),
+        Some(&ws_id),
+        None,
+        None,
+        None,
+        None,
+    );
+    let old_row = projected
+        .iter()
+        .find(|s| s["sessionId"] == old.session_id)
+        .unwrap();
+    assert_eq!(old_row["followUp"]["reason"], "superseded");
+    assert_eq!(old_row["followUp"]["inCurrentList"], false);
+    host.supervisor()
+        .fail_session(
+            &ws_id,
+            new_sid,
+            "model_timeout",
+            "second fixture failure",
+            true,
+        )
+        .unwrap();
+    let second_sid = new_sid.clone();
+    let wake_twice = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "retry-twice",
+                "spawn_session",
+                &json!({"supersedes": second_sid}),
+            )
+        }),
+        Box::new(|req| {
+            let result: Value = serde_json::from_str(latest_autonomy_tool_result(req)).unwrap();
+            assert_eq!(result["autoRetryCount"], 2, "{result}");
+            sse_tool_call(
+                "wait-retry-twice",
+                "wait_for_sessions",
+                &json!({"sessionIds": [result["sessionId"]]}),
+            )
+        }),
+    ]);
+    let tick = host
+        .tick_foreground(
+            &ws_id,
+            &mock_model(&wake_twice.endpoint),
+            json!({}),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick.promoted_session_ids.len(), 1);
+    let third_sid = tick.promoted_session_ids[0].clone();
+    host.supervisor()
+        .fail_session(
+            &ws_id,
+            &third_sid,
+            "model_timeout",
+            "third fixture failure",
+            true,
+        )
+        .unwrap();
+    let capped = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call("limit", "spawn_session", &json!({"supersedes": third_sid}))
+        }),
+        Box::new(|req| {
+            assert!(latest_autonomy_tool_result(req).contains("auto_retry_limit_exceeded"));
+            sse_tool_call(
+                "limit-reply",
+                "post_reply",
+                &json!({"proactive": true, "text": "The automatic retry limit was reached."}),
+            )
+        }),
+    ]);
+    let tick = host
+        .tick_foreground(&ws_id, &mock_model(&capped.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert!(tick.promoted_session_ids.is_empty());
+    assert_eq!(host.supervisor().list_sessions(&ws_id).len(), 3);
+    host.close();
+}
+
+#[tokio::test]
+async fn autonomy_worker_technical_question_wakes_parent_and_continues_same_conversation() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "readme").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("AnswerBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    let parent_id = profile.agent_conversation_id.unwrap();
+    host.ensure_lease(&ws_id).unwrap();
+    let child = spawn_autonomy_fixture(&host, &ws_id, &parent_id, ws.path());
+    let sid = &child.session_id;
+    host.supervisor().promote_queued(&ws_id, true).unwrap();
+    let worker = start_mock_server(vec![
+        Box::new(|req| {
+            assert!(tool_names_from_request(req).contains(&"request_parent_input".to_string()));
+            sse_tool_call(
+                "ask-parent",
+                "request_parent_input",
+                &json!({
+                    "question": "Which readme should I inspect?"
+                }),
+            )
+        }),
+        Box::new(|req| {
+            assert!(req["messages"].to_string().contains("Use root readme.md"));
+            sse_text("Root readme.md exists.")
+        }),
+    ]);
+    let worker_model = mock_model(&worker.endpoint);
+    let cancel = CancellationToken::new();
+    let mut permission = AutoAllowPermission;
+    let episode = host
+        .run_promoted_session(
+            &ws_id,
+            sid,
+            &worker_model,
+            None,
+            &mut permission,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(episode.status, "waiting_agent");
+    let waiting = host.supervisor().read_plan(&child.plan_id).unwrap();
+    let worker_conv = waiting["delegationOrigin"]["workerConversationId"].clone();
+    let sid_to_answer = sid.clone();
+    let sid_to_wait = sid.clone();
+    let wake = start_mock_server(vec![
+        Box::new(|req| {
+            assert!(
+                req["messages"]
+                    .to_string()
+                    .contains("Which readme should I inspect?")
+            );
+            sse_tool_call(
+                "ops-pack",
+                "activate_skill_pack",
+                &json!({"pack": "session_ops"}),
+            )
+        }),
+        Box::new(move |_| {
+            sse_tool_call(
+                "answer-worker",
+                "message_session",
+                &json!({
+                    "sessionId": sid_to_answer, "intent": "answer", "text": "Use root readme.md"
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let result = latest_autonomy_tool_result(req);
+            assert!(result.contains(r#""ok":true"#), "{result}");
+            sse_tool_call(
+                "wait-answer",
+                "wait_for_sessions",
+                &json!({"sessionIds": [sid_to_wait]}),
+            )
+        }),
+    ]);
+    let tick = host
+        .tick_foreground(&ws_id, &mock_model(&wake.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.promoted_session_ids, vec![sid.clone()]);
+    let episode = host
+        .run_promoted_session(
+            &ws_id,
+            sid,
+            &worker_model,
+            None,
+            &mut permission,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(episode.status, "completed");
+    let completed = host.supervisor().read_plan(&child.plan_id).unwrap();
+    assert_eq!(
+        completed["delegationOrigin"]["workerConversationId"],
+        worker_conv
+    );
+    assert_eq!(
+        completed["delegationOrigin"]["lastAnsweredAgentWaitMessageId"],
+        waiting["delegationOrigin"]["agentWaitMessageId"]
+    );
+    assert!(completed["delegationOrigin"]["agentWaitMessageId"].is_null());
+    assert_eq!(completed["delegationOrigin"]["workerTurnsUsed"], 2);
+    host.close();
+}
+
+#[tokio::test]
+async fn autonomy_wake_reverification_runs_readonly_role_and_auto_accepts_after_reporting() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "readme").unwrap();
+    fs::write(
+        home.path().join("settings.json"),
+        json!({
+            "schemaVersion": 3,
+            "projectAgent": { "shell": "bots", "managedRoot": ws.path().join("managed") }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("ReverifyBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    host.ensure_lease(&ws_id).unwrap();
+    let child = spawn_autonomy_fixture(
+        &host,
+        &ws_id,
+        &profile.agent_conversation_id.unwrap(),
+        ws.path(),
+    );
+    let sid = &child.session_id;
+    host.supervisor().promote_queued(&ws_id, true).unwrap();
+    let worker = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "bad-args",
+                "read_file",
+                &json!({"path":"readme.md","invalid_option":true}),
+            )
+        }),
+        Box::new(|req| {
+            assert!(latest_autonomy_tool_result(req).contains("tool_arguments_invalid"));
+            sse_tool_call("corrected-args", "read_file", &json!({"path":"readme.md"}))
+        }),
+        Box::new(|req| {
+            assert!(latest_autonomy_tool_result(req).contains("readme"));
+            sse_text("Root readme exists.")
+        }),
+    ]);
+    let failed = start_mock_server(vec![Box::new(|_| {
+        sse_text(
+            r#"{"passed":false,"failedCriteria":[],"missingEvidence":[],"risks":[],"evidenceRefs":[],"summary":"Temporary verifier failure"}"#,
+        )
+    })]);
+    let cancel = CancellationToken::new();
+    host.run_promoted_session(
+        &ws_id,
+        sid,
+        &mock_model(&worker.endpoint),
+        Some(&mock_model(&failed.endpoint)),
+        &mut AutoAllowPermission,
+        8,
+        &cancel,
+    )
+    .await
+    .unwrap();
+    let initial = host.supervisor().read_plan(&child.plan_id).unwrap();
+    assert_eq!(initial["delegationOrigin"]["independentVerifier"], "failed");
+    let verified_response = |req: &Value| {
+        let tools = tool_names_from_request(req);
+        assert!(tools.contains(&"read_file".to_string()));
+        assert!(!tools.iter().any(|tool| matches!(
+            tool.as_str(),
+            "run_command" | "write_file" | "request_parent_input"
+        )));
+        let prompt = req["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|msg| {
+                msg["role"] == "user"
+                    && msg["content"]
+                        .as_str()
+                        .is_some_and(|s| s.contains("Check the root"))
+            })
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        let known: Vec<String> = serde_json::from_str(
+            prompt
+                .lines()
+                .find_map(|l| l.strip_prefix("Known Worker Evidence Refs: "))
+                .unwrap(),
+        )
+        .unwrap();
+        sse_text(&json!({"passed": true, "failedCriteria": [], "missingEvidence": [], "risks": [], "evidenceRefs": [known[0]], "summary": "Readme verified"}).to_string())
+    };
+    let verifier = start_mock_server(vec![
+        Box::new(verified_response),
+        Box::new(verified_response),
+    ]);
+    let sid_to_verify = sid.clone();
+    let sid_to_verify_again = sid.clone();
+    let sid_to_test_limit = sid.clone();
+    let sid_to_report = sid.clone();
+    let wake = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "ops-pack",
+                "activate_skill_pack",
+                &json!({"pack": "session_ops"}),
+            )
+        }),
+        Box::new(move |_| {
+            sse_tool_call(
+                "reverify",
+                "verify_session",
+                &json!({
+                    "sessionId": sid_to_verify, "focus": "Check the root"
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let result: Value = serde_json::from_str(latest_autonomy_tool_result(req)).unwrap();
+            assert_eq!(result["reverified"], true, "{result}");
+            assert_eq!(result["verifierRunCount"], 2);
+            assert_eq!(result["verificationReport"]["passed"], true);
+            sse_tool_call(
+                "reverify-again",
+                "verify_session",
+                &json!({
+                    "sessionId":sid_to_verify_again, "focus":"Check the root again"
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            let result: Value = serde_json::from_str(latest_autonomy_tool_result(req)).unwrap();
+            assert_eq!(result["verifierRunCount"], 3, "{result}");
+            sse_tool_call(
+                "reverify-over-limit",
+                "verify_session",
+                &json!({
+                    "sessionId":sid_to_test_limit, "force":true
+                }),
+            )
+        }),
+        Box::new(move |req| {
+            assert!(latest_autonomy_tool_result(req).contains("reverify_limit_exceeded"));
+            sse_tool_call(
+                "verified-reply",
+                "post_reply",
+                &json!({
+                    "proactive": true, "sources": [sid_to_report], "text": "The readme was verified."
+                }),
+            )
+        }),
+    ]);
+    host.tick_foreground_with_verifier(
+        &ws_id,
+        &mock_model(&wake.endpoint),
+        Some(&mock_model(&verifier.endpoint)),
+        json!({}),
+        &cancel,
+    )
+    .await
+    .unwrap();
+    let completed = host.supervisor().read_plan(&child.plan_id).unwrap();
+    assert_eq!(completed["runner"]["verifierRuns"][0]["status"], "failed");
+    assert_eq!(completed["runner"]["verifierRuns"][1]["status"], "passed");
+    assert_eq!(completed["runner"]["verifierRuns"][2]["status"], "passed");
+    assert_eq!(
+        completed["runner"]["verifierRuns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(
+        completed["resultAcceptance"]["acceptedAt"].is_string(),
+        "{completed}"
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn autonomy_resume_only_continues_host_confirmed_technical_interruptions() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("ResumeBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    host.ensure_lease(&ws_id).unwrap();
+    let child = spawn_autonomy_fixture(
+        &host,
+        &ws_id,
+        &profile.agent_conversation_id.unwrap(),
+        ws.path(),
+    );
+    let sid = &child.session_id;
+    let supervisor = host.supervisor();
+    supervisor.promote_queued(&ws_id, true).unwrap();
+    let worker = start_mock_server(vec![
+        Box::new(|_| sse_text("First episode checkpoint.")),
+        Box::new(|req| {
+            assert!(
+                req["messages"]
+                    .to_string()
+                    .contains("First episode checkpoint.")
+            );
+            sse_text("Continued the original work.")
+        }),
+    ]);
+    let worker_model = mock_model(&worker.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    host.run_promoted_session(&ws_id, sid, &worker_model, None, &mut perm, 8, &cancel)
+        .await
+        .unwrap();
+    let checkpoint = supervisor.read_plan(&child.plan_id).unwrap();
+    let worker_conv = checkpoint["delegationOrigin"]["workerConversationId"].clone();
+    let set_interrupted = |origin: &str, count: u64, blocked_reason: Option<&str>| {
+        let mut interrupted = checkpoint.clone();
+        interrupted["status"] = json!("interrupted");
+        interrupted["delegationOrigin"]["phase"] = json!("paused");
+        interrupted["delegationOrigin"]["autoResumeCount"] = json!(count);
+        interrupted["runner"] = json!({
+            "status":"paused",
+            "interruption":{"source":"stream_error","origin":origin,"reason":"model_timeout","recoverable":true,"interruptedAt":peer_project_agent::now_iso()}
+        });
+        if blocked_reason == Some("worker_budget_exhausted") {
+            interrupted["delegationOrigin"]["workerTurnsUsed"] =
+                interrupted["delegationOrigin"]["workerTurnLimit"].clone();
+        } else if let Some(reason) = blocked_reason.filter(|reason| *reason != "open_approval") {
+            interrupted["runner"]["blockedReason"] = json!(reason);
+        }
+        supervisor.save_plan_json(&interrupted).unwrap();
+        host.inbox()
+            .append(
+                &ws_id,
+                &[json!({
+                    "eventId":format!("resume-{origin}-{count}-{blocked_reason:?}"),
+                    "kind":"session_ended",
+                    "sessionId":sid,
+                    "at":peer_project_agent::now_iso(),
+                    "payload":{"status":"interrupted"}
+                })],
+            )
+            .unwrap();
+    };
+
+    for (origin, count, blocked_reason, expected_error) in [
+        ("user", 0, None, Some("current_user_required")),
+        (
+            "provider",
+            0,
+            Some("open_approval"),
+            Some("current_user_required"),
+        ),
+        (
+            "provider",
+            0,
+            Some("execution_outcome_unknown"),
+            Some("current_user_required"),
+        ),
+        (
+            "provider",
+            0,
+            Some("manual_dod_confirmation_required"),
+            Some("current_user_required"),
+        ),
+        (
+            "provider",
+            0,
+            Some("worker_budget_exhausted"),
+            Some("worker_budget_exhausted"),
+        ),
+        ("provider", 2, None, Some("auto_resume_limit_exceeded")),
+        ("provider", 1, None, None),
+    ] {
+        set_interrupted(origin, count, blocked_reason);
+        let approval = (blocked_reason == Some("open_approval")).then(|| {
+            host.approvals()
+                .open(
+                    &peer_store::HostApproval {
+                        approval_id: "blocked-resume-approval",
+                        workspace_id: Some(&ws_id),
+                        conversation_id: worker_conv.as_str().unwrap(),
+                        stream_id: "blocked-resume-stream",
+                        plan_id: Some(&child.plan_id),
+                        session_id: Some(sid),
+                        capability_id: "local.file.write",
+                        args_digest: &"a".repeat(64),
+                        policy_revision: "1",
+                        created_at: &peer_project_agent::now_iso(),
+                        deadline_at: None,
+                    },
+                    None,
+                )
+                .unwrap()
+        });
+        let resume_sid = sid.clone();
+        let wait_sid = sid.clone();
+        let wake = start_mock_server(vec![
+            Box::new(|_| {
+                sse_tool_call(
+                    "ops-pack",
+                    "activate_skill_pack",
+                    &json!({"pack":"session_ops"}),
+                )
+            }),
+            Box::new(move |_| {
+                sse_tool_call(
+                    "resume-tech",
+                    "resume_session",
+                    &json!({"sessionId":resume_sid}),
+                )
+            }),
+            Box::new(move |req| {
+                let result = latest_autonomy_tool_result(req);
+                if let Some(error) = expected_error {
+                    assert!(result.contains(error), "{result}");
+                    sse_tool_call(
+                        "explain-rejection",
+                        "post_reply",
+                        &json!({"proactive":true,"text":format!("Recovery stopped at {error}.")}),
+                    )
+                } else {
+                    assert!(result.contains(r#""ok":true"#), "{result}");
+                    sse_tool_call(
+                        "wait-resume",
+                        "wait_for_sessions",
+                        &json!({"sessionIds":[wait_sid]}),
+                    )
+                }
+            }),
+        ]);
+        let tick = host
+            .tick_foreground(&ws_id, &mock_model(&wake.endpoint), json!({}), &cancel)
+            .await
+            .unwrap();
+        if expected_error.is_some() {
+            assert!(tick.promoted_session_ids.is_empty());
+        } else {
+            assert_eq!(tick.promoted_session_ids, vec![sid.clone()]);
+        }
+        if let Some(approval) = approval {
+            host.approvals()
+                .decide(
+                    &approval,
+                    ApprovalState::Denied,
+                    peer_store::ApprovalDecision::LocalUser,
+                    &peer_project_agent::now_iso(),
+                    Some("local_user_denied"),
+                    None,
+                )
+                .unwrap();
+        }
+    }
+    let started = supervisor.read_plan(&child.plan_id).unwrap();
+    assert_eq!(started["delegationOrigin"]["autoResumeCount"], 2);
+    assert!(started["runner"]["interruption"].is_null());
+    let episode = host
+        .run_promoted_session(&ws_id, sid, &worker_model, None, &mut perm, 8, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(episode.status, "completed");
+    assert_eq!(
+        supervisor.read_plan(&child.plan_id).unwrap()["delegationOrigin"]["workerConversationId"],
+        worker_conv
+    );
     host.close();
 }

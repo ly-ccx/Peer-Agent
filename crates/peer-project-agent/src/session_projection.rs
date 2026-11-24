@@ -503,6 +503,7 @@ fn decide_follow_up(
     cancellation_phase: Option<&str>,
     cancellation_disposition: Option<&str>,
     obligation_disposition: Option<&str>,
+    verification_failed: bool,
 ) -> FollowUpProjection {
     let make = |owner: &str, reason: &str| FollowUpProjection {
         owner: owner.to_owned(),
@@ -554,6 +555,9 @@ fn decide_follow_up(
         return make("bot", "technical_block");
     }
     if status == "result_ready" {
+        if verification_failed {
+            return make("bot", "verification_failed");
+        }
         return make("bot", "awaiting_acceptance_technical");
     }
     if matches!(status, "verifying" | "running" | "starting" | "queued") {
@@ -714,6 +718,9 @@ pub fn decide_lifecycle(
         takeover_phase.as_deref() == Some("stopping"),
         runner_status == Some("budget_exhausted") && !live_execution,
     );
+    let verification_failed = !verification_active
+        && (opt_str(&origin["independentVerifier"]) == Some("failed")
+            || plan["verificationReport"]["passed"].as_bool() == Some(false));
     let follow_up = decide_follow_up(
         status,
         pres.needs_you_reason,
@@ -727,7 +734,13 @@ pub fn decide_lifecycle(
         cancel_phase.as_deref(),
         cancel_disposition,
         obligation_disposition,
+        verification_failed,
     );
+
+    let cancelable = (pres.action_right != "terminal" && !is_non_cancelable_status(status))
+        || (status == "result_ready" && !accepted)
+        || (status == "failed" && follow_up.in_current_list)
+        || (status == "cancelled" && follow_up.reason == "stop_unconfirmed");
 
     LifecycleDecision {
         status: status.to_owned(),
@@ -736,7 +749,7 @@ pub fn decide_lifecycle(
         next_action: pres.next_action.to_owned(),
         status_label: pres.status_label.to_owned(),
         action_label: pres.action_label.to_owned(),
-        cancelable: pres.action_right != "terminal" && !is_non_cancelable_status(status),
+        cancelable,
         needs_user: status == "waiting_user",
         verification_active: status == "verifying",
         blocked_reason,
@@ -1510,15 +1523,29 @@ fn project_session_value(
     buckets: Option<&HashMap<String, HashMap<String, Value>>>,
     all_summaries: &[WorkSessionSummary],
     child_messages: &[Value],
+    parent_anchors: &mut HashMap<String, HashMap<String, String>>,
 ) -> Value {
     let origin = &plan["delegationOrigin"];
     let session_id = summary.session_id.as_str();
     let workspace_id = summary.workspace_id.as_str();
-    let human_gate = supervisor.compute_human_gate(plan, summary);
+    let verification_active = opt_str(&origin["phase"]) == Some("verifying")
+        && !matches!(opt_str(&plan["status"]), Some("failed" | "cancelled"))
+        && opt_str(&plan["resultAcceptance"]["acceptedAt"]).is_none();
+    let human_gate = if verification_active {
+        false
+    } else {
+        supervisor.compute_human_gate_with_cache(plan, summary, parent_anchors)
+    };
     let coord_facts = buckets.and_then(|b| coordination_facts_for_session(b, session_id));
     let coord_phase = coord_facts.as_ref().and_then(|cf| opt_str(&cf["phase"]));
     let obl_disp = buckets.and_then(|b| obligation_disposition_for_session(b, session_id));
-    let lc = decide_lifecycle(plan, human_gate, false, coord_phase, obl_disp.as_deref());
+    let lc = decide_lifecycle(
+        plan,
+        human_gate,
+        verification_active,
+        coord_phase,
+        obl_disp.as_deref(),
+    );
 
     let report = build_session_report(plan, session_id, &lc.status, child_messages);
     let mut report_without_status = report.clone();
@@ -1555,7 +1582,7 @@ fn project_session_value(
     session.insert("followUp".into(), json!(lc.follow_up));
     session.insert(
         "executionOwnership".into(),
-        json!(execution_ownership_of(plan, false)),
+        json!(execution_ownership_of(plan, verification_active)),
     );
     if let Some(ref r) = lc.needs_you_reason {
         session.insert("needsYouReason".into(), json!(r));
@@ -1663,29 +1690,118 @@ fn load_workspace_coordination(
     read_coordination_read_model_buckets(data_home, workspace_id, buckets).ok()
 }
 
-/// Project delegated sessions matching JS `session-supervisor.mjs#list`.
-pub fn list_sessions_projected(
+pub(crate) fn load_workspace_session_coordination(
     data_home: &Path,
-    workspace_id: Option<&str>,
-    work_id: Option<&str>,
-    session_ids: Option<&[String]>,
-    status: Option<&str>,
-    limit: Option<usize>,
-) -> Vec<Value> {
-    let cap = limit.filter(|&n| n > 0).map_or(50, |n| n.min(50));
+    workspace_id: &str,
+) -> Option<HashMap<String, HashMap<String, Value>>> {
+    load_workspace_coordination(data_home, workspace_id, &SESSION_COORDINATION_BUCKETS)
+}
+
+pub(crate) fn compute_bot_list_session_lifecycle(
+    supervisor: &SessionSupervisor,
+    plan: &Value,
+    summary: &WorkSessionSummary,
+    buckets: Option<&HashMap<String, HashMap<String, Value>>>,
+    parent_anchors: &mut HashMap<String, HashMap<String, String>>,
+) -> (LifecycleDecision, bool) {
+    let origin = &plan["delegationOrigin"];
+    let session_id = summary.session_id.as_str();
+    let verification_active = opt_str(&origin["phase"]) == Some("verifying")
+        && !matches!(opt_str(&plan["status"]), Some("failed" | "cancelled"))
+        && opt_str(&plan["resultAcceptance"]["acceptedAt"]).is_none();
+    let human_gate = if verification_active {
+        false
+    } else {
+        supervisor.compute_human_gate_with_cache(plan, summary, parent_anchors)
+    };
+    let coord_facts = buckets.and_then(|b| coordination_facts_for_session(b, session_id));
+    let coord_phase = coord_facts.as_ref().and_then(|cf| opt_str(&cf["phase"]));
+    let obl_disp = buckets.and_then(|b| obligation_disposition_for_session(b, session_id));
+    let lc = decide_lifecycle(
+        plan,
+        human_gate,
+        verification_active,
+        coord_phase,
+        obl_disp.as_deref(),
+    );
+    (lc, human_gate)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListSessionsQuery<'a> {
+    pub workspace_id: Option<&'a str>,
+    pub work_id: Option<&'a str>,
+    pub session_ids: Option<&'a [String]>,
+    pub status: Option<&'a str>,
+    /// Optional scope: `"all"` (default), `"active"`, or `"history"`.
+    pub scope: Option<&'a str>,
+    /// Optional history category filter: `"all"`, `"settled"`, `"canceled"`, `"failed"`.
+    pub category: Option<&'a str>,
+    /// Optional case-insensitive search substring over title / summary / sessionId.
+    pub search_query: Option<&'a str>,
+    /// Optional sessionId cursor (returns items strictly after this sessionId).
+    pub cursor: Option<&'a str>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PagedSessions {
+    pub sessions: Vec<Value>,
+    pub total_count: usize,
+    pub next_cursor: Option<String>,
+}
+
+fn matches_history_category(projected: &Value, category: &str) -> bool {
+    let status = projected["status"].as_str().unwrap_or("");
+    let reason = projected["followUp"]["reason"].as_str().unwrap_or("");
+    match category {
+        "settled" => status == "accepted" || reason == "settled",
+        "canceled" => {
+            matches!(status, "cancelled" | "superseded" | "paused")
+                || matches!(reason, "stop_confirmed" | "user_withdrawn" | "superseded" | "paused")
+        }
+        "failed" => status == "failed" || reason == "verification_failed",
+        _ => true,
+    }
+}
+
+/// Project delegated sessions with optional ADR 134 scope/category/search/cursor pagination.
+pub fn list_sessions_paged(data_home: &Path, query: &ListSessionsQuery<'_>) -> PagedSessions {
+    let max_cap = if query.scope.is_some() || query.cursor.is_some() {
+        100
+    } else {
+        50
+    };
+    let cap = query
+        .limit
+        .filter(|&n| n > 0)
+        .map_or(50, |n| n.min(max_cap));
     let supervisor = SessionSupervisor::new(data_home, None);
     let all_summaries = supervisor.all_delegated_summaries();
-    let pairs = supervisor.list_delegated_plans(workspace_id);
+    let pairs = supervisor.list_delegated_plans(query.workspace_id);
     let mut coord_cache: HashMap<String, Option<crate::obligation::CoordinationBuckets>> =
         HashMap::new();
-    let sid_set: Option<HashSet<&str>> =
-        session_ids.map(|arr| arr.iter().map(String::as_str).collect());
+    let mut parent_anchors: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let sid_set: Option<HashSet<&str>> = query
+        .session_ids
+        .map(|arr| arr.iter().map(String::as_str).collect());
+    let search_q = query
+        .search_query
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+    let scope = query.scope.map(str::trim).filter(|s| !s.is_empty());
+    let category = query
+        .category
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "all");
+    let cursor = query.cursor.map(str::trim).filter(|s| !s.is_empty());
 
-    let mut out = Vec::new();
+    let mut matched = Vec::new();
     for (summary, plan) in pairs {
-        if work_id.is_some() || sid_set.is_some() {
-            let wid_match =
-                work_id.is_some_and(|w| plan["delegationOrigin"]["workId"].as_str() == Some(w));
+        if query.work_id.is_some() || sid_set.is_some() {
+            let wid_match = query
+                .work_id
+                .is_some_and(|w| plan["delegationOrigin"]["workId"].as_str() == Some(w));
             let sid_match = sid_set
                 .as_ref()
                 .is_some_and(|set| set.contains(summary.session_id.as_str()));
@@ -1711,18 +1827,93 @@ pub fn list_sessions_projected(
             buckets,
             &all_summaries,
             &child_msgs,
+            &mut parent_anchors,
         );
-        if let Some(st) = status
+        if let Some(st) = query.status
             && projected["status"].as_str() != Some(st)
         {
             continue;
         }
-        out.push(projected);
-        if out.len() >= cap {
-            break;
+        let reason = projected["followUp"]["reason"].as_str().unwrap_or("");
+        let in_current = projected["followUp"]["inCurrentList"].as_bool() == Some(true);
+        if let Some(sc) = scope {
+            if reason == "obligation_indexed" {
+                continue;
+            }
+            if sc == "active" && !in_current {
+                continue;
+            }
+            if sc == "history" && in_current {
+                continue;
+            }
         }
+        if let Some(cat) = category
+            && !matches_history_category(&projected, cat)
+        {
+            continue;
+        }
+        if let Some(ref q) = search_q {
+            let title = projected["title"].as_str().unwrap_or("").to_lowercase();
+            let summary_txt = projected["summary"].as_str().unwrap_or("").to_lowercase();
+            let sid = projected["sessionId"].as_str().unwrap_or("").to_lowercase();
+            if !title.contains(q) && !summary_txt.contains(q) && !sid.contains(q) {
+                continue;
+            }
+        }
+        matched.push(projected);
     }
-    out
+
+    let total_count = matched.len();
+    let start_idx = match cursor {
+        Some(c) => matched
+            .iter()
+            .position(|row| row["sessionId"].as_str() == Some(c))
+            .map(|pos| pos + 1)
+            .unwrap_or(total_count),
+        None => 0,
+    };
+    let slice_end = (start_idx + cap).min(total_count);
+    let sessions = matched[start_idx..slice_end].to_vec();
+    let next_cursor = if slice_end < total_count {
+        sessions
+            .last()
+            .and_then(|row| row["sessionId"].as_str())
+            .map(str::to_owned)
+    } else {
+        None
+    };
+
+    PagedSessions {
+        sessions,
+        total_count,
+        next_cursor,
+    }
+}
+
+/// Project delegated sessions matching JS `session-supervisor.mjs#list`.
+pub fn list_sessions_projected(
+    data_home: &Path,
+    workspace_id: Option<&str>,
+    work_id: Option<&str>,
+    session_ids: Option<&[String]>,
+    status: Option<&str>,
+    limit: Option<usize>,
+) -> Vec<Value> {
+    list_sessions_paged(
+        data_home,
+        &ListSessionsQuery {
+            workspace_id,
+            work_id,
+            session_ids,
+            status,
+            scope: None,
+            category: None,
+            search_query: None,
+            cursor: None,
+            limit,
+        },
+    )
+    .sessions
 }
 
 /// Project one delegated session (with optional `report` view) matching `session-supervisor.mjs#get`.
@@ -1747,6 +1938,7 @@ pub fn get_session_projected(
     };
     let buckets = load_workspace_coordination(data_home, &summary.workspace_id, bucket_list);
     let child_msgs = supervisor.child_conversation_messages(&summary.conversation_id);
+    let mut parent_anchors = HashMap::new();
     let mut session = project_session_value(
         &supervisor,
         &plan,
@@ -1754,6 +1946,7 @@ pub fn get_session_projected(
         buckets.as_ref(),
         &all_summaries,
         &child_msgs,
+        &mut parent_anchors,
     );
 
     if detail == Some("report") {
@@ -2069,5 +2262,64 @@ mod tests {
         assert_eq!(rev["criteria"][0]["id"], "c-man");
 
         assert!(get_session_projected(home, "missing-session", None).is_none());
+
+        // Paged scope / category / query / cursor projection (ADR 134)
+        let active_page = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("active"),
+                limit: Some(10),
+                ..Default::default()
+            },
+        );
+        assert_eq!(active_page.total_count, 1);
+        assert_eq!(active_page.sessions.len(), 1);
+        assert_eq!(active_page.sessions[0]["sessionId"], "sess-rev-1");
+        assert!(active_page.next_cursor.is_none());
+
+        let hist_page = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("history"),
+                category: Some("settled"),
+                search_query: Some("done"),
+                limit: Some(10),
+                ..Default::default()
+            },
+        );
+        assert_eq!(hist_page.total_count, 1);
+        assert_eq!(hist_page.sessions[0]["sessionId"], "sess-done-2");
+
+        let all_paged_1 = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("all"),
+                limit: Some(1),
+                ..Default::default()
+            },
+        );
+        assert_eq!(all_paged_1.total_count, 2);
+        assert_eq!(all_paged_1.sessions.len(), 1);
+        let cursor = all_paged_1.next_cursor.as_deref().expect("next cursor");
+        let all_paged_2 = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("all"),
+                cursor: Some(cursor),
+                limit: Some(1),
+                ..Default::default()
+            },
+        );
+        assert_eq!(all_paged_2.total_count, 2);
+        assert_eq!(all_paged_2.sessions.len(), 1);
+        assert_ne!(
+            all_paged_2.sessions[0]["sessionId"],
+            all_paged_1.sessions[0]["sessionId"]
+        );
+        assert!(all_paged_2.next_cursor.is_none());
     }
 }

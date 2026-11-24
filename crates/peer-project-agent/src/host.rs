@@ -271,6 +271,9 @@ impl NativeProjectHost {
     pub fn runner(&self) -> &ProjectAgentRunner {
         &self.runner
     }
+    pub fn set_tool_projection_mode(&self, mode: crate::ToolProjectionMode) {
+        self.runner.set_projection_mode(mode);
+    }
     pub fn directory(&self) -> &BotDirectory {
         &self.directory
     }
@@ -464,6 +467,7 @@ impl NativeProjectHost {
             text,
             anchor_refs: vec![],
             quote_refs: vec![],
+            task_refs: vec![],
             attachment_refs: vec![],
             attachments,
             answer_to,
@@ -477,6 +481,7 @@ impl NativeProjectHost {
         &self,
         workspace_id: &str,
         model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
         worker_model_selection: &Value,
         cancel: &CancellationToken,
     ) -> Result<Option<(String, PathBuf, ForegroundTickReport, bool)>, ProjectError> {
@@ -538,7 +543,7 @@ impl NativeProjectHost {
             if cancel.is_cancelled() {
                 break;
             }
-            let outcome = Box::pin(self.runner.run_turn(
+            let outcome = Box::pin(self.runner.run_turn_with_verifier(
                 &RunTurnOptions {
                     workspace_id,
                     workspace_path: &ws_path,
@@ -550,6 +555,7 @@ impl NativeProjectHost {
                     holds_lease: true,
                 },
                 model,
+                verifier_model,
                 cancel,
             ))
             .await?;
@@ -590,7 +596,7 @@ impl NativeProjectHost {
         workspace_id: &str,
         ws_path: &Path,
         conv_id: &str,
-        model: &NativeModel,
+        models: (&NativeModel, Option<&NativeModel>),
         worker_model_selection: Value,
         cancel: &CancellationToken,
     ) -> Result<Option<AgentTurnOutcome>, ProjectError> {
@@ -613,7 +619,8 @@ impl NativeProjectHost {
                 .commit_batch(workspace_id, batch.through_seq, true);
             return Ok(None);
         }
-        let outcome = Box::pin(self.runner.run_turn(
+        let (model, verifier_model) = models;
+        let outcome = Box::pin(self.runner.run_turn_with_verifier(
             &RunTurnOptions {
                 workspace_id,
                 workspace_path: ws_path,
@@ -625,6 +632,7 @@ impl NativeProjectHost {
                 holds_lease: true,
             },
             model,
+            verifier_model,
             cancel,
         ))
         .await?;
@@ -642,8 +650,32 @@ impl NativeProjectHost {
         worker_model_selection: Value,
         cancel: &CancellationToken,
     ) -> Result<ForegroundTickReport, ProjectError> {
+        self.tick_foreground_with_verifier(
+            workspace_id,
+            model,
+            None,
+            worker_model_selection,
+            cancel,
+        )
+        .await
+    }
+
+    pub async fn tick_foreground_with_verifier(
+        &self,
+        workspace_id: &str,
+        model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
+        worker_model_selection: Value,
+        cancel: &CancellationToken,
+    ) -> Result<ForegroundTickReport, ProjectError> {
         let Some((conv_id, ws_path, mut report, stopped)) = self
-            .run_user_input_phase(workspace_id, model, &worker_model_selection, cancel)
+            .run_user_input_phase(
+                workspace_id,
+                model,
+                verifier_model,
+                &worker_model_selection,
+                cancel,
+            )
             .await?
         else {
             return Ok(ForegroundTickReport {
@@ -668,7 +700,7 @@ impl NativeProjectHost {
                 workspace_id,
                 &ws_path,
                 &conv_id,
-                model,
+                (model, verifier_model),
                 worker_model_selection,
                 cancel,
             )
@@ -676,6 +708,14 @@ impl NativeProjectHost {
         {
             report.wake_turns_run += 1;
             report.last_turn = Some(outcome);
+            if !cancel.is_cancelled() && self.holds_lease(workspace_id) {
+                let starts = self.supervisor.promote_queued(workspace_id, true)?.start;
+                for id in starts {
+                    if !report.promoted_session_ids.contains(&id) {
+                        report.promoted_session_ids.push(id);
+                    }
+                }
+            }
         }
 
         Ok(report)
@@ -743,7 +783,7 @@ impl NativeProjectHost {
         cancel: &CancellationToken,
     ) -> Result<HostTickReport, ProjectError> {
         let Some((conv_id, ws_path, fg, stopped)) = self
-            .run_user_input_phase(workspace_id, model, &worker_model_selection, cancel)
+            .run_user_input_phase(workspace_id, model, None, &worker_model_selection, cancel)
             .await?
         else {
             return Ok(HostTickReport {
@@ -784,7 +824,7 @@ impl NativeProjectHost {
                 model,
                 None,
                 worker_permission,
-                16,
+                crate::DEFAULT_WORKER_MAX_TURNS,
                 cancel,
             ))
             .await
@@ -811,7 +851,7 @@ impl NativeProjectHost {
                 workspace_id,
                 &ws_path,
                 &conv_id,
-                model,
+                (model, None),
                 worker_model_selection,
                 cancel,
             )
@@ -839,15 +879,12 @@ impl NativeProjectHost {
             return Ok(None);
         };
         let target_msg_id = crate::input_message_id(input_id)?;
-        let snapshot = match self
-            .conversations
-            .read_committed(conv_id, None, 8 * 1024 * 1024)
-        {
-            Ok(s) => s,
+        let messages = match crate::read_full_conversation_messages(&self.conversations, conv_id) {
+            Ok(msgs) => msgs,
             Err(peer_store::StoreError::NotFound) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        Ok(snapshot.history.messages.into_iter().find(|msg| {
+        Ok(messages.into_iter().find(|msg| {
             msg["role"] == "assistant"
                 && msg["kind"] == "agent_reply"
                 && msg["replyTo"]
@@ -907,12 +944,9 @@ impl NativeProjectHost {
         let at = now_iso();
 
         if is_blank {
-            match self
-                .conversations
-                .read_committed(&conv_id, None, 1024 * 1024)
-            {
-                Ok(_) => {}
-                Err(StoreError::NotFound) => {
+            match self.conversations.read_metadata(&conv_id) {
+                Ok(snap) if snap.metadata.is_some() => {}
+                Ok(_) | Err(StoreError::NotFound) => {
                     self.conversations.create_project_conversation(
                         &NewProjectConversation {
                             id: Some(&conv_id),
@@ -1271,13 +1305,6 @@ impl NativeProjectHost {
                             }
                             "inbox" => {
                                 let _ = self.inbox.read_cursor(workspace_id);
-                            }
-                            "queue" => {
-                                let _ = self.approvals.recover_owned(
-                                    Some(workspace_id),
-                                    &now_iso(),
-                                    None,
-                                )?;
                             }
                             "tasks" => {
                                 counts.recovered_sessions = Box::pin(
@@ -1648,11 +1675,9 @@ impl NativeProjectHost {
             .read(workspace_id)
             .filter(BotProfile::is_active)
             .and_then(|p| p.agent_conversation_id)
-            && let Ok(snap) = self
-                .conversations
-                .read_committed(&conv_id, None, 4 * 1024 * 1024)
+            && let Ok(msgs) = crate::read_full_conversation_messages(&self.conversations, &conv_id)
         {
-            for m in snap.history.messages {
+            for m in msgs {
                 msg_storage.push((workspace_id.to_owned(), m));
             }
         }
@@ -1699,11 +1724,10 @@ impl NativeProjectHost {
                 continue;
             };
             if let Some(conv_id) = bot["profile"]["agentConversationId"].as_str()
-                && let Ok(snap) = self
-                    .conversations
-                    .read_committed(conv_id, None, 4 * 1024 * 1024)
+                && let Ok(msgs) =
+                    crate::read_full_conversation_messages(&self.conversations, conv_id)
             {
-                for m in snap.history.messages {
+                for m in msgs {
                     msg_storage.push((ws_id.to_owned(), m));
                 }
             }
@@ -1752,11 +1776,8 @@ impl NativeProjectHost {
     ) -> Result<(), ProjectError> {
         let at = now_iso();
         let existing_messages =
-            match self
-                .conversations
-                .read_committed(conv_id, None, 4 * 1024 * 1024)
-            {
-                Ok(snap) => snap.history.messages,
+            match crate::read_full_conversation_messages(&self.conversations, conv_id) {
+                Ok(msgs) => msgs,
                 Err(StoreError::NotFound) => {
                     self.conversations.create_project_conversation(
                         &NewProjectConversation {
@@ -2419,11 +2440,10 @@ impl NativeProjectHost {
         self.require_held_or_acquire_lease(workspace_id)?;
         let mut target_inputs: Vec<String> = Vec::new();
         if let Some(ref conv_id) = profile.agent_conversation_id
-            && let Ok(snap) = self
-                .conversations
-                .read_committed(conv_id, None, 8 * 1024 * 1024)
+            && let Ok(messages) =
+                crate::read_full_conversation_messages(&self.conversations, conv_id)
         {
-            for msg in snap.history.messages.iter().rev() {
+            for msg in messages.iter().rev() {
                 let matches_turn =
                     msg["turnId"].as_str() == Some(trimmed) || msg["id"].as_str() == Some(trimmed);
                 if !matches_turn {
@@ -2733,6 +2753,7 @@ mod tests {
                 text: "A",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: Some("card:question:reply:q-1".to_owned()),
@@ -2751,6 +2772,7 @@ mod tests {
                 text: "A",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: Some("card:question:reply:q-1".to_owned()),
@@ -2769,6 +2791,7 @@ mod tests {
                 text: "B",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: Some("card:question:reply:q-1".to_owned()),

@@ -42,6 +42,8 @@ pub struct ProjectInput {
     pub anchor_refs: Vec<String>,
     #[serde(default)]
     pub quote_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_refs: Vec<String>,
     #[serde(default)]
     pub attachment_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,6 +81,7 @@ pub struct SubmitInputRequest<'a> {
     pub text: &'a str,
     pub anchor_refs: Vec<String>,
     pub quote_refs: Vec<String>,
+    pub task_refs: Vec<String>,
     pub attachment_refs: Vec<String>,
     pub attachments: Vec<Value>,
     pub answer_to: Option<String>,
@@ -254,6 +257,7 @@ impl InputQueue {
             if text.is_empty()
                 && request.attachment_refs.is_empty()
                 && normalized_attachments.is_none()
+                && request.task_refs.is_empty()
             {
                 return Err(ProjectError::code("EMPTY_INPUT"));
             }
@@ -272,6 +276,7 @@ impl InputQueue {
                 text: request.text.to_owned(),
                 anchor_refs: request.anchor_refs.clone(),
                 quote_refs: request.quote_refs.clone(),
+                task_refs: request.task_refs.clone(),
                 attachment_refs: request.attachment_refs.clone(),
                 attachments: normalized_attachments,
                 resource_feedback: None,
@@ -393,6 +398,9 @@ impl InputQueue {
                 }
                 if !item.quote_refs.is_empty() {
                     msg["quoteRefs"] = json!(item.quote_refs);
+                }
+                if !item.task_refs.is_empty() {
+                    msg["taskRefs"] = json!(item.task_refs);
                 }
                 if !item.attachment_refs.is_empty() {
                     msg["attachmentRefs"] = json!(item.attachment_refs);
@@ -727,6 +735,7 @@ mod tests {
             text: "Hello bot",
             anchor_refs: vec![],
             quote_refs: vec![],
+            task_refs: vec![],
             attachment_refs: vec![],
             attachments: vec![],
             answer_to: None,
@@ -810,6 +819,7 @@ mod tests {
                 text: "继续：Old chat",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: None,
@@ -870,6 +880,7 @@ mod tests {
                 text: "original",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: None,
@@ -887,6 +898,7 @@ mod tests {
                 text: "",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: None,
@@ -905,6 +917,7 @@ mod tests {
                 text: "",
                 anchor_refs: vec![],
                 quote_refs: vec![],
+                task_refs: vec![],
                 attachment_refs: vec![],
                 attachments: vec![],
                 answer_to: None,

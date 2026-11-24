@@ -387,6 +387,8 @@ pub struct CommitAgentMessageRequest<'a> {
 #[derive(Default)]
 pub struct CoordinationHub {
     stores: Mutex<HashMap<String, CoordinationStore>>,
+    owned: Mutex<HashSet<String>>,
+    lease_epochs: Mutex<HashMap<String, String>>,
 }
 
 impl CoordinationHub {
@@ -395,8 +397,16 @@ impl CoordinationHub {
     }
 
     pub fn insert_lease(&self, workspace_id: &str, token: LeaseToken) {
+        let rec = token.record();
+        let epoch = format!("{}:{}:{}", rec.host_id, rec.pid, rec.acquired_at);
         if let Ok(mut guard) = self.stores.lock() {
             guard.insert(workspace_id.to_owned(), CoordinationStore::new(token));
+            if let Ok(mut owned) = self.owned.lock() {
+                owned.insert(workspace_id.to_owned());
+            }
+            if let Ok(mut epochs) = self.lease_epochs.lock() {
+                epochs.insert(workspace_id.to_owned(), epoch);
+            }
         }
     }
 
@@ -412,31 +422,47 @@ impl CoordinationHub {
             Ok(true)
         } else {
             guard.remove(workspace_id);
+            if let Ok(mut owned) = self.owned.lock() {
+                owned.remove(workspace_id);
+            }
+            if let Ok(mut epochs) = self.lease_epochs.lock() {
+                epochs.remove(workspace_id);
+            }
             Ok(false)
         }
     }
 
     pub fn holds(&self, workspace_id: &str) -> bool {
-        self.stores
+        self.owned
             .lock()
-            .map(|g| g.contains_key(workspace_id))
+            .map(|g| g.contains(workspace_id))
             .unwrap_or(false)
     }
 
-    pub fn lease_epoch(&self, workspace_id: &str) -> Option<String> {
-        self.stores.lock().ok().and_then(|g| {
-            g.get(workspace_id).map(|s| {
-                let rec = s.lease().record();
-                format!("{}:{}:{}", rec.host_id, rec.pid, rec.acquired_at)
-            })
+    pub(crate) fn holds_generation(&self, workspace_id: &str, epoch: &str) -> bool {
+        let Ok(stores) = self.stores.lock() else {
+            return false;
+        };
+        stores.get(workspace_id).is_some_and(|store| {
+            let lease = store.lease();
+            let record = lease.record();
+            epoch == format!("{}:{}:{}", record.host_id, record.pid, record.acquired_at)
+                && lease.holds().unwrap_or(false)
         })
+    }
+
+    pub fn lease_epoch(&self, workspace_id: &str) -> Option<String> {
+        self.lease_epochs
+            .lock()
+            .ok()
+            .and_then(|g| g.get(workspace_id).cloned())
     }
 
     pub fn owned_workspaces(&self) -> Vec<String> {
         let mut list: Vec<String> = self
-            .stores
+            .owned
             .lock()
-            .map(|g| g.keys().cloned().collect())
+            .map(|g| g.iter().cloned().collect())
             .unwrap_or_default();
         list.sort();
         list
@@ -454,11 +480,19 @@ impl CoordinationHub {
     }
 
     pub fn release(&self, workspace_id: &str) -> Result<(), ProjectError> {
-        let removed = self
-            .stores
-            .lock()
-            .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?
-            .remove(workspace_id);
+        let removed = {
+            let mut guard = self
+                .stores
+                .lock()
+                .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
+            if let Ok(mut owned) = self.owned.lock() {
+                owned.remove(workspace_id);
+            }
+            if let Ok(mut epochs) = self.lease_epochs.lock() {
+                epochs.remove(workspace_id);
+            }
+            guard.remove(workspace_id)
+        };
         if let Some(store) = removed {
             store.into_lease().release()?;
         }
@@ -467,6 +501,12 @@ impl CoordinationHub {
 
     pub fn release_all(&self) {
         if let Ok(mut guard) = self.stores.lock() {
+            if let Ok(mut owned) = self.owned.lock() {
+                owned.clear();
+            }
+            if let Ok(mut epochs) = self.lease_epochs.lock() {
+                epochs.clear();
+            }
             for (_, store) in guard.drain() {
                 let _ = store.into_lease().release();
             }

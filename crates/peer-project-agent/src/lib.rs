@@ -33,6 +33,7 @@ pub mod runner;
 pub mod scheduler;
 pub mod search_index;
 pub mod session_projection;
+pub mod skill_packs;
 pub mod supervisor;
 pub mod system_context;
 pub mod verifier;
@@ -80,8 +81,9 @@ pub use directory::{
     project_reply_questions, sort_bot_list,
 };
 pub use drafts::{
-    DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftWriteRequest,
-    HydratedDraftBody, HydratedDraftEnvelope, HydratedDraftSnapshot, InputDraftStore,
+    DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftTaskRef,
+    DraftWriteRequest, HydratedDraftBody, HydratedDraftEnvelope, HydratedDraftSnapshot,
+    InputDraftStore,
 };
 pub use host::{
     FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, ForegroundTickReport, HostTickReport,
@@ -140,7 +142,7 @@ pub use reply::{
 };
 pub use runner::{
     AgentTurnOutcome, ProjectAgentActivity, ProjectAgentRunner, RunTurnOptions, TurnEndKind,
-    read_retry_continuity,
+    hydrate_agent_turn_record, read_retry_continuity,
 };
 pub use scheduler::{
     ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,
@@ -151,13 +153,20 @@ pub use search_index::{
     collect_conversation_search_documents,
 };
 pub use session_projection::{
-    FollowUpProjection, LifecycleDecision, build_session_report, build_verification_detail,
-    decide_lifecycle, get_session_projected, list_sessions_projected,
-    project_completion_review_for_plan, session_observation_revision, supervision_recovery,
-    verification_content_hash,
+    FollowUpProjection, LifecycleDecision, ListSessionsQuery, PagedSessions, build_session_report,
+    build_verification_detail, decide_lifecycle, get_session_projected, list_sessions_paged,
+    list_sessions_projected, project_completion_review_for_plan, session_observation_revision,
+    supervision_recovery, verification_content_hash,
+};
+pub use skill_packs::{
+    ACTIVATE_SKILL_PACK_CAPABILITY, ACTIVATE_SKILL_PACK_TOOL, CORE_CAPABILITIES, SKILL_PACKS,
+    SkillPackSpec, ToolProjectionMode, TurnProjectionSignals, all_skill_pack_ids,
+    auto_activated_packs, build_allowlist, find_skill_pack, ordered_definitions,
+    render_unactivated_pack_catalog,
 };
 pub use supervisor::{
-    SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
+    DEFAULT_WORKER_MAX_TURNS, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
+    WorkSessionReport, WorkSessionSummary,
 };
 pub use system_context::{ProjectAgentContextInput, assemble_project_agent_context};
 pub use verifier::{
@@ -429,4 +438,16 @@ pub fn is_safe_diagnostic_relative_path(item: &str) -> bool {
         )
     });
     !re.is_match(item)
+}
+
+/// Stream-read every committed message in a conversation without enforcing the
+/// bounded 4–8 MiB snapshot cap used by `read_committed`.
+pub(crate) fn read_full_conversation_messages(
+    store: &peer_store::ConversationStore,
+    conv_id: &str,
+) -> Result<Vec<serde_json::Value>, peer_store::StoreError> {
+    match store.read_conversation_window(conv_id, None, None, true)? {
+        Some(page) => Ok(page["window"].as_array().cloned().unwrap_or_default()),
+        None => Err(peer_store::StoreError::NotFound),
+    }
 }

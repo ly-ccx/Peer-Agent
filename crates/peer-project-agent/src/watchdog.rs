@@ -190,6 +190,11 @@ fn derive_plan_status(plan: &Value) -> String {
     {
         return "accepted".to_owned();
     }
+    if !matches!(plan["status"].as_str(), Some("cancelled" | "failed"))
+        && plan["delegationOrigin"]["phase"].as_str() == Some("verifying")
+    {
+        return "verifying".to_owned();
+    }
     match plan["status"].as_str().unwrap_or("") {
         "cancelled" => "cancelled".to_owned(),
         "failed" => "failed".to_owned(),
@@ -466,6 +471,14 @@ pub fn assess_stall(session: &WatchSessionFacts, now_ms: i64, window_ms: i64) ->
                 stall_id: None,
                 anchor: None,
                 waiting: true,
+            };
+        }
+        if session.verdict_outcome.as_deref() == Some("failed") {
+            return StallAssessment {
+                stalled: false,
+                stall_id: None,
+                anchor: None,
+                waiting: false,
             };
         }
         let Some(anchor_str) = session.completed_at.as_deref() else {

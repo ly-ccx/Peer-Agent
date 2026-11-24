@@ -26,8 +26,20 @@ const MAX_QUOTE_MSG_ID_CHARS: usize = 512;
 const MAX_PENDING: usize = 32;
 const MAX_ATTACHMENTS: usize = 16;
 const MAX_QUOTE_REFS: usize = 64;
+const MAX_TASK_REFS: usize = 5;
+const MAX_TASK_REF_TITLE_CHARS: usize = 200;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftTaskRef {
+    pub session_id: String,
+    pub title: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_message_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +67,8 @@ pub struct DraftBody {
     pub resource_feedback: Option<Vec<Value>>,
     #[serde(default)]
     pub attachment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_refs: Vec<DraftTaskRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,6 +85,8 @@ pub struct DraftEnvelope {
     pub answer_to: Option<String>,
     #[serde(default)]
     pub attachment_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_refs: Vec<DraftTaskRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +125,8 @@ pub struct HydratedDraftBody {
     pub text: String,
     pub quote: Option<DraftQuote>,
     pub attachments: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_refs: Vec<DraftTaskRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -121,6 +139,8 @@ pub struct HydratedDraftEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_to: Option<String>,
     pub attachments: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_refs: Vec<DraftTaskRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,6 +180,67 @@ pub struct DraftWriteRequest<'a> {
 
 pub struct InputDraftStore {
     runtime_root: PathBuf,
+}
+
+fn normalize_task_refs_strict(value: Option<&Value>) -> Result<Vec<DraftTaskRef>, ProjectError> {
+    let Some(val) = value else {
+        return Ok(Vec::new());
+    };
+    if val.is_null() {
+        return Ok(Vec::new());
+    }
+    let Some(arr) = val.as_array() else {
+        return Err(ProjectError::code("INVALID_DRAFT"));
+    };
+    if arr.len() > MAX_TASK_REFS {
+        return Err(ProjectError::code("INVALID_DRAFT"));
+    }
+    let mut out = Vec::with_capacity(arr.len());
+    let mut seen = HashSet::new();
+    for item in arr {
+        let Some(obj) = item.as_object() else {
+            return Err(ProjectError::code("INVALID_DRAFT"));
+        };
+        let Some(session_id) = obj
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 200)
+        else {
+            return Err(ProjectError::code("INVALID_DRAFT"));
+        };
+        if !seen.insert(session_id.to_owned()) {
+            continue;
+        }
+        let title = obj
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("")
+            .chars()
+            .take(MAX_TASK_REF_TITLE_CHARS)
+            .collect::<String>();
+        let status = obj
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| s.encode_utf16().count() <= 64)
+            .unwrap_or("accepted")
+            .to_owned();
+        let anchor_message_id = obj
+            .get("anchorMessageId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.encode_utf16().count() <= MAX_QUOTE_MSG_ID_CHARS)
+            .map(str::to_owned);
+        out.push(DraftTaskRef {
+            session_id: session_id.to_owned(),
+            title,
+            status,
+            anchor_message_id,
+        });
+    }
+    Ok(out)
 }
 
 fn valid_surface(surface: &str) -> bool {
@@ -488,7 +569,7 @@ impl InputDraftStore {
         if draft_obj.keys().any(|k| {
             !matches!(
                 k.as_str(),
-                "text" | "quote" | "resourceFeedback" | "attachmentIds"
+                "text" | "quote" | "resourceFeedback" | "taskRefs" | "attachmentIds"
             )
         }) {
             return Err(ProjectError::code("DRAFT_UNAVAILABLE"));
@@ -504,6 +585,7 @@ impl InputDraftStore {
                         | "text"
                         | "createdAt"
                         | "resourceFeedback"
+                        | "taskRefs"
                         | "quoteRefs"
                         | "answerTo"
                         | "attachmentIds"
@@ -585,6 +667,7 @@ impl InputDraftStore {
             text: saved.draft.text,
             quote: draft_quote,
             attachments: draft_attachments,
+            task_refs: saved.draft.task_refs,
         };
 
         let mut pending = Vec::with_capacity(saved.pending.len());
@@ -622,6 +705,7 @@ impl InputDraftStore {
                 quote_refs: quote_refs.clone(),
                 answer_to,
                 attachments,
+                task_refs: item.task_refs.clone(),
             });
         }
 
@@ -736,11 +820,13 @@ impl InputDraftStore {
             .map(|q| serde_json::to_value(q).map_err(|_| ProjectError::code("DRAFT_SAVE_FAILED")))
             .transpose()?;
         let draft_refs = validate_refs(draft_obj.and_then(|o| o.get("attachmentIds")))?;
+        let draft_task_refs = normalize_task_refs_strict(draft_obj.and_then(|o| o.get("taskRefs")))?;
         let draft = DraftBody {
             text: draft_text,
             quote: draft_quote,
             resource_feedback: None,
             attachment_ids: draft_refs,
+            task_refs: draft_task_refs,
         };
 
         let Some(req_pending) = req_obj.get("pending").and_then(Value::as_array) else {
@@ -789,6 +875,7 @@ impl InputDraftStore {
                 Some(v) => Some(validate_text_limit(Some(v), MAX_QUOTE_MSG_ID_CHARS)?),
             };
             let attachment_ids = validate_refs(p.get("attachmentIds"))?;
+            let task_refs = normalize_task_refs_strict(p.get("taskRefs"))?;
             pending.push(DraftEnvelope {
                 input_id: input_id.to_owned(),
                 text: p_text,
@@ -797,6 +884,7 @@ impl InputDraftStore {
                 quote_refs: Some(quote_refs),
                 answer_to,
                 attachment_ids,
+                task_refs,
             });
         }
 
@@ -860,6 +948,7 @@ mod tests {
                     quote: None,
                     resource_feedback: None,
                     attachment_ids: vec![],
+                    task_refs: vec![],
                 },
                 pending: vec![],
                 uploads: vec![],
@@ -1033,6 +1122,94 @@ mod tests {
         assert_eq!(
             store.write_strict(&fb_req).unwrap_err().code,
             "RESOURCE_FEEDBACK_HOST_REQUIRED"
+        );
+    }
+
+    #[test]
+    fn draft_task_refs_roundtrip_and_strict_validation() {
+        use serde_json::json;
+
+        let dir = tempdir().unwrap();
+        let store = InputDraftStore::new(dir.path());
+
+        let req = json!({
+            "workspaceId": "ws-1",
+            "surface": "desktop",
+            "revision": 0,
+            "uploads": [],
+            "draft": {
+                "text": "请对照上次检查",
+                "quote": null,
+                "attachmentIds": [],
+                "taskRefs": [{
+                    "sessionId": "sess-123",
+                    "title": "验证 gitconfig 放行",
+                    "status": "accepted",
+                    "anchorMessageId": "m-42"
+                }]
+            },
+            "pending": [{
+                "inputId": "in-ref-1",
+                "text": "继续处理",
+                "createdAt": "2026-11-23T10:00:00.000Z",
+                "quoteRefs": [],
+                "attachmentIds": [],
+                "taskRefs": [{
+                    "sessionId": "sess-123",
+                    "title": "验证 gitconfig 放行"
+                }]
+            }]
+        });
+
+        let rev1 = store.write_strict(&req).unwrap();
+        assert_eq!(rev1, 1);
+
+        let snap = store.read_hydrated("ws-1", "desktop", true).unwrap();
+        assert_eq!(snap.revision, 1);
+        assert_eq!(snap.draft.task_refs.len(), 1);
+        assert_eq!(snap.draft.task_refs[0].session_id, "sess-123");
+        assert_eq!(snap.draft.task_refs[0].title, "验证 gitconfig 放行");
+        assert_eq!(snap.draft.task_refs[0].anchor_message_id.as_deref(), Some("m-42"));
+        assert_eq!(snap.pending.len(), 1);
+        assert_eq!(snap.pending[0].task_refs.len(), 1);
+        assert_eq!(snap.pending[0].task_refs[0].session_id, "sess-123");
+
+        // Duplicate sessionId is deduplicated cleanly; exceeding MAX_TASK_REFS rejects INVALID_DRAFT
+        let dup_req = json!({
+            "workspaceId": "ws-1",
+            "surface": "desktop",
+            "revision": 1,
+            "uploads": [],
+            "draft": {
+                "text": "",
+                "quote": null,
+                "attachmentIds": [],
+                "taskRefs": [
+                    { "sessionId": "sess-123", "title": "A" },
+                    { "sessionId": "sess-123", "title": "B" }
+                ]
+            },
+            "pending": []
+        });
+        assert_eq!(store.write_strict(&dup_req).unwrap(), 2);
+        let deduped = store.read_hydrated("ws-1", "desktop", true).unwrap();
+        assert_eq!(deduped.draft.task_refs.len(), 1);
+        assert_eq!(deduped.draft.task_refs[0].title, "A");
+
+        let too_many: Vec<Value> = (0..=MAX_TASK_REFS)
+            .map(|i| json!({ "sessionId": format!("sess-{i}"), "title": format!("T{i}") }))
+            .collect();
+        let over_req = json!({
+            "workspaceId": "ws-1",
+            "surface": "desktop",
+            "revision": 2,
+            "uploads": [],
+            "draft": { "text": "", "quote": null, "attachmentIds": [], "taskRefs": too_many },
+            "pending": []
+        });
+        assert_eq!(
+            store.write_strict(&over_req).unwrap_err().code,
+            "INVALID_DRAFT"
         );
     }
 }

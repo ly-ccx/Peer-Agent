@@ -4,9 +4,10 @@
 //! and `packages/runtime-node/src/project-agent/attention.mjs` (ADR 84, ADR 100).
 
 use crate::{
-    BotProfile, BotProfileStore, ProjectError, ProjectRegistry, atomic_write, cards,
-    is_valid_workspace_id, now_iso, parse_iso_ms,
+    BotProfile, BotProfileStore, FollowUpProjection, ProjectError, ProjectRegistry, atomic_write,
+    cards, is_valid_workspace_id, now_iso, parse_iso_ms,
 };
+use peer_runtime::tool_markup::strip_literal_tool_call_blocks;
 use peer_store::{ApprovalStore, ConversationStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -37,6 +38,14 @@ pub struct BotListSession {
     pub conversation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_up: Option<FollowUpProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +78,12 @@ pub struct BotListItem {
     pub preview: String,
     pub last_active_at: String,
     pub state: BotRowState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_sessions: Vec<BotListSession>,
+    #[serde(default)]
+    pub active_session_total: usize,
+    #[serde(default)]
+    pub history_session_total: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -177,12 +192,20 @@ fn message_kind(message: &Value) -> &str {
 }
 
 fn message_text(message: &Value) -> String {
-    let text = message["content"]
+    let raw = message["content"]
         .as_str()
         .or_else(|| message["text"].as_str())
         .unwrap_or("");
+    let text = if !raw.trim().is_empty()
+        && (message["role"].as_str() == Some("assistant")
+            || matches!(message_kind(message), "agent_reply" | "agent_activity"))
+    {
+        strip_literal_tool_call_blocks(raw)
+    } else {
+        raw.to_owned()
+    };
     if !text.trim().is_empty() {
-        return text.to_owned();
+        return text;
     }
     message["attachments"]
         .as_array()
@@ -566,6 +589,37 @@ pub fn project_bot_attention_with_cards(
     deduped
 }
 
+fn session_in_current_list(session: &BotListSession) -> Option<bool> {
+    if let Some(ref follow_up) = session.follow_up {
+        if follow_up.reason == "obligation_indexed" {
+            return None;
+        }
+        return Some(follow_up.in_current_list);
+    }
+    Some(!TERMINAL_SESSION_STATUSES.contains(&session.status.as_str()) && session.status != "paused")
+}
+
+fn active_session_rank(session: &BotListSession) -> u8 {
+    if let Some(ref follow_up) = session.follow_up {
+        if follow_up.owner == "user" {
+            return 0;
+        }
+        if follow_up.reason == "verification_failed" {
+            return 1;
+        }
+    }
+    match session.status.as_str() {
+        "waiting_user" => 0,
+        "failed" => 1,
+        "result_ready" => 2,
+        "verifying" => 3,
+        "running" | "starting" => 4,
+        "waiting_agent" | "stopping" | "awaiting_outcome" => 5,
+        "queued" => 6,
+        _ => 7,
+    }
+}
+
 pub fn project_bot_list_item(
     profile: BotProfile,
     last_message: Option<&BotListMessage>,
@@ -577,6 +631,24 @@ pub fn project_bot_list_item(
         .iter()
         .filter(|s| RUNNING_STATUSES.contains(&s.status.as_str()))
         .count();
+    let mut active_sessions: Vec<BotListSession> = Vec::new();
+    let mut history_session_total: usize = 0;
+    for session in sessions {
+        match session_in_current_list(session) {
+            Some(true) => active_sessions.push(session.clone()),
+            Some(false) => history_session_total += 1,
+            None => {}
+        }
+    }
+    active_sessions.sort_by(|a, b| {
+        active_session_rank(a).cmp(&active_session_rank(b)).then_with(|| {
+            let ta = a.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
+            let tb = b.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
+            tb.cmp(&ta)
+        })
+    });
+    let active_session_total = active_sessions.len();
+    active_sessions.truncate(20);
     let unread = match last_message {
         Some(msg)
             if msg.role == "assistant"
@@ -618,6 +690,9 @@ pub fn project_bot_list_item(
             running,
             agent_status: None,
         },
+        active_sessions,
+        active_session_total,
+        history_session_total,
     }
 }
 
@@ -1045,10 +1120,13 @@ impl BotDirectory {
         sessions_cache: &mut Option<HashMap<String, Value>>,
     ) -> Value {
         let mut out = message.clone();
+        let kind = message_kind(message);
+        if kind == "agent_turn" {
+            crate::runner::hydrate_agent_turn_record(&self.data_home, workspace_id, &mut out);
+        }
         let Some(obj) = out.as_object_mut() else {
             return out;
         };
-        let kind = message_kind(message);
         let msg_id = message["id"].as_str().unwrap_or("");
 
         let has_sources = message["sources"].as_array().is_some_and(|a| !a.is_empty());
@@ -1877,6 +1955,10 @@ mod tests {
                     completion_review_required: false,
                     conversation_id: Some(child_conv_id),
                     queue_reason: None,
+                    follow_up: None,
+                    phase_label: None,
+                    anchor_message_id: None,
+                    plan_id: None,
                 },
                 BotListSession {
                     session_id: "sess-dep".into(),
@@ -1887,6 +1969,10 @@ mod tests {
                     completion_review_required: false,
                     conversation_id: None,
                     queue_reason: Some("dependency_failed".into()),
+                    follow_up: None,
+                    phase_label: None,
+                    anchor_message_id: None,
+                    plan_id: None,
                 },
                 BotListSession {
                     session_id: "sess-comp".into(),
@@ -1897,6 +1983,10 @@ mod tests {
                     completion_review_required: true,
                     conversation_id: None,
                     queue_reason: None,
+                    follow_up: None,
+                    phase_label: None,
+                    anchor_message_id: None,
+                    plan_id: None,
                 },
             ],
         );
@@ -2187,5 +2277,138 @@ mod tests {
             .filter_map(|m| m["id"].as_str())
             .collect();
         assert_eq!(inter_ids, vec!["u-1", "r-1"]);
+    }
+
+    #[test]
+    fn project_bot_list_message_strips_dsml_and_xml_tool_markup_from_preview() {
+        let pure_dsml = json!({
+            "id": "r-dsml",
+            "role": "assistant",
+            "kind": "agent_reply",
+            "content": "<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"read_file\">\n<｜DSML｜ parameter name=\"path\" string=\"true\">foo.css</｜DSML｜ parameter>\n</｜DSML｜ invoke>\n</｜DSML｜ calls>",
+            "createdAt": "2026-11-22T14:12:00.000Z"
+        });
+        assert_eq!(project_bot_list_message(&pure_dsml).text, "");
+
+        let mixed = json!({
+            "id": "r-mixed",
+            "role": "assistant",
+            "kind": "agent_reply",
+            "content": "已经查完前半段。\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"read_file\"></｜DSML｜ invoke>\n</｜DSML｜ calls>",
+            "createdAt": "2026-11-22T14:12:05.000Z"
+        });
+        assert_eq!(project_bot_list_message(&mixed).text, "已经查完前半段。");
+
+        let user_msg = json!({
+            "id": "u-raw",
+            "role": "user",
+            "kind": "user_input",
+            "content": "为什么会出现 <｜DSML｜ calls> 这种乱码？",
+            "createdAt": "2026-11-22T14:12:10.000Z"
+        });
+        assert!(
+            project_bot_list_message(&user_msg)
+                .text
+                .contains("<｜DSML｜ calls>"),
+            "user questions quoting DSML stay visible"
+        );
+    }
+
+    #[test]
+    fn project_bot_list_item_separates_active_history_and_hides_obligation_indexed() {
+        let dir = tempdir().unwrap();
+        let profiles = BotProfileStore::new(dir.path());
+        let (profile, _) = profiles
+            .create(&CreateBotProfile {
+                workspace_id: "ws-1",
+                display_name: "Peer-Agent",
+                managed: false,
+                agent_conversation_id: "conv-1",
+                avatar_salt: "",
+            })
+            .unwrap();
+        let make_sess = |id: &str, status: &str, title: &str, updated: &str, fu: FollowUpProjection| {
+            BotListSession {
+                session_id: id.into(),
+                title: title.into(),
+                status: status.into(),
+                updated_at: Some(updated.into()),
+                result_confirmation_required: None,
+                completion_review_required: false,
+                conversation_id: None,
+                queue_reason: None,
+                follow_up: Some(fu),
+                phase_label: None,
+                anchor_message_id: None,
+                plan_id: Some(format!("p-{id}")),
+            }
+        };
+        let sessions = vec![
+            make_sess(
+                "s-run",
+                "running",
+                "Running Task",
+                "2026-11-23T09:10:00.000Z",
+                FollowUpProjection {
+                    in_current_list: true,
+                    owner: "bot".into(),
+                    reason: "live_execution".into(),
+                },
+            ),
+            make_sess(
+                "s-obl",
+                "running",
+                "Hidden Obligation",
+                "2026-11-23T09:20:00.000Z",
+                FollowUpProjection {
+                    in_current_list: false,
+                    owner: "none".into(),
+                    reason: "obligation_indexed".into(),
+                },
+            ),
+            make_sess(
+                "s-vf",
+                "result_ready",
+                "Verification Failed",
+                "2026-11-23T09:05:00.000Z",
+                FollowUpProjection {
+                    in_current_list: true,
+                    owner: "bot".into(),
+                    reason: "verification_failed".into(),
+                },
+            ),
+            make_sess(
+                "s-wait",
+                "waiting_user",
+                "Needs Approval",
+                "2026-11-23T09:00:00.000Z",
+                FollowUpProjection {
+                    in_current_list: true,
+                    owner: "user".into(),
+                    reason: "human_request".into(),
+                },
+            ),
+            make_sess(
+                "s-done",
+                "accepted",
+                "Settled Task",
+                "2026-11-23T08:30:00.000Z",
+                FollowUpProjection {
+                    in_current_list: false,
+                    owner: "none".into(),
+                    reason: "settled".into(),
+                },
+            ),
+        ];
+
+        let item = project_bot_list_item(profile, None, &sessions, &[], None);
+        assert_eq!(item.active_session_total, 3);
+        assert_eq!(item.history_session_total, 1);
+        let ids: Vec<&str> = item
+            .active_sessions
+            .iter()
+            .map(|s| s.session_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["s-wait", "s-vf", "s-run"]);
     }
 }

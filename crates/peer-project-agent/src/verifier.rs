@@ -67,6 +67,44 @@ fn is_excluded_capability(cap: &str) -> bool {
         .any(|prefix| cap.starts_with(prefix))
 }
 
+fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
+    let key = raw.trim().to_ascii_lowercase();
+    if key.is_empty() || is_excluded_capability(&key) {
+        return Vec::new();
+    }
+    match key.as_str() {
+        "local.file.read" | "read_file" | "read_files" | "file-read" | "file_read" | "read" => {
+            vec!["local.file.read"]
+        }
+        "local.file.list" | "list_files" | "list_directory" | "file-list" | "file_list" => {
+            vec!["local.file.list"]
+        }
+        "local.file.search" | "search_files" | "search" | "file-search" | "file_search"
+        | "grep" | "rg" => {
+            vec!["local.file.search", "local.search.aggregate"]
+        }
+        "local.search.aggregate" | "batch_search" => {
+            vec!["local.search.aggregate", "local.file.search"]
+        }
+        "local.git.query" | "git_query" | "git" | "git-read" | "git_read" => {
+            vec!["local.git.query"]
+        }
+        "local.tool-result.read" | "read_tool_result" => vec!["local.tool-result.read"],
+        "local.file.write" | "local.file.edit" | "file-write" | "file_write" | "file-edit"
+        | "file_edit" | "write_file" | "edit_file" | "write" | "edit" | "filesystem" | "fs" => {
+            vec!["local.file.write", "local.file.edit"]
+        }
+        "local.shell.exec" | "local.shell.stop" | "local.shell" | "shell" | "bash" | "command"
+        | "exec" | "terminal" | "run_command" => {
+            vec!["local.shell.exec", "local.shell.stop"]
+        }
+        "local.web.fetch" | "web_fetch" | "web-fetch" | "web" | "fetch" => {
+            vec!["local.web.fetch"]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Computes the governed capability profile for a delegated work-session role
 /// (`"worker"`, `"explorer"`, `"verifier"`). Intersects requested capabilities
 /// against strict role ceilings and never admits control/delegation/write caps
@@ -94,8 +132,8 @@ pub fn resolve_work_session_profile(
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .map(str::trim)
-        .filter(|c| !c.is_empty() && !is_excluded_capability(c))
+        .flat_map(expand_requested_capabilities)
+        .filter(|c| !is_excluded_capability(c))
         .filter(|c| ceiling.contains(c))
         .map(str::to_owned)
         .collect();
@@ -124,19 +162,31 @@ pub fn resolve_work_session_profile(
             );
         }
     } else {
-        for &cap in [
-            "local.file.read",
-            "local.file.list",
-            "local.file.search",
-            "local.git.query",
-            "local.tool-result.read",
-        ]
-        .iter()
-        {
-            push_unique((*cap).to_owned(), &mut allowlist, &mut seen);
+        for &cap in &READ_ONLY_CAPABILITY_CEILING {
+            push_unique(cap.to_owned(), &mut allowlist, &mut seen);
         }
         for cap in requested {
             push_unique(cap, &mut allowlist, &mut seen);
+        }
+        let needs_shell = plan["successCriteria"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|c| matches!(c["kind"].as_str(), Some("command" | "test")));
+        if needs_shell {
+            push_unique("local.shell.exec".to_owned(), &mut allowlist, &mut seen);
+            push_unique("local.shell.stop".to_owned(), &mut allowlist, &mut seen);
+        }
+        let has_write_or_shell = allowlist.iter().any(|cap| {
+            matches!(
+                cap.as_str(),
+                "local.file.write" | "local.file.edit" | "local.shell.exec"
+            )
+        });
+        if !has_write_or_shell {
+            for &cap in &WORKER_CAPABILITY_CEILING {
+                push_unique(cap.to_owned(), &mut allowlist, &mut seen);
+            }
         }
     }
 
@@ -281,6 +331,19 @@ fn clean_issue_list(val: Option<&Value>) -> Option<Vec<VerifierIssue>> {
     let arr = v.as_array()?;
     let mut out = Vec::new();
     for item in arr {
+        if let Some(raw) = item.as_str() {
+            let reason = raw.trim();
+            if reason.is_empty() {
+                return None;
+            }
+            out.push(VerifierIssue {
+                task_id: None,
+                criterion_id: None,
+                reason: reason.to_owned(),
+                evidence_refs: Vec::new(),
+            });
+            continue;
+        }
         let obj = item.as_object()?;
         let reason = obj.get("reason").and_then(Value::as_str)?.trim();
         if reason.is_empty() {
@@ -374,20 +437,133 @@ pub fn decode_verifier_report(text: &str) -> Option<VerifierReport> {
 
 struct DenyEscalationPermission;
 
+/// Returns `true` only for read-only `local.git.query` requests reading standard
+/// system/user Git config, ignore, or attributes files (e.g. macOS
+/// `/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig` or `~/.gitconfig`).
+/// All write/shell/web escalations and arbitrary outside-workspace file reads remain denied.
+fn is_safe_verifier_git_config_read(prompt: &Value) -> bool {
+    if prompt["capabilityId"].as_str() != Some("local.git.query")
+        || prompt["riskLevel"].as_str() != Some("L1_local_read")
+    {
+        return false;
+    }
+    let Some(scopes) = prompt["scopes"].as_array() else {
+        return false;
+    };
+    if scopes.is_empty() {
+        return false;
+    }
+    scopes.iter().all(|scope| {
+        if scope["kind"].as_str() != Some("file-read")
+            || scope["capabilityId"].as_str() != Some("local.git.query")
+        {
+            return false;
+        }
+        let Some(raw_path) = scope["path"].as_str().map(str::trim) else {
+            return false;
+        };
+        let normalized = raw_path.replace('\\', "/");
+        let lower = normalized.to_ascii_lowercase();
+        let file_name = Path::new(&normalized)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        matches!(
+            file_name.as_str(),
+            "gitconfig" | ".gitconfig" | ".gitignore" | ".gitattributes"
+        ) || lower.ends_with("/git/config")
+            || lower.ends_with("/git/ignore")
+            || lower.ends_with("/git/attributes")
+            || lower.ends_with("/git-core/gitconfig")
+            || lower.ends_with("/git-core/attributes")
+    })
+}
+
 impl PermissionInput for DenyEscalationPermission {
     fn decide<'a>(
         &'a mut self,
-        _prompt: Value,
+        prompt: Value,
         _cancel: &'a CancellationToken,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LocalPermissionDecision> + 'a>> {
-        Box::pin(async { LocalPermissionDecision::Deny })
+        let decision = if is_safe_verifier_git_config_read(&prompt) {
+            LocalPermissionDecision::Approve
+        } else {
+            LocalPermissionDecision::Deny
+        };
+        Box::pin(async move { decision })
     }
+}
+
+const MAX_REPAIR_REFS_LISTED: usize = 200;
+
+enum RepairFeedback {
+    InvalidFormat {
+        previous_text: String,
+    },
+    UnindexedRefs {
+        unindexed_refs: Vec<String>,
+        previous_text: String,
+    },
+}
+
+fn collect_conversation_evidence_refs(
+    evidence_store: &EvidenceIndexStore,
+    conversation_id: &str,
+    allowed_refs: &mut HashSet<String>,
+    verifier_ev_refs: &mut Vec<String>,
+) {
+    if conversation_id.is_empty() {
+        return;
+    }
+    if let Ok(rows) = evidence_store.list_for_conversation(conversation_id, None) {
+        for row in rows {
+            if let Some(r) = row["evidenceRef"].as_str().map(str::trim)
+                && !r.is_empty()
+            {
+                let owned = r.to_owned();
+                allowed_refs.insert(owned.clone());
+                if !verifier_ev_refs.contains(&owned) {
+                    verifier_ev_refs.push(owned);
+                }
+            }
+        }
+    }
+}
+
+fn prioritized_allowed_refs(
+    verifier_ev_refs: &[String],
+    allowed_refs: &HashSet<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for r in verifier_ev_refs {
+        if seen.insert(r.as_str()) {
+            out.push(r.clone());
+            if out.len() >= MAX_REPAIR_REFS_LISTED {
+                return out;
+            }
+        }
+    }
+    let mut rest: Vec<&str> = allowed_refs
+        .iter()
+        .map(String::as_str)
+        .filter(|r| !seen.contains(*r))
+        .collect();
+    rest.sort();
+    for r in rest {
+        out.push(r.to_owned());
+        if out.len() >= MAX_REPAIR_REFS_LISTED {
+            break;
+        }
+    }
+    out
 }
 
 fn build_verifier_prompt(
     plan: &Value,
     allowed_refs: &HashSet<String>,
-    previous_text: Option<&str>,
+    focus: Option<&str>,
 ) -> String {
     let title = plan["title"].as_str().unwrap_or("");
     let goal = plan["goal"].as_str().unwrap_or("");
@@ -400,33 +576,108 @@ fn build_verifier_prompt(
     known_list.sort();
     let known_json = serde_json::to_string(&known_list).unwrap_or_else(|_| "[]".into());
 
-    let mut prompt = format!(
+    let focus = focus.map(|text| {
+        format!("\nAdditional review question (within the existing criteria and read-only permissions): {text}\n")
+    }).unwrap_or_default();
+
+    format!(
         "You are an independent read-only Verification Reviewer.\n\
          Verify the completed delegated session strictly against persisted disk state and indexed host Evidence.\n\
-         Never modify files or assume worker prose is true without verifying.\n\n\
+         Never modify files or assume worker prose is true without verifying.\n\
+         Verify changed workspace files and git state directly via git_query/read_file/search_files; do not waste turns guessing internal host storage directories.\n\n\
          Task Title: {title}\n\
          Goal / Brief: {goal}\n\
-         Success Criteria: {criteria_json}\n\
+         Success Criteria: {criteria_json}\n{focus}\
          Known Worker Evidence Refs: {known_json}\n\
          Worker Output Summary:\n{worker_output}\n\n\
+         Evidence citation rules:\n\
+         - Every entry in `evidenceRefs` MUST be an exact string copied from `Known Worker Evidence Refs` above OR `tool-result://<toolCallId>` from your own tool calls in this session.\n\
+         - NEVER put raw workspace file paths (such as `/path/to/file` or `.git/config`) in `evidenceRefs`.\n\
+         - Record non-blocking caveats in `risks` (strings) and any missing evidence in `missingEvidence` (objects `{{\"reason\": \"...\", \"evidenceRefs\": []}}`).\n\n\
+         Batch independent read/search tool calls into the same turn and emit your final JSON verdict promptly once verified.\n\
          Respond with ONE valid JSON object (no extra JSON objects) matching:\n\
-         {{\"passed\": boolean, \"failedCriteria\": [{{\"criterionId\": \"...\", \"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"missingEvidence\": [], \"risks\": [], \"evidenceRefs\": [\"...\"], \"summary\": \"...\"}}"
-    );
-    if let Some(prev) = previous_text.map(str::trim).filter(|s| !s.is_empty()) {
-        let clipped: String = prev.chars().take(MAX_REPAIR_TEXT).collect();
-        prompt.push_str(&format!(
-            "\n\nYour previous verifier output could not be decoded or cited unindexed evidenceRefs:\n{clipped}\n\
-             Return ONE valid JSON object citing ONLY real evidenceRefs from your tool calls or Known Worker Evidence Refs."
-        ));
-    }
-    prompt
+         {{\"passed\": boolean, \"failedCriteria\": [{{\"criterionId\": \"...\", \"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"missingEvidence\": [{{\"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"risks\": [\"...\"], \"evidenceRefs\": [\"...\"], \"summary\": \"...\"}}"
+    )
 }
 
-/// Runs the bounded, read-only Independent Verifier episode (up to 2 attempts: initial + 1 format repair).
+fn build_wrap_up_prompt(verifier_ev_refs: &[String], allowed_refs: &HashSet<String>) -> String {
+    let valid_refs = prioritized_allowed_refs(verifier_ev_refs, allowed_refs);
+    let valid_json = serde_json::to_string(&valid_refs).unwrap_or_else(|_| "[]".into());
+    format!(
+        "You have reached the tool-turn limit for verification. Tools are now disabled.\n\
+         Respond with ONE valid JSON verdict object matching:\n\
+         {{\"passed\": boolean, \"failedCriteria\": [{{\"criterionId\": \"...\", \"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"missingEvidence\": [{{\"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"risks\": [\"...\"], \"evidenceRefs\": [\"...\"], \"summary\": \"...\"}}\n\
+         Rules:\n\
+         - Every entry in `evidenceRefs` MUST be an exact string from the valid indexed refs below. NEVER put raw file paths in `evidenceRefs`.\n\
+         - When `passed` is true, `evidenceRefs` must be non-empty.\n\
+         Valid indexed evidenceRefs: {valid_json}"
+    )
+}
+
+fn build_repair_prompt(
+    feedback: &RepairFeedback,
+    verifier_ev_refs: &[String],
+    allowed_refs: &HashSet<String>,
+) -> String {
+    let valid_refs = prioritized_allowed_refs(verifier_ev_refs, allowed_refs);
+    let valid_json = serde_json::to_string(&valid_refs).unwrap_or_else(|_| "[]".into());
+    let (diagnosis, previous_text) = match feedback {
+        RepairFeedback::InvalidFormat { previous_text } => (
+            "Your previous verifier output could not be decoded as a single valid JSON verdict object. \
+             Ensure `passed` is boolean, `failedCriteria` and `missingEvidence` are arrays of `{\"reason\": \"...\", \"evidenceRefs\": []}` objects, \
+             `risks` and `evidenceRefs` are arrays of strings, and `evidenceRefs` is non-empty when `passed` is true."
+                .to_owned(),
+            previous_text.as_str(),
+        ),
+        RepairFeedback::UnindexedRefs {
+            unindexed_refs,
+            previous_text,
+        } => {
+            let bad_json = serde_json::to_string(unindexed_refs).unwrap_or_else(|_| "[]".into());
+            (
+                format!(
+                    "Your previous JSON verdict cited unindexed entries in `evidenceRefs` that are NOT in the host Evidence Index: {bad_json}.\n\
+                     Remove those unindexed entries (such as raw workspace file paths) and keep ONLY exact strings from the valid indexed evidenceRefs list below."
+                ),
+                previous_text.as_str(),
+            )
+        }
+    };
+    let clipped: String = previous_text.trim().chars().take(MAX_REPAIR_TEXT).collect();
+    format!(
+        "Format repair only — tools are disabled. Do not attempt tool calls.\n\
+         {diagnosis}\n\n\
+         Valid indexed evidenceRefs (cite ONLY exact strings from this list): {valid_json}\n\n\
+         Previous output excerpt:\n{clipped}\n\n\
+         Return ONE valid JSON object matching:\n\
+         {{\"passed\": boolean, \"failedCriteria\": [{{\"criterionId\": \"...\", \"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"missingEvidence\": [{{\"reason\": \"...\", \"evidenceRefs\": [\"...\"]}}], \"risks\": [\"...\"], \"evidenceRefs\": [\"...\"], \"summary\": \"...\"}}"
+    )
+}
+
+/// Runs the bounded, read-only Independent Verifier episode (up to 2 attempts: initial + 1 tool-less format repair).
 pub async fn run_independent_verifier(
     data_home: &Path,
     plan: &Value,
     worker_evidence_refs: &HashSet<String>,
+    verifier_model: &NativeModel,
+    cancel: &CancellationToken,
+) -> Result<VerifierOutcome, ProjectError> {
+    run_independent_verifier_with_focus(
+        data_home,
+        plan,
+        worker_evidence_refs,
+        None,
+        verifier_model,
+        cancel,
+    )
+    .await
+}
+
+pub(crate) async fn run_independent_verifier_with_focus(
+    data_home: &Path,
+    plan: &Value,
+    worker_evidence_refs: &HashSet<String>,
+    focus: Option<&str>,
     verifier_model: &NativeModel,
     cancel: &CancellationToken,
 ) -> Result<VerifierOutcome, ProjectError> {
@@ -449,23 +700,38 @@ pub async fn run_independent_verifier(
     let evidence_store = EvidenceIndexStore::new(data_home);
     let mut allowed_refs = worker_evidence_refs.clone();
     let mut verifier_ev_refs = Vec::new();
-    let mut previous_text: Option<String> = None;
+    let mut repair_feedback: Option<RepairFeedback> = None;
     let mut last_conv_id = String::new();
 
     for attempt in 0..2 {
         if cancel.is_cancelled() {
             return Err(ProjectError::code("CANCELLED"));
         }
-        let prompt = build_verifier_prompt(plan, &allowed_refs, previous_text.as_deref());
+        let is_repair = attempt > 0;
+        let prompt = match repair_feedback.as_ref() {
+            Some(feedback) if is_repair => {
+                build_repair_prompt(feedback, &verifier_ev_refs, &allowed_refs)
+            }
+            _ => build_verifier_prompt(plan, &allowed_refs, focus),
+        };
         let runtime = NativeConversationRuntime::new(
             data_home,
             ConversationAccess::new(LocalAccessLevel::SessionLocal),
         );
         let mut deny_perm = DenyEscalationPermission;
-        let conv_out = Box::pin(runtime.execute(
+        let reuse_conv_id =
+            (is_repair && !last_conv_id.is_empty()).then_some(last_conv_id.as_str());
+        let empty_allowlist: [String; 0] = [];
+        let allowlist = if is_repair {
+            Some(&empty_allowlist[..])
+        } else {
+            Some(profile.allowlist.as_slice())
+        };
+        let max_turns = if is_repair { Some(1) } else { Some(12) };
+        let mut conv_out = Box::pin(runtime.execute_verification(
             &ConversationOptions {
                 workspace: &target_ws,
-                conversation_id: None,
+                conversation_id: reuse_conv_id,
                 resume_from: None,
                 prompt: &prompt,
                 image_paths: &[],
@@ -473,8 +739,8 @@ pub async fn run_independent_verifier(
                 mode: RuntimeMode::Chat,
                 effort: "default",
                 persist_model_selection: false,
-                allowlist: Some(&profile.allowlist),
-                max_turns: Some(8),
+                allowlist,
+                max_turns,
             },
             verifier_model,
             &mut deny_perm,
@@ -483,35 +749,70 @@ pub async fn run_independent_verifier(
         .await?;
 
         last_conv_id = conv_out.session_id.clone();
-        if let Ok(rows) = evidence_store.list_for_conversation(&last_conv_id, None) {
-            for row in rows {
-                if let Some(r) = row["evidenceRef"].as_str().map(str::trim)
-                    && !r.is_empty()
-                {
-                    let owned = r.to_owned();
-                    allowed_refs.insert(owned.clone());
-                    if !verifier_ev_refs.contains(&owned) {
-                        verifier_ev_refs.push(owned);
-                    }
-                }
+        collect_conversation_evidence_refs(
+            &evidence_store,
+            &last_conv_id,
+            &mut allowed_refs,
+            &mut verifier_ev_refs,
+        );
+
+        if !is_repair && conv_out.error == Some("agent_loop_exhausted") && !cancel.is_cancelled() {
+            let wrap_prompt = build_wrap_up_prompt(&verifier_ev_refs, &allowed_refs);
+            if let Ok(wrap_out) = Box::pin(runtime.execute_verification(
+                &ConversationOptions {
+                    workspace: &target_ws,
+                    conversation_id: Some(&last_conv_id),
+                    resume_from: None,
+                    prompt: &wrap_prompt,
+                    image_paths: &[],
+                    provider_id: verifier_model.provider(),
+                    mode: RuntimeMode::Chat,
+                    effort: "default",
+                    persist_model_selection: false,
+                    allowlist: Some(&[]),
+                    max_turns: Some(1),
+                },
+                verifier_model,
+                &mut deny_perm,
+                cancel,
+            ))
+            .await
+                && wrap_out.error.is_none()
+                && !wrap_out.content.trim().is_empty()
+            {
+                conv_out.content = wrap_out.content;
+                conv_out.error = None;
             }
         }
+
         if conv_out.error == Some("permission_denied") {
-            return Err(ProjectError::code("verifier_permission_denied"));
+            return Ok(VerifierOutcome::InvalidReport {
+                error: "verifier_permission_denied",
+                summary: "Verifier requested an action outside its read-only permission boundary."
+                    .to_owned(),
+                verifier_conversation_id: last_conv_id,
+            });
         }
-        if conv_out.error.is_some() {
-            return Err(ProjectError::code(
-                conv_out.error.unwrap_or("verifier_failed"),
-            ));
+        if let Some(err_code) = conv_out.error {
+            return Ok(VerifierOutcome::InvalidReport {
+                error: err_code,
+                summary: err_code.to_owned(),
+                verifier_conversation_id: last_conv_id,
+            });
         }
 
         if let Some(report) = decode_verifier_report(&conv_out.content) {
-            let refs_valid = !report.passed
-                || report
+            let unindexed_refs: Vec<String> = if report.passed {
+                report
                     .evidence_refs
                     .iter()
-                    .all(|r| allowed_refs.contains(r.as_str()));
-            if refs_valid {
+                    .filter(|r| !allowed_refs.contains(r.as_str()))
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if unindexed_refs.is_empty() {
                 return Ok(VerifierOutcome::Verified {
                     report,
                     verifier_conversation_id: last_conv_id,
@@ -520,9 +821,16 @@ pub async fn run_independent_verifier(
                     verifier_evidence_refs: verifier_ev_refs,
                 });
             }
-        }
-        if attempt == 0 {
-            previous_text = Some(conv_out.content);
+            if attempt == 0 {
+                repair_feedback = Some(RepairFeedback::UnindexedRefs {
+                    unindexed_refs,
+                    previous_text: conv_out.content,
+                });
+            }
+        } else if attempt == 0 {
+            repair_feedback = Some(RepairFeedback::InvalidFormat {
+                previous_text: conv_out.content,
+            });
         }
     }
 
@@ -607,5 +915,196 @@ mod tests {
         assert_eq!(model_family("anthropic/claude-sonnet-4"), "claude");
         assert_eq!(model_family("gpt-5.2-codex"), "gpt");
         assert_eq!(model_family("deepseek-v3"), "deepseek");
+    }
+
+    #[test]
+    fn worker_profile_normalizes_shorthand_capabilities_and_defaults_safely() {
+        let shorthand_write = json!({
+            "delegationOrigin": {
+                "readOnly": false,
+                "requiredCapabilities": ["file-write", "shell"]
+            }
+        });
+        let worker =
+            resolve_work_session_profile(&shorthand_write, "worker", LocalAccessLevel::FullLocal)
+                .expect("worker profile");
+        for expected in [
+            "local.file.read",
+            "local.file.list",
+            "local.file.search",
+            "local.search.aggregate",
+            "local.git.query",
+            "local.file.write",
+            "local.file.edit",
+            "local.shell.exec",
+            "local.shell.stop",
+        ] {
+            assert!(
+                worker.allowlist.iter().any(|c| c == expected),
+                "expected {expected} in worker allowlist {:?}",
+                worker.allowlist
+            );
+        }
+
+        let ro_shorthand = json!({
+            "delegationOrigin": {
+                "readOnly": true,
+                "requiredCapabilities": ["file-write", "shell", "read_file"]
+            }
+        });
+        let ro_worker =
+            resolve_work_session_profile(&ro_shorthand, "worker", LocalAccessLevel::FullLocal)
+                .expect("read-only worker profile");
+        assert!(!ro_worker.allowlist.contains(&"local.file.write".to_owned()));
+        assert!(!ro_worker.allowlist.contains(&"local.file.edit".to_owned()));
+        assert!(!ro_worker.allowlist.contains(&"local.shell.exec".to_owned()));
+        assert!(ro_worker.allowlist.contains(&"local.file.read".to_owned()));
+
+        let verifier =
+            resolve_work_session_profile(&shorthand_write, "verifier", LocalAccessLevel::FullLocal)
+                .expect("verifier profile");
+        assert!(!verifier.allowlist.contains(&"local.file.write".to_owned()));
+        assert!(!verifier.allowlist.contains(&"local.shell.exec".to_owned()));
+
+        let empty_write = json!({
+            "delegationOrigin": {
+                "readOnly": false,
+                "requiredCapabilities": []
+            }
+        });
+        let fallback_worker =
+            resolve_work_session_profile(&empty_write, "worker", LocalAccessLevel::FullLocal)
+                .expect("fallback worker profile");
+        assert!(
+            fallback_worker
+                .allowlist
+                .contains(&"local.file.write".to_owned())
+        );
+        assert!(
+            fallback_worker
+                .allowlist
+                .contains(&"local.file.edit".to_owned())
+        );
+        assert!(
+            fallback_worker
+                .allowlist
+                .contains(&"local.shell.exec".to_owned())
+        );
+        assert!(!fallback_worker.allowlist.iter().any(|c| {
+            WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES
+                .iter()
+                .any(|p| c.starts_with(p))
+        }));
+
+        let command_criterion = json!({
+            "delegationOrigin": {
+                "readOnly": false,
+                "requiredCapabilities": ["file-write"]
+            },
+            "successCriteria": [
+                { "kind": "command", "description": "Run tests", "command": "pnpm test" }
+            ]
+        });
+        let cmd_worker =
+            resolve_work_session_profile(&command_criterion, "worker", LocalAccessLevel::FullLocal)
+                .expect("command criterion worker profile");
+        assert!(
+            cmd_worker
+                .allowlist
+                .contains(&"local.shell.exec".to_owned())
+        );
+        assert!(
+            cmd_worker
+                .allowlist
+                .contains(&"local.shell.stop".to_owned())
+        );
+    }
+
+    #[test]
+    fn verifier_permission_allows_only_read_only_git_config_and_denies_escalations() {
+        let mac_gitconfig = json!({
+            "capabilityId": "local.git.query",
+            "riskLevel": "L1_local_read",
+            "scopes": [{
+                "kind": "file-read",
+                "capabilityId": "local.git.query",
+                "path": "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig"
+            }]
+        });
+        assert!(is_safe_verifier_git_config_read(&mac_gitconfig));
+
+        let user_gitconfig = json!({
+            "capabilityId": "local.git.query",
+            "riskLevel": "L1_local_read",
+            "scopes": [{
+                "kind": "file-read",
+                "capabilityId": "local.git.query",
+                "path": "/Users/alice/.config/git/config"
+            }]
+        });
+        assert!(is_safe_verifier_git_config_read(&user_gitconfig));
+
+        let secret_read = json!({
+            "capabilityId": "local.git.query",
+            "riskLevel": "L1_local_read",
+            "scopes": [{
+                "kind": "file-read",
+                "capabilityId": "local.git.query",
+                "path": "/Users/alice/.ssh/id_rsa"
+            }]
+        });
+        assert!(!is_safe_verifier_git_config_read(&secret_read));
+
+        let plain_file_read = json!({
+            "capabilityId": "local.file.read",
+            "riskLevel": "L1_local_read",
+            "scopes": [{
+                "kind": "file-read",
+                "capabilityId": "local.file.read",
+                "path": "/Users/alice/.gitconfig"
+            }]
+        });
+        assert!(!is_safe_verifier_git_config_read(&plain_file_read));
+    }
+
+    #[test]
+    fn decode_verifier_report_accepts_string_missing_evidence_and_prompts_guide_refs() {
+        let parsed = decode_verifier_report(
+            r#"{"passed":true,"failedCriteria":[],"missingEvidence":["PR body not independently fetched"],"risks":["PR base is main"],"evidenceRefs":["tool-result://call-1"],"summary":"All criteria verified."}"#,
+        )
+        .expect("string missingEvidence should lift to VerifierIssue");
+        assert!(parsed.passed);
+        assert_eq!(parsed.missing_evidence.len(), 1);
+        assert_eq!(
+            parsed.missing_evidence[0].reason,
+            "PR body not independently fetched"
+        );
+        assert!(parsed.missing_evidence[0].evidence_refs.is_empty());
+
+        // Blank string items remain invalid.
+        assert!(
+            decode_verifier_report(
+                r#"{"passed":true,"missingEvidence":["   "],"evidenceRefs":["tool-result://call-1"]}"#
+            )
+            .is_none()
+        );
+
+        let allowed: HashSet<String> = ["tool-result://call-1".to_owned()].into_iter().collect();
+        let initial = build_verifier_prompt(&json!({"title": "T", "goal": "G"}), &allowed, None);
+        assert!(initial.contains("NEVER put raw workspace file paths"));
+        assert!(initial.contains(r#""missingEvidence": [{"reason": "...""#));
+
+        let repair = build_repair_prompt(
+            &RepairFeedback::UnindexedRefs {
+                unindexed_refs: vec!["/repo/.git/config".to_owned()],
+                previous_text: r#"{"passed":true}"#.to_owned(),
+            },
+            &["tool-result://call-v1".to_owned()],
+            &allowed,
+        );
+        assert!(repair.contains("Format repair only"));
+        assert!(repair.contains("/repo/.git/config"));
+        assert!(repair.contains("tool-result://call-v1"));
+        assert!(repair.contains("tool-result://call-1"));
     }
 }

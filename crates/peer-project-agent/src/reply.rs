@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
-const TEXT_MAX: usize = 2000;
+const TEXT_MAX: usize = 8000;
 const OUTCOMES: [&str; 4] = ["passed", "failed", "partial", "unverifiable"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,7 +388,7 @@ pub fn compose_reply(input: ComposeReplyInput) -> Result<ComposedReply, ProjectE
     if text.is_empty() || text.chars().count() > TEXT_MAX {
         return Err(ProjectError::new(
             "invalid_input",
-            "text is required and must be at most 2000 characters",
+            "text is required and must be at most 8000 characters",
         ));
     }
     let validated_question = input.question.as_ref().map(validate_question).transpose()?;
@@ -420,7 +420,9 @@ pub fn compose_reply(input: ComposeReplyInput) -> Result<ComposedReply, ProjectE
         if !input.project_session_ids.contains(source) {
             return Err(ProjectError::new(
                 "forged_sources",
-                format!("source session does not belong to project: {source}"),
+                format!(
+                    "sources must contain only raw delegated sessionIds belonging to this project (not file paths or prefixed refs); invalid entry: {source}"
+                ),
             ));
         }
     }
@@ -433,7 +435,14 @@ pub fn compose_reply(input: ComposeReplyInput) -> Result<ComposedReply, ProjectE
 
     if !input.sources.is_empty() || !input.status_claims.is_empty() {
         if input.status_claims.len() != input.sources.len() {
-            return Err(ProjectError::code("status_claim_required"));
+            return Err(ProjectError::new(
+                "status_claim_required",
+                format!(
+                    "sources ({}) and statusClaims ({}) must match 1:1; cite every claimed sessionId in sources and include one statusClaim per source",
+                    input.sources.len(),
+                    input.status_claims.len()
+                ),
+            ));
         }
         let mut seen = HashSet::new();
         for claim in &input.status_claims {
@@ -441,10 +450,22 @@ pub fn compose_reply(input: ComposeReplyInput) -> Result<ComposedReply, ProjectE
                 || !input.sources.contains(&claim.session_id)
                 || !WORK_SESSION_STATUSES.contains(&claim.status.as_str())
             {
-                return Err(ProjectError::code("status_claim_required"));
+                return Err(ProjectError::new(
+                    "status_claim_required",
+                    format!(
+                        "invalid statusClaim for sessionId={} status={}; every claim must appear in sources and use an exact host session status",
+                        claim.session_id, claim.status
+                    ),
+                ));
             }
             let Some(actual) = facts_by_id.get(claim.session_id.as_str()) else {
-                return Err(ProjectError::code("status_claim_required"));
+                return Err(ProjectError::new(
+                    "status_claim_required",
+                    format!(
+                        "missing host session status fact for sessionId={}",
+                        claim.session_id
+                    ),
+                ));
             };
             if actual.status != claim.status {
                 return Err(ProjectError::new(

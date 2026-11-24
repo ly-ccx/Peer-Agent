@@ -24,6 +24,7 @@ use std::{
 const AVATAR_MAX_BYTES: u64 = 1024 * 1024;
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const BOT_PROACTIVITY_LEVELS: [&str; 6] = ["inherit", "quiet", "low", "standard", "high", "muted"];
+const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
 const MODEL_POLICY_ROLES: [&str; 8] = [
     "project_agent",
     "session_worker",
@@ -285,6 +286,13 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
             Some(level)
         }
     };
+    let communication_style = match obj.get("communicationStyle") {
+        None => None,
+        Some(v) => match v.as_str() {
+            Some(style) if BOT_COMMUNICATION_STYLES.contains(&style) => Some(style),
+            _ => return Ok(ok_fail("INVALID_COMMUNICATION_STYLE")),
+        },
+    };
     let avatar_source_path = match obj.get("avatarSourcePath") {
         None => None,
         Some(v) => {
@@ -320,6 +328,15 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
             return Ok(ok_fail("NOT_FOUND"));
         };
         cur.proactivity = Some(level.to_owned());
+        if let Err(err) = store.save(cur) {
+            return Ok(ok_fail(err.code));
+        }
+    }
+    if let Some(style) = communication_style {
+        let Some(mut cur) = store.read(ws) else {
+            return Ok(ok_fail("NOT_FOUND"));
+        };
+        cur.communication_style = Some(style.to_owned());
         if let Err(err) = store.save(cur) {
             return Ok(ok_fail(err.code));
         }
@@ -1035,7 +1052,7 @@ pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value
             page["window"].as_array().cloned().unwrap_or_default()
         } else {
             conv_store
-                .read_committed(conv_id, None, 4 * 1024 * 1024)
+                .read_committed(conv_id, None, 8 * 1024 * 1024)
                 .map(|s| s.history.messages)
                 .unwrap_or_default()
         };

@@ -8,7 +8,7 @@ use peer_project_agent::{
     now_iso, occupied_recovery_view, parse_iso_ms,
 };
 use peer_runtime::session_host::LocalPermissionDecision;
-use peer_store::{ApprovalDecision, ApprovalState, ApprovalStore, PolicyStore};
+use peer_store::{ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, PolicyStore};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -352,6 +352,109 @@ pub async fn handle_delete(ctx: &ServerContext, params: Value) -> Result<Value, 
 }
 
 // ---------------------------------------------------------------------------
+// 4b. project.bot.rebindFolder
+// ---------------------------------------------------------------------------
+
+pub async fn handle_rebind_folder(ctx: &ServerContext, params: Value) -> Result<Value, RpcError> {
+    let workspace_id = params
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if !is_valid_workspace_id(workspace_id) {
+        return Ok(ok_fail("INVALID_WORKSPACE"));
+    }
+
+    let host = ctx.project_host.host();
+    let Some(mut profile) = host.profiles().read(workspace_id) else {
+        return Ok(ok_fail("NOT_FOUND"));
+    };
+    if !profile.is_active() {
+        return Ok(ok_fail("ARCHIVED"));
+    }
+
+    let raw_path = params
+        .get("workspacePath")
+        .or_else(|| params.get("path"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let mut norm = raw_path;
+    while norm.len() > 1 && (norm.ends_with('/') || norm.ends_with('\\')) {
+        norm = &norm[..norm.len() - 1];
+    }
+    if norm.is_empty() {
+        return Ok(ok_fail("INVALID_PATH"));
+    }
+    if !Path::new(norm).is_dir() {
+        return Ok(ok_fail("FOLDER_NOT_FOUND"));
+    }
+
+    let existing = match host.registry().get(workspace_id) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return Ok(ok_fail("NOT_FOUND")),
+        Err(err) => return Ok(ok_fail(err.code)),
+    };
+
+    let real = std::fs::canonicalize(norm)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| norm.to_owned());
+
+    match host.registry().find_by_path(norm) {
+        Ok(Some(other)) if other.workspace_id != workspace_id => {
+            return Ok(ok_fail("PATH_TAKEN"));
+        }
+        Ok(_) => {}
+        Err(err) => return Ok(ok_fail(err.code)),
+    }
+
+    if existing.path == norm && existing.real_path == real {
+        return Ok(json!({
+            "ok": true,
+            "workspaceId": workspace_id,
+            "path": existing.path,
+            "previousPath": existing.path,
+            "pathExists": true,
+            "unchanged": true,
+            "profile": profile,
+        }));
+    }
+
+    ctx.project_host.quiesce_workspace(workspace_id).await;
+
+    let updated_entry = match host.registry().update_path(workspace_id, norm) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => return Ok(ok_fail("NOT_FOUND")),
+        Err(err) => return Ok(ok_fail(err.code)),
+    };
+
+    if profile.managed {
+        profile.managed = false;
+        profile = match host.profiles().save(profile) {
+            Ok(saved) => saved,
+            Err(err) => return Ok(ok_fail(err.code)),
+        };
+    }
+
+    if let Some(conv_id) = profile.agent_conversation_id.as_deref() {
+        let _ = ConversationStore::new(&ctx.config.data_home)
+            .update_workspace_path(conv_id, &updated_entry.path);
+    }
+
+    ctx.project_host.emit_changed(vec![workspace_id.to_owned()]);
+
+    Ok(json!({
+        "ok": true,
+        "workspaceId": workspace_id,
+        "path": updated_entry.path,
+        "previousPath": existing.path,
+        "pathExists": true,
+        "unchanged": false,
+        "profile": profile,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // 5. project.bot.submitInput
 // ---------------------------------------------------------------------------
 
@@ -393,6 +496,25 @@ pub async fn handle_submit_input(ctx: &ServerContext, params: Value) -> Result<V
         .map(str::to_owned);
     let anchor_refs = string_vec(params.get("anchorRefs"));
     let quote_refs = string_vec(params.get("quoteRefs"));
+    let raw_task_refs = string_vec(params.get("taskRefs"));
+    let mut task_refs = Vec::new();
+    let mut seen_task_refs = std::collections::HashSet::new();
+    for sid in raw_task_refs {
+        let trimmed = sid.trim();
+        if trimmed.is_empty() || !seen_task_refs.insert(trimmed.to_owned()) {
+            continue;
+        }
+        if host
+            .supervisor()
+            .find_plan_by_session(workspace_id, trimmed)
+            .is_some()
+        {
+            task_refs.push(trimmed.to_owned());
+            if task_refs.len() >= 5 {
+                break;
+            }
+        }
+    }
     let attachment_refs = string_vec(params.get("attachmentRefs"));
     let attachments = params
         .get("attachments")
@@ -407,6 +529,7 @@ pub async fn handle_submit_input(ctx: &ServerContext, params: Value) -> Result<V
         text,
         anchor_refs,
         quote_refs,
+        task_refs,
         attachment_refs,
         attachments,
         answer_to: answer_to.clone(),
@@ -623,6 +746,49 @@ pub async fn handle_resume_session(ctx: &ServerContext, params: Value) -> Result
             Ok(json!({ "ok": true, "session": session }))
         }
         Err(err) => Ok(ok_fail(err.code)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8b. project.bot.verifySession (ADR 134 — UI-triggered bounded re-verify)
+// ---------------------------------------------------------------------------
+
+pub async fn handle_verify_session(ctx: &ServerContext, params: Value) -> Result<Value, RpcError> {
+    let workspace_id = params
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let focus = params
+        .get("focus")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if !is_valid_workspace_id(workspace_id)
+        || session_id.is_empty()
+        || focus.is_some_and(|s| s.chars().count() > 500)
+    {
+        return Ok(ok_fail("INVALID_INPUT"));
+    }
+    match ctx
+        .project_host
+        .verify_session_now(workspace_id, session_id, focus)
+        .await
+    {
+        Ok(result) => Ok(json!({
+            "ok": true,
+            "sessionId": session_id,
+            "result": result,
+        })),
+        Err(err) => Ok(json!({
+            "ok": false,
+            "code": err.code,
+            "message": err.detail,
+        })),
     }
 }
 

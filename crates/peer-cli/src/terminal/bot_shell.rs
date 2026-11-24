@@ -25,7 +25,7 @@ use peer_project_agent::{
 use peer_protocol::interactive_result::{InteractiveAvailability, InteractiveOwner};
 use peer_runtime::{
     CancellationToken,
-    model_catalog::{ExecSelection, ExecSelectionError, resolve_exec},
+    model_catalog::{ExecSelection, ExecSelectionError, has_role_model_config, resolve_exec},
     session_host::LocalPermissionDecision,
 };
 use peer_tui::{
@@ -1329,6 +1329,15 @@ impl<'a> BotShellState<'a> {
             .resolve_role_selection("session_worker")
             .map(|r| r.selection)
             .unwrap_or_else(|_| resolved.selection.clone());
+        let profile = self.host.profiles().read(&ws_id);
+        let verifier_selection = has_role_model_config(
+            &self.home,
+            "verifier",
+            profile.as_ref().and_then(|p| p.model_policy.as_ref()),
+        )
+        .then(|| self.resolve_role_selection("verifier").ok())
+        .flatten()
+        .map(|r| r.selection);
         let home = self.home.clone();
         let host = Arc::clone(&self.host);
         let cancel = CancellationToken::new();
@@ -1338,9 +1347,22 @@ impl<'a> BotShellState<'a> {
             let model = peer_runtime::model_config::load_model(&home, &selection, &task_cancel)
                 .await
                 .map_err(|e| e.code.to_owned())?;
-            host.tick_foreground(&ws_id, &model, worker_selection, &task_cancel)
-                .await
-                .map_err(|e| e.to_string())
+            let verifier = if let Some(selection) = verifier_selection {
+                peer_runtime::model_config::load_model(&home, &selection, &task_cancel)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            host.tick_foreground_with_verifier(
+                &ws_id,
+                &model,
+                verifier.as_ref(),
+                worker_selection,
+                &task_cancel,
+            )
+            .await
+            .map_err(|e| e.to_string())
         });
         self.active_tick = Some(ActiveTick { cancel, task });
     }
@@ -1395,7 +1417,7 @@ impl<'a> BotShellState<'a> {
                 &worker_model,
                 verifier_model.as_ref(),
                 &mut perm,
-                16,
+                peer_project_agent::DEFAULT_WORKER_MAX_TURNS,
                 &task_cancel,
             ))
             .await

@@ -208,11 +208,57 @@ pub fn is_manual_criterion_confirmed(manual_confirmations: &[Value], criterion_i
         .is_some_and(|(_, row)| matches!(row["decision"].as_str(), Some("approve" | "confirmed")))
 }
 
-/// Evaluates whether every leaf task is completed with indexed host Evidence and
-/// all required automatic/model_review criteria pass against the host Evidence index.
-pub fn evaluate_acceptance_close_gate(
+/// Returns `true` when the host's independent verifier completed with a passing
+/// structured verdict backed by host-indexed Evidence and did not fail `criterion_id`.
+pub(crate) fn criterion_verified_by_independent_report(
+    plan: &Value,
+    criterion_id: &str,
+    known_refs: &HashSet<String>,
+) -> bool {
+    if plan["delegationOrigin"]["independentVerifier"].as_str() != Some("passed") {
+        return false;
+    }
+    let report = &plan["verificationReport"];
+    if report["passed"].as_bool() != Some(true) {
+        return false;
+    }
+    let explicitly_failed = report["failedCriteria"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|fc| fc["criterionId"].as_str() == Some(criterion_id));
+    if explicitly_failed {
+        return false;
+    }
+    report["evidenceRefs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .any(|r| !r.is_empty() && known_refs.contains(r))
+}
+
+fn criterion_result_has_indexed_evidence(result: &Value, known_refs: &HashSet<String>) -> bool {
+    let single_ok = result["evidenceRef"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some_and(|r| known_refs.contains(r));
+    let multi_ok = result["evidenceRefs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .any(|r| !r.is_empty() && known_refs.contains(r));
+    single_ok || multi_ok
+}
+
+fn evaluate_close_gate_inner(
     plan: &Value,
     known_refs: &HashSet<String>,
+    require_manual_confirmed: bool,
 ) -> (bool, Vec<String>) {
     let tasks = plan["tasks"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     let mut leaves = Vec::new();
@@ -256,35 +302,39 @@ pub fn evaluate_acceptance_close_gate(
             let kind = criterion["kind"].as_str().unwrap_or("");
             match kind {
                 "manual" => {
-                    if !is_manual_criterion_confirmed(manual_confirmations, cid) {
+                    if require_manual_confirmed
+                        && !is_manual_criterion_confirmed(manual_confirmations, cid)
+                    {
                         unmet.push(format!("criterion:{cid}:manual_pending"));
                     }
                 }
                 "model_review" => {
-                    let reviewed = reviews.iter().any(|r| {
-                        r["criterionId"].as_str() == Some(cid)
-                            && r["passed"] == true
-                            && r["evidenceRefs"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(Value::as_str)
-                                .any(|er| known_refs.contains(er.trim()))
-                    });
+                    let reviewed =
+                        reviews.iter().any(|r| {
+                            r["criterionId"].as_str() == Some(cid)
+                                && r["passed"] == true
+                                && criterion_result_has_indexed_evidence(r, known_refs)
+                        }) || criterion_verified_by_independent_report(plan, cid, known_refs);
                     if !reviewed {
                         unmet.push(format!("criterion:{cid}:model_review_unmet"));
+                    }
+                }
+                "command" | "test" => {
+                    let passed =
+                        results.iter().any(|r| {
+                            r["criterionId"].as_str() == Some(cid)
+                                && r["passed"] == true
+                                && criterion_result_has_indexed_evidence(r, known_refs)
+                        }) || criterion_verified_by_independent_report(plan, cid, known_refs);
+                    if !passed {
+                        unmet.push(format!("criterion:{cid}:check_unmet"));
                     }
                 }
                 _ => {
                     let passed = results.iter().any(|r| {
                         r["criterionId"].as_str() == Some(cid)
                             && r["passed"] == true
-                            && r["evidenceRefs"]
-                                .as_array()
-                                .into_iter()
-                                .flatten()
-                                .filter_map(Value::as_str)
-                                .any(|er| known_refs.contains(er.trim()))
+                            && criterion_result_has_indexed_evidence(r, known_refs)
                     });
                     if !passed {
                         unmet.push(format!("criterion:{cid}:check_unmet"));
@@ -294,6 +344,24 @@ pub fn evaluate_acceptance_close_gate(
         }
     }
     (unmet.is_empty(), unmet)
+}
+
+/// Evaluates whether every leaf task is completed with indexed host Evidence and
+/// all required automatic/model_review/manual criteria pass against the host Evidence index.
+pub fn evaluate_acceptance_close_gate(
+    plan: &Value,
+    known_refs: &HashSet<String>,
+) -> (bool, Vec<String>) {
+    evaluate_close_gate_inner(plan, known_refs, true)
+}
+
+/// Evaluates leaf evidence and all non-manual (`file-*`, `command`, `test`, `model_review`)
+/// criteria without requiring `manual` criteria to already be confirmed.
+pub(crate) fn evaluate_mechanical_close_gate(
+    plan: &Value,
+    known_refs: &HashSet<String>,
+) -> (bool, Vec<String>) {
+    evaluate_close_gate_inner(plan, known_refs, false)
 }
 
 pub fn compute_verification_verdict(

@@ -1145,6 +1145,7 @@ async fn project_bot_diagnostics_history_drafts_and_evidence_roundtrip() {
             text: "hello",
             anchor_refs: vec![],
             quote_refs: vec![],
+            task_refs: vec![],
             attachment_refs: vec![],
             attachments: vec![],
             answer_to: None,

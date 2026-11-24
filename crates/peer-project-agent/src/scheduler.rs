@@ -272,14 +272,33 @@ impl ExecutionScheduler {
             let mut dep_plans = Vec::new();
             for dep in deps {
                 let Some(dep_id) = dep.as_str() else { continue };
-                let Some(found) = by_session.get(dep_id) else {
+                let Some(mut found) = by_session.get(dep_id).copied() else {
                     return ScheduleDecision {
                         allowed: false,
                         reason: Some("dependency_missing".to_owned()),
                         queued_behind: Vec::new(),
                     };
                 };
-                dep_plans.push(*found);
+                // A bounded automatic retry inherits the exact predecessor task.
+                // Dependents follow that replacement while it remains pending.
+                for _ in 0..crate::supervisor::autonomy::MAX_AUTONOMOUS_RETRIES {
+                    let origin = &found["delegationOrigin"];
+                    let Some(next) = origin["supersededBy"]
+                        .as_str()
+                        .and_then(|id| by_session.get(id).copied())
+                        .filter(|next| {
+                            let next_origin = &next["delegationOrigin"];
+                            next_origin["autonomousRetry"] == true
+                                && next_origin["supersedes"] == origin["sessionId"]
+                                && next_origin["parentConversationId"]
+                                    == origin["parentConversationId"]
+                        })
+                    else {
+                        break;
+                    };
+                    found = next;
+                }
+                dep_plans.push(found);
             }
             let failed_deps: Vec<QueuedBehind> = dep_plans
                 .iter()

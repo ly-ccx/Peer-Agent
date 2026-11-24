@@ -654,6 +654,7 @@ pub fn handle_bot_continue_history(
         text: &text,
         anchor_refs: Vec::new(),
         quote_refs: Vec::new(),
+        task_refs: Vec::new(),
         attachment_refs: Vec::new(),
         attachments: Vec::new(),
         answer_to: None,
