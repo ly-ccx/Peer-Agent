@@ -408,6 +408,14 @@
   width: auto;
 }
 
+.model-selection-provider-menu.is-align-bottom {
+  transform-origin: bottom right;
+}
+
+.model-selection-provider-menu.is-below.is-align-bottom {
+  transform-origin: bottom center;
+}
+
 .model-selection-manage {
   margin-top: 4px;
   border-top: 1px solid color-mix(in srgb, var(--graphite-mute) 12%, transparent);
