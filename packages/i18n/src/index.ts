@@ -943,6 +943,8 @@ export type TranslationKey =
   | 'settings.bots.quietUntil'
   | 'settings.bots.digestTime'
   | 'settings.bots.digestTime.description'
+  | 'settings.bots.interactiveResults'
+  | 'settings.bots.interactiveResults.description'
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
@@ -1696,6 +1698,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': '结束',
     'settings.bots.digestTime': '今日小结',
     'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
+    'settings.bots.interactiveResults': '交互结果预览（OpenUI）',
+    'settings.bots.interactiveResults.description': '允许工作会话在桌面端发布可筛选、可试算的本地交互卡片（终端仍以文本摘要展示）。',
     'settings.replyLanguage.description': '机器人与你交流时使用的语言。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
@@ -3227,6 +3231,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': 'Until',
     'settings.bots.digestTime': 'Daily summary',
     'settings.bots.digestTime.description': 'At this time, held notes become one message.',
+    'settings.bots.interactiveResults': 'Interactive results preview (OpenUI)',
+    'settings.bots.interactiveResults.description': 'Allow delegated work sessions to publish local filterable tables, charts, and calculators in Desktop (terminal still renders text fallback).',
     'settings.replyLanguage.description': 'The language bots use when talking with you.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',

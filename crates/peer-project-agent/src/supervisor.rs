@@ -5,26 +5,35 @@
 //! Matches `packages/runtime-node/src/project-agent/session-supervisor.mjs` (ADR 80, 85, 88, 91, 103, 116).
 
 use crate::{
-    BotListSession, BotProfileStore, ObjectiveStore, ProjectError, ProjectInbox,
+    BotListSession, BotProfileStore, INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL,
+    InteractiveContentBridge, ObjectiveStore, ProjectError, ProjectInbox,
+    WorkSessionInteractiveContext, WorkSessionInteractiveProvider,
     acceptance::{
         AcceptanceDecision, AcceptanceFacts, HostAuthorityFacts, compute_verification_verdict,
         decide_session_acceptance,
     },
-    atomic_write,
+    atomic_write, interactive_context_extension, is_interactive_results_enabled_in_settings,
     memory::create_snapshot,
     now_iso,
     scheduler::{ExecutionScheduler, SelectionOutcome},
     sha256_json,
-    verifier::resolve_work_session_profile,
+    verifier::{
+        WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, resolve_work_session_profile_with_interactive,
+    },
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
-use peer_protocol::LocalAccessLevel;
+use peer_protocol::{
+    HostSurface, LocalAccessLevel,
+    interactive_result::{
+        INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, InteractiveOwner,
+    },
+};
 use peer_runtime::{
     CancellationToken,
     conversation_host::{ConversationAccess, ConversationOptions, NativeConversationRuntime},
     model::NativeModel,
     native_exec::{execute_plan, recover_plan},
-    providers::RuntimeMode,
+    providers::{CapabilityProvider, RuntimeMode},
     session_host::{EpisodeOutcome, PermissionInput},
 };
 use peer_store::{
@@ -39,7 +48,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, SystemTime},
 };
 
@@ -533,6 +542,7 @@ pub struct WorkSessionReport {
 
 pub struct SessionSupervisor {
     data_home: PathBuf,
+    surface: HostSurface,
     goal_plans_dir: PathBuf,
     conversations: ConversationStore,
     approvals: ApprovalStore,
@@ -543,6 +553,8 @@ pub struct SessionSupervisor {
     plan_cache: Mutex<PlanIndexCache>,
     transitions: Mutex<()>,
     verifying_sessions: Mutex<HashSet<String>>,
+    interactive_bridge: RwLock<Option<Arc<dyn InteractiveContentBridge>>>,
+    interactive_enabled_override: RwLock<Option<bool>>,
 }
 
 fn resolve_confined_criterion_path(
@@ -586,6 +598,77 @@ fn resolve_confined_criterion_path(
         }
     }
     matches.into_iter().next()
+}
+
+fn normalize_model_selection_slot(raw: &Value) -> Value {
+    let model_id = raw["modelId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default");
+    let provider_id = raw["providerId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            raw["modelProviderId"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("native");
+    let model_provider_id = raw["modelProviderId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(provider_id);
+    let family = raw["family"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if model_id.contains("claude") {
+                "anthropic"
+            } else if model_id.contains("gemini") {
+                "google"
+            } else {
+                "openai"
+            }
+        });
+    let mut slot = json!({
+        "providerId": provider_id,
+        "modelId": model_id,
+        "modelProviderId": model_provider_id,
+        "family": family,
+    });
+    if let Some(effort) = raw["reasoningEffort"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        slot["reasoningEffort"] = json!(effort);
+    }
+    if let Some(fast) = raw["fastMode"].as_bool() {
+        slot["fastMode"] = json!(fast);
+    }
+    slot
+}
+
+fn canonical_model_selection_snapshot(worker_raw: &Value, resolved_at: &str) -> Value {
+    let worker = normalize_model_selection_slot(worker_raw);
+    let mut verifier = worker.clone();
+    verifier["sameFamilyAsWorker"] = json!(true);
+    json!({
+        "worker": worker,
+        "explorer": worker,
+        "verifier": verifier,
+        "source": {
+            "worker": "auto",
+            "explorer": "auto",
+            "verifier": "auto",
+        },
+        "resolvedAt": resolved_at,
+    })
 }
 
 fn plan_approval_required(policy: &str, read_only: bool) -> bool {
@@ -1187,8 +1270,17 @@ impl SessionSupervisor {
     }
 
     pub fn new(data_home: impl AsRef<Path>, concurrency: Option<usize>) -> Self {
+        Self::new_for_surface(data_home, HostSurface::Tui, concurrency)
+    }
+
+    pub fn new_for_surface(
+        data_home: impl AsRef<Path>,
+        surface: HostSurface,
+        concurrency: Option<usize>,
+    ) -> Self {
         let home = data_home.as_ref().to_path_buf();
         Self {
+            surface,
             goal_plans_dir: home.join("goal-plans"),
             conversations: ConversationStore::new(&home),
             approvals: ApprovalStore::new(&home),
@@ -1200,7 +1292,136 @@ impl SessionSupervisor {
             plan_cache: Mutex::new(PlanIndexCache::default()),
             transitions: Mutex::new(()),
             verifying_sessions: Mutex::new(HashSet::new()),
+            interactive_bridge: RwLock::new(None),
+            interactive_enabled_override: RwLock::new(None),
         }
+    }
+
+    pub fn surface(&self) -> HostSurface {
+        self.surface
+    }
+
+    pub fn surface_str(&self) -> &'static str {
+        match self.surface {
+            HostSurface::Desktop => "desktop",
+            HostSurface::Tui => "tui",
+        }
+    }
+
+    pub fn set_interactive_bridge(&self, bridge: Option<Arc<dyn InteractiveContentBridge>>) {
+        if let Ok(mut guard) = self.interactive_bridge.write() {
+            *guard = bridge;
+        }
+    }
+
+    pub fn interactive_bridge(&self) -> Option<Arc<dyn InteractiveContentBridge>> {
+        self.interactive_bridge
+            .read()
+            .ok()
+            .and_then(|g| g.clone())
+    }
+
+    pub fn set_interactive_enabled_override(&self, enabled: Option<bool>) {
+        if let Ok(mut guard) = self.interactive_enabled_override.write() {
+            *guard = enabled;
+        }
+    }
+
+    pub fn is_interactive_results_enabled(&self) -> bool {
+        if let Ok(guard) = self.interactive_enabled_override.read()
+            && let Some(explicit) = *guard
+        {
+            return explicit;
+        }
+        is_interactive_results_enabled_in_settings(&self.data_home)
+    }
+
+    /// True iff this host can both validate/publish interactive results for workers
+    /// and inspect/evaluate them for verifiers (Desktop surface + bridge + setting on).
+    pub fn is_interactive_publishing_available(&self) -> bool {
+        self.surface == HostSurface::Desktop
+            && self.interactive_bridge().is_some()
+            && self.is_interactive_results_enabled()
+    }
+
+    fn check_delegation_capabilities(&self, req: &SpawnSessionRequest) -> Result<(), ProjectError> {
+        let mut needs_publish = false;
+        let mut needs_inspect = false;
+        for raw in &req.required_capabilities {
+            let cap = raw.trim().to_ascii_lowercase();
+            if cap.is_empty() {
+                continue;
+            }
+            if WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES
+                .iter()
+                .any(|prefix| cap.starts_with(prefix))
+            {
+                return Err(ProjectError::new(
+                    "capability_not_available",
+                    format!("Delegated worker cannot be granted excluded capability `{raw}`"),
+                ));
+            }
+            if cap == INTERACTIVE_PUBLISH_CAPABILITY || cap == INTERACTIVE_PUBLISH_TOOL {
+                needs_publish = true;
+                continue;
+            }
+            if cap == INTERACTIVE_INSPECT_CAPABILITY || cap == INTERACTIVE_INSPECT_TOOL {
+                needs_inspect = true;
+                continue;
+            }
+            if req.read_only
+                && matches!(
+                    cap.as_str(),
+                    "local.file.write"
+                        | "local.file.edit"
+                        | "write_file"
+                        | "edit_file"
+                        | "local.shell.exec"
+                        | "local.shell.stop"
+                        | "run_command"
+                        | "local.web.fetch"
+                        | "web_fetch"
+                )
+            {
+                return Err(ProjectError::new(
+                    "capability_not_available",
+                    format!(
+                        "Read-only delegated worker cannot be granted `{raw}`; set readOnly=false if project writes or commands are required"
+                    ),
+                ));
+            }
+        }
+        if needs_publish && !self.is_interactive_publishing_available() {
+            let detail = if self.surface != HostSurface::Desktop
+                || self.interactive_bridge().is_none()
+            {
+                format!(
+                    "`{INTERACTIVE_PUBLISH_CAPABILITY}` requires the Desktop host with interactive results support (current host surface: {})",
+                    self.surface_str()
+                )
+            } else {
+                format!(
+                    "`{INTERACTIVE_PUBLISH_CAPABILITY}` is disabled because `projectAgent.interactiveResults` is turned off in Settings -> General"
+                )
+            };
+            return Err(ProjectError::new("capability_not_available", detail));
+        }
+        if needs_inspect && !self.is_interactive_publishing_available() {
+            let detail = if self.surface != HostSurface::Desktop
+                || self.interactive_bridge().is_none()
+            {
+                format!(
+                    "`{INTERACTIVE_INSPECT_CAPABILITY}` requires the Desktop host with interactive results support (current host surface: {})",
+                    self.surface_str()
+                )
+            } else {
+                format!(
+                    "`{INTERACTIVE_INSPECT_CAPABILITY}` is disabled because `projectAgent.interactiveResults` is turned off in Settings -> General"
+                )
+            };
+            return Err(ProjectError::new("capability_not_available", detail));
+        }
+        Ok(())
     }
 
     pub fn scheduler(&self) -> &ExecutionScheduler {
@@ -1619,6 +1840,7 @@ impl SessionSupervisor {
                 "successCriteria must contain between 1 and 8 items",
             ));
         }
+        self.check_delegation_capabilities(&req)?;
         let at = now_iso();
         let snapshot = create_snapshot(&self.data_home, &req.workspace_id)?;
         let plan_id = format!("plan-{}", uuid::Uuid::new_v4());
@@ -1750,6 +1972,17 @@ impl SessionSupervisor {
         } else {
             "accepted"
         };
+        let model_selection = canonical_model_selection_snapshot(&req.worker_model_selection, &at);
+        let declared_caps: Vec<String> = {
+            let mut seen = HashSet::new();
+            req.required_capabilities
+                .iter()
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .filter(|c| seen.insert((*c).to_owned()))
+                .map(str::to_owned)
+                .collect()
+        };
         let mut origin = json!({
             "workspaceId": req.workspace_id,
             "sessionId": session_id,
@@ -1761,6 +1994,13 @@ impl SessionSupervisor {
             "kind": req.kind,
             "readOnly": req.read_only,
             "requiredCapabilities": req.required_capabilities,
+            "capabilityAdmission": {
+                "required": declared_caps,
+                "inventoryHash": Value::Null,
+                "inventoryKnown": true,
+                "requirementsDeclared": !req.required_capabilities.is_empty(),
+                "checkedAt": at,
+            },
             "memorySnapshotId": snapshot.snapshot_id,
             "priority": req.priority,
             "dependsOn": req.depends_on,
@@ -1768,9 +2008,7 @@ impl SessionSupervisor {
             "phase": initial_phase,
             "executionGeneration": execution_generation,
             "depth": 1,
-            "modelSelection": {
-                "worker": req.worker_model_selection,
-            }
+            "modelSelection": model_selection,
         });
         if let Some(ref predecessor) = req.supersedes {
             origin["supersedes"] = json!(predecessor);
@@ -2131,8 +2369,16 @@ impl SessionSupervisor {
                 .read_existing(workspace_id)
                 .map(|p| p.access_level)
                 .unwrap_or(LocalAccessLevel::SessionLocal);
-            let mut session_profile = match resolve_work_session_profile(&plan, "worker", ws_access)
-            {
+            let interactive_available = self.is_interactive_publishing_available();
+            let interactive_bridge = interactive_available
+                .then(|| self.interactive_bridge())
+                .flatten();
+            let mut session_profile = match resolve_work_session_profile_with_interactive(
+                &plan,
+                "worker",
+                ws_access,
+                interactive_bridge.is_some(),
+            ) {
                 Some(p) => p,
                 None => {
                     let _ = self.fail_session(
@@ -2237,13 +2483,61 @@ impl SessionSupervisor {
             } else {
                 None
             };
+            let can_publish_interactive = session_profile
+                .allowlist
+                .iter()
+                .any(|c| c == INTERACTIVE_PUBLISH_CAPABILITY);
+            let can_inspect_interactive = session_profile
+                .allowlist
+                .iter()
+                .any(|c| c == INTERACTIVE_INSPECT_CAPABILITY);
+            let mut extra_providers: Vec<Box<dyn CapabilityProvider>> = Vec::new();
+            let mut context_extensions: Vec<Value> = Vec::new();
+            if let Some(bridge) = interactive_bridge
+                && (can_publish_interactive || can_inspect_interactive)
+                && let (Some(parent_cid), Some(plan_cid)) = (
+                    plan["delegationOrigin"]["parentConversationId"].as_str(),
+                    plan["conversationId"].as_str(),
+                )
+            {
+                let epoch = plan["delegationOrigin"]["executionGeneration"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&plan_id)
+                    .to_owned();
+                extra_providers.push(Box::new(WorkSessionInteractiveProvider::new(
+                    WorkSessionInteractiveContext {
+                        data_home: self.data_home.clone(),
+                        owner: InteractiveOwner {
+                            workspace_id: workspace_id.to_owned(),
+                            conversation_id: parent_cid.to_owned(),
+                        },
+                        plan_id: plan_id.clone(),
+                        session_id: session_id.to_owned(),
+                        plan_conversation_id: plan_cid.to_owned(),
+                        execution_epoch: epoch,
+                        role: "session_worker".to_owned(),
+                        can_publish: can_publish_interactive,
+                        bridge: Arc::clone(&bridge),
+                    },
+                )));
+                context_extensions.push(interactive_context_extension(
+                    Some(bridge.as_ref()),
+                    can_publish_interactive,
+                ));
+                if can_publish_interactive && continuation.is_none() {
+                    prompt.push_str(
+                        "- `publish_interactive_result` IS projected in this session. Follow the `Peer Interactive Results Catalog & Rules` section in your system context strictly (`peer-basic-1` DSL), pass `publication: {\"kind\": \"create\"}`, valid `title`, `textFallback`, `program`, and `inputs`, and cite the returned `artifactRef` (`interactive-result://...`) in your final report.\n",
+                    );
+                }
+            }
             let runtime = NativeConversationRuntime::new(
                 &self.data_home,
                 ConversationAccess::new(session_profile.access_level),
             )
             .with_capability_overrides(worker_cap_overrides);
             let conv_res = Box::pin(
-                runtime.execute_delegated(
+                runtime.execute_delegated_with_extensions(
                     &ConversationOptions {
                         workspace: &target_ws,
                         conversation_id: continuation
@@ -2266,6 +2560,8 @@ impl SessionSupervisor {
                     worker_model,
                     permission,
                     cancel,
+                    extra_providers,
+                    context_extensions,
                 ),
             )
             .await;

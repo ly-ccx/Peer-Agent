@@ -1828,12 +1828,15 @@ impl ProjectAgentRunner {
                                     })
                             })
                         });
-            let has_interactive_results = InteractiveResultStore::new(&self.data_home)
-                .list_for_owner(&peer_protocol::interactive_result::InteractiveOwner {
-                    workspace_id: opts.workspace_id.to_owned(),
-                    conversation_id: opts.conversation_id.to_owned(),
-                })
-                .is_ok_and(|items| !items.is_empty());
+            let interactive_publishing_available =
+                self.supervisor.is_interactive_publishing_available();
+            let has_interactive_results = interactive_publishing_available
+                || InteractiveResultStore::new(&self.data_home)
+                    .list_for_owner(&peer_protocol::interactive_result::InteractiveOwner {
+                        workspace_id: opts.workspace_id.to_owned(),
+                        conversation_id: opts.conversation_id.to_owned(),
+                    })
+                    .is_ok_and(|items| !items.is_empty());
             let has_working_context = working_context.as_ref().is_some_and(|wc| {
                 wc["notes"].as_array().is_some_and(|a| !a.is_empty())
                     || wc["windows"].as_array().is_some_and(|a| !a.is_empty())
@@ -1930,6 +1933,9 @@ impl ProjectAgentRunner {
             committed_message_ids.push(None);
         }
 
+        let host_surface = self.supervisor.surface_str();
+        let interactive_publishing_available =
+            self.supervisor.is_interactive_publishing_available();
         let build_system_prompt = |continuity: Option<&str>| {
             assemble_project_agent_context(&ProjectAgentContextInput {
                 workspace_id: opts.workspace_id,
@@ -1951,6 +1957,8 @@ impl ProjectAgentRunner {
                 agent_messages: &agent_messages,
                 skill_pack_catalog: skill_pack_catalog.as_deref(),
                 mounted_capabilities_summary: mounted_capabilities_summary.as_deref(),
+                host_surface,
+                interactive_publishing_available,
             })
         };
         let mut system_prompt = build_system_prompt(continuity_summary.as_deref());

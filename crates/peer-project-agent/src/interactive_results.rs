@@ -11,14 +11,17 @@ use peer_protocol::interactive_result::{
     InteractiveResultReference, InteractiveResultSource, interactive_canonical_json,
     interactive_digest, interactive_json_digest, interactive_token,
 };
+use peer_runtime::CancellationToken;
 use peer_store::{DirectoryLock, EvidenceIndexStore};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeSet, HashSet},
     fs::{self, OpenOptions},
+    future::Future,
     io::Write,
     path::{Path, PathBuf},
+    pin::Pin,
     time::Duration,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -31,6 +34,60 @@ pub const INTERACTIVE_TOMBSTONE_LIMIT: usize = 256;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const CLEANUP_CATEGORY: &str = "interactive-cleanup";
 const LIBRARY_VERSION: &str = "1.0.0";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractiveValidationError {
+    pub code: String,
+    pub path: String,
+    pub details: String,
+}
+
+impl InteractiveValidationError {
+    pub fn new(
+        code: impl Into<String>,
+        path: impl Into<String>,
+        details: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            path: path.into(),
+            details: details.into(),
+        }
+    }
+}
+
+/// Host-supplied bridge to `@peer-agent/interactive-content` (OpenUI DSL validator
+/// and bounded pure evaluator). Desktop mounts this over reverse RPC (`peer-core-rpc`);
+/// CLI / TUI leaves it unmounted so graphics/JS dependencies never enter CLI startup.
+pub trait InteractiveContentBridge: Send + Sync {
+    fn validate_draft(
+        &self,
+        draft: Value,
+        bindings: Value,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, InteractiveValidationError>> + Send>>;
+
+    fn evaluate_content(
+        &self,
+        content: Value,
+        values: Value,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, InteractiveValidationError>> + Send>>;
+
+    fn catalog_prompt(&self) -> Option<String>;
+}
+
+/// Read `projectAgent.interactiveResults` from `<data_home>/settings.json`.
+/// Defaults safely to `false` on absent or malformed files.
+pub fn is_interactive_results_enabled_in_settings(data_home: &Path) -> bool {
+    let Ok(raw) = fs::read_to_string(data_home.join("settings.json")) else {
+        return false;
+    };
+    serde_json::from_str::<Value>(&raw)
+        .ok()
+        .and_then(|v| v["projectAgent"]["interactiveResults"].as_bool())
+        == Some(true)
+}
 
 const DATA_LEVELS: [&str; 5] = [
     "D0_public",
@@ -91,10 +148,13 @@ fn strip_provenance_timestamps(provenance: &[Value]) -> Vec<Value> {
         .map(|mut rec| {
             if let Some(obj) = rec.as_object_mut() {
                 obj.remove("capturedAt");
-                if let Some(src) = obj.get_mut("source").and_then(Value::as_object_mut)
-                    && src.get("kind").and_then(Value::as_str) == Some("model-data")
+                if obj
+                    .get("source")
+                    .and_then(|s| s.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("model-data")
                 {
-                    src.remove("observedAt");
+                    obj.remove("observedAt");
                 }
             }
             rec
@@ -259,6 +319,35 @@ fn select_data(root: &Value, selector: Option<&Value>) -> Result<Value, ProjectE
         return Ok(Value::Object(m));
     }
     Ok(cur)
+}
+
+pub(crate) fn page_interactive_text(
+    raw: &str,
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> Result<Value, ProjectError> {
+    page_text(raw, offset, limit)
+}
+
+pub(crate) fn select_interactive_data(
+    root: &Value,
+    selector: Option<&Value>,
+) -> Result<Value, ProjectError> {
+    select_data(root, selector)
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedPublicationRequest {
+    pub owner: InteractiveOwner,
+    pub source: InteractiveResultSource,
+    pub publication_kind: String,
+    pub base: Option<InteractiveResultReference>,
+    pub normalized_draft: Value,
+    pub validated_content: Value,
+    pub provenance: Vec<Value>,
+    pub data_level: String,
+    pub grant_id: String,
+    pub stream_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -519,6 +608,104 @@ impl InteractiveResultStore {
         }
     }
 
+    pub fn owner_data_level(
+        &self,
+        owner: &InteractiveOwner,
+        minimum: &str,
+    ) -> Result<String, ProjectError> {
+        Self::validate_owner(owner)?;
+        if data_level_rank(minimum).is_none() {
+            return Err(ProjectError::code("material_classification_unavailable"));
+        }
+        let Some(conn) = self.open_ro(&owner.workspace_id)? else {
+            return Ok(minimum.to_owned());
+        };
+        let owner_val = serde_json::to_value(owner).unwrap();
+        let owner_str = encode_canonical(&owner_val)?;
+        Self::read_privacy(&conn, &owner_str, minimum)
+    }
+
+    /// Commit an interactive result whose OpenUI `content` was already validated by
+    /// `@peer-agent/interactive-content` (`validateDraft`), preserving exact `libraryVersion`,
+    /// `specHash`, `stateSchemaHash`, `stateSchema`, `initialValues`, and `bindings` so
+    /// Desktop's OpenUI renderer opens and evaluates it with 100% schema fidelity.
+    pub fn commit_validated_publication(
+        &self,
+        req: &ValidatedPublicationRequest,
+        holds_lease: bool,
+    ) -> Result<Value, ProjectError> {
+        if !holds_lease {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
+        Self::validate_owner(&req.owner)?;
+        if !req.source.is_valid()
+            || req
+                .source
+                .execution_epoch
+                .as_deref()
+                .is_none_or(str::is_empty)
+            || data_level_rank(&req.data_level).is_none()
+            || !interactive_token(&req.grant_id)
+        {
+            return Err(ProjectError::code(
+                "interactive_publication_authority_invalid",
+            ));
+        }
+        if !matches!(req.publication_kind.as_str(), "create" | "revise") {
+            return Err(ProjectError::code("invalid_publication_intent"));
+        }
+        if req.publication_kind == "revise" && req.base.is_none() {
+            return Err(ProjectError::code("interactive_reference_invalid"));
+        }
+
+        let mut content = req.validated_content.clone();
+        let Some(content_obj) = content.as_object_mut() else {
+            return Err(ProjectError::code("interactive_content_invalid"));
+        };
+        // Strip cached evaluated tree (matching TS `store.mjs#storedContent`).
+        content_obj.remove("tree");
+        if content_obj.get("schemaVersion").and_then(Value::as_u64) != Some(1)
+            || !content_obj.get("program").is_some_and(Value::is_string)
+            || !content_obj
+                .get("specHash")
+                .and_then(Value::as_str)
+                .is_some_and(interactive_digest)
+            || !content_obj
+                .get("stateSchemaHash")
+                .and_then(Value::as_str)
+                .is_some_and(interactive_digest)
+        {
+            return Err(ProjectError::code("interactive_content_invalid"));
+        }
+        let trimmed_title = content_obj
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 160 && !s.contains('\0'))
+            .ok_or_else(|| ProjectError::code("interactive_content_invalid"))?
+            .to_owned();
+        let spec_hash = content_obj["specHash"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+
+        let args_digest = json_digest(&req.normalized_draft)?;
+        self.commit_prepared_publication(
+            &req.owner,
+            &req.source,
+            &req.publication_kind,
+            req.base.as_ref(),
+            &trimmed_title,
+            &spec_hash,
+            content,
+            &req.provenance,
+            &req.data_level,
+            &req.grant_id,
+            req.stream_id.as_deref(),
+            &args_digest,
+        )
+    }
+
     /// Commit a new interactive result publication (`phase = "index_pending"`), enforcing
     /// lease, owner privacy monotonicity, revision concurrency, and schema compatibility with
     /// `crates/peer-store/src/interactive_result/local.rs`.
@@ -563,18 +750,6 @@ impl InteractiveResultStore {
             return Err(ProjectError::code("interactive_reference_invalid"));
         }
 
-        let owner_val = serde_json::to_value(&req.owner).unwrap();
-        let owner_str = encode_canonical(&owner_val)?;
-        let call_ref = json!({
-            "owner": req.owner,
-            "conversationId": req.source.conversation_id,
-            "toolCallId": req.source.tool_call_id,
-        });
-        let op_id = Self::operation_key(
-            &req.owner,
-            &req.source.conversation_id,
-            &req.source.tool_call_id,
-        )?;
         let draft_for_digest = json!({
             "publication": match (&req.publication_kind[..], &req.base) {
                 ("revise", Some(b)) => json!({"kind": "revise", "base": b}),
@@ -605,15 +780,56 @@ impl InteractiveResultStore {
             "initialValues": {},
             "bindings": req.bindings,
         });
-        let content_version = content_digest(&content, &req.provenance, &req.data_level)?;
+
+        self.commit_prepared_publication(
+            &req.owner,
+            &req.source,
+            &req.publication_kind,
+            req.base.as_ref(),
+            trimmed_title,
+            &spec_hash,
+            content,
+            &req.provenance,
+            &req.data_level,
+            &req.grant_id,
+            req.stream_id.as_deref(),
+            &args_digest,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_prepared_publication(
+        &self,
+        owner: &InteractiveOwner,
+        source: &InteractiveResultSource,
+        publication_kind: &str,
+        base: Option<&InteractiveResultReference>,
+        trimmed_title: &str,
+        spec_hash: &str,
+        content: Value,
+        provenance: &[Value],
+        data_level: &str,
+        grant_id: &str,
+        stream_id: Option<&str>,
+        args_digest: &str,
+    ) -> Result<Value, ProjectError> {
+        let owner_val = serde_json::to_value(owner).unwrap();
+        let owner_str = encode_canonical(&owner_val)?;
+        let call_ref = json!({
+            "owner": owner,
+            "conversationId": source.conversation_id,
+            "toolCallId": source.tool_call_id,
+        });
+        let op_id = Self::operation_key(owner, &source.conversation_id, &source.tool_call_id)?;
+        let content_version = content_digest(&content, provenance, data_level)?;
         let body = json!({
             "encoding": "peer-interactive-content-1",
             "content": content,
-            "provenance": req.provenance,
-            "dataLevel": req.data_level,
+            "provenance": provenance,
+            "dataLevel": data_level,
         });
 
-        let conn = self.open_rw(&req.owner.workspace_id)?;
+        let conn = self.open_rw(&owner.workspace_id)?;
         conn.execute_batch("BEGIN IMMEDIATE;")
             .map_err(|_| ProjectError::code("interactive_storage_unavailable"))?;
 
@@ -637,22 +853,20 @@ impl InteractiveResultStore {
                 return Ok(prev);
             }
 
-            let cur_privacy = Self::read_privacy(&conn, &owner_str, &req.data_level)?;
-            if cur_privacy != req.data_level {
+            let cur_privacy = Self::read_privacy(&conn, &owner_str, data_level)?;
+            if cur_privacy != data_level {
                 return Err(ProjectError::code("material_classification_changed"));
             }
-            Self::remember_privacy(&conn, &owner_str, &req.data_level)?;
+            Self::remember_privacy(&conn, &owner_str, data_level)?;
 
             let mut result_id = format!("res-{}", uuid::Uuid::new_v4());
             let mut predecessor: Option<InteractiveResultReference> = None;
 
-            if req.publication_kind == "revise" {
-                let base_ref = req
-                    .base
-                    .as_ref()
+            if publication_kind == "revise" {
+                let base_ref = base
                     .filter(|b| b.is_valid())
                     .ok_or_else(|| ProjectError::code("interactive_reference_invalid"))?;
-                if base_ref.owner != req.owner {
+                if base_ref.owner != *owner {
                     return Err(ProjectError::code("interactive_scope_denied"));
                 }
                 let head_row: Option<(String, String)> = conn
@@ -688,8 +902,8 @@ impl InteractiveResultStore {
                         params![
                             op_id,
                             owner_str,
-                            req.source.conversation_id,
-                            req.source.tool_call_id,
+                            source.conversation_id,
+                            source.tool_call_id,
                             args_digest,
                             encoded
                         ],
@@ -718,7 +932,7 @@ impl InteractiveResultStore {
             }
 
             let reference = InteractiveResultReference {
-                owner: req.owner.clone(),
+                owner: owner.clone(),
                 result_id: result_id.clone(),
                 content_version: content_version.clone(),
             };
@@ -728,10 +942,10 @@ impl InteractiveResultStore {
 
             let mut metadata = json!({
                 "reference": reference,
-                "source": req.source,
+                "source": source,
                 "evidenceRef": evidence_ref,
                 "artifactRef": artifact_ref,
-                "dataLevel": req.data_level,
+                "dataLevel": data_level,
                 "createdAt": created_at,
                 "operationId": op_id,
             });
@@ -749,16 +963,16 @@ impl InteractiveResultStore {
 
             let mut index_entry = json!({
                 "evidenceRef": evidence_ref,
-                "planId": req.source.plan_id,
-                "conversationId": req.source.conversation_id,
-                "toolCallId": req.source.tool_call_id,
+                "planId": source.plan_id,
+                "conversationId": source.conversation_id,
+                "toolCallId": source.tool_call_id,
                 "capabilityId": INTERACTIVE_PUBLISH_CAPABILITY,
                 "toolName": INTERACTIVE_PUBLISH_TOOL,
                 "createdAt": created_at,
                 "artifactRefs": [artifact_ref],
                 "userArtifacts": [user_artifact],
             });
-            if let Some(ref sid) = req.stream_id
+            if let Some(sid) = stream_id
                 && !sid.is_empty()
             {
                 index_entry["streamId"] = json!(sid);
@@ -772,8 +986,8 @@ impl InteractiveResultStore {
                 "indexEntry": index_entry,
                 "evidenceId": format!("ev-{}", uuid::Uuid::new_v4()),
                 "grantAudit": {
-                    "grantId": req.grant_id,
-                    "toolCallId": req.source.tool_call_id,
+                    "grantId": grant_id,
+                    "toolCallId": source.tool_call_id,
                 },
             });
 
@@ -815,8 +1029,8 @@ impl InteractiveResultStore {
                 params![
                     op_id,
                     owner_str,
-                    req.source.conversation_id,
-                    req.source.tool_call_id,
+                    source.conversation_id,
+                    source.tool_call_id,
                     args_digest,
                     encode_canonical(&receipt)?,
                 ],

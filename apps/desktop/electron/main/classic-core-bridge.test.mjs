@@ -28,7 +28,13 @@ import {
   createBotDirectory,
   createInputQueue,
   createProjectInbox,
+  createSessionSupervisor,
 } from '@peer-agent/runtime-node/project-agent';
+import {
+  createInteractiveRuntime,
+  createInteractiveViewService,
+} from '@peer-agent/runtime-node/interactive-results';
+import { INTERACTIVE_CONTEXT } from '@peer-agent/interactive-content/context';
 import { createProjectMemoryService } from './project-agent/project-memory-service.mjs';
 import { createProjectObjectivesService } from './project-agent/project-objectives-service.mjs';
 import { createProjectAgentApplicationService } from './project-agent/project-agent-application-service.mjs';
@@ -3576,6 +3582,346 @@ test('E2E: remote-device-connector (setupRemoteAccess + createRemoteProjectAcces
     assert.equal(detailAfterRebind.pathExists, true);
   } finally {
     remote?.stop();
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});
+
+test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.interactive.validate -> verifier evaluates -> Desktop opens card', async () => {
+  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+
+  const openUiProgram = [
+    '$status="全部"',
+    'allRows=@Data("items")',
+    'shown=$status=="全部"?allRows:@RowsWhere(allRows,"status","eq",$status)',
+    'statusPicker=Select("status","状态筛选",$status,[{value:"全部",label:"全部"},{value:"正常",label:"正常"},{value:"风险",label:"风险"}])',
+    'tbl=Table("模块状态",[{key:"name",label:"模块"},{key:"status",label:"状态"},{key:"progress",label:"进度%"}],shown,"name")',
+    'chart=Chart("模块进度","bar","name",[{key:"progress",label:"进度%"}],shown)',
+    'root=Col([Title("项目交付概览"),Text("以下为虚构示例数据"),statusPicker,chart,tbl,Button("重置筛选",@Reset($status))])',
+  ].join('\n');
+
+  const sseTool = (callId, name, args) => [
+    `data: ${JSON.stringify({
+      id: `chunk-${callId}-1`,
+      choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: callId, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }],
+    })}`,
+    `data: ${JSON.stringify({
+      id: `chunk-${callId}-2`,
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+    })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
+
+  let workerSawPublishTool = false;
+  let workerSawCatalogPrompt = false;
+  let verifierSawInspectOnly = false;
+  let verifierEvaluatedCard = false;
+  let publishedArtifactRef = null;
+  let spawnedSessionId = null;
+
+  const mockServer = await startMockSseServer(({ body, res }) => {
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const tools = Array.isArray(body?.tools) ? body.tools.map((t) => t?.function?.name) : [];
+    const systemText = messages.find((m) => m.role === 'system')?.content || '';
+    const joined = JSON.stringify(messages);
+    const lastRole = messages.at(-1)?.role;
+
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+
+    // Independent verifier turn
+    if (joined.includes('independent read-only Verification Reviewer')) {
+      if (tools.length > 0) {
+        verifierSawInspectOnly = tools.includes('inspect_interactive_result') && !tools.includes('publish_interactive_result');
+      }
+      if (lastRole !== 'tool' && publishedArtifactRef) {
+        const refMatch = publishedArtifactRef.match(/^interactive-result:\/\/([^/]+)\/([^/]+)\/([^/]+)\/([a-f0-9]{64})$/);
+        if (refMatch) {
+          res.end(sseTool('ver-inspect-1', 'inspect_interactive_result', {
+            target: {
+              kind: 'result',
+              reference: {
+                owner: { workspaceId: refMatch[1], conversationId: refMatch[2] },
+                resultId: refMatch[3],
+                contentVersion: `sha256:${refMatch[4]}`,
+              },
+            },
+            view: 'evaluate',
+          }));
+          return;
+        }
+      }
+      if (lastRole === 'tool') {
+        const evalMsg = [...messages].reverse().find((m) => m.role === 'tool');
+        if (evalMsg?.content?.includes('host-derived') && evalMsg?.content?.includes('项目交付概览')) {
+          verifierEvaluatedCard = true;
+        }
+      }
+      const verdict = {
+        passed: true,
+        failedCriteria: [],
+        missingEvidence: [],
+        risks: [],
+        evidenceRefs: publishedArtifactRef ? [publishedArtifactRef] : [],
+        summary: 'Verified published OpenUI interactive card via inspect_interactive_result evaluate.',
+      };
+      res.end(sseText('verifier-done', JSON.stringify(verdict)));
+      return;
+    }
+
+    // Delegated worker turn
+    if (joined.includes('Delegated Task: 渲染 OpenUI 演示')) {
+      if (tools.includes('publish_interactive_result')) workerSawPublishTool = true;
+      if (systemText.includes('peer-basic-1') && systemText.includes('@RowsWhere')) workerSawCatalogPrompt = true;
+      if (lastRole !== 'tool') {
+        res.end(sseTool('worker-pub-1', 'publish_interactive_result', {
+          publication: { kind: 'create' },
+          title: '项目交付概览',
+          textFallback: '虚构数据示例：模块 A 正常 (85%)，模块 B 风险 (40%)。',
+          program: openUiProgram,
+          inputs: [
+            {
+              bindingId: 'items',
+              source: {
+                kind: 'model-data',
+                value: [
+                  { name: '模块 A', status: '正常', progress: 85 },
+                  { name: '模块 B', status: '风险', progress: 40 },
+                ],
+              },
+            },
+          ],
+        }));
+        return;
+      }
+      const toolMsg = [...messages].reverse().find((m) => m.role === 'tool');
+      const refHit = typeof toolMsg?.content === 'string'
+        ? toolMsg.content.match(/interactive-result:\/\/[^"\\\s}]+/)
+        : null;
+      if (refHit) publishedArtifactRef = refHit[0];
+      res.end(sseText('worker-done', `已发布交互卡片：${publishedArtifactRef || 'missing'}`));
+      return;
+    }
+
+    // Main Bot turns
+    if (joined.includes('Process ') && joined.includes('wake event')) {
+      if (lastRole === 'tool') {
+        res.end(sseText('bot-wake-done', ''));
+        return;
+      }
+      res.end(sseTool('bot-wake-reply-1', 'post_reply', {
+        proactive: true,
+        sources: spawnedSessionId ? [spawnedSessionId] : [],
+        text: '已经为你渲染好「项目交付概览」交互卡片，可直接打开体验筛选。',
+      }));
+      return;
+    }
+
+    if (lastRole === 'tool') {
+      const toolMsg = [...messages].reverse().find((m) => m.role === 'tool');
+      try {
+        const parsed = JSON.parse(toolMsg?.content || '{}');
+        if (typeof parsed?.sessionId === 'string') spawnedSessionId = parsed.sessionId;
+      } catch { /* ignore */ }
+      if (toolMsg?.content?.includes('"sessionId"')) {
+        res.end(sseTool('bot-wait-1', 'wait_for_sessions', {
+          sessionIds: [spawnedSessionId],
+          summary: '正在生成 OpenUI 演示卡片',
+        }));
+        return;
+      }
+      res.end(sseText('bot-user-done', ''));
+      return;
+    }
+
+    res.end(sseTool('bot-spawn-1', 'spawn_session', {
+      title: '渲染 OpenUI 演示',
+      brief: '请使用 publish_interactive_result 发布一份包含图表、表格与筛选控件的虚构中文示例。',
+      kind: 'ui',
+      readOnly: true,
+      requiredCapabilities: ['local.interactive.publish', 'local.interactive.inspect'],
+      successCriteria: [
+        { id: 'c-1', kind: 'model_review', description: '发布并验证有效 OpenUI 交互卡片' },
+      ],
+    }));
+  });
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: () => {},
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-openui',
+      PEER_MODEL_ID: 'e2e-mock-openui',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-openui-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    const cfg = await bridge.configureProjectBotHost({
+      enabled: true,
+      interactiveResults: true,
+      interactiveContext: INTERACTIVE_CONTEXT.content,
+    });
+    assert.equal(cfg.ok, true);
+    assert.equal(cfg.interactiveResultsEnabled, true);
+
+    const created = await bridge.projectBotCreate({ workspacePath: workspace, displayName: 'OpenUI Bot' });
+    assert.equal(created.ok, true);
+    const workspaceId = created.workspaceId;
+
+    const submitted = await bridge.projectBotSubmitInput({
+      workspaceId,
+      text: '你给我渲染一下看看',
+      inputId: 'in-openui-e2e-1',
+    });
+    assert.equal(submitted.ok, true);
+
+    // Wait for Main Bot wake reply carrying the interactive-result://... evidenceRef.
+    let replyWithInteractive = null;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const conv = await bridge.projectBotReadConversation({ workspaceId, limit: 20 });
+      const hit = (conv.messages || []).find((m) => (
+        m.kind === 'agent_reply'
+        && Array.isArray(m.meta?.evidenceRefs)
+        && m.meta.evidenceRefs.some((ref) => typeof ref === 'string' && ref.startsWith('interactive-result://'))
+      ));
+      if (hit) {
+        replyWithInteractive = hit;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    assert.equal(workerSawPublishTool, true, 'worker must receive publish_interactive_result tool');
+    assert.equal(workerSawCatalogPrompt, true, 'worker must receive peer-basic-1 catalog prompt');
+    assert.equal(verifierSawInspectOnly, true, 'verifier must receive inspect_interactive_result only');
+    assert.equal(verifierEvaluatedCard, true, 'verifier must run real OpenUI evaluate via host.interactive.validate');
+    assert.ok(publishedArtifactRef && publishedArtifactRef.startsWith('interactive-result://'), 'worker must publish interactive-result:// ref');
+    assert.ok(replyWithInteractive, 'main bot reply must carry interactive-result:// in meta.evidenceRefs');
+    assert.equal(replyWithInteractive.meta.evidenceRefs[0], publishedArtifactRef, 'interactive ref must be prioritized first');
+
+    // Verify Electron Desktop Interactive Results stack resolves deliveries & opens the exact Rust-published card!
+    const supervisor = createSessionSupervisor({
+      conversationStore,
+      goalPlanStore,
+      canManageWorkspace: () => false,
+      deferRecovery: true,
+    });
+    const interactive = createInteractiveRuntime({
+      rootDir: runtimeRoot,
+      goalPlanStore,
+      conversationStore,
+      getBotConversationId: (id) => profileStore.read(id)?.agentConversationId,
+      holdsLease: () => false,
+      enabled: () => false,
+      classifyContext: () => 'D3_private',
+      getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }),
+    });
+    const readEvidenceBody = createEvidenceReader({
+      resolveScopedRecord: (ref, context) => interactive.publications.resolveEvidence(ref, context),
+      projectDeliveries: createEvidenceDeliveryProjection({
+        getConversationId: (id) => profileStore.read(id)?.agentConversationId,
+        getPlan: (id) => goalPlanStore.getPlan(id),
+        getSession: (id) => supervisor.get({ sessionId: id, detail: 'report' }),
+      }),
+      findRecords: (refs) => goalPlanStore.findEvidenceIndexRecords?.(refs),
+      readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
+      readArtifact: () => null,
+    });
+
+    // 1. Rust readEvidence returns INTERACTIVE_EVIDENCE_HOST_REQUIRED so Desktop falls back to Electron interactive reader.
+    const rustRead = await bridge.projectBotReadEvidence({
+      evidenceRef: publishedArtifactRef,
+      context: { workspaceId },
+    });
+    assert.equal(rustRead.code, 'INTERACTIVE_EVIDENCE_HOST_REQUIRED');
+
+    // 2. Desktop local evidence reader verifies publication proof & returns interactive delivery!
+    const evidence = readEvidenceBody(publishedArtifactRef, { context: { workspaceId } });
+    assert.equal(evidence.availability, 'available', `evidence unavailable: ${JSON.stringify(evidence)}`);
+    assert.equal(evidence.deliveryStatus, 'available');
+    assert.equal(evidence.deliveries.length, 1);
+    assert.equal(evidence.deliveries[0].kind, 'interactive');
+    assert.equal(evidence.deliveries[0].label, '项目交付概览');
+    assert.equal(evidence.deliveries[0].specHash, INTERACTIVE_CONTEXT.specHash);
+
+    // 3. Desktop InteractiveViewService opens the card with real OpenUI stateSchema & initialValues!
+    const fakeSender = { isDestroyed: () => false, once() {}, removeListener() {} };
+    const botConvId = profileStore.read(workspaceId).agentConversationId;
+    const views = createInteractiveViewService({
+      resultStore: interactive.resultStore,
+      stateStore: interactive.stateStore,
+      resolveSource: (_sender, reference) => ({
+        owner: { workspaceId, conversationId: botConvId },
+        assertIdentity: () => true,
+        assertCurrent: () => reference.owner.workspaceId === workspaceId && reference.owner.conversationId === botConvId,
+        hasReplacement: () => false,
+      }),
+    });
+    try {
+      const opened = await views.open(fakeSender, {
+        reference: evidence.deliveries[0].interactiveReference,
+        requestId: 'open-e2e-1',
+      });
+      assert.equal(opened.ok, true, `views.open failed: ${JSON.stringify(opened)}`);
+      assert.equal(opened.result.content.libraryVersion, 'peer-basic-1');
+      assert.equal(opened.result.content.specHash, INTERACTIVE_CONTEXT.specHash);
+      assert.deepEqual(opened.result.content.initialValues, { $status: '全部' });
+      assert.ok(opened.result.content.stateSchema.$status, 'stateSchema must contain $status filter');
+
+      // 4. Persisted interactive state update (simulating Select filter switch '全部' -> '风险')
+      const acquired = views.acquire(fakeSender, {
+        handle: opened.handle,
+        expectedRevision: opened.state.stateRevision,
+      });
+      assert.equal(acquired.ok, true, `views.acquire failed: ${JSON.stringify(acquired)}`);
+      const saved = views.save(fakeSender, {
+        handle: opened.handle,
+        writer: acquired.writer,
+        expectedRevision: opened.state.stateRevision,
+        requestId: 'save-e2e-1',
+        values: { $status: '风险' },
+        inputDrafts: {},
+      });
+      assert.equal(saved.ok, true, `views.save failed: ${JSON.stringify(saved)}`);
+      const reopened = await views.open(fakeSender, {
+        reference: evidence.deliveries[0].interactiveReference,
+        requestId: 'open-e2e-2',
+      });
+      assert.equal(reopened.ok, true);
+      assert.deepEqual(reopened.state.values, { $status: '风险' });
+    } finally {
+      views.dispose();
+    }
+
+    // 5. Turning interactiveResults OFF via hostConfigure immediately disables it on the live Rust host.
+    const disabledStatus = await bridge.configureProjectBotHost({
+      enabled: true,
+      interactiveResults: false,
+      interactiveContext: INTERACTIVE_CONTEXT.content,
+    });
+    assert.equal(disabledStatus.interactiveResultsEnabled, false);
+  } finally {
     await client.dispose();
     await mockServer.close();
     cleanup();

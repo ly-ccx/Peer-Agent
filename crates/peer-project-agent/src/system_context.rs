@@ -29,6 +29,8 @@ pub struct ProjectAgentContextInput<'a> {
     pub agent_messages: &'a [Value],
     pub skill_pack_catalog: Option<&'a str>,
     pub mounted_capabilities_summary: Option<&'a str>,
+    pub host_surface: &'a str,
+    pub interactive_publishing_available: bool,
 }
 
 fn hash(s: &str) -> String {
@@ -175,6 +177,24 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
             "runtime",
         ));
     }
+
+    let interactive_status = if input.interactive_publishing_available {
+        "Interactive Results (OpenUI): ENABLED on this Desktop host.\n\
+         - When the user asks for an interactive card, chart, filterable table, or calculator, delegate a worker via `spawn_session` with `requiredCapabilities: [\"local.interactive.publish\", \"local.interactive.inspect\"]` (`readOnly: true` is permitted for internal result publishing).\n\
+         - After the worker finishes and publishes, report the outcome via `post_reply` citing the sessionId in `sources` so the host attaches the verified interactive card to your reply and task record."
+    } else if input.host_surface == "desktop" {
+        "Interactive Results (OpenUI): DISABLED in settings (`projectAgent.interactiveResults` is off).\n\
+         - Do not request `local.interactive.publish` until the user turns on \"交互结果预览（OpenUI）\" / \"Interactive results preview (OpenUI)\" in Settings -> General."
+    } else {
+        "Interactive Results (OpenUI): Unavailable on terminal/CLI host (text fallback reading only; publishing interactive cards requires the Desktop client with Interactive Results enabled)."
+    };
+    sections.push(section(
+        "project-agent.interactive-results-status",
+        "L4_CAPABILITIES",
+        18,
+        interactive_status.to_owned(),
+        "runtime",
+    ));
 
     if input.turn_kind == "wake" {
         let mut reminder = String::from(
@@ -382,6 +402,8 @@ mod tests {
             agent_messages: &[],
             skill_pack_catalog: None,
             mounted_capabilities_summary: None,
+            host_surface: "desktop",
+            interactive_publishing_available: false,
         }
     }
 

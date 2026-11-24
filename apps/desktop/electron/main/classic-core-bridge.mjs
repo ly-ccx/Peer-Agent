@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { runInteractiveValidation } from '@peer-agent/runtime-node/interactive-results';
 import {
   createRuntimeProjectionFromToolRegistry,
   createRuntimeToolRegistry,
@@ -618,6 +619,19 @@ export function createClassicCoreBridge({
           ? await runVisualVerification(params)
           : { required: false, passed: true, report: null }
       ),
+      'host.interactive.validate': async (params = {}) => {
+        try {
+          const result = await runInteractiveValidation(params);
+          return { ok: true, result };
+        } catch (error) {
+          return {
+            ok: false,
+            code: typeof error?.code === 'string' && error.code ? error.code : 'interactive_validation_failed',
+            path: String(error?.path ?? '').slice(0, 240),
+            details: String(error?.details ?? error?.message ?? '').slice(0, 240),
+          };
+        }
+      },
     };
   }
 

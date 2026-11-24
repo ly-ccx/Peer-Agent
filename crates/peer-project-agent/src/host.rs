@@ -170,7 +170,11 @@ impl NativeProjectHost {
             std::process::id(),
             app_version,
         )?;
-        let supervisor = Arc::new(SessionSupervisor::new(&home, concurrency));
+        let supervisor = Arc::new(SessionSupervisor::new_for_surface(
+            &home,
+            surface,
+            concurrency,
+        ));
         let coordination = Arc::new(CoordinationHub::new());
         let runner = ProjectAgentRunner::with_coordination(
             &home,
@@ -222,6 +226,18 @@ impl NativeProjectHost {
     }
     pub fn interactive_results(&self) -> &InteractiveResultStore {
         &self.interactive_results
+    }
+    pub fn set_interactive_bridge(
+        &self,
+        bridge: Option<Arc<dyn crate::InteractiveContentBridge>>,
+    ) {
+        self.supervisor.set_interactive_bridge(bridge);
+    }
+    pub fn set_interactive_enabled_override(&self, enabled: Option<bool>) {
+        self.supervisor.set_interactive_enabled_override(enabled);
+    }
+    pub fn is_interactive_publishing_available(&self) -> bool {
+        self.supervisor.is_interactive_publishing_available()
     }
     pub fn registry(&self) -> &ProjectRegistry {
         &self.registry

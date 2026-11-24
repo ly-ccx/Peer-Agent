@@ -131,8 +131,9 @@ fn validate_legacy_metadata(settings: &Value) -> Result<(), &'static str> {
             match key.as_str() {
                 "shell" if value == "bots" => {}
                 "shell" if !value.is_string() => return Err("context_settings_invalid"),
-                "shellIntroPending" | "shellIntroDismissed" if value.is_boolean() => {}
-                "shellIntroPending" | "shellIntroDismissed" => {
+                "shellIntroPending" | "shellIntroDismissed" | "interactiveResults"
+                    if value.is_boolean() => {}
+                "shellIntroPending" | "shellIntroDismissed" | "interactiveResults" => {
                     return Err("context_settings_invalid");
                 }
                 "proactivity" | "digestTime" | "communicationStyle"

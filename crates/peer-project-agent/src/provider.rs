@@ -1266,12 +1266,28 @@ fn execute_post_reply(
         .decision
     };
 
-    let mut ev_refs = Vec::new();
+    let mut interactive_refs = Vec::new();
+    let mut other_refs = Vec::new();
+    let mut seen_ev = HashSet::new();
     for sid in &sources {
         if let Ok(rep) = supervisor.read_report(&state.workspace_id, sid) {
-            ev_refs.extend(rep.evidence_refs);
+            for r in rep.evidence_refs {
+                if !seen_ev.insert(r.clone()) {
+                    continue;
+                }
+                if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX) {
+                    interactive_refs.push(r);
+                } else {
+                    other_refs.push(r);
+                }
+            }
         }
     }
+    // ADR 118 §9.5: prioritize confirmed fixed interactive result references first within
+    // the reply's bounded evidence budget so interactive cards are never pushed out by routine reads.
+    let mut ev_refs = interactive_refs;
+    ev_refs.extend(other_refs);
+    ev_refs.truncate(20);
 
     let reply_id = format!("reply-{tool_call_id}");
     let composed = compose_reply(ComposeReplyInput {
@@ -1806,7 +1822,7 @@ fn spawn_from_args(
             parent_conversation_id: state.conversation_id.clone(),
             anchor_message_ids: anchors,
             input_id: state.current_input_id.clone(),
-            surface: "tui".into(),
+            surface: supervisor.surface_str().to_owned(),
             title: args["title"].as_str().unwrap_or("").to_owned(),
             brief: args["brief"].as_str().unwrap_or("").to_owned(),
             kind: args["kind"].as_str().unwrap_or("other").to_owned(),

@@ -20,6 +20,7 @@ pub mod host;
 pub mod inbox;
 pub mod inherited_background;
 pub mod input_queue;
+pub mod interactive_provider;
 pub mod interactive_results;
 pub mod memory;
 pub mod objectives;
@@ -96,10 +97,16 @@ pub use input_queue::{
     ConsumeOutcome, InputDiagnosticSnapshot, InputQueue, ProjectInput, SubmitInputRequest,
     input_message_id,
 };
+pub use interactive_provider::{
+    INTERACTIVE_READ_RULES, WorkSessionInteractiveContext, WorkSessionInteractiveProvider,
+    interactive_context_extension,
+};
 pub use interactive_results::{
     INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_RESULTS_PER_BOT,
-    INTERACTIVE_STORE_BYTES, INTERACTIVE_TOMBSTONE_LIMIT, InteractiveResultStore,
-    PublishInteractiveRequest, build_cleanup_expected_digest, task_result_references,
+    INTERACTIVE_STORE_BYTES, INTERACTIVE_TOMBSTONE_LIMIT, InteractiveContentBridge,
+    InteractiveResultStore, InteractiveValidationError, PublishInteractiveRequest,
+    ValidatedPublicationRequest, build_cleanup_expected_digest,
+    is_interactive_results_enabled_in_settings, task_result_references,
 };
 pub use memory::{
     AdmissionContext, AdmissionDecision, CURATOR_EXCLUDED_CAPABILITY_PREFIXES, CURATOR_INTERVAL_MS,

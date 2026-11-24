@@ -232,6 +232,7 @@ import { createResourceWindowIpcRegistrations } from './ipc/register-resource-wi
 import { createResourceWindowController } from './resource-window-controller.mjs';
 import { createDesktopInteractiveApplication } from './interactive-results/application-service.mjs';
 import { createInteractiveResultsIpcRegistrations } from './ipc/register-interactive-results-ipc.mjs';
+import { INTERACTIVE_CONTEXT } from '@peer-agent/interactive-content/context';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
@@ -459,6 +460,8 @@ function buildProjectBotHostConfig({ includeWorkspaces = false } = {}) {
     enabled,
     ...(typeof policy?.projectAgent?.proactivity === 'string' ? { proactivity: policy.projectAgent.proactivity } : {}),
     learnPreferences: policy?.memory?.learnPreferences !== false,
+    interactiveResults: policy?.projectAgent?.interactiveResults === true,
+    interactiveContext: INTERACTIVE_CONTEXT.content,
     ...(Number.isInteger(policy?.projectAgent?.concurrency) && policy.projectAgent.concurrency > 0
       ? { concurrency: policy.projectAgent.concurrency }
       : {}),

@@ -147,8 +147,12 @@ fn settings_are_read_only_and_unsupported_values_do_not_become_defaults() {
             "native_capability_inventory_unsupported",
         ),
         (
-            "{\"projectAgent\":{\"interactiveResults\":true}}",
+            "{\"projectAgent\":{\"unsupportedFlag\":true}}",
             "native_capability_inventory_unsupported",
+        ),
+        (
+            "{\"projectAgent\":{\"interactiveResults\":\"yes\"}}",
+            "context_settings_invalid",
         ),
         (
             "{\"projectAgent\":{\"shellIntroDismissed\":\"yes\"}}",
@@ -267,6 +271,19 @@ fn desktop_host_tolerates_desktop_settings_and_respects_config_override() {
     let rendered = serde_json::to_string(&desktop.sections()).unwrap();
     assert!(rendered.contains("Custom/"));
     assert!(!rendered.contains("Reply Language"));
+
+    // Standard host also accepts boolean projectAgent.interactiveResults metadata.
+    std::fs::write(
+        &file,
+        serde_json::to_string(&serde_json::json!({
+            "schemaVersion": 3,
+            "projectAgent": { "shell": "bots", "interactiveResults": true },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    ProjectInstructions::observe_host(root.path(), root.path(), &CancellationToken::new())
+        .expect("boolean interactiveResults should be admitted on native host");
 
     // Explicit config_override takes precedence.
     let override_items = [ConfigInstruction {
