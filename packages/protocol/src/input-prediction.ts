@@ -12,9 +12,9 @@ export interface InputPredictionSettings {
 }
 
 export const INPUT_PREDICTION_LIMITS = Object.freeze({
-  inputTokens: 4096, outputTokens: 128, draftLength: 2048,
+  inputTokens: 4096, outputTokens: 256, draftLength: 2048,
   candidateLength: 240, candidateGraphemes: 120,
-  timeoutMs: 2000, validationMs: 150, ttlMs: 60_000,
+  timeoutMs: 6000, validationMs: 150, ttlMs: 60_000,
   requestIntervalMs: 3000, requestsPerMinute: 12,
 });
 

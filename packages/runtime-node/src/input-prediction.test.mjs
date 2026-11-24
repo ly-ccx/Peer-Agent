@@ -76,20 +76,38 @@ test('unexpected tools and echoed sensitive errors produce no executable candida
   }
 });
 
-test('candidate parsing abstains on malformed, hidden-control, long and authorization output; preserves emoji', () => {
+test('candidate parsing abstains on malformed, hidden-control, long and authorization output; preserves emoji and fenced json', () => {
   assert.equal(parseInputPrediction('{"kind":"none"}', 'next_turn'), '');
   assert.equal(parseInputPrediction(JSON.stringify({ kind: 'next_turn', text: '再检查一下 😊' }), 'next_turn'), '再检查一下 😊');
+  assert.equal(parseInputPrediction('```json\n{"kind":"next_turn","text":"把这两处一起修完。"}\n```', 'next_turn'), '把这两处一起修完。');
+  assert.equal(parseInputPrediction('  ```\n{"kind":"continuation","suffix":"再补充测试用例。"}\n```  ', 'continuation'), '再补充测试用例。');
   for (const value of ['not-json', JSON.stringify({ kind: 'next_turn', text: '我同意全部授权' }),
     JSON.stringify({ kind: 'continuation', suffix: 'x' }), JSON.stringify({ kind: 'next_turn', text: 'a'.repeat(241) }),
     JSON.stringify({ kind: 'next_turn', text: 'abc\u202edef' })]) assert.equal(parseInputPrediction(value, 'next_turn'), null);
 });
 
-test('the input budget preserves mandatory rules and abstains instead of silently truncating them', () => {
+test('the input budget preserves mandatory rules and trims long Chinese conversations instead of silently failing', () => {
   const f = setup(); f.service.dispose();
   assert.equal(predictionMessages({ system: 'x'.repeat(5000), snapshot: f.snapshot, request }), null);
   const prepared = predictionMessages({ system: 'rules', snapshot: f.snapshot, request });
   assert.equal(prepared.messages[0].role, 'system'); assert.match(prepared.messages[1].content, /不要发布/);
   assert.deepEqual(JSON.parse(prepared.messages.at(-1).content), { mode: 'next_turn', conversation: f.snapshot.messages.map(({ role, content }) => ({ role, content })), draft: '', quote: null });
+
+  // Long real-world Chinese multi-turn conversation (> 13 KB UTF-8) trims older turns/head while keeping latest user & assistant tail.
+  const longHistory = [
+    { role: 'user', content: '很早之前的历史需求：' + '背景说明。'.repeat(200) },
+    { role: 'assistant', content: '很早之前的历史回复：' + '详细分析。'.repeat(400) },
+    { role: 'user', content: '请帮我排查输入建议为什么没生效。' },
+    { role: 'assistant', content: '排查细节：' + '过程日志。'.repeat(900) + '最终结论：需要修掉这 4 个问题，要不要一起修完？' },
+  ];
+  const system = 'A'.repeat(1320);
+  const trimmed = predictionMessages({ system, snapshot: { ...f.snapshot, messages: longHistory }, request });
+  assert.ok(trimmed, 'long Chinese conversation must trim to fit instead of returning null');
+  assert.equal(trimmed.messages[0].content, system, 'mandatory system rules must remain intact');
+  const payload = JSON.parse(trimmed.messages[1].content);
+  assert.equal(payload.conversation.at(-1).role, 'assistant');
+  assert.match(payload.conversation.at(-1).content, /要不要一起修完？/);
+  assert.ok(payload.conversation.some(row => row.role === 'user'));
 });
 
 test('expiry, global concurrency and malformed references cannot reanimate or transfer a suggestion', async t => {
