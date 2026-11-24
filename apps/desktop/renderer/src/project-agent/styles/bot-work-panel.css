@@ -59,7 +59,7 @@
 .bot-work-panel-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: var(--space-1) var(--space-5) var(--space-4); }
 /* View changes use the shared fade without retaining an animation fill. */
 .bot-work-panel-scroll.motion-enter-fade { animation-fill-mode: backwards; }
-.bot-work-panel-attention { margin-bottom: var(--space-4); padding: var(--space-3); border-radius: var(--ui-radius-control); background: color-mix(in srgb, var(--azure-trace) 70%, var(--paper-sheet)); }
+.bot-work-panel-attention { margin-bottom: var(--space-4); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--chrome-hairline) 80%, transparent); border-radius: var(--ui-radius-control); background: var(--paper-hover); }
 .bot-work-panel-attention h3 { display: flex; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-1); color: var(--graphite-soft); font-size: var(--ui-font-caption); font-weight: 400; }
 .bot-work-panel-focus { margin: 0; font-size: var(--ui-font-control); font-weight: 500; overflow-wrap: anywhere; }
 .bot-work-panel-focus-source { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; min-height: var(--ui-target-min); padding: var(--space-2) 0 0; border: 0; color: var(--graphite-soft); background: transparent; font: inherit; font-size: var(--ui-font-caption); text-align: start; cursor: pointer; }
@@ -86,7 +86,7 @@
 .bot-work-panel-session-heading > strong { flex: 1; min-width: min(100%, 7rem); font-size: var(--ui-font-meta); font-weight: 500; overflow-wrap: anywhere; }
 .bot-work-panel-status { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: 0 var(--space-1); border-radius: var(--ui-radius-chip); background: var(--paper-hover); color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
 .bot-work-panel-status > svg { flex: none; }
-.bot-work-panel-session[data-needs-user="true"] .bot-work-panel-status { color: var(--azure-seal); background: var(--azure-trace); }
+.bot-work-panel-session[data-needs-user="true"] .bot-work-panel-status { color: var(--azure-seal); background: color-mix(in srgb, var(--azure-seal) 12%, transparent); }
 .bot-work-panel-session-detail { color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
 .bot-work-panel-session-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
 .bot-work-panel-session-meta:empty { display: none; }
