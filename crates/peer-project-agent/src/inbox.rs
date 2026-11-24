@@ -243,6 +243,7 @@ impl ProjectInbox {
             handle
                 .sync_all()
                 .map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+            drop(handle);
             let _ = self.archive_consumed_unlocked(workspace_id);
         }
         Ok(AppendResult {

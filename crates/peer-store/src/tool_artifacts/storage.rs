@@ -241,6 +241,10 @@ mod imp {
             self.directory.sync_all().map_err(|_| Error::CommitUnknown)
         }
 
+        pub fn sync_file(&self, name: &str) -> Result<(), Error> {
+            self.file(name)?.sync_all().map_err(|_| Error::Unavailable)
+        }
+
         pub fn publish(&self, temp: &str, name: &str) -> Result<(), Error> {
             self.check_path()?;
             // linkat is atomic and never replaces an existing content address.
@@ -466,6 +470,17 @@ mod imp {
 
         pub fn sync(&self) -> Result<(), Error> {
             Ok(())
+        }
+
+        pub fn sync_file(&self, name: &str) -> Result<(), Error> {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(self.directory_path.join(name))
+                .map_err(map_io)?;
+            version(&file)?;
+            file.sync_all().map_err(|_| Error::Unavailable)
         }
 
         pub fn publish(&self, temp: &str, name: &str) -> Result<(), Error> {

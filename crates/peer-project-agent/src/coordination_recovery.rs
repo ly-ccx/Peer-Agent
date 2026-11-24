@@ -176,30 +176,8 @@ fn write_durable_bytes(file: &Path, bytes: &[u8]) -> Result<(), ProjectError> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn stat_token(meta: &fs::Metadata) -> String {
-    use std::os::unix::fs::MetadataExt;
-    let mtime_ns = i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec());
-    let ctime_ns = i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec());
-    format!(
-        "{}:{}:{}:{}:{}",
-        meta.dev(),
-        meta.ino(),
-        meta.len(),
-        mtime_ns,
-        ctime_ns
-    )
-}
-
-#[cfg(not(unix))]
-fn stat_token(meta: &fs::Metadata) -> String {
-    let mtime_ns = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("0:0:{}:{mtime_ns}:{mtime_ns}", meta.len())
+    peer_store::file_stat_token(meta)
 }
 
 fn hash_file(file: &Path, end: Option<usize>, seed: Option<&[u8]>) -> Result<Value, ProjectError> {

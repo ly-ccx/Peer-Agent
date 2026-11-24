@@ -28,8 +28,10 @@ async fn separate_native_owners_reserve_once_before_sending_the_same_refresh_tok
     let config = json!({"version":2,"channels":[{"id":"group","authMethod":"oauth_chatgpt","oauthConfigured":true}],"models":[{"id":"group::model","groupId":"group","model":"gpt-5.6-luna"}]});
     std::fs::write(home.join("llm-providers.json"), config.to_string()).unwrap();
     let selected = json!({"modelProviderId":"group::model"});
-    let helper_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/examples/vault-fixture");
+    let helper_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../target/debug/examples/vault-fixture{}",
+        std::env::consts::EXE_SUFFIX
+    ));
     let make_helper = || HelperClient::new(&helper_path, home, Duration::from_secs(10)).unwrap();
     let cancel = CancellationToken::new();
     let key = "model/group/oauth-tokens";

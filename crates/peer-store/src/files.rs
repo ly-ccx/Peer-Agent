@@ -68,6 +68,14 @@ pub(crate) fn read(path: &Path, max: usize) -> Result<Option<Vec<u8>>, StoreErro
     Ok(Some(bytes))
 }
 
+pub fn file_stat_token(meta: &Metadata) -> String {
+    let v = from_metadata(meta);
+    format!(
+        "{}:{}:{}:{}:{}",
+        v.dev, v.ino, v.size, v.modified_ns, v.changed_ns
+    )
+}
+
 pub(crate) fn fingerprint(versions: &[Option<FileIdentity>]) -> String {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();

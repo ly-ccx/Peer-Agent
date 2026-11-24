@@ -93,6 +93,7 @@ mod transcript;
 pub use transcript::{TranscriptError, TranscriptLimit, TranscriptLimits, TranscriptReader};
 pub mod usage_queries;
 
+pub use files::file_stat_token;
 pub(crate) use files::identity;
 pub use goal_source::{GoalSourceSnapshot, GoalSourceStore};
 pub use history::{ConversationMetadataSnapshot, ConversationStore, HistorySnapshot};

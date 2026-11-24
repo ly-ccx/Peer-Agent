@@ -208,9 +208,7 @@ impl ToolArtifactStore {
         }
         // Reopen through the locked directory FD. Partial files are preserved on any
         // uncertain exit; only this known-complete temporary link is removed below.
-        let file = dir.file(&temp)?;
-        file.sync_all().map_err(|_| Error::Unavailable)?;
-        drop(file);
+        dir.sync_file(&temp)?;
         check(cancel)?;
         dir.publish(&temp, &reference.name())?;
         dir.check_path().map_err(|_| Error::CommitUnknown)?;
@@ -421,6 +419,8 @@ mod verified_window_tests {
         let reference = store.publish_utf8("c", "original", &|| false).unwrap();
         let dir = storage::Directory::open(home.path(), "c", false, &|| false).unwrap();
         let verified = store.verify(&dir, "c", &reference, &|| false).unwrap();
+        #[cfg(windows)]
+        std::thread::sleep(Duration::from_millis(25));
         std::fs::write(store.path("c", &reference).unwrap(), "tampered").unwrap();
         assert_eq!(
             verified_window(&dir, &reference, verified, (0, 8), &|| false).unwrap_err(),

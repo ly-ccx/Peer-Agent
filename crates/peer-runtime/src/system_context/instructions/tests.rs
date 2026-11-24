@@ -13,12 +13,18 @@ fn actual_ts_source_rendering_metadata_and_checksums_match_native_files() {
         }
         let instructions = ProjectInstructions::observe(root.path()).unwrap();
         let sections = instructions.sections();
-        let normalized: Value = serde_json::from_str(
-            &serde_json::to_string(&sections)
-                .unwrap()
-                .replace(root.path().to_str().unwrap(), "/synthetic/workspace"),
-        )
-        .unwrap();
+        let root_str = root.path().to_str().unwrap();
+        let mut normalized = serde_json::to_value(&sections).unwrap();
+        if let Some(items) = normalized.as_array_mut() {
+            for item in items {
+                if let Some(p) = item["source"]["path"].as_str() {
+                    let replaced = p
+                        .replace(root_str, "/synthetic/workspace")
+                        .replace('\\', "/");
+                    item["source"]["path"] = Value::String(replaced);
+                }
+            }
+        }
         assert_eq!(normalized, c["expected"]["sections"]);
         let rendered = sections
             .iter()

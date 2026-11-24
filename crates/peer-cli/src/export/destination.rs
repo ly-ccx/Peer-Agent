@@ -16,6 +16,8 @@ struct Version {
     len: u64,
     mtime_ns: i128,
     ctime_ns: i128,
+    #[cfg(windows)]
+    sample_hash: u64,
 }
 
 fn meta_dev_ino(m: &fs::Metadata) -> (u64, u64) {
@@ -57,12 +59,36 @@ fn version(path: &Path) -> io::Result<Option<Version>> {
             i128::from(m.creation_time()),
         )
     };
+    #[cfg(windows)]
+    let sample_hash = {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        if let Ok(mut f) = File::open(path) {
+            let mut buf = [0u8; 4096];
+            if let Ok(n) = f.read(&mut buf) {
+                for b in &buf[..n] {
+                    h ^= u64::from(*b);
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+            if m.len() > 4096 && f.seek(SeekFrom::End(-4096)).is_ok() {
+                if let Ok(n) = f.read(&mut buf) {
+                    for b in &buf[..n] {
+                        h ^= u64::from(*b);
+                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                }
+            }
+        }
+        h
+    };
     Ok(Some(Version {
         dev,
         ino,
         len: m.len(),
         mtime_ns,
         ctime_ns,
+        #[cfg(windows)]
+        sample_hash,
     }))
 }
 
@@ -204,12 +230,25 @@ fn reserved(path: &Path, home: &Path) -> io::Result<bool> {
     if path.starts_with(&store) {
         return Ok(true);
     }
+    #[cfg(unix)]
     if let Ok(identity) = fs::metadata(&store) {
         let store_id = meta_dev_ino(&identity);
         let mut parent = path.parent();
         while let Some(p) = parent {
             if let Ok(m) = fs::metadata(p)
                 && meta_dev_ino(&m) == store_id
+            {
+                return Ok(true);
+            }
+            parent = p.parent();
+        }
+    }
+    #[cfg(windows)]
+    if let Ok(canonical_store) = fs::canonicalize(&store) {
+        let mut parent = path.parent();
+        while let Some(p) = parent {
+            if let Ok(canonical_parent) = fs::canonicalize(p)
+                && canonical_parent == canonical_store
             {
                 return Ok(true);
             }

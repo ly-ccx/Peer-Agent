@@ -277,6 +277,7 @@ enum Interruption {
     ForeignMessage,
     ForeignGrant,
 }
+#[cfg(unix)]
 #[tokio::test]
 async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later_work() {
     for interruption in [

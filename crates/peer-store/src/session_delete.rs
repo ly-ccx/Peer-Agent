@@ -490,6 +490,7 @@ fn publish_change(path: &Path, id: &str, selected: &Selection) -> Result<(), Sto
                 {
                     return Err(StoreError::VersionChanged);
                 }
+                #[cfg(unix)]
                 reader
                     .get_ref()
                     .get_ref()
