@@ -199,7 +199,7 @@ jobs:
         run: cargo build --locked --release -p peer-credential-helper --bin peer-credential-helper -p peer-cli --bin peer-native
 
       - name: Build credential helper test fixture for Windows unit tests
-        run: cargo build --locked -p peer-credential-helper --example vault-fixture
+        run: cargo build --locked -p peer-credential-helper --features test-fixtures --example vault-fixture
 
       - name: Run Windows Rust unit tests
         run: cargo test --locked --no-fail-fast -p peer-protocol -p peer-store -p peer-runtime -p peer-project-agent -p peer-core-rpc -p peer-tui -p peer-cli --lib
