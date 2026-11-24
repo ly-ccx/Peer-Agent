@@ -7,10 +7,13 @@ import type { ReplyAnchor } from '../state/replyReferenceState';
 import { useState } from 'react';
 import { userReceipt } from '../state/userReceiptState';
 
+import type { BotWorkIndex } from '../state/botWorkState';
+
 export function UserBubble({
   message,
   replied,
   highlighted = false,
+  workIndex,
   i18n,
   anchors,
   onJump,
@@ -20,6 +23,7 @@ export function UserBubble({
   readonly message: BotChatMessage;
   readonly replied: boolean;
   readonly highlighted?: boolean;
+  readonly workIndex?: BotWorkIndex;
   readonly i18n: I18nRuntime;
   readonly anchors: ReadonlyMap<string, ReplyAnchor>;
   readonly onJump: (messageId: string) => void;
@@ -40,6 +44,23 @@ export function UserBubble({
       <div className="bot-user-content">
         <ResourceFeedbackCards rows={message.resourceFeedback ?? []} botName="" sent isZh={i18n.locale.startsWith('zh')} />
         {message.resourceFeedbackInvalid ? <p role="status">{i18n.locale.startsWith('zh') ? '此消息的资源引用暂不可用，原消息保留。' : 'Resource references for this message are unavailable. The original message is preserved.'}</p> : null}
+        {message.taskRefs?.length ? (
+          <div className="bot-user-task-refs">
+            {message.taskRefs.map((sessionId) => {
+              const title = workIndex?.byId.get(sessionId)?.title || sessionId;
+              return (
+                <button
+                  key={sessionId}
+                  type="button"
+                  className="bot-user-task-ref"
+                  onClick={() => onLocateSession(sessionId)}
+                >
+                  @ {title}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         {excerpt ? (
           <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
             excerpt={excerpt} className="bot-user-quote" i18n={i18n} onJump={onJump} />

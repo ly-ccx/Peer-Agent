@@ -497,6 +497,56 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   font-size: 12px;
 }
 
+.bot-overview-folder[data-missing='true'] {
+  border-color: color-mix(in srgb, var(--za-warning, #f4ad45) 45%, var(--chrome-hairline));
+}
+
+.bot-overview-folder-missing {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--za-warning, #f4ad45);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bot-overview-folder-missing svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.bot-overview-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bot-overview-tab .bot-overview-folder .bot-overview-folder-rebind.is-primary {
+  border-color: color-mix(in srgb, var(--za-accent, #4c8dff) 55%, transparent);
+  background: color-mix(in srgb, var(--za-accent, #4c8dff) 14%, transparent);
+  color: var(--graphite-base, var(--za-text));
+}
+
+.bot-overview-tab .bot-overview-folder .bot-overview-folder-rebind.is-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--za-accent, #4c8dff) 22%, transparent);
+}
+
+.bot-overview-folder-feedback {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bot-overview-folder-feedback.is-error {
+  color: var(--za-danger, #f36d63);
+}
+
+.bot-overview-folder-feedback.is-success {
+  color: var(--za-success, #61b68c);
+}
+
 .bot-overview-heading {
   display: flex;
   align-items: center;

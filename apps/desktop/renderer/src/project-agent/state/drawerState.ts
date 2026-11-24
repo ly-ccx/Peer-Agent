@@ -228,7 +228,11 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
 }
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
-  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return i18n.t('projectAgent.chat.work.resultSettling');
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') {
+    return i18n.t(session.followUp.reason === 'verification_failed'
+      ? 'projectAgent.chat.work.verificationFailed'
+      : 'projectAgent.chat.work.resultSettling');
+  }
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
   if (session.resourceBlocker?.kind === 'protection') return i18n.t(session.resourceBlocker.code === 'execution_outcome_unknown'

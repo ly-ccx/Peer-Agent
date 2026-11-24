@@ -6,14 +6,27 @@ import { botNarration } from './botNarrationState.ts';
 const TERMINAL = new Set(['done', 'error', 'stopped', 'disposed']);
 export const isActivityRunning = (activity: ProjectAgentActivity | null) => Boolean(activity && !TERMINAL.has(activity.phase));
 
+function normalizeActivity(incoming: ProjectAgentActivity): ProjectAgentActivity {
+  if (Array.isArray(incoming.segments) && Array.isArray(incoming.replyTo) && typeof incoming.replyText === 'string') {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    segments: Array.isArray(incoming.segments) ? incoming.segments : [],
+    replyTo: Array.isArray(incoming.replyTo) ? incoming.replyTo : [],
+    replyText: typeof incoming.replyText === 'string' ? incoming.replyText : '',
+  };
+}
+
 /** Push and read snapshots share this ordering boundary; late reads cannot rewind a turn. */
 export function mergeBotActivity(current: ProjectAgentActivity | null, incoming: ProjectAgentActivity | null | undefined, workspaceId: string): ProjectAgentActivity | null {
   if (!incoming || incoming.workspaceId !== workspaceId || !incoming.turnId || !Number.isFinite(incoming.revision)) return current;
-  if (!current) return incoming;
-  if (current.turnId === incoming.turnId) return incoming.revision > current.revision ? incoming : current;
-  if (incoming.startedAt < current.startedAt) return current;
-  if (incoming.startedAt === current.startedAt && incoming.revision <= current.revision && current.phase !== 'disposed') return current;
-  return incoming;
+  const normalized = normalizeActivity(incoming);
+  if (!current) return normalized;
+  if (current.turnId === normalized.turnId) return normalized.revision > current.revision ? normalized : current;
+  if (normalized.startedAt < current.startedAt) return current;
+  if (normalized.startedAt === current.startedAt && normalized.revision <= current.revision && current.phase !== 'disposed') return current;
+  return normalized;
 }
 
 /** A read may retire activity only alongside its messages and before any newer push. */
@@ -27,7 +40,7 @@ export function visibleBotActivity(activity: ProjectAgentActivity | null, messag
   if (!activity || activity.phase === 'disposed') return null;
   if (messages.some(message => message.turnId === activity.turnId && (message.kind === 'agent_reply'
     || message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind))))) return null;
-  const delivering = activity.phase === 'done' && Boolean(activity.replyText.trim());
+  const delivering = activity.phase === 'done' && Boolean((activity.replyText ?? '').trim());
   if (!delivering && TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
   return activity;
 }
@@ -90,7 +103,7 @@ export function attachBotProcesses(rows: readonly ConversationRow[], messages: r
     // Internal rounds never become public text, including legacy user turns.
     const eligible = Boolean(live) || turn?.publicUpdates !== undefined;
     const updates = turn?.publicUpdates !== undefined ? turn.publicUpdates
-      : live?.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) ?? [];
+      : live ? (live.segments ?? []).flatMap(segment => segment.kind === 'text' ? [segment] : []) : [];
     const first = row.message.turnId && !narrated.has(row.message.turnId);
     if (first) narrated.add(row.message.turnId!);
     return { ...row, processRounds, ...(live ? { activity: live } : {}),

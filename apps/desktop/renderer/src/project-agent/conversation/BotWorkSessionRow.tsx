@@ -36,7 +36,7 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
   }) : '';
   return <button type="button" className={`bot-work-panel-session is-${variant}`} data-needs-user={needsUser}
     data-blocked={blocked} data-session-id={session.sessionId} onClick={() => onOpen(session.sessionId)}>
-    {variant === 'agent' ? <span className="bot-work-panel-agent-icon"><PeerIcon name={identity.icon} size={17} /></span> : null}
+    <span className="bot-work-panel-agent-icon"><PeerIcon name={identity.icon} size={variant === 'agent' ? 14 : 17} /></span>
     <span className="bot-work-panel-session-copy">
       <span className="bot-work-panel-session-heading"><strong>{title}</strong>
         <span className="bot-work-panel-status"><PeerIcon name={needsUser ? 'info' : blocked ? 'warning' : 'circle'} size={11} />

@@ -8,12 +8,20 @@ export function replyActivityLabel(activity: ProjectAgentActivity | undefined, i
   if (!activity || !isActivityRunning(activity)) return null;
   if (activity.phase === 'awaiting_permission') return i18n.t('projectAgent.chat.activity.permission');
   if (activity.phase === 'tool') {
-    const tool = [...activity.segments].reverse().find(segment => segment.kind === 'tool'
+    const tool = [...(activity.segments ?? [])].reverse().find(segment => segment.kind === 'tool'
       && (segment.status === 'preparing' || segment.status === 'running'));
     if (tool?.kind === 'tool') {
       const preparing = tool.status === 'preparing';
       const operation = toolPresentation(tool.name).labelKey;
-      if (tool.name === 'list_directory') return i18n.t(preparing ? 'projectAgent.chat.activity.preparing' : 'projectAgent.chat.activity.directory');
+      if (tool.name === 'list_directory' || tool.name === 'list_files') {
+        return i18n.t(preparing ? 'projectAgent.chat.activity.preparing' : 'projectAgent.chat.activity.directory');
+      }
+      if (tool.name === 'git_query') {
+        return i18n.t(preparing ? 'projectAgent.chat.activity.preparing' : 'projectAgent.chat.activity.git');
+      }
+      if (tool.name === 'post_reply') {
+        return i18n.t('projectAgent.chat.activity.responding');
+      }
       if (operation === 'projectAgent.chat.toolLabel.read') {
         const name = fileName(tool.summary);
         if (name) return i18n.t(preparing ? 'projectAgent.chat.activity.prepareRead' : 'projectAgent.chat.activity.readFile', { name });

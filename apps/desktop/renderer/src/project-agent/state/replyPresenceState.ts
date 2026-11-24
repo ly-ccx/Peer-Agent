@@ -1,6 +1,7 @@
 import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
 import type { BotReplyRow } from './botReplyContinuity';
 import { isActivityRunning } from './botActivityState.ts';
+import { replyActivityLabel } from './replyActivityLabel.ts';
 
 interface ReplyPresenceView {
   readonly label: string | null;
@@ -22,8 +23,8 @@ export function replyPresenceState(reply: BotReplyRow, i18n: I18nRuntime): Reply
   else if (activity?.phase === 'awaiting_permission') key = 'projectAgent.chat.activity.permission';
   else if (running && activity?.recovery) { key = 'projectAgent.chat.reply.reconnecting'; busy = true; }
   else if (running) {
-    // One stable cue spans provider, prose and tool stages; details own the process.
-    return { label: i18n.t('projectAgent.chat.generating'), busy: true, refresh: false, replying: true };
+    const liveLabel = replyActivityLabel(activity, i18n) ?? i18n.t('projectAgent.chat.generating');
+    return { label: liveLabel, busy: true, refresh: false, replying: true };
   } else if (activity?.phase === 'error') key = 'projectAgent.chat.reply.interrupted';
   else if (activity?.phase === 'stopped') key = 'projectAgent.chat.stopped';
   else if (activity?.phase === 'done') {

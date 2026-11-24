@@ -48,8 +48,9 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await closeReplyDetails(page);
   await openWorkPanel(page);
   assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task').count(), 1);
-  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-agent').count(), 1);
-  checks.push('work panel separates the task and Agent views of current structured session facts');
+  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task .bot-work-panel-agent-icon').count(), 1);
+  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-agent').count(), 0);
+  checks.push('work panel unifies root tasks and nested child Agents without duplicating single-layer tasks');
   await checkWorkPanelLayout({ page, report, captureDirectory });
   await openReplyDetails(page, reply);
   assert.match(await work.locator(':scope > summary').textContent(), /核查历史任务完成情况.*正在运行中/);

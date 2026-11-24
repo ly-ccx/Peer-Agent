@@ -118,6 +118,7 @@ export interface BotChatMessage {
   readonly proactive: boolean;
   readonly cards: readonly BotChatCard[];
   readonly quoteRefs: readonly string[];
+  readonly taskRefs?: readonly string[];
   readonly separatorLabel: string;
   readonly pending?: 'sending' | 'received' | 'failed' | 'unknown';
   readonly attachments?: readonly ChatAttachment[];
@@ -194,6 +195,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     proactive: raw.proactive === true || meta.surfacing === 'digest',
     cards: cards.filter(card => card.kind !== 'verdict'),
     quoteRefs: readStringList(raw.quoteRefs),
+    ...(readStringList(raw.taskRefs).length ? { taskRefs: readStringList(raw.taskRefs) } : {}),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
     ...imageField(material.attachments),
     attachments: readAttachments(material.attachments),

@@ -230,3 +230,23 @@ test('a delivered reply clears the awaited input whichever anchor spelling was s
   assert.equal(awaitingInputAnswered([user, delivered], 'u'), true);
   assert.equal(awaitingInputAnswered([user], 'u'), false);
 });
+
+test('a historical input before a later agent_reply is never resurrected as an unconfirmed ghost row', () => {
+  const older = message('input-old', 'user_input', { inputId: 'old', content: '跑检查' });
+  const proactiveWake = message('reply-wake', 'agent_reply', { proactive: true, replyTo: [], content: '检查跑完了。' });
+  const newer = message('input-new', 'user_input', { inputId: 'new', content: '咋样了？' });
+  const liveForNewer = activity({ turnId: 'turn-new', replyTo: [newer.id], phase: 'thinking' });
+  const all = [older, proactiveWake, newer];
+  const rows = continuousReplyRows(
+    [row(older), row(proactiveWake), row(newer), { type: 'activity', activity: liveForNewer }],
+    all,
+    [{ inputId: 'new', createdAt: at }],
+    [{ inputId: 'new', text: '咋样了？', quoteRefs: [], attachments: [], createdAt: at, state: 'received' }],
+  );
+  const replyRows = replies(rows);
+  assert.equal(replyRows.length, 2, 'only the delivered wake reply and the live reply for the new message should exist');
+  assert.ok(replyRows.every(item => !item.pending?.restored), 'older input before a delivered reply must not spawn an unconfirmed ghost row');
+  const settled = replies(continuousReplyRows([row(older), row(proactiveWake)], [older, proactiveWake], [], []));
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0]!.message?.id, proactiveWake.id);
+});

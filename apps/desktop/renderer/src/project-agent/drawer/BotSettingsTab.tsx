@@ -5,7 +5,7 @@ import { useSettingsAction } from '../../ui/forms/useSettingsAction';
 import { readBotDetails } from '../state/botDetails';
 import { BotModelFeedback } from '../BotModelFeedback';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { BOT_AVATAR_COLORS, type BotProfile } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotCommunicationStyle, type BotProfile } from '@peer-agent/protocol';
 import { useEffect, useId, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -19,6 +19,7 @@ import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
 type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
+const COMMUNICATION_STYLES: readonly BotCommunicationStyle[] = ['natural', 'concise', 'detailed', 'technical'] as const;
 const COLOR_NAME_KEYS = [
   'projectAgent.drawer.settings.avatarColor.0',
   'projectAgent.drawer.settings.avatarColor.1',
@@ -32,6 +33,10 @@ const COLOR_NAME_KEYS = [
 
 function isProactivityLevel(value: string): value is ProactivityLevel {
   return (PROACTIVITY_LEVELS as readonly string[]).includes(value);
+}
+
+function isCommunicationStyle(value: string): value is BotCommunicationStyle {
+  return (COMMUNICATION_STYLES as readonly string[]).includes(value);
 }
 
 /**
@@ -68,7 +73,7 @@ export function BotSettingsTab({
     if (previousName.current !== profile.displayName && !nameForm.saving) void nameForm.reload();
     previousName.current = profile.displayName;
   }, [profile.displayName, nameForm.reload]);
-  const name = nameForm.draft, level = profile.proactivity || 'inherit';
+  const name = nameForm.draft, level = profile.proactivity || 'inherit', communicationStyle: BotCommunicationStyle = profile.communicationStyle || 'natural';
   const busy = action.busy || nameForm.saving || concurrencyForm.saving;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const saveConcurrency = async (value: string) => { concurrencyForm.edit(value); await concurrencyForm.save(); };
@@ -77,7 +82,11 @@ export function BotSettingsTab({
     if (!isProactivityLevel(next)) return;
     await savePolicy({ proactivity: next });
   };
-  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy' | 'autoHandoffOnPolicyAccept' | 'proactivity'>) {
+  const saveCommunicationStyle = async (next: string) => {
+    if (!isCommunicationStyle(next)) return;
+    await savePolicy({ communicationStyle: next });
+  };
+  async function savePolicy(patch: Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy' | 'autoHandoffOnPolicyAccept' | 'proactivity' | 'communicationStyle'>) {
     if (busy) return;
     await action.run(async () => {
       const result = await clientApi.projectAgentUpdateProfile({ workspaceId, ...patch });
@@ -168,6 +177,17 @@ export function BotSettingsTab({
       </div>
       </SettingsGroup>
       <SettingsGroup className="bot-settings-section bot-settings-workflow" title={i18n.t('projectAgent.drawer.settings.workflow')}>
+      <div className="bot-settings-row">
+        <span>{i18n.t('projectAgent.drawer.settings.communicationStyle')}</span>
+        <Dropdown
+          value={communicationStyle}
+          disabled={busy}
+          ariaLabel={i18n.t('projectAgent.drawer.settings.communicationStyle')}
+          options={COMMUNICATION_STYLES.map((item) => ({ value: item, label: i18n.t(`projectAgent.drawer.settings.communicationStyle.${item}`) }))}
+          onChange={(next) => { void saveCommunicationStyle(next); }}
+        />
+      </div>
+      <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.communicationStyleHint')}</p>
       <div className="bot-settings-row">
         <span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span>
         <Dropdown

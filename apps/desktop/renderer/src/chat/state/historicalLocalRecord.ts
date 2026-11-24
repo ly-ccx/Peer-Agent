@@ -24,13 +24,23 @@ export function sanitizeAssistantHistoryTextForApi(content: string): string {
 }
 
 const DISPLAY_LITERAL_TOOL_CALL_BLOCK_PATTERN = /(?:<|&lt;)tool_call(?:>|&gt;)[\s\S]*?(?:(?:<|&lt;)\/tool_call(?:>|&gt;)|$)/gi;
-const DISPLAY_TOOL_CALL_SYNTAX_PATTERN = /(?:<|&lt;)(\/?)(?:(antml:)?(tool_call|function_calls|invoke|parameter)|(functions\.[a-zA-Z0-9_.-]+))\b/gi;
+const DISPLAY_DSML_CALLS_BLOCK_PATTERN =
+  /(?:<|&lt;)\s*[｜|]\s*DSML\s*[｜|]\s*(?:function_)?calls\b[\s\S]*?(?:(?:<|&lt;)\s*\/\s*[｜|]\s*DSML\s*[｜|]\s*(?:function_)?calls\s*(?:>|&gt;)|$)/gi;
+const DISPLAY_DSML_INVOKE_BLOCK_PATTERN =
+  /(?:<|&lt;)\s*[｜|]\s*DSML\s*[｜|]\s*invoke\b[\s\S]*?(?:(?:<|&lt;)\s*\/\s*[｜|]\s*DSML\s*[｜|]\s*invoke\s*(?:>|&gt;)|$)/gi;
+const DISPLAY_DSML_STRAY_TAG_PATTERN =
+  /(?:<|&lt;)\s*\/?\s*[｜|]\s*DSML\s*[｜|][^>\n]*(?:>|&gt;|$)/gi;
+const DISPLAY_TOOL_CALL_SYNTAX_PATTERN =
+  /(?:<|&lt;)(\s*\/?\s*(?:[｜|]\s*DSML\s*[｜|]|(?:antml:)?(?:tool_call|function_calls|invoke|parameter)\b|functions\.[a-zA-Z0-9_.-]+\b))/gi;
 
 export function neutralizeToolCallSyntaxForDisplay(content: string): string {
   if (!content || (content.indexOf('<') === -1 && !/&lt;/i.test(content))) return content;
   const neutralized = content
+    .replace(DISPLAY_DSML_CALLS_BLOCK_PATTERN, '')
+    .replace(DISPLAY_DSML_INVOKE_BLOCK_PATTERN, '')
+    .replace(DISPLAY_DSML_STRAY_TAG_PATTERN, '')
     .replace(DISPLAY_LITERAL_TOOL_CALL_BLOCK_PATTERN, '')
-    .replace(DISPLAY_TOOL_CALL_SYNTAX_PATTERN, '&lt;$1$2$3$4');
+    .replace(DISPLAY_TOOL_CALL_SYNTAX_PATTERN, '&lt;$1');
   if (neutralized === content) return content;
   return neutralized
     .replace(/\n{3,}/g, '\n\n')

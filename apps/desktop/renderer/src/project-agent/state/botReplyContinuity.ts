@@ -86,6 +86,10 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   // Reopen only the most recent unanswered input run. Absence of Activity is not execution truth.
   const restored = new Map<string, AwaitingBotInput>();
   for (const message of [...messages].reverse()) {
+    if (message.kind === 'agent_reply'
+      || (message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind)))) {
+      break;
+    }
     if (message.kind !== 'user_input' || !message.inputId) continue;
     if (answeredId(message.id) || message.dispositions.some(mark => ['stopped', 'superseded', 'out_of_scope'].includes(mark.kind))) break;
     if (message.pending !== 'failed' && message.pending !== 'unknown') restored.set(message.id, { inputId: message.inputId, createdAt: message.createdAt });
@@ -118,7 +122,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       const work = activity.workId || activity.turnId;
       // Empty or differently spelled anchors still belong to the receipt that is waiting.
       // The activity fact itself is not rewritten.
-      const explicit = activity.replyTo.filter(id => id);
+      const explicit = (activity.replyTo ?? []).filter(id => id);
       const namesOf = (id: string) => aliases.get(id) ? [...aliases.get(id)!] : [id];
       const recognized = explicit.filter(id => messages.some(message => message.kind === 'user_input' && namesOf(id).includes(message.id)));
       const spelled = recognized.flatMap(namesOf);
@@ -142,7 +146,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       byTurn.set(activity.turnId, group); open.set(work, group);
       if (explicitKey) openAnchors.set(explicitKey, group);
       if (anchors) openAnchors.set(anchors, group);
-      appendUpdates(group, activity.turnId, activity.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []));
+      appendUpdates(group, activity.turnId, (activity.segments ?? []).flatMap(segment => segment.kind === 'text' ? [segment] : []));
       if (activity.replyText) appendConclusion(group, activity.turnId, activity.replyText);
       continue;
     }
@@ -170,7 +174,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
     if (!identityCache.has(turnId)) identityCache.set(turnId, group.id);
     if (!additionalReply) byTurn.set(turnId, group);
     appendUpdates(group, turnId, turn?.publicUpdates ?? message.publicUpdates
-      ?? row.activity?.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) ?? row.narration ?? []);
+      ?? (row.activity ? (row.activity.segments ?? []).flatMap(segment => segment.kind === 'text' ? [segment] : []) : undefined) ?? row.narration ?? []);
     if (turn?.displayContract === 2 || message.displayContract === 2) group.segmented = true;
     if (message.kind === 'agent_reply') {
       appendConclusion(group, turnId, message.content);

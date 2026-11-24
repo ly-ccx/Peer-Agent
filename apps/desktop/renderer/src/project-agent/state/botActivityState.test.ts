@@ -181,3 +181,31 @@ test('targeted detail pages retain exact-turn interrupted Activity without borro
   assert.equal(other.activity, undefined);
   assert.equal(replyDetailsFromPage('stopped', { ok: false, messages, activity }), undefined);
 });
+
+test('incomplete activity snapshots omitting segments, replyTo, or replyText stay safe across projection and label helpers', async () => {
+  const { continuousReplyRows } = await import('./botReplyContinuity.ts');
+  const { replyActivityLabel } = await import('./replyActivityLabel.ts');
+  const partial = {
+    workspaceId: 'w',
+    conversationId: 'c',
+    turnId: 't-partial',
+    revision: 1,
+    startedAt: '2026-11-22T00:00:00Z',
+    phase: 'tool',
+  } as unknown as ProjectAgentActivity;
+  const merged = mergeBotActivity(null, partial, 'w');
+  assert.ok(merged);
+  assert.deepEqual(merged.segments, []);
+  assert.deepEqual(merged.replyTo, []);
+  assert.equal(merged.replyText, '');
+
+  const visible = visibleBotActivity(partial, []);
+  assert.equal(visible?.turnId, 't-partial');
+  const attached = attachBotProcesses([{ type: 'activity', activity: partial }] as unknown as ReturnType<typeof conversationRows>, [], partial);
+  assert.equal(attached.length, 1);
+  const view = continuousReplyRows(attached, [], [], [], new Map(), undefined);
+  assert.equal(view.length, 1);
+
+  const mockI18n = { locale: 'zh-CN', t: (key: string) => key } as unknown as Parameters<typeof replyActivityLabel>[1];
+  assert.equal(replyActivityLabel(partial, mockI18n), 'projectAgent.chat.activity.thinking');
+});

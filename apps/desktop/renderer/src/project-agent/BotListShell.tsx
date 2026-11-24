@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { InputDraftTaskRef } from '@peer-agent/protocol';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
+import { useOptionalAppearance } from '../appearance/AppearanceProvider';
 import { usePointerResize } from '../app/hooks/usePointerResize';
 import { AutomationCenter, CapabilitiesPanel } from '../app/components/deferredPanels';
 import { VersionBadge } from '../app/components/VersionBadge';
@@ -16,11 +18,29 @@ import { useBotWorkSessions } from './state/useBotWorkSessions';
 import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
+import type { CiteTaskRequest } from './conversation/BotConversationComposer';
 import { BotDocumentPreview } from './conversation/BotDocumentPreview';
 import { BotResourceButton, useResourceWorkspace, useBotResourceOwner, type BotResourceOwner } from '../workbench/ResourceWorkspaceContext';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
+import { TaskWorkspaceView } from './task-workspace/TaskWorkspaceView';
+import {
+  canGoBack,
+  canGoForward,
+  currentNavigationView,
+  historyTotalOf,
+  initialNavigationState,
+  navigateBack,
+  navigateForward,
+  navigateTo,
+  pruneDeletedWorkspace,
+  sidebarActiveSessionsOf,
+  toggleBotExpanded,
+  toggleBotMoreTasks,
+  toggleSidebarCollapsed,
+  type NavigationState,
+} from './state/botNavigationState';
 import {
   BOT_LIST_WIDTH_DEFAULT,
   BOT_LIST_WIDTH_MAX,
@@ -34,7 +54,6 @@ import {
 } from './state/botListState';
 import {
   closeDrawer,
-  locateDrawerSession,
   openDrawer,
   readDrawerMemory,
   writeDrawerMemory,
@@ -58,6 +77,7 @@ export interface BotListShellProps {
   readonly automationRunTarget: { automationId: string; runId: string } | null;
   readonly onOpenSettings: () => void;
   readonly onOpenProviders?: () => void;
+  readonly onOpenSearch?: () => void;
   readonly hasModel?: boolean;
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
@@ -91,6 +111,7 @@ export function BotListShell({
   automationRunTarget,
   onOpenSettings,
   onOpenProviders,
+  onOpenSearch,
   hasModel = false,
   onOpenAutomations,
   onOpenCapabilities,
@@ -99,22 +120,28 @@ export function BotListShell({
   notificationFocus = null,
 }: BotListShellProps) {
   const list = useBotList(activePage !== 'settings');
+  const appearance = useOptionalAppearance();
   const resources = useResourceWorkspace();
   const showDetails = resources?.showDetails;
   const revealPrimary = resources?.revealPrimary;
   const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
+  const inspectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [replyDetailsTarget, setReplyDetailsTarget] = useState<HTMLDivElement | null>(null);
   const [workPanelTarget, setWorkPanelTarget] = useState<HTMLSpanElement | null>(null);
   const [drawerLoadedFor, setDrawerLoadedFor] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
-  const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
   const [inspect, setInspect] = useState<BotInspect | null>(null);
   const [taskContext, setTaskContext] = useState<TaskConversationContext | null>(null);
   const [taskRequest, setTaskRequest] = useState<(TaskConversationRequest & { readonly workspaceId: string }) | null>(null);
+  const [citeRequest, setCiteRequest] = useState<(CiteTaskRequest & { readonly workspaceId: string }) | null>(null);
+  const [nav, setNav] = useState<NavigationState>(() => initialNavigationState(list.openedId));
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [reportedTaskEvidenceCount, setReportedTaskEvidenceCount] = useState(0);
+  const [openedWorkspacePath, setOpenedWorkspacePath] = useState('');
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
   const [replyPresence, setReplyPresence] = useState<{ workspaceId: string; mood: BotAvatarMood | null } | null>(null);
   const updateReplyPresence = useCallback((workspaceId: string, mood: BotAvatarMood | null) => {
@@ -136,6 +163,59 @@ export function BotListShell({
   useBotResourceOwner(opened?.workspaceId ?? null, onResourceOwnerChange, opened?.profile.agentConversationId);
   const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
   const detailsVisible = inspect && resources ? resources.detailsVisible : currentDrawerMemory.open;
+
+  const activeNavView = currentNavigationView(nav);
+  const activeTaskSessionId = activeNavView?.kind === 'task' && activeNavView.workspaceId === opened?.workspaceId
+    ? activeNavView.sessionId
+    : null;
+
+  const openBotView = useCallback((workspaceId: string) => {
+    setInspectorOpen(false);
+    list.openBot(workspaceId);
+    setNav((current) => navigateTo(current, { kind: 'bot', workspaceId }));
+  }, [list]);
+
+  const openTaskView = useCallback((workspaceId: string, sessionId: string) => {
+    revealPrimary?.();
+    setInspect(null);
+    setInspectorOpen(false);
+    setDrawerMemory((current) => closeDrawer(current));
+    list.openBot(workspaceId);
+    setNav((current) => navigateTo(current, { kind: 'task', workspaceId, sessionId }));
+  }, [list, revealPrimary]);
+
+  const goBack = useCallback(() => {
+    setNav((current) => {
+      if (!canGoBack(current)) return current;
+      const next = navigateBack(current);
+      const target = currentNavigationView(next);
+      if (target) list.openBot(target.workspaceId);
+      setInspectorOpen(false);
+      return next;
+    });
+  }, [list]);
+
+  const goForward = useCallback(() => {
+    setNav((current) => {
+      if (!canGoForward(current)) return current;
+      const next = navigateForward(current);
+      const target = currentNavigationView(next);
+      if (target) list.openBot(target.workspaceId);
+      setInspectorOpen(false);
+      return next;
+    });
+  }, [list]);
+
+  // Keep NavigationState synchronized when list.openedId changes externally (e.g. startup or creation)
+  useEffect(() => {
+    if (!list.openedId) return;
+    setNav((current) => {
+      const active = currentNavigationView(current);
+      if (active?.workspaceId === list.openedId) return current;
+      return navigateTo(current, { kind: 'bot', workspaceId: list.openedId! });
+    });
+  }, [list.openedId]);
+
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
     return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
@@ -155,14 +235,60 @@ export function BotListShell({
   });
   const needsYouCount = sumNeedsYou(list.catalog);
 
+  const openedActive = useMemo(
+    () => (opened ? sidebarActiveSessionsOf(opened, work.available ? work.sessions : null) : { items: [], total: 0 }),
+    [opened, work.available, work.sessions],
+  );
+  const openedHistoryTotal = useMemo(
+    () => historyTotalOf(opened, work.available ? work.sessions : null),
+    [opened, work.available, work.sessions],
+  );
+  const activeTaskSession = useMemo(
+    () => (activeTaskSessionId ? work.sessions.find((s) => s.sessionId === activeTaskSessionId) ?? null : null),
+    [activeTaskSessionId, work.sessions],
+  );
+  const activeTaskTitle = useMemo(() => {
+    if (!activeTaskSessionId) return '';
+    if (activeTaskSession?.title && activeTaskSession.title !== activeTaskSessionId) return activeTaskSession.title;
+    const fromSidebar = openedActive.items.find((t) => t.sessionId === activeTaskSessionId)?.title;
+    if (fromSidebar && fromSidebar !== activeTaskSessionId) return fromSidebar;
+    return i18n.t('projectAgent.chat.work.related');
+  }, [activeTaskSessionId, activeTaskSession?.title, openedActive.items, i18n]);
+  const activeTaskEvidenceCount = useMemo(() => {
+    const base = activeTaskSession
+      ? new Set([
+        ...activeTaskSession.evidenceRefs,
+        ...(activeTaskSession.verification?.checks.flatMap((c) => c.evidenceRefs) ?? []),
+        ...(activeTaskSession.verification?.outputs.map((o) => o.evidenceRef) ?? []),
+      ]).size
+      : 0;
+    return Math.max(base, reportedTaskEvidenceCount);
+  }, [activeTaskSession, reportedTaskEvidenceCount]);
+
   useEffect(() => {
-    setLocateSessionId(null);
+    setReportedTaskEvidenceCount(0);
+  }, [activeTaskSessionId]);
+
+  useEffect(() => {
     setInspect(null);
     setTaskContext(null);
     setTaskRequest(null);
     setReplyFlash(null);
     setDrawerLoadedFor(null);
+    setInspectorOpen(false);
+    setOpenedWorkspacePath('');
   }, [opened?.workspaceId]);
+
+  useEffect(() => {
+    if (!opened?.workspaceId || !activeTaskSessionId) return;
+    let cancelled = false;
+    void clientApi.projectAgentGet({ workspaceId: opened.workspaceId }).then((got) => {
+      if (!cancelled && got?.ok && typeof got.path === 'string') {
+        setOpenedWorkspacePath(got.path);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [opened?.workspaceId, activeTaskSessionId]);
 
   useEffect(() => () => {
     if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
@@ -198,30 +324,30 @@ export function BotListShell({
       || (notificationFocus?.drawerTab === 'memory' ? (openedIdRef.current || firstVisibleIdRef.current) : '');
     if (!workspaceId) return;
     setInspect(null);
-    list.openBot(workspaceId);
     if (notificationFocus?.sessionId) {
-      setLocateSessionId(notificationFocus.sessionId);
-      setDrawerMemory((current) => locateDrawerSession(current, notificationFocus.sessionId || ''));
+      openTaskView(workspaceId, notificationFocus.sessionId);
       return;
     }
-    if (notificationFocus?.drawerTab) {
+    openBotView(workspaceId);
+    if (notificationFocus?.drawerTab && notificationFocus.drawerTab !== 'tasks') {
       setDrawerMemory((current) => openDrawer(current, notificationFocus.drawerTab || 'overview'));
     }
-  }, [list.openBot, notificationFocus]);
+  }, [openBotView, openTaskView, notificationFocus]);
 
   useEffect(() => window.peerAgent?.onResourceWindowReturn?.(request => {
     if (!request?.context || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
     const { context } = request;
-    // This event is emitted only for an explicit return from the captured native view.
     setInspect(null);
-    list.openBot(context.owner.workspaceId);
+    openBotView(context.owner.workspaceId);
     onClosePage();
-  }), [list.openBot, onClosePage]);
+  }), [openBotView, onClosePage]);
 
   useEffect(() => window.peerAgent?.onBrowserWindowReturn?.(request => {
     if (!request?.workspaceId || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
-    setInspect(null); list.openBot(request.workspaceId); onClosePage();
-  }), [list.openBot, onClosePage]);
+    setInspect(null);
+    openBotView(request.workspaceId);
+    onClosePage();
+  }), [openBotView, onClosePage]);
 
   const lookingAtBot = Boolean(opened?.workspaceId) && !pageOverride && activePage !== 'settings';
   useEffect(() => {
@@ -234,17 +360,27 @@ export function BotListShell({
   }, [lookingAtBot, opened?.workspaceId]);
 
   useEffect(() => {
-    if (!locateSessionId) return;
-    revealPrimary?.();
-    setInspect(null);
-    setDrawerMemory((current) => locateDrawerSession(current, locateSessionId));
-    setLocateSessionId(null);
-  }, [locateSessionId, revealPrimary]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       const palette = event.target instanceof Element && Boolean(event.target.closest('.conversation-search'));
+      const meta = event.metaKey || event.ctrlKey;
+      if (meta && !event.shiftKey && !event.altKey && !palette && !list.sheetOpen) {
+        if (event.key === '[' && !typingTarget(event.target)) {
+          event.preventDefault();
+          goBack();
+          return;
+        }
+        if (event.key === ']' && !typingTarget(event.target)) {
+          event.preventDefault();
+          goForward();
+          return;
+        }
+        if (event.key === '\\' && !typingTarget(event.target)) {
+          event.preventDefault();
+          setNav((current) => toggleSidebarCollapsed(current));
+          return;
+        }
+      }
       const shortcut = resolveBotShortcut({
         key: event.key,
         meta: event.metaKey,
@@ -266,6 +402,7 @@ export function BotListShell({
         event.preventDefault();
         event.stopPropagation();
         if (!list.sheetOpen) {
+          if (nav.sidebarCollapsed) setNav((current) => toggleSidebarCollapsed(current, false));
           searchRef.current?.focus();
           searchRef.current?.select();
         }
@@ -285,10 +422,9 @@ export function BotListShell({
         if (!next) return;
         event.preventDefault();
         event.stopPropagation();
-        list.openBot(next.workspaceId);
+        openBotView(next.workspaceId);
         return;
       }
-      const meta = event.metaKey || event.ctrlKey;
       if (list.sheetOpen) return;
       if (list.menuOpen) return;
       if (pageOverride) return;
@@ -303,12 +439,12 @@ export function BotListShell({
         const next = enterBotSelection(list.visible, list.highlightedId);
         if (!next) return;
         event.preventDefault();
-        list.openBot(next);
+        openBotView(next);
       }
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary]);
+  }, [list, nav.sidebarCollapsed, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary, goBack, goForward, openBotView]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -326,19 +462,98 @@ export function BotListShell({
     const handle = event.currentTarget;
     const startX = event.clientX;
     const startWidth = list.width;
-    // 拖拽全程保持高亮：:hover 在指针移出 6px 命中区（含快速外甩）时会丢掉，
-    // 只有 data-active 能让整段拖拽稳定显示强调色。与 SidebarResizer 同写法。
     if (resizeGesture.start(event, {
       onMove: x => list.setWidth(clampBotListWidth(startWidth + x - startX)),
       onEnd: committed => { if (!committed) list.setWidth(startWidth); handle.removeAttribute('data-active'); },
     })) handle.setAttribute('data-active', 'true');
   };
 
+  const handleCiteToBot = useCallback((ref: InputDraftTaskRef, prefillText?: string) => {
+    if (!opened) return;
+    setCiteRequest((current) => ({
+      workspaceId: opened.workspaceId,
+      ref,
+      prefillText,
+      id: (current?.id ?? 0) + 1,
+    }));
+    openBotView(opened.workspaceId);
+  }, [opened, openBotView]);
+
+  const handleBackToBotFromTask = useCallback((focusMessageId?: string) => {
+    if (!opened) return;
+    openBotView(opened.workspaceId);
+    if (focusMessageId) {
+      setAttentionFocus({
+        workspaceId: opened.workspaceId,
+        messageId: focusMessageId,
+        requestId: --attentionRequestRef.current,
+        notificationRequestId: notificationFocus?.requestId ?? null,
+      });
+    }
+  }, [opened, openBotView, notificationFocus?.requestId]);
+
   return (
     <TaskCancellationProvider workspaceId={opened?.workspaceId ?? null} onRefresh={work.reload}>
-    <div className="bot-shell" data-bot-shell="open" style={{ ['--peer-bot-list-width' as string]: `${list.width}px` }}>
-      <aside className="bot-column" aria-label={i18n.t('projectAgent.list.brand')}>
+    <div
+      className={`bot-shell${nav.sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}
+      data-bot-shell="open"
+      style={{ ['--peer-bot-list-width' as string]: `${list.width}px` }}
+    >
+      <aside
+        className={`bot-column${nav.sidebarCollapsed ? ' is-collapsed' : ''}`}
+        aria-label={i18n.t('projectAgent.list.brand')}
+        aria-hidden={nav.sidebarCollapsed}
+        inert={nav.sidebarCollapsed || undefined}
+      >
         <UpgradeBanner i18n={i18n} />
+        <div className="bot-sidebar-utilbar">
+          <button
+            type="button"
+            className="bot-util-btn"
+            aria-label={isZh ? '收起侧栏' : 'Collapse sidebar'}
+            title={isZh ? '收起侧栏 (⌘\\)' : 'Collapse sidebar (⌘\\)'}
+            onClick={() => setNav((current) => toggleSidebarCollapsed(current, true))}
+          >
+            <PeerIcon name="panelLeft" size={15} />
+          </button>
+          <div className="bot-util-nav">
+            <button
+              type="button"
+              className="bot-util-btn"
+              aria-label={isZh ? '全局搜索 (⌘K)' : 'Search (⌘K)'}
+              title={isZh ? '搜索 Bot 与任务 (⌘K)' : 'Search bots & tasks (⌘K)'}
+              onClick={() => {
+                if (onOpenSearch) onOpenSearch();
+                else {
+                  searchRef.current?.focus();
+                  searchRef.current?.select();
+                }
+              }}
+            >
+              <PeerIcon name="search" size={14} />
+            </button>
+            <button
+              type="button"
+              className="bot-util-btn"
+              disabled={!canGoBack(nav)}
+              aria-label={isZh ? '后退' : 'Back'}
+              title={isZh ? '后退 (⌘[)' : 'Back (⌘[)'}
+              onClick={goBack}
+            >
+              <PeerIcon name="chevronLeft" size={14} />
+            </button>
+            <button
+              type="button"
+              className="bot-util-btn"
+              disabled={!canGoForward(nav)}
+              aria-label={isZh ? '前进' : 'Forward'}
+              title={isZh ? '前进 (⌘])' : 'Forward (⌘])'}
+              onClick={goForward}
+            >
+              <PeerIcon name="chevronRight" size={14} />
+            </button>
+          </div>
+        </div>
         <div className="bot-column-top">
           <div className="bot-brand">
             <span className="bot-brand-mark" aria-hidden="true">
@@ -377,30 +592,26 @@ export function BotListShell({
             aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
             onChange={(event) => list.setQuery(event.target.value)}
           />
-          {needsYouCount > 0 || list.needsYouOnly ? (
-            <button
-              type="button"
-              className={`bot-need-filter${list.needsYouOnly ? ' is-on' : ''}`}
-              aria-expanded={attention !== null}
-              aria-haspopup="dialog"
-              onClick={() => setAttention({})}
-            >
-              {i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}
-            </button>
-          ) : null}
         </div>
         <BotList
           items={list.visible}
           avatarMoods={avatarMoods}
           highlightedId={list.highlightedId}
           openedId={list.openedId}
+          activeSessionId={activeTaskSessionId}
+          openedLiveSessions={work.available ? work.sessions : null}
+          expandedBots={nav.expandedBots}
+          expandedMoreBots={nav.expandedMoreBots}
           emptyLabel={list.catalog.length === 0 && list.status === 'ready' && !list.searching && !list.needsYouOnly
             ? i18n.t('projectAgent.list.empty')
             : emptyLabel}
           i18n={i18n}
           onHighlight={list.setHighlightedId}
-          onOpen={list.openBot}
+          onOpen={openBotView}
           onAttention={openBotAttention}
+          onToggleExpand={(workspaceId) => setNav((current) => toggleBotExpanded(current, workspaceId))}
+          onToggleMoreTasks={(workspaceId) => setNav((current) => toggleBotMoreTasks(current, workspaceId))}
+          onOpenTask={openTaskView}
         />
         {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
@@ -428,6 +639,31 @@ export function BotListShell({
               onOpenCapabilities();
             }}
           />
+          <div className="bot-dock-actions">
+            {needsYouCount > 0 || list.needsYouOnly ? (
+              <button
+                type="button"
+                className={`bot-dock-needs${list.needsYouOnly ? ' is-on' : ''}`}
+                aria-expanded={attention !== null}
+                aria-haspopup="dialog"
+                onClick={() => setAttention({})}
+              >
+                <PeerIcon name="warning" size={13} />
+                <span>{i18n.t('projectAgent.list.needsYou', { count: needsYouCount })}</span>
+              </button>
+            ) : null}
+            {appearance ? (
+              <button
+                type="button"
+                className="bot-dock-theme"
+                aria-label={appearance.activeScheme === 'dark' ? (isZh ? '切换到浅色外观' : 'Switch to light theme') : (isZh ? '切换到深色外观' : 'Switch to dark theme')}
+                title={appearance.activeScheme === 'dark' ? (isZh ? '切换浅色' : 'Light mode') : (isZh ? '切换深色' : 'Dark mode')}
+                onClick={() => appearance.setMode(appearance.activeScheme === 'dark' ? 'light' : 'dark')}
+              >
+                <PeerIcon name={appearance.activeScheme === 'dark' ? 'sun' : 'moon'} size={14} />
+              </button>
+            ) : null}
+          </div>
         </footer>
         <div
           className="bot-column-resizer"
@@ -468,64 +704,142 @@ export function BotListShell({
         ) : opened ? (
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
-              <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
-                animate mood={openedAvatarMood} />
-              <p className="bot-main-title">{opened.profile.displayName}</p>
-              <button
-                ref={profileButtonRef}
-                type="button"
-                className="bot-profile is-icon"
-                title={i18n.t('projectAgent.list.profile')}
-                aria-label={i18n.t('projectAgent.list.profile')}
-                data-profile-drawer="b2-16"
-                data-seam="b2-16"
-                data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
-                aria-expanded={currentDrawerMemory.open && !inspect}
-                onClick={() => {
-                  drawerTriggerRef.current = profileButtonRef.current;
-                  setInspect(null);
-                  setDrawerMemory((current) => (
-                    current.open && current.tab === 'settings' && !inspect && detailsVisible
-                      ? closeDrawer(current) : openDrawer(current, 'settings')
-                  ));
-                }}
-              >
-                <PeerIcon name="settings" size={16} strokeWidth={1.75} />
-              </button>
-              <BotResourceButton isZh={isZh} />
-              <span className="bot-work-panel-header-slot" ref={setWorkPanelTarget} />
+              {nav.sidebarCollapsed ? (
+                <button
+                  type="button"
+                  className="bot-profile is-icon bot-sidebar-expand"
+                  aria-label={isZh ? '展开侧栏' : 'Expand sidebar'}
+                  title={isZh ? '展开侧栏 (⌘\\)' : 'Expand sidebar (⌘\\)'}
+                  onClick={() => setNav((current) => toggleSidebarCollapsed(current, false))}
+                >
+                  <PeerIcon name="panelLeft" size={16} />
+                </button>
+              ) : null}
+              {activeTaskSessionId ? (
+                <>
+                  <nav className="bot-main-crumbs" aria-label={isZh ? '当前位置' : 'Breadcrumb'}>
+                    <button
+                      type="button"
+                      className="bot-crumb-parent"
+                      onClick={() => openBotView(opened.workspaceId)}
+                    >
+                      <BotAvatar
+                        avatar={opened.profile.avatar}
+                        label={opened.profile.displayName}
+                        workspaceId={opened.workspaceId}
+                        mood={openedAvatarMood}
+                      />
+                      <span>{opened.profile.displayName}</span>
+                    </button>
+                    <PeerIcon name="chevronRight" size={14} className="bot-crumb-sep" />
+                    <span className="bot-crumb-current">{activeTaskTitle}</span>
+                  </nav>
+                  <button
+                    ref={inspectorButtonRef}
+                    type="button"
+                    className={`bot-profile bot-inspector-toggle${inspectorOpen ? ' is-active' : ''}`}
+                    aria-expanded={inspectorOpen}
+                    onClick={() => setInspectorOpen((value) => !value)}
+                  >
+                    <PeerIcon name="panelRight" size={15} />
+                    <span>
+                      {isZh
+                        ? (activeTaskEvidenceCount > 0 ? `证据 · ${activeTaskEvidenceCount}` : '证据')
+                        : (activeTaskEvidenceCount > 0 ? `Evidence · ${activeTaskEvidenceCount}` : 'Evidence')}
+                    </span>
+                  </button>
+                  <BotResourceButton isZh={isZh} />
+                </>
+              ) : (
+                <>
+                  <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
+                    animate mood={openedAvatarMood} />
+                  <p className="bot-main-title">{opened.profile.displayName}</p>
+                  <button
+                    ref={profileButtonRef}
+                    type="button"
+                    className="bot-profile is-icon"
+                    title={i18n.t('projectAgent.list.profile')}
+                    aria-label={i18n.t('projectAgent.list.profile')}
+                    data-profile-drawer="b2-16"
+                    data-seam="b2-16"
+                    data-session-id={currentDrawerMemory.sessionId ?? undefined}
+                    aria-expanded={currentDrawerMemory.open && !inspect}
+                    onClick={() => {
+                      drawerTriggerRef.current = profileButtonRef.current;
+                      setInspect(null);
+                      setDrawerMemory((current) => (
+                        current.open && current.tab === 'settings' && !inspect && detailsVisible
+                          ? closeDrawer(current) : openDrawer(current, 'settings')
+                      ));
+                    }}
+                  >
+                    <PeerIcon name="settings" size={16} strokeWidth={1.75} />
+                  </button>
+                  <BotResourceButton isZh={isZh} />
+                  <span className="bot-work-panel-header-slot" ref={setWorkPanelTarget} />
+                </>
+              )}
             </header>
             <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
-            <BotConversation
-              workIndex={work.index}
-              onRefreshWork={work.reload}
-              workPanelTarget={workPanelTarget}
-              key={opened.workspaceId}
-              workspaceId={opened.workspaceId}
-              profile={opened.profile}
-              modelControls={modelControls}
-              avatar={opened.profile.avatar}
-              label={opened.profile.displayName}
-              avatarMood={openedAvatarMood}
-              i18n={i18n}
-              onReplyArrived={announceReply}
-              onReplyPresenceChange={updateReplyPresence}
-              onLocateSession={sessionId => setLocateSessionId(sessionId)}
-              contextSessionId={currentDrawerMemory.open && currentDrawerMemory.tab === 'tasks' ? currentDrawerMemory.sessionId : null}
-              onTaskContext={setTaskContext}
-              taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
-              replyDetailsId={inspect?.replyId ?? null}
-              replyDetailsTarget={replyDetailsTarget}
-              onInspect={(next) => {
-                showDetails?.();
-                const trigger = document.activeElement;
-                if (trigger instanceof HTMLButtonElement && !trigger.closest('.bot-drawer-body')) drawerTriggerRef.current = trigger;
-                setInspect(next);
-                setDrawerMemory((current) => openDrawer(current));
-              }}
-              focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
-              focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
-            />
+              <div className="bot-main-stage-convo" hidden={Boolean(activeTaskSessionId)}>
+                <BotConversation
+                  workIndex={work.index}
+                  onRefreshWork={work.reload}
+                  workPanelTarget={workPanelTarget}
+                  key={opened.workspaceId}
+                  workspaceId={opened.workspaceId}
+                  profile={opened.profile}
+                  modelControls={modelControls}
+                  avatar={opened.profile.avatar}
+                  label={opened.profile.displayName}
+                  avatarMood={openedAvatarMood}
+                  i18n={i18n}
+                  onReplyArrived={announceReply}
+                  onReplyPresenceChange={updateReplyPresence}
+                  onLocateSession={(sessionId) => openTaskView(opened.workspaceId, sessionId)}
+                  contextSessionId={activeTaskSessionId}
+                  onTaskContext={setTaskContext}
+                  taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
+                  citeRequest={citeRequest?.workspaceId === opened.workspaceId ? citeRequest : null}
+                  activeTasks={openedActive.items}
+                  historyTotal={openedHistoryTotal}
+                  replyDetailsId={inspect?.replyId ?? null}
+                  replyDetailsTarget={replyDetailsTarget}
+                  onInspect={(next) => {
+                    showDetails?.();
+                    const trigger = document.activeElement;
+                    if (trigger instanceof HTMLButtonElement && !trigger.closest('.bot-drawer-body')) drawerTriggerRef.current = trigger;
+                    setInspect(next);
+                    setDrawerMemory((current) => openDrawer(current));
+                  }}
+                  focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
+                  focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
+                />
+              </div>
+              {activeTaskSessionId ? (
+                <TaskWorkspaceView
+                  key={`${opened.workspaceId}:${activeTaskSessionId}`}
+                  workspaceId={opened.workspaceId}
+                  workspacePath={openedWorkspacePath}
+                  profile={opened.profile}
+                  sessionId={activeTaskSessionId}
+                  liveSession={activeTaskSession}
+                  sessionsAvailable={work.available}
+                  context={taskContext?.sessionId === activeTaskSessionId ? taskContext : null}
+                  inspectorOpen={inspectorOpen}
+                  inspectorTriggerRef={inspectorButtonRef}
+                  i18n={i18n}
+                  isZh={isZh}
+                  onToggleInspector={() => setInspectorOpen((value) => !value)}
+                  onCloseInspector={() => setInspectorOpen(false)}
+                  onBackToBot={handleBackToBotFromTask}
+                  onOpenTask={(nextSessionId) => openTaskView(opened.workspaceId, nextSessionId)}
+                  onCiteToBot={handleCiteToBot}
+                  onRefreshSessions={work.reload}
+                  onEvidenceCountChange={setReportedTaskEvidenceCount}
+                />
+              ) : null}
             </BotDocumentPreview>
           </div>
         ) : onboarding ? (
@@ -552,7 +866,7 @@ export function BotListShell({
                       key={item.workspaceId}
                       type="button"
                       className="bot-main-pick"
-                      onClick={() => list.openBot(item.workspaceId)}
+                      onClick={() => openBotView(item.workspaceId)}
                     >
                       <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId}
                         mood={botAvatarMood(item.state)} />
@@ -577,7 +891,7 @@ export function BotListShell({
           replayEntrance={replayDrawerEntrance}
           modelControls={modelControls}
           memory={currentDrawerMemory}
-          locateSessionId={locateSessionId}
+          locateSessionId={null}
           inspect={inspect}
           onReplyDetailsTarget={setReplyDetailsTarget}
           sessions={work.available ? work.sessions : []}
@@ -587,8 +901,10 @@ export function BotListShell({
             revealPrimary?.();
             setInspect(null);
             setDrawerMemory(current => closeDrawer(current));
+            openBotView(opened.workspaceId);
             setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
           }}
+          onOpenTask={(sessionId) => openTaskView(opened.workspaceId, sessionId)}
           onRefreshSessions={work.reload}
           onCloseInspect={() => {
             if (!inspect?.evidence || !inspect.replyId) revealPrimary?.();
@@ -604,19 +920,22 @@ export function BotListShell({
           onOpenAutomations={onOpenAutomations}
           onDeleted={() => {
             setDrawerMemory((current) => closeDrawer(current));
+            setNav((current) => pruneDeletedWorkspace(current, opened.workspaceId));
           }}
         />
       ) : null}
       {attention ? <AttentionSheet workspaceId={attention.workspaceId} i18n={i18n}
         onClose={() => setAttention(null)} onChanged={() => { void list.reload(); }}
         onLocate={item => {
-          list.openBot(item.workspaceId);
-          if (item.messageId) setAttentionFocus({ workspaceId: item.workspaceId, messageId: item.messageId,
-            requestId: --attentionRequestRef.current, notificationRequestId: notificationFocus?.requestId ?? null });
-          else if (item.sessionId) {
+          if (item.messageId) {
+            openBotView(item.workspaceId);
+            setAttentionFocus({ workspaceId: item.workspaceId, messageId: item.messageId,
+              requestId: --attentionRequestRef.current, notificationRequestId: notificationFocus?.requestId ?? null });
+          } else if (item.sessionId) {
             setAttentionFocus(null);
-            setLocateSessionId(item.sessionId);
-            setDrawerMemory(current => ({ ...openDrawer(current, 'tasks'), sessionId: item.sessionId ?? null }));
+            openTaskView(item.workspaceId, item.sessionId);
+          } else {
+            openBotView(item.workspaceId);
           }
         }} /> : null}
       <HistorySheet
@@ -630,7 +949,7 @@ export function BotListShell({
         onClose={() => setMeHistoryOpen(false)}
         onContinued={(workspaceId) => {
           setMeHistoryOpen(false);
-          list.openBot(workspaceId);
+          openBotView(workspaceId);
         }}
       />
       <NewBotSheet

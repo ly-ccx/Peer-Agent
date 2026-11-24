@@ -85,6 +85,22 @@ describe('neutralizeToolCallSyntaxForDisplay', () => {
     const input = '  示例 <div>plain</div>\n\n\n保留  ';
     assert.equal(neutralizeToolCallSyntaxForDisplay(input), input);
   });
+
+  it('strips DeepSeek DSML fullwidth and ASCII blocks while keeping genuine prose', () => {
+    const pure = [
+      '',
+      '<｜DSML｜ calls>',
+      '<｜DSML｜ invoke name="read_file">',
+      '<｜DSML｜ parameter name="end_line" string="false">161</｜DSML｜ parameter>',
+      '<｜DSML｜ parameter name="path" string="true">Peer-Agent/apps/desktop/renderer/src/app/components/provider-settings.css</｜DSML｜ parameter>',
+      '</｜DSML｜ invoke>',
+      '</｜DSML｜ calls>',
+    ].join('\n');
+    assert.equal(neutralizeToolCallSyntaxForDisplay(pure), '');
+
+    const mixed = `已查明原因如下。\n\n<|DSML|function_calls>\n<|DSML|invoke name="bash">`;
+    assert.equal(neutralizeToolCallSyntaxForDisplay(mixed), '已查明原因如下。');
+  });
 });
 
 describe('stripHistoricalLocalRecordForDisplay', () => {

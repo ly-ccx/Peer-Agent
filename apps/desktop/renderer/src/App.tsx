@@ -1015,6 +1015,7 @@ function MainApp() {
                 <BotResourceLayout owner={botResourceOwner} active={activePage === 'chat'} isZh={isZh}>
                 <BotListShell
                   onResourceOwnerChange={setBotResourceOwner}
+                  onOpenSearch={() => setSearchOpen(true)}
                   i18n={i18n}
                   isZh={isZh}
                   activePage={activePage}

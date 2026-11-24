@@ -13,7 +13,8 @@ import { useBotConversation } from '../state/useBotConversation';
 import type { BotModelsControlState } from '../state/useBotModels';
 import type { BotWorkIndex } from '../state/botWorkState';
 import { BotWorkPanel } from './BotWorkPanel';
-import { BotConversationComposer } from './BotConversationComposer';
+import { BotConversationComposer, type CiteTaskRequest } from './BotConversationComposer';
+import type { SidebarTaskEntry } from '../state/botNavigationState';
 import { BotMessageList } from './BotMessageList';
 import { ObligationGrantList } from './ObligationGrantCard';
 import { useObligationGrants } from '../state/useObligationGrants';
@@ -44,6 +45,9 @@ export function BotConversation({
   replyDetailsId = null,
   replyDetailsTarget = null,
   workPanelTarget = null,
+  activeTasks = [],
+  historyTotal = 0,
+  citeRequest = null,
   onRefreshWork,
 }: {
   readonly workspaceId: string;
@@ -66,6 +70,9 @@ export function BotConversation({
   readonly replyDetailsId?: string | null;
   readonly replyDetailsTarget?: HTMLElement | null;
   readonly workPanelTarget?: HTMLElement | null;
+  readonly activeTasks?: readonly SidebarTaskEntry[];
+  readonly historyTotal?: number;
+  readonly citeRequest?: CiteTaskRequest | null;
   readonly onRefreshWork: () => Promise<void>;
 }) {
   const conversation = useBotConversation(workspaceId);
@@ -207,6 +214,7 @@ export function BotConversation({
         i18n={i18n} onConfirm={obligations.confirm} onReject={obligations.reject} onRetry={obligations.retry} />
       <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
         conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
+        activeTasks={activeTasks} historyTotal={historyTotal} citeRequest={citeRequest} onOpenTask={onLocateSession}
         onJump={messageId => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }} />
     </div>
     </BotWorkPanel>

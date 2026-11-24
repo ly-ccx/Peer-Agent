@@ -4,7 +4,7 @@
   min-width: 0;
   min-height: 0;
   color: var(--graphite-base);
-  background: var(--paper-sheet, var(--za-app-bg));
+  background: var(--chrome-raised);
 }
 
 .bot-column {
@@ -16,15 +16,30 @@
   min-width: 0;
   min-height: 0;
   padding: 40px 10px 12px;
-  background: var(--chrome-raised);
-  border-right: 1px solid var(--chrome-hairline);
+  background: transparent;
+  border-right: 0;
   -webkit-app-region: drag;
+  transition:
+    flex-basis var(--za-motion-medium, 180ms) var(--za-ease-standard, ease),
+    width var(--za-motion-medium, 180ms) var(--za-ease-standard, ease),
+    padding var(--za-motion-medium, 180ms) var(--za-ease-standard, ease),
+    opacity var(--za-motion-fast, 120ms) ease;
+}
+
+.bot-column.is-collapsed {
+  flex: 0 0 0px;
+  width: 0;
+  padding-inline: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 :root:not([data-os='darwin']) .bot-column {
   padding-top: 12px;
 }
 
+.bot-sidebar-utilbar,
 .bot-column-top,
 .bot-search-frame,
 .bot-search,
@@ -32,11 +47,58 @@
 .bot-list,
 .bot-app-menu,
 .bot-column-footer,
+.bot-dock-actions,
 .bot-new,
 .bot-upgrade,
 .bot-upgrade-banner,
 .bot-column-resizer {
   -webkit-app-region: no-drag;
+}
+
+.bot-sidebar-utilbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px 6px;
+}
+
+.bot-util-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bot-util-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact, 8px);
+  background: transparent;
+  color: var(--graphite-soft);
+  cursor: pointer;
+  transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
+    color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-util-btn:hover:not(:disabled) {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
+.bot-util-btn:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.bot-util-btn:focus-visible {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 1px;
 }
 
 .bot-column-top {
@@ -270,16 +332,18 @@
   width: 100%;
   min-width: 0;
   margin-bottom: 8px;
-  background: var(--chrome-canvas);
-  border: 1px solid var(--chrome-hairline);
+  background: var(--chrome-glass-input);
+  border: 1px solid var(--chrome-glass-input-border);
   border-radius: var(--ui-radius-control);
   transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
     border-color var(--za-motion-fast) var(--za-ease-standard),
     box-shadow var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-search-frame:focus-within {
-  border-color: color-mix(in srgb, var(--graphite-base) 32%, var(--chrome-hairline));
+  background: var(--chrome-glass-hover);
+  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--chrome-glass-input-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--graphite-base) 8%, transparent);
 }
 
@@ -355,7 +419,6 @@
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
   -webkit-app-region: no-drag;
 }
 
@@ -460,16 +523,17 @@
     box-shadow var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-row:hover,
-.bot-row.is-highlighted {
-  background: var(--chrome-hover);
+.bot-row:hover:not(.is-open),
+.bot-column:focus-within .bot-row.is-highlighted:not(.is-open) {
+  background: var(--chrome-glass-hover);
 }
 
+/* A × G 黄金分层：多行 Bot 选中态使用 A 液态受光玻璃（久看不刺眼） */
 .bot-row.is-open {
   padding: 8px 7px;
-  background: var(--chrome-canvas);
-  border-color: var(--chrome-hairline);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 6%, transparent);
+  background: var(--chrome-glass-row-active);
+  border-color: var(--chrome-glass-row-border);
+  box-shadow: var(--chrome-glass-row-shadow);
 }
 
 [data-theme="dark"] .bot-row.is-open {
@@ -725,10 +789,280 @@
 }
 
 .bot-column-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   flex: none;
-  margin-top: 12px;
-  margin-inline: -10px;
-  padding: 12px 14px 0;
+  margin-top: 10px;
+  padding: 8px 4px 0;
+}
+
+.bot-dock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.bot-dock-needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--state-confirm) 34%, var(--chrome-hairline));
+  border-radius: var(--ui-radius-pill, 999px);
+  background: var(--za-warn-soft, var(--chrome-canvas));
+  color: var(--state-confirm, var(--graphite-base));
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--za-motion-fast) ease, color var(--za-motion-fast) ease;
+}
+
+.bot-dock-needs:hover {
+  background: color-mix(in srgb, var(--state-confirm) 18%, var(--chrome-canvas));
+}
+
+.bot-dock-theme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control-compact, 8px);
+  background: var(--chrome-canvas);
+  color: var(--graphite-soft);
+  cursor: pointer;
+  transition: background var(--za-motion-fast) ease, color var(--za-motion-fast) ease;
+}
+
+.bot-dock-theme:hover {
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
+}
+
+.bot-dock-needs:focus-visible,
+.bot-dock-theme:focus-visible {
+  outline: 2px solid var(--azure-seal);
+  outline-offset: 2px;
+}
+
+/* ─── Sidebar Nested Active Tasks (ADR 134 — pure indentation, zero tree pipes) ─── */
+.bot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.bot-row-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+}
+
+.bot-avatar-pip {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--chrome-raised);
+  background: var(--azure-seal);
+}
+
+.bot-avatar-pip.is-warn {
+  background: var(--state-confirm);
+}
+
+.bot-row-preview {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bot-row-preview-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.bot-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.bot-thinking-dots i {
+  display: block;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background: var(--azure-seal);
+  animation: bot-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.bot-thinking-dots i:nth-child(2) { animation-delay: 160ms; }
+.bot-thinking-dots i:nth-child(3) { animation-delay: 320ms; }
+
+@keyframes bot-dot-pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1.1); }
+}
+
+.bot-expand-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-fade);
+  cursor: pointer;
+  transition: transform 140ms ease, background 120ms ease, color 120ms ease;
+}
+
+.bot-expand-chevron:hover {
+  background: var(--chrome-glass-hover);
+  color: var(--graphite-base);
+}
+
+.bot-expand-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.bot-sidebar-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 4px 4px 36px;
+}
+
+.bot-sidebar-task {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 29px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-row);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--za-motion-fast) ease,
+    border-color var(--za-motion-fast) ease,
+    color var(--za-motion-fast) ease,
+    box-shadow var(--za-motion-fast) ease;
+}
+
+.bot-sidebar-task:hover:not(.is-selected) {
+  background: var(--chrome-glass-hover);
+  color: var(--graphite-base);
+}
+
+/* A × G 黄金分层：单行精准任务锚点使用 G 银白键帽 */
+.bot-sidebar-task.is-selected {
+  background: var(--chrome-keycap-bg);
+  border-color: var(--chrome-keycap-border);
+  color: var(--chrome-keycap-fg);
+  font-weight: 600;
+  box-shadow: var(--chrome-keycap-shadow);
+}
+
+.bot-sidebar-task.is-selected .bot-sidebar-task-glyph {
+  color: var(--chrome-keycap-fg);
+  opacity: 0.78;
+}
+[data-theme="dark"] .bot-sidebar-task.is-selected .bot-sidebar-task-glyph[data-tone="azure"] {
+  color: #1D6B96;
+  opacity: 1;
+}
+[data-theme="dark"] .bot-sidebar-task.is-selected .bot-sidebar-task-glyph[data-tone="danger"] {
+  color: #8C334C;
+  opacity: 1;
+}
+.bot-sidebar-task.is-selected .bot-sidebar-task-tag {
+  background: color-mix(in srgb, var(--chrome-keycap-fg) 12%, transparent);
+  color: var(--chrome-keycap-fg);
+}
+
+.bot-sidebar-task-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--graphite-fade);
+}
+.bot-sidebar-task-glyph[data-tone="azure"] { color: var(--azure-seal); }
+.bot-sidebar-task-glyph[data-tone="warn"] { color: var(--state-confirm); }
+.bot-sidebar-task-glyph[data-tone="danger"] { color: var(--state-danger); }
+
+.bot-sidebar-task-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.bot-sidebar-task-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--ui-radius-detail);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
+  white-space: nowrap;
+}
+.bot-sidebar-task-tag[data-tone="warn"] {
+  background: var(--za-warn-soft);
+  color: var(--state-confirm);
+}
+.bot-sidebar-task-tag[data-tone="danger"] {
+  background: var(--za-danger-soft);
+  color: var(--state-danger);
+}
+.bot-sidebar-task-tag[data-tone="azure"] {
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+  color: var(--azure-seal);
+}
+
+.bot-sidebar-task-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-fade);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bot-sidebar-task-more:hover {
+  background: var(--chrome-glass-hover);
+  color: var(--graphite-base);
 }
 
 .bot-app-menu-button:focus-visible,
@@ -739,6 +1073,7 @@
 
 .bot-app-menu {
   position: relative;
+  flex: none;
 }
 
 .bot-app-menu-details {
@@ -766,6 +1101,7 @@
   font-size: 12px;
   font-weight: 500;
   text-align: left;
+  white-space: nowrap;
   background: transparent;
   border: 0;
   border-radius: var(--ui-radius-control);
@@ -786,16 +1122,20 @@
 
 .bot-app-menu-menu {
   position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
   left: 0;
+  right: auto;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  min-width: 224px;
+  width: max-content;
+  max-width: calc(var(--peer-bot-list-width, 292px) - 20px);
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 5px;
-  background: var(--chrome-canvas);
+  padding: var(--space-2);
+  background: var(--paper-raised);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-modal);
+  border-radius: var(--ui-radius-popover);
   box-shadow: var(--shadow-popover);
 }
 
@@ -807,12 +1147,14 @@
   display: flex;
   gap: 10px;
   align-items: center;
+  width: 100%;
   min-height: 34px;
   padding: 8px 10px;
   color: var(--graphite-base);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   text-align: left;
+  white-space: nowrap;
   background: transparent;
   border: 0;
   border-radius: var(--ui-radius-control);
@@ -829,11 +1171,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .bot-app-menu-item-copy small {
   color: var(--graphite-fade);
   font-size: 11px;
+  white-space: normal;
 }
 
 /* ── 跨栏拖拽条（左栏右缘，镜像 .bot-drawer-resizer）──
@@ -884,7 +1229,91 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  margin: 8px 8px 8px 0;
   background: var(--paper-sheet);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-panel, 16px);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.bot-shell.is-sidebar-collapsed .bot-main {
+  margin-left: 8px;
+}
+
+.bot-main-stage-convo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bot-main-stage-convo[hidden] {
+  display: none;
+}
+
+.bot-main-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.bot-crumb-parent {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 4px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact, 8px);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  cursor: pointer;
+  flex: none;
+  max-width: 42%;
+}
+
+.bot-crumb-parent .bot-avatar {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+}
+
+.bot-crumb-parent > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-crumb-parent:hover {
+  background: var(--control-fill-hover);
+  color: var(--graphite-base);
+}
+
+.bot-crumb-sep {
+  flex: none;
+  color: var(--graphite-mute);
+}
+
+.bot-crumb-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--graphite-base);
+}
+
+.bot-inspector-toggle.is-active {
+  background: var(--control-fill-active);
+  color: var(--graphite-base);
 }
 
 .bot-main-thread,
@@ -1372,7 +1801,11 @@ html[data-vibrancy='true'] .bot-column {
 
 /* 主面板：悬浮黑牌。实色纸面沿用 .bot-main 的 --paper-sheet。 */
 html[data-vibrancy='true'] .bot-main {
-  margin-left: var(--bot-float-gap);
+  margin: 0 0 0 var(--bot-float-gap);
+}
+
+html[data-vibrancy='true'] .bot-shell.is-sidebar-collapsed .bot-main {
+  margin-left: 0;
 }
 
 /* Conversation and resource views are peers in the same floating shell. */

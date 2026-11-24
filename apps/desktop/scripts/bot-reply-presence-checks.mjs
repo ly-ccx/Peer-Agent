@@ -6,12 +6,13 @@ export async function checkReplyPresence({ page, reply, report, until, state, qu
   const samples = report.replyPresence ??= { cases: [] };
   const footer = reply.locator('.bot-reply-context');
   if (quiet) {
-    // Public prose keeps one stable replying cue; process and elapsed-time copy stay in details.
+    // Public prose keeps a concise single-line activity cue; parameters, results and elapsed-time copy stay in details.
     const labels = await footer.locator('.bot-context-running').allTextContents();
-    assert.deepEqual(labels, ['正在回复'], 'public prose retains exactly one stable replying label');
+    assert.equal(labels.length, 1, 'public prose retains exactly one live activity label');
+    assert.match(labels[0], /^(?:正在回复|等待模型响应|正在整理思路|正在整理回复|正在整理结果|正在查找相关内容|正在阅读.*|正在查看.*|正在执行.*|正在调整.*|正在核对.*|正在安排.*|正在更新.*|正在一点一点推进|准备阅读.*|正在准备下一步)$/);
     assert.equal(await footer.locator('.bot-reply-typing-dots.is-active > circle').count(), 3, 'running replies use three active SVG dots');
     assert.equal(await footer.locator(':scope > button').count(), 1, 'ordinary replying has one details action and no refresh action');
-    assert.doesNotMatch(await footer.textContent(), /正在整理回复|准备阅读|正在阅读|正在准备下一步|消息已收到|正在同步回复|等待处理进展/);
+    assert.doesNotMatch(await footer.textContent(), /消息已收到|正在同步回复|等待处理进展/);
   }
   const bounds = await until(() => reply.evaluate(node => {
     const bubbles = [...node.querySelectorAll(':scope > .bot-reply-body, :scope > .bot-continuous-paragraphs > .bot-reply-body, :scope > .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > *, '

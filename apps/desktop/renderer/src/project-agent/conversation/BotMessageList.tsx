@@ -183,6 +183,7 @@ export function BotMessageList({
             key={conversationRowKey(row)}
             message={row.message}
             replied={replied.has(row.message.id)}
+            workIndex={workIndex}
             anchors={anchors}
             onJump={onJump}
             highlighted={highlighted === row.message.id}
@@ -210,6 +211,8 @@ export function BotMessageList({
             anchors={anchors}
             onJump={onJump}
             onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
+            workIndex={workIndex}
+            onOpenWork={onLocateSession}
             welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
             avatar={avatar}
             label={label}
@@ -254,6 +257,8 @@ function SystemCard({
   anchors,
   onJump,
   onOpenDetails,
+  workIndex,
+  onOpenWork,
   activity,
   processRounds,
   narration = [],
@@ -268,6 +273,8 @@ function SystemCard({
   readonly referenceIds: readonly string[];
   readonly welcome: boolean;
   readonly onOpenDetails?: () => void;
+  readonly workIndex: BotWorkIndex;
+  readonly onOpenWork: (sessionId: string) => void;
   readonly activity?: ProjectAgentActivity;
   readonly processRounds?: readonly BotToolRound[];
   readonly narration?: readonly BotNarrationSegment[];
@@ -288,7 +295,7 @@ function SystemCard({
       <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotNarration segments={narration} />
       {retired ? <RecoveryHistory messageKey={agentFailurePresentation(cards[0]).messageKey} createdAt={message.createdAt} highlighted={highlighted} i18n={i18n} onOpenDetails={onOpenDetails} />
-        : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />}
+        : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />}
       {!welcome && !retired && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
         <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} /> : null}
     </div>

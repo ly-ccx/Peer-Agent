@@ -4,7 +4,7 @@ import { BotDocumentPreview } from '../conversation/BotDocumentPreview';
 import { useMotionSettled } from '../../app/hooks/useMotionSettled';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile } from '@peer-agent/protocol';
-import { useEffect, useState, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useState, useRef, type RefObject } from 'react';
 import { collectFocusable } from '../../app/hooks/focusScope';
 import { useBotDrawerFocus } from './useBotDrawerFocus';
 import { Drawer } from '../../app/components/Drawer';
@@ -42,9 +42,8 @@ import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
 import { TasksTab, type ClassicGoalRow } from './TasksTab';
 import '../styles/bot-drawer.css';
 
-const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 'projectAgent.drawer.tab.tasks' | 'projectAgent.drawer.tab.objectives' | 'projectAgent.drawer.tab.memory' | 'projectAgent.drawer.tab.settings' }[] = [
+const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 'projectAgent.drawer.tab.objectives' | 'projectAgent.drawer.tab.memory' | 'projectAgent.drawer.tab.settings' }[] = [
   { id: 'overview', key: 'projectAgent.drawer.tab.overview' },
-  { id: 'tasks', key: 'projectAgent.drawer.tab.tasks' },
   { id: 'objectives', key: 'projectAgent.drawer.tab.objectives' },
   { id: 'memory', key: 'projectAgent.drawer.tab.memory' },
   { id: 'settings', key: 'projectAgent.drawer.tab.settings' },
@@ -70,6 +69,7 @@ export function BotProfileDrawer({
   onDeleted,
   onOpenConversation,
   onOpenAutomations,
+  onOpenTask,
   taskContext,
   onTaskConversation,
   replayEntrance = true,
@@ -93,6 +93,7 @@ export function BotProfileDrawer({
   readonly onDeleted: () => void;
   readonly onOpenConversation?: (conversationId: string) => void;
   readonly onOpenAutomations?: () => void;
+  readonly onOpenTask?: (sessionId: string) => void;
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
   readonly replayEntrance?: boolean;
@@ -106,6 +107,9 @@ export function BotProfileDrawer({
   const motionEnabled = useMotionAllowed();
   const [width, setWidth] = useState(() => (typeof window === 'undefined' ? 1200 : window.innerWidth));
   const [path, setPath] = useState('');
+  const [pathExists, setPathExists] = useState<boolean | undefined>(undefined);
+  const [rebinding, setRebinding] = useState(false);
+  const [rebindFeedback, setRebindFeedback] = useState<{ readonly kind: 'error' | 'success'; readonly message: string } | null>(null);
   const [memories, setMemories] = useState<readonly DrawerMemoryItem[]>([]);
   const modelRoute = modelControls.views.project_agent?.resolution;
   const modelLabel = modelRoute?.ok
@@ -219,19 +223,71 @@ export function BotProfileDrawer({
 
 
   useEffect(() => {
+    setRebindFeedback(null);
+    setRebinding(false);
+    setPathExists(undefined);
+  }, [workspaceId]);
+
+  const loadDetails = useCallback(async (isCancelled: () => boolean = () => false) => {
+    const got = await clientApi.projectAgentGet({ workspaceId });
+    if (isCancelled()) return;
+    if (got?.ok && typeof got.path === 'string') {
+      setPath(got.path);
+      setPathExists(typeof got.pathExists === 'boolean' ? got.pathExists : undefined);
+    } else {
+      setPath('');
+      setPathExists(undefined);
+    }
+    const memoriesResult = await clientApi.projectMemoryList({ workspaceId });
+    if (isCancelled()) return;
+    setMemories(readMemoryItems(memoriesResult?.items));
+  }, [workspaceId]);
+
+  useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const got = await clientApi.projectAgentGet({ workspaceId });
-      if (cancelled) return;
-      setPath(got?.ok && typeof got.path === 'string' ? got.path : '');
-      const memories = await clientApi.projectMemoryList({ workspaceId });
-      if (cancelled) return;
-      setMemories(readMemoryItems(memories?.items));
-    })();
+    void loadDetails(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, memory.open]);
+  }, [loadDetails, memory.open]);
+
+  useEffect(() => {
+    if (!memory.open) return undefined;
+    return clientApi.onProjectAgentChanged((event) => {
+      if (event.workspaceIds?.includes(workspaceId)) {
+        void loadDetails();
+      }
+    });
+  }, [loadDetails, memory.open, workspaceId]);
+
+  const handleRebindFolder = async () => {
+    if (rebinding) return;
+    setRebinding(true);
+    setRebindFeedback(null);
+    try {
+      const result = await clientApi.projectAgentRebindFolder({ workspaceId });
+      if (!result?.ok) {
+        if (result?.code === 'CANCELLED') return;
+        const key = result?.code === 'PATH_TAKEN'
+          ? 'projectAgent.drawer.rebindError.pathTaken'
+          : result?.code === 'FOLDER_NOT_FOUND' || result?.code === 'INVALID_PATH'
+            ? 'projectAgent.drawer.rebindError.notFound'
+            : 'projectAgent.drawer.rebindError.failed';
+        setRebindFeedback({ kind: 'error', message: i18n.t(key) });
+        return;
+      }
+      if (typeof result.path === 'string') setPath(result.path);
+      setPathExists(result.pathExists ?? true);
+      if (result.profile) onProfile(result.profile);
+      if (!result.unchanged) {
+        setRebindFeedback({ kind: 'success', message: i18n.t('projectAgent.drawer.rebindSuccess') });
+      }
+    } catch {
+      setRebindFeedback({ kind: 'error', message: i18n.t('projectAgent.drawer.rebindError.failed') });
+    } finally {
+      setRebinding(false);
+    }
+  };
 
   useEffect(() => {
     if (!memory.open || !path) {
@@ -283,9 +339,18 @@ export function BotProfileDrawer({
       {memory.tab === 'overview' ? (
         <OverviewTab
           path={path}
+          pathExists={pathExists}
           profile={profile}
           sessionsAvailable={sessionsAvailable}
-          onOpenTasks={() => onMemory({ open: true, tab: 'tasks', sessionId: null })}
+          onOpenTasks={() => {
+            const firstRunning = groupDrawerSessions(sessions).running[0];
+            if (onOpenTask && firstRunning) {
+              onMemory({ ...memory, open: false, sessionId: null });
+              onOpenTask(firstRunning.sessionId);
+              return;
+            }
+            onMemory({ open: true, tab: 'tasks', sessionId: null });
+          }}
           brief={memories.find(item => item.kind === 'responsibility' && item.status === 'active')?.text ?? ''}
           running={groupDrawerSessions(sessions).running}
           modelLabel={modelLabel}
@@ -294,7 +359,17 @@ export function BotProfileDrawer({
             if (!path) return;
             void clientApi.openPath(path, path, { mode: 'reveal', target: 'self' });
           }}
-          onOpenSession={(sessionId) => onMemory({ open: true, tab: 'tasks', sessionId })}
+          onRebind={() => { void handleRebindFolder(); }}
+          rebinding={rebinding}
+          rebindFeedback={rebindFeedback}
+          onOpenSession={(sessionId) => {
+            if (onOpenTask) {
+              onMemory({ ...memory, open: false, sessionId: null });
+              onOpenTask(sessionId);
+              return;
+            }
+            onMemory({ open: true, tab: 'tasks', sessionId });
+          }}
         />
       ) : null}
       {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
@@ -353,7 +428,14 @@ export function BotProfileDrawer({
       ) : null}
       {memory.tab === 'objectives' ? (
         <ObjectivesTab key={workspaceId} workspaceId={workspaceId} workspacePath={path} i18n={i18n} selectedId={memory.objectiveId}
-          onOpenSession={(sessionId) => onMemory({...memory,tab:'tasks',sessionId})} onOpenAutomations={onOpenAutomations} />
+          onOpenSession={(sessionId) => {
+            if (onOpenTask) {
+              onMemory({ ...memory, open: false, sessionId: null });
+              onOpenTask(sessionId);
+              return;
+            }
+            onMemory({ ...memory, tab: 'tasks', sessionId });
+          }} onOpenAutomations={onOpenAutomations} />
       ) : null}
       {memory.tab === 'memory' ? (
         <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />

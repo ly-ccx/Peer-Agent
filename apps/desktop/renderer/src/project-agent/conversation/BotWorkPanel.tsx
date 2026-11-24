@@ -9,7 +9,14 @@ import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotChatMessage, ConversationDisplayRow } from '../state/botConversationState';
 import type { BotWorkIndex } from '../state/botWorkState';
-import { BOT_WORK_PANEL_MIN_WIDTH, workPanelActivity, workPanelMaterials, workPanelNeedsUser, workPanelSessions } from '../state/botWorkPanelState';
+import {
+  BOT_WORK_PANEL_MIN_WIDTH,
+  workPanelActivity,
+  workPanelChildrenByParent,
+  workPanelMaterials,
+  workPanelNeedsUser,
+  workPanelSessions,
+} from '../state/botWorkPanelState';
 import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useBotWorkPanelData } from '../state/useBotWorkPanelData';
 import { taskConversationContext } from '../state/taskConversationState';
@@ -54,7 +61,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   const [choices, setChoices] = useState<{ wide?: boolean; compact?: boolean }>({});
   const [view, setView] = useState<'overview' | 'materials'>('overview');
   const [taskLimit, setTaskLimit] = useState(4);
-  const [agentLimit, setAgentLimit] = useState(4);
   const open = choices[wide ? 'wide' : 'compact'] ?? wide;
   const close = () => {
     if (panel.current?.contains(document.activeElement)) trigger.current?.focus({ preventScroll: true });
@@ -64,6 +70,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
     const element = root.current;
     if (!element) return;
     const measure = () => {
+      if (element.clientWidth === 0) return;
       const fontScale = (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) / 16;
       const next = element.clientWidth >= BOT_WORK_PANEL_MIN_WIDTH * fontScale;
       // Only rescue focus from content that is actually about to become hidden.
@@ -95,6 +102,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   const materials = useMemo(() => workPanelMaterials(workspaceId, workIndex, data.items, messages, { resourceReferences: references }),
     [workspaceId, workIndex, data.items, messages, references]);
   const sessions = useMemo(() => workPanelSessions(workIndex), [workIndex]);
+  const childrenByParent = useMemo(() => workPanelChildrenByParent(sessions), [sessions]);
   const questions = useMemo(() => new Map(sessions.agents.filter(workPanelNeedsUser).map(session => [session.sessionId,
     taskConversationContext(workspaceId, session.sessionId, messages, workIndex)?.question?.content])),
     [workspaceId, sessions.agents, messages, workIndex]);
@@ -140,21 +148,23 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
         {!workIndex.available ? <div className="bot-work-panel-feedback" role="status"><p>{i18n.t('projectAgent.workPanel.unavailable')}</p>
           <button type="button" className="ui-button is-compact" onClick={() => { void onRefreshWork(); }}>{i18n.t('resources.retryRead')}</button></div> : <>
           <section className="bot-work-panel-section" aria-labelledby={`${id}-tasks`}>
-            <header><h3 id={`${id}-tasks`}>{i18n.t('projectAgent.workPanel.tasks')}<span>{sessions.tasks.length}</span></h3></header>
-            {sessions.tasks.length ? sessions.tasks.slice(0, taskLimit).map(session => <BotWorkSessionRow key={session.sessionId} session={session}
-              question={questions.get(session.sessionId)} overview={data.error ? undefined : byPlan.get(session.planId ?? '')} variant="task" i18n={i18n} onOpen={onOpenTask} />)
-              : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyTasks')}</p>}
+            <header><h3 id={`${id}-tasks`}>{i18n.t('projectAgent.workPanel.tasks')}<span>{sessions.tasks.length}</span></h3>
+              {blockers ? <span className="bot-work-panel-section-meta">{i18n.t('projectAgent.workPanel.blockers', { count: blockers })}</span> : null}</header>
+            {sessions.tasks.length ? sessions.tasks.slice(0, taskLimit).map((session) => {
+              const children = childrenByParent.get(session.sessionId) ?? [];
+              return <div className="bot-work-panel-task-group" key={session.sessionId}>
+                <BotWorkSessionRow session={session}
+                  question={questions.get(session.sessionId)} overview={data.error ? undefined : byPlan.get(session.planId ?? '')}
+                  variant="task" i18n={i18n} onOpen={onOpenTask} />
+                {children.length ? <div className="bot-work-panel-subagents">
+                  {children.map(child => <BotWorkSessionRow key={child.sessionId} session={child}
+                    question={questions.get(child.sessionId)} parent={session}
+                    overview={data.error ? undefined : byPlan.get(child.planId ?? '')} variant="agent" i18n={i18n} onOpen={onOpenTask} />)}
+                </div> : null}
+              </div>;
+            }) : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyTasks')}</p>}
             {sessions.tasks.length > taskLimit ? <button type="button" className="bot-work-panel-text-button" onClick={() => setTaskLimit(value => value + 10)}>{i18n.t('projectAgent.workPanel.showMore')}</button> : null}
             {workIndex.byId.size >= 50 ? <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.recentTasks')}</p> : null}
-          </section>
-          <section className="bot-work-panel-section" aria-labelledby={`${id}-agents`}>
-            <header><h3 id={`${id}-agents`}>{i18n.t('projectAgent.workPanel.agents')}<span>{sessions.agents.length}</span></h3>
-              {blockers ? <span className="bot-work-panel-section-meta">{i18n.t('projectAgent.workPanel.blockers', { count: blockers })}</span> : null}</header>
-            {sessions.agents.length ? sessions.agents.slice(0, agentLimit).map(session => <BotWorkSessionRow key={session.sessionId} session={session}
-              question={questions.get(session.sessionId)} parent={workIndex.byId.get(session.parentSessionId ?? '')}
-              overview={data.error ? undefined : byPlan.get(session.planId ?? '')} variant="agent" i18n={i18n} onOpen={onOpenTask} />)
-              : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyAgents')}</p>}
-            {sessions.agents.length > agentLimit ? <button type="button" className="bot-work-panel-text-button" onClick={() => setAgentLimit(value => value + 10)}>{i18n.t('projectAgent.workPanel.showMore')}</button> : null}
           </section>
         </>}
         <section className="bot-work-panel-section" aria-labelledby={`${id}-materials`}>
@@ -176,7 +186,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
         {data.loaded ? <><p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.materialWindow', { limit: data.windowLimit })}</p>
           <button type="button" className="ui-button is-compact" disabled={data.loading} onClick={data.loadMore}>{i18n.t('projectAgent.workPanel.loadMore')}</button></> : null}
       </div>
-      <footer className="bot-work-panel-footer"><PeerIcon name="blocks" size={12} />{i18n.t('projectAgent.workPanel.followBot')}</footer>
     </aside>
   </div>;
 }

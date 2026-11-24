@@ -1,4 +1,5 @@
 .bot-convo {
+  position: relative;
   --bot-font-body: var(--ui-font-body-lg, 0.9375rem);
   --bot-line-body: 1.7;
   --bot-column-max: 800px;
@@ -13,6 +14,10 @@
   flex-direction: column;
   min-height: 0;
   background: var(--paper-base);
+}
+
+.bot-convo[hidden] {
+  display: none;
 }
 
 [data-theme="dark"] .bot-convo {
@@ -32,6 +37,7 @@
 }
 
 .bot-thread-shell {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -56,9 +62,11 @@
 .bot-thread-failed { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 0; padding: 24px; }
 
 .bot-thread-latest {
-  flex: none;
-  align-self: center;
-  margin-block-end: var(--space-2, 8px);
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3, 12px);
+  transform: translateX(-50%);
+  z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -66,9 +74,22 @@
   height: 34px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-circle);
-  background: var(--paper-sheet);
+  background: var(--paper-raised);
   color: var(--graphite-base);
+  box-shadow: var(--shadow-popover);
   cursor: pointer;
+  transition: background var(--za-motion-fast, 120ms) ease,
+    border-color var(--za-motion-fast, 120ms) ease,
+    transform var(--za-motion-fast, 120ms) ease;
+}
+
+.bot-thread-latest:hover {
+  background: var(--paper-hover);
+  border-color: color-mix(in srgb, var(--graphite-base) 22%, var(--chrome-hairline));
+}
+
+.bot-thread-latest:active {
+  transform: translateX(-50%) scale(0.95);
 }
 
 /* Virtual spacers and message rows must retain their scroll geometry. */
@@ -364,7 +385,8 @@
   cursor: pointer;
 }
 
-.bot-card-actions button:first-child {
+.bot-card-actions:not(.bot-plan-approval-actions) button:first-child,
+.bot-plan-approval-actions button[data-primary="true"] {
   border-color: transparent;
   background: var(--graphite-base);
   color: var(--chrome-canvas, #fff);
@@ -378,7 +400,8 @@
   color: var(--graphite-base);
 }
 
-.bot-card-actions button:first-child:hover {
+.bot-card-actions:not(.bot-plan-approval-actions) button:first-child:hover,
+.bot-plan-approval-actions button[data-primary="true"]:hover {
   background: var(--graphite-base);
   color: var(--chrome-canvas, #fff);
   opacity: 0.9;
@@ -725,6 +748,102 @@
   box-shadow: none;
 }
 
+.bot-card.bot-plan-approval {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 9px 12px;
+  border-radius: var(--ui-radius-control);
+  background: var(--control-fill);
+}
+
+.bot-plan-approval-heading {
+  flex: 1 1 200px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bot-plan-approval-icon {
+  display: grid;
+  flex: 0 0 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--ui-radius-control-compact);
+  color: var(--state-info);
+  background: color-mix(in srgb, var(--state-info) 12%, var(--paper-sheet));
+}
+
+.bot-plan-approval-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bot-plan-approval-label {
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-meta);
+  line-height: 1.35;
+}
+
+.bot-plan-approval-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--graphite-base);
+  font: 600 var(--ui-font-control)/1.45 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.bot-plan-approval-link {
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.bot-plan-approval-title > svg {
+  flex: none;
+  color: var(--graphite-soft);
+}
+
+.bot-plan-approval-link:hover .bot-plan-approval-title > span {
+  text-decoration: underline;
+}
+
+.bot-plan-approval-link:focus-visible {
+  outline: 2px solid var(--graphite-soft);
+  outline-offset: 3px;
+}
+
+.bot-plan-approval-actions {
+  justify-content: flex-end;
+  margin-inline-start: auto;
+  max-width: 100%;
+}
+
+.bot-plan-approval-actions button {
+  border-radius: var(--ui-radius-control-compact);
+  white-space: nowrap;
+}
+
+.bot-plan-approval-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bot-card.bot-plan-approval > p {
+  flex-basis: 100%;
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-meta);
+  line-height: 1.5;
+}
+
 .bot-card.is-resolved {
   opacity: 0.72;
 }
@@ -739,21 +858,21 @@
 }
 
 .bot-approval-receipt details { min-width: 0; }
-.bot-approval-receipt summary {
+.bot-approval-receipt :is(summary, .bot-approval-receipt-summary) {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 44px;
   padding: 6px 10px;
   list-style: none;
-  cursor: pointer;
   border-radius: var(--ui-radius-control);
   color: var(--graphite-soft);
 }
+.bot-approval-receipt summary { cursor: pointer; }
 .bot-approval-receipt summary::-webkit-details-marker { display: none; }
 .bot-approval-receipt summary:hover { background: var(--chrome-hover); }
 .bot-approval-receipt summary:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 2px; }
-.bot-approval-receipt summary > svg { flex-shrink: 0; }
+.bot-approval-receipt :is(summary, .bot-approval-receipt-summary) > svg { flex-shrink: 0; }
 .bot-approval-receipt-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .bot-approval-receipt-copy strong { color: var(--graphite-base); font-size: var(--ui-font-control); font-weight: 500; line-height: 1.4; }
 .bot-approval-receipt-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-font-meta); line-height: 1.5; }
