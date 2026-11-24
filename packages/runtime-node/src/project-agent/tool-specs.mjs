@@ -233,7 +233,7 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     type: 'object',
     properties: {
       replyTo: { type: 'array', items: { type: 'string' } },
-      text: { type: 'string', maxLength: 2000 },
+      text: { type: 'string', maxLength: 8000 },
       proactive: { type: 'boolean' },
       sources: { type: 'array', items: { type: 'string' } },
       statusClaims: { type: 'array', maxItems: 20, items: {
@@ -612,8 +612,8 @@ function validateProactivity(input) {
 }
 
 function validateReply(input) {
-  const body = text(input.text, 2000);
-  if (!body) return invalid('text is required and must be at most 2000 characters.');
+  const body = text(input.text, 8000);
+  if (!body) return invalid('text is required and must be at most 8000 characters.');
   const replyTo = input.replyTo === undefined
     ? []
     : stringList(input.replyTo, { max: 20, itemMax: 200 });

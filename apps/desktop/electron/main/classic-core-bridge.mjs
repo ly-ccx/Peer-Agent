@@ -160,6 +160,16 @@ export function createClassicCoreBridge({
     }
   }
 
+  function normalizeBotActivity(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      ...raw,
+      replyTo: Array.isArray(raw.replyTo) ? raw.replyTo : [],
+      replyText: typeof raw.replyText === 'string' ? raw.replyText : '',
+      segments: Array.isArray(raw.segments) ? raw.segments : [],
+    };
+  }
+
   function applyProjectBotHostStatus(snapshot, scopedWorkspaceId = null) {
     if (!snapshot || typeof snapshot !== 'object') return;
     projectBotHostActive = snapshot.enabled === true;
@@ -169,7 +179,15 @@ export function createClassicCoreBridge({
         if (typeof id === 'string' && id) botOwnedWorkspaces.add(id);
       }
     }
-    applyMapSnapshot(botActivities, snapshot.activities, scopedWorkspaceId);
+    const normalizedActivities = snapshot.activities && typeof snapshot.activities === 'object'
+      ? Object.fromEntries(
+        Object.entries(snapshot.activities).flatMap(([key, value]) => {
+          const normalized = normalizeBotActivity(value);
+          return normalized ? [[key, normalized]] : [];
+        }),
+      )
+      : snapshot.activities;
+    applyMapSnapshot(botActivities, normalizedActivities, scopedWorkspaceId);
     applyMapSnapshot(botAgentStatuses, snapshot.agentStatuses, scopedWorkspaceId);
     applyMapSnapshot(botRecoveryStatus, snapshot.recoveryStatus, scopedWorkspaceId);
     applyMapSnapshot(botRecoveryAttention, snapshot.recoveryAttention, scopedWorkspaceId);
@@ -213,7 +231,7 @@ export function createClassicCoreBridge({
   }
 
   function readProjectBotActivity(workspaceId) {
-    return typeof workspaceId === 'string' ? (botActivities.get(workspaceId) ?? null) : null;
+    return typeof workspaceId === 'string' ? normalizeBotActivity(botActivities.get(workspaceId) ?? null) : null;
   }
 
   function readProjectBotAgentStatus(workspaceId) {
@@ -307,14 +325,19 @@ export function createClassicCoreBridge({
     }
 
     if (method === 'project.bot.activity') {
-      const activity = params?.activity && typeof params.activity === 'object'
+      const rawActivity = params?.activity && typeof params.activity === 'object'
         ? params.activity
         : (params && typeof params === 'object' && typeof params.workspaceId === 'string' ? params : null);
+      const activity = normalizeBotActivity(rawActivity);
       const workspaceId = typeof params?.workspaceId === 'string'
         ? params.workspaceId
         : (typeof activity?.workspaceId === 'string' ? activity.workspaceId : '');
       if (workspaceId && activity) {
-        botActivities.set(workspaceId, activity);
+        if (activity.phase === 'disposed') {
+          botActivities.delete(workspaceId);
+        } else {
+          botActivities.set(workspaceId, activity);
+        }
       }
       if (workspaceId && typeof params?.status === 'string') {
         botAgentStatuses.set(workspaceId, params.status);
@@ -1298,6 +1321,10 @@ export function createClassicCoreBridge({
     return res;
   }
 
+  async function projectBotRebindFolder(params = {}) {
+    return requireClient().request('project.bot.rebindFolder', params || {}, { timeoutMs: 60_000 });
+  }
+
   async function projectBotSubmitInput(params = {}) {
     return requireClient().request('project.bot.submitInput', params || {});
   }
@@ -1312,6 +1339,10 @@ export function createClassicCoreBridge({
 
   async function projectBotResumeSession(params = {}) {
     return requireClient().request('project.bot.resumeSession', params || {});
+  }
+
+  async function projectBotVerifySession(params = {}) {
+    return requireClient().request('project.bot.verifySession', params || {}, { timeoutMs: 320_000 });
   }
 
   async function projectBotDecideObligation(params = {}) {
@@ -1478,10 +1509,12 @@ export function createClassicCoreBridge({
     projectBotHostStatus,
     projectBotCreate,
     projectBotDelete,
+    projectBotRebindFolder,
     projectBotSubmitInput,
     projectBotStopResponse,
     projectBotCancelSession,
     projectBotResumeSession,
+    projectBotVerifySession,
     projectBotDecideObligation,
     projectBotRequestClaimClosure,
     projectBotDecideApproval,

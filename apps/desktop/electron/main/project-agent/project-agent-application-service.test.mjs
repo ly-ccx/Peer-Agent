@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { createConversationStore } from '../../../../../packages/conversation-store/src/index.mjs';
 import { createBotLifecycle } from '../../../../../packages/runtime-node/src/project-agent/bot-lifecycle.mjs';
+import { createBotProfileStore } from '../../../../../packages/runtime-node/src/project-agent/bot-profile-store.mjs';
 import { createInputQueue } from '../../../../../packages/runtime-node/src/project-agent/input-queue.mjs';
 import { createProjectRegistry } from '../../../../../packages/runtime-node/src/project-registry.mjs';
 import { createApprovalStore } from '../../../../../packages/runtime-node/src/project-agent/approval-store.mjs';
@@ -19,6 +20,7 @@ const METHODS = [
   ['readAvatar', { workspaceId: 'ws-1' }],
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
+  ['rebindFolder', { workspaceId: 'ws-1', workspacePath: '/tmp/next' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
   ['readInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
   ['writeInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
@@ -1059,4 +1061,109 @@ test('rust bot host interactive resourceFeedback validates via inputQueue then w
   assert.equal(rustCalls[2][0], 'delete');
   assert.equal(rustCalls[2][1].phase, 'finalize');
   assert.equal(rustCalls[2][1].folderRemoved, false);
+});
+
+test('rebindFolder validates missing/taken folders, clears managed flag, syncs workspace settings, and delegates when Rust bridge is active', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'rebind-folder-app-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const oldFolder = path.join(root, 'old-repo');
+  const nextFolder = path.join(root, 'next-repo');
+  const takenFolder = path.join(root, 'taken-repo');
+  mkdirSync(oldFolder);
+  mkdirSync(nextFolder);
+  mkdirSync(takenFolder);
+
+  const dataHome = path.join(root, 'data');
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const lifecycle = createBotLifecycle({ rootDir: dataHome, registry, conversationStore, profileStore });
+  const entryA = registry.ensureForPath(oldFolder);
+  const entryB = registry.ensureForPath(takenFolder);
+  assert.equal(lifecycle.ensureBot(entryA.workspaceId, { managed: true }).ok, true);
+  assert.equal(lifecycle.ensureBot(entryB.workspaceId, { managed: false }).ok, true);
+
+  const syncedCalls = [];
+  const changed = [];
+  let pickedValue = null;
+  let sawCurrentPath = null;
+  const fallbackService = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: {
+      get: (id) => ({ ok: true, path: registry.diagnosticSnapshot().find(r => r.workspaceId === id)?.path || '' }),
+      list: () => [],
+      search: () => [],
+    },
+    profileStore,
+    relinkWorkspace: (id, nextPath) => registry.relinkWorkspace(id, nextPath),
+    chooseFolder: async (_sender, currentPath) => {
+      sawCurrentPath = currentPath;
+      return pickedValue;
+    },
+    syncReboundWorkspace: (info) => syncedCalls.push(info),
+    broadcast: (channel, payload) => { if (channel === 'project-agent:changed') changed.push(...payload.workspaceIds); },
+    schedule: (fn) => { fn(); return 1; },
+  });
+
+  // Cancel in picker
+  pickedValue = null;
+  assert.deepEqual(await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId }), { ok: false, code: 'CANCELLED' });
+  assert.equal(sawCurrentPath, oldFolder);
+
+  // Non-existent explicit path
+  assert.deepEqual(
+    await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId, workspacePath: path.join(root, 'missing') }),
+    { ok: false, code: 'FOLDER_NOT_FOUND' },
+  );
+
+  // Path already bound to another bot
+  assert.deepEqual(
+    await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId, workspacePath: takenFolder }),
+    { ok: false, code: 'PATH_TAKEN' },
+  );
+
+  // Picker chooses valid nextFolder -> clears managed=true, syncs workspace, broadcasts changed
+  pickedValue = nextFolder;
+  const rebound = await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId });
+  assert.equal(rebound.ok, true);
+  assert.equal(rebound.path, nextFolder);
+  assert.equal(rebound.previousPath, oldFolder);
+  assert.equal(rebound.pathExists, true);
+  assert.equal(rebound.unchanged, false);
+  assert.equal(rebound.profile.managed, false);
+  assert.equal(profileStore.read(entryA.workspaceId).managed, false);
+  assert.equal(syncedCalls.length, 1);
+  assert.equal(syncedCalls[0].path, nextFolder);
+  assert.ok(changed.includes(entryA.workspaceId));
+
+  // Rust bridge delegation path
+  const bridgeCalls = [];
+  const bridgeSynced = [];
+  const rustService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: {
+      isAvailable: () => true,
+      async projectBotGet() { return { ok: true, path: oldFolder }; },
+      async projectBotRebindFolder(params) {
+        bridgeCalls.push(params);
+        return {
+          ok: true,
+          workspaceId: params.workspaceId,
+          path: params.workspacePath,
+          previousPath: oldFolder,
+          pathExists: true,
+          unchanged: false,
+          profile: { workspaceId: params.workspaceId, displayName: 'Moved Bot', managed: false },
+        };
+      },
+    },
+    chooseFolder: async () => nextFolder,
+    syncReboundWorkspace: (info) => bridgeSynced.push(info),
+    schedule: () => 1,
+  });
+  const rustRes = await rustService.rebindFolder({ workspaceId: 'ws-rust-1' });
+  assert.equal(rustRes.ok, true);
+  assert.deepEqual(bridgeCalls, [{ workspaceId: 'ws-rust-1', workspacePath: nextFolder }]);
+  assert.equal(bridgeSynced.length, 1);
+  assert.equal(bridgeSynced[0].path, nextFolder);
 });

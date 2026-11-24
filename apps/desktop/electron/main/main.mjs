@@ -3873,7 +3873,13 @@ function flushPendingRuntimeEvents() {
 }
 
 async function startRecoveryAndAppearance() {
-  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore, canRecover: row => !goalPlanStore.getPlan(row.planId)?.delegationOrigin || hostLeases.holds(row.workspaceId) });
+  // Session-bound approvals belong to the workspace host. A native plan may
+  // not decode through the desktop GoalPlan store while that host is starting.
+  applyStartupApprovalRecovery({
+    approvalStore: createApprovalStore(),
+    goalPlanStore,
+    canRecover: row => !row.sessionId && !goalPlanStore.getPlan(row.planId)?.delegationOrigin,
+  });
   setDockIcon();
   const onNativeThemeUpdated = () => {
     const appearance = settingsStore.getAll().appearance;

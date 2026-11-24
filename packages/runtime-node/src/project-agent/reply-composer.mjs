@@ -7,7 +7,7 @@ import { planDelivery } from './digest.mjs';
 import { WORK_SESSION_STATUSES, parseInteractiveArtifactRef } from '@peer-agent/protocol';
 import { resolveUserAnchors, userAnchorCandidates } from './user-anchor.mjs';
 
-const TEXT_MAX = 2000;
+const TEXT_MAX = 8000;
 const ID_MAX = 200;
 const LIST_MAX = 20;
 const MEMORY_LIST_MAX = 200;
@@ -36,10 +36,10 @@ export function composeReply(input = {}) {
   if (input.kind !== 'user' && input.kind !== 'wake') {
     return fail('invalid_input', 'kind must be user or wake.');
   }
-  if (typeof input.text !== 'string') return fail('invalid_input', 'text is required and must be at most 2000 characters.');
+  if (typeof input.text !== 'string') return fail('invalid_input', 'text is required and must be at most 8000 characters.');
   const text = input.text.trim();
   if (!text || text.length > TEXT_MAX) {
-    return fail('invalid_input', 'text is required and must be at most 2000 characters.');
+    return fail('invalid_input', 'text is required and must be at most 8000 characters.');
   }
 
   const turnId = readOptionalId(input.turnId, 'turnId');

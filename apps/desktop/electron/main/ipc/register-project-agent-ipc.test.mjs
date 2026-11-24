@@ -13,6 +13,7 @@ const CHANNELS = [
   'project-agent:read-avatar',
   'project-agent:create',
   'project-agent:update-profile',
+  'project-agent:rebind-folder',
   'project-agent:update-model-selection',
   'project-agent:delete',
   'project-agent:submit-input',
@@ -30,6 +31,7 @@ const CHANNELS = [
   'project-agent:read-unknown-outcome-policy',
   'project-agent:set-unknown-outcome-policy',
   'project-agent:resume-session',
+  'project-agent:verify-session',
   'project-agent:list-approvals',
   'project-agent:decide-approval',
   'project-agent:mark-read',
@@ -61,6 +63,7 @@ function harness() {
       readAvatar: port('read-avatar'),
       create: port('create'),
       updateProfile: port('update-profile'),
+      rebindFolder: port('rebind-folder'),
       updateModelSelection: port('update-model-selection'),
       deleteBot: port('delete'),
       submitInput: port('submit-input'),
@@ -77,6 +80,7 @@ function harness() {
       readUnknownOutcomePolicy: port('read-unknown-outcome-policy'),
       setUnknownOutcomePolicy: port('set-unknown-outcome-policy'),
       resumeSession: port('resume-session'),
+      verifySession: port('verify-session'),
       listApprovals: port('list-approvals'),
       decideApproval: port('decide-approval'),
       markRead: port('mark-read'),
@@ -122,6 +126,7 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
   assert.equal(calls.length, CHANNELS.length);
   assert.deepEqual(calls.find(row => row[0] === 'create'), ['create', { channel: 'project-agent:create' }, sender]);
   assert.deepEqual(calls.find(row => row[0] === 'update-profile'), ['update-profile', { channel: 'project-agent:update-profile' }, sender]);
+  assert.deepEqual(calls.find(row => row[0] === 'rebind-folder'), ['rebind-folder', { channel: 'project-agent:rebind-folder' }, sender]);
   assert.ok(calls.some(row => row[0] === 'list' && row[1].channel === 'project-agent:list'));
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);

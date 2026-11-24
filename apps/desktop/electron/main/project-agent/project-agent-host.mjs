@@ -7,7 +7,7 @@ import {
 } from "@peer-agent/runtime-node/project-agent";
 import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
 import path from 'node:path';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
 import { createBotSqliteAdapter, createSessionService } from '@peer-agent/conversation-store';
 
@@ -157,7 +157,11 @@ export function registerDesktopProjectAgent({
   let host = null;
   let objectiveWatches=null;
   const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
-  const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
+  const rustBotHostOwned = () => (
+    classicCoreBridge?.isProjectBotHostOwnedOrPending?.() === true
+    || classicCoreBridge?.isProjectBotHostActive?.() === true
+  );
+  const ownsProject = workspaceId => runtimeEnabled() && !rustBotHostOwned() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor?.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
     isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
@@ -219,7 +223,7 @@ export function registerDesktopProjectAgent({
     findSession: (id, event) => goalPlanStore.getPlan(event.planId || supervisor.get({ sessionId: id })?.planId),
     onChanged: workspaceId => {
       broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] });
-      void host?.sync([workspaceId]).catch(() => {});
+      if (!rustBotHostOwned()) void host?.sync([workspaceId]).catch(() => {});
     },
   });
   const verification = createSessionVerification({
@@ -423,7 +427,7 @@ export function registerDesktopProjectAgent({
       return { ok: true };
     },
   });
-  if (runtimeEnabled() && !classicCoreBridge?.isProjectBotHostActive?.()) {
+  if (runtimeEnabled() && !rustBotHostOwned()) {
     try {
       const settings = typeof getSettings === 'function' ? getSettings() : null;
       const workspaces = Array.isArray(settings?.workspaces) ? settings.workspaces : [];
@@ -465,15 +469,15 @@ export function registerDesktopProjectAgent({
     rootDir: runtimeRoot,
     readLeaseEpoch,
     holdsLease: ownsProject,
-    acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
+    acquireLease: workspaceId => { if (runtimeEnabled() && !rustBotHostOwned() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: readCanonicalMessages,
     readInputFacts: inputFacts || readCanonicalMessages,
     restoreQueue: workspaceId => { interactive.recoverWorkspace(workspaceId); applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
-    listWorkspaceIds: () => directory.workspaceIds(),
-    readOwnedWorkspaceIds: ids => runtimeEnabled() ? ids.filter(id => holdsLease(id) === true) : [],
+    listWorkspaceIds: () => (rustBotHostOwned() ? [] : directory.workspaceIds()),
+    readOwnedWorkspaceIds: ids => (runtimeEnabled() && !rustBotHostOwned()) ? ids.filter(id => holdsLease(id) === true) : [],
     resolveConversationId,
     hasMessage,
     appendMessage,
@@ -540,7 +544,7 @@ export function registerDesktopProjectAgent({
     await objectiveWatches.stopWorkspace(workspaceId);
     await Promise.allSettled(sessions.map(session => goalRunner.waitForIdle?.(session.planId)));
   });
-  objectiveWatches.start(()=>directory.workspaceIds());
+  objectiveWatches.start(() => (rustBotHostOwned() ? [] : directory.workspaceIds()));
   const diagnosticsReader = createProjectDiagnostics({
     readProjects: () => {
       const active = new Set(directory.workspaceIds());
@@ -621,6 +625,11 @@ export function registerDesktopProjectAgent({
         : (workBudgetBinding(workspaceId) ? 'registered' : 'absent')
     ),
     openObligationRuntime: async workspaceId => {
+      if (rustBotHostOwned()) {
+        await classicCoreBridge.projectBotWake?.(workspaceId)?.catch?.(() => {});
+        await classicCoreBridge.projectBotHostStatus?.({ workspaceId })?.catch?.(() => {});
+        return;
+      }
       const synced = await host?.sync?.([workspaceId]);
       const failed = synced?.outcomes?.find(row => row.workspaceId === workspaceId && row.ok === false);
       if (failed) {
@@ -638,6 +647,65 @@ export function registerDesktopProjectAgent({
     approvals: approvalStore,
     readEvidenceBody,
     bindWorkspace: (sender) => workspace.addWorkspace(sender),
+    chooseFolder: async (sender, currentPath) => {
+      const parent = sender ? BrowserWindow.fromWebContents(sender) : undefined;
+      const defaultPath = currentPath && existsSync(currentPath)
+        ? currentPath
+        : (currentPath && existsSync(path.dirname(currentPath)) ? path.dirname(currentPath) : undefined);
+      const options = {
+        title: '选择绑定文件夹',
+        properties: ['openDirectory'],
+        ...(defaultPath ? { defaultPath } : {}),
+      };
+      const { canceled, filePaths } = await (parent
+        ? dialog.showOpenDialog(parent, options)
+        : dialog.showOpenDialog(options));
+      return canceled ? null : (filePaths?.[0] ?? null);
+    },
+    relinkWorkspace: (workspaceId, nextPath) => registry.relinkWorkspace(workspaceId, nextPath),
+    syncReboundWorkspace({ workspaceId, previousPath, path: nextPath, name }) {
+      const norm = (value) => {
+        if (typeof value !== 'string') return '';
+        const trimmed = value.trim();
+        return trimmed.length > 1 ? trimmed.replace(/[\\/]+$/, '') : trimmed;
+      };
+      const nextNorm = norm(nextPath);
+      const prevNorm = norm(previousPath);
+      if (!nextNorm) return;
+      const settings = getSettings?.() || {};
+      const workspaces = Array.isArray(settings.workspaces) ? [...settings.workspaces] : [];
+      const existingIdx = workspaces.findIndex((item) => (
+        item?.id === workspaceId || (prevNorm && norm(item?.path) === prevNorm)
+      ));
+      if (existingIdx >= 0) {
+        const existing = workspaces[existingIdx];
+        workspaces[existingIdx] = {
+          ...existing,
+          id: workspaceId,
+          path: nextNorm,
+          linkedFolders: Array.isArray(existing?.linkedFolders)
+            ? existing.linkedFolders.filter((folder) => norm(folder?.path) !== nextNorm)
+            : [],
+        };
+      } else if (!workspaces.some((item) => norm(item?.path) === nextNorm)) {
+        workspaces.push({
+          id: workspaceId,
+          path: nextNorm,
+          name: (typeof name === 'string' && name.trim()) ? name.trim() : path.basename(nextNorm),
+          addedAt: new Date().toISOString(),
+          linkedFolders: [],
+        });
+      }
+      const activeChanged = Boolean(prevNorm) && norm(settings.activeWorkspace) === prevNorm;
+      mergeSettings?.({
+        workspaces,
+        ...(activeChanged ? { activeWorkspace: nextNorm } : {}),
+      });
+      if (activeChanged) {
+        workspace?.setActiveWorkspace?.(nextNorm);
+      }
+      broadcast?.('workspaces:changed', { workspacePath: nextNorm });
+    },
     removeWorkspace: (folder) => workspace.removeWorkspace(folder),
     moveToTrash: (folder) => shell.trashItem(folder),
     rememberWorkspace({ workspaceId, path: folder, name }) {
@@ -670,6 +738,10 @@ export function registerDesktopProjectAgent({
       return canceled ? null : (filePaths?.[0] ?? null);
     },
     wake: (workspaceId) => {
+      if (rustBotHostOwned()) {
+        void classicCoreBridge.projectBotWake?.(workspaceId)?.catch?.(() => {});
+        return;
+      }
       void host.sync([workspaceId]).catch(() => {});
     },
     agentOnline: (workspaceId) => (

@@ -97,14 +97,15 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     })();
     active.set(input.inputId, job); return job;
   }
-  async function send(options: { text?: string; quoteRefs?: readonly string[]; answerTo?: string; useDraft?: boolean } = {}): Promise<ProjectAgentSubmitInputResult> {
+  async function send(options: { text?: string; quoteRefs?: readonly string[]; taskRefs?: readonly import('@peer-agent/protocol').InputDraftTaskRef[]; answerTo?: string; useDraft?: boolean } = {}): Promise<ProjectAgentSubmitInputResult> {
     if (!view.ready && !await load()) return { ok: false, code: view.error || 'DRAFT_UNAVAILABLE' };
     const useDraft = options.useDraft !== false, draft = view.draft;
     const text = (options.text ?? draft.text).trim(), attachments = useDraft ? draft.attachments : [];
+    const taskRefs = options.taskRefs ?? (useDraft ? (draft.taskRefs ?? []) : []);
     if (useDraft && options.text !== undefined && text !== draft.text.trim()) return { ok: false, code: 'INPUT_CHANGED' };
     const resourceFeedback = useDraft ? normalizeResourceFeedbackList(draft.resourceFeedback) : [];
     if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
-    if (!text && !attachments.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
+    if (!text && !attachments.length && !taskRefs.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
     if (!useDraft && options.answerTo) {
       const existing = view.pending.find(item => item.answerTo === options.answerTo);
       if (existing) return existing.text === text ? dispatch(existing) : { ok: false, code: 'INPUT_PENDING_ANSWER' };
@@ -113,7 +114,7 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     if (resourceFeedback.some(item => item.recipient.workspaceId !== workspaceId)) return { ok: false, code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' };
     try { encodeResourceFeedbackTransport(resourceFeedback, attachments); }
     catch (error) { return { ok: false, code: (error as { code?: string }).code ?? 'INVALID_RESOURCE_FEEDBACK' }; }
-    const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
+    const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), ...(taskRefs.length ? { taskRefs } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
       ...(options.answerTo ? { answerTo: options.answerTo } : {}) };
     changed++; publish({ pending: [...view.pending, input], ...(useDraft ? { draft: emptyInputDraft() } : {}) });
     return dispatch(input);

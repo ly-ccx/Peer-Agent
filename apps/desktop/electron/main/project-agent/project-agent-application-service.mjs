@@ -8,7 +8,15 @@ import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+
+function isExistingDirectory(candidate) {
+  try {
+    return Boolean(candidate) && statSync(candidate).isDirectory();
+  } catch {
+    return false;
+  }
+}
 import {
   BOT_LEVELS,
   cleanDisplayName,
@@ -76,6 +84,9 @@ export function createProjectAgentApplicationService({
   sessions = null,
   approvals = null,
   bindWorkspace = null,
+  chooseFolder = null,
+  relinkWorkspace = null,
+  syncReboundWorkspace = null,
   rememberWorkspace = null,
   createManaged = null,
   moveToTrash = null,
@@ -179,7 +190,10 @@ export function createProjectAgentApplicationService({
   function decorateBotDetail(result) {
     if (!result?.ok || !result.item) return result;
     const providers = listModels().filter(model => model.enabled !== false);
-    return { ...result, item: withAgentStatus(result.item),
+    const pathExists = typeof result.pathExists === 'boolean'
+      ? result.pathExists
+      : isExistingDirectory(typeof result.path === 'string' ? result.path : '');
+    return { ...result, pathExists, item: withAgentStatus(result.item),
       modelOptions: providers.map(projectModelRoutingMenuOption).filter(Boolean),
       modelViews: projectBotModelViews({ providers, routing: readModelRouting(), projectPolicy: result.item.profile?.modelPolicy }),
     };
@@ -340,6 +354,7 @@ export function createProjectAgentApplicationService({
         ...(payload.regenerateAvatar === true ? { regenerateAvatar: true } : {}),
         ...(payload.avatarColor !== undefined ? { avatarColor: payload.avatarColor } : {}),
         ...(typeof payload.proactivity === 'string' ? { proactivity: payload.proactivity } : {}),
+        ...(typeof payload.communicationStyle === 'string' ? { communicationStyle: payload.communicationStyle } : {}),
         ...(avatarSourcePath ? { avatarSourcePath } : {}),
         ...policy.patch,
       };
@@ -371,6 +386,14 @@ export function createProjectAgentApplicationService({
       const saved = profileStore.save({ ...latest, proactivity: payload.proactivity });
       if (!saved?.ok) return saved;
     }
+    if (typeof payload.communicationStyle === 'string') {
+      if (!['natural', 'concise', 'detailed', 'technical'].includes(payload.communicationStyle)) {
+        return { ok: false, code: 'INVALID_COMMUNICATION_STYLE' };
+      }
+      const latest = profileStore.read(workspaceId) || current;
+      const saved = profileStore.save({ ...latest, communicationStyle: payload.communicationStyle });
+      if (!saved?.ok) return saved;
+    }
     if (payload.chooseAvatar === true) {
       if (typeof chooseAvatar !== 'function') return { ok: false, code: 'AVATAR_UNAVAILABLE' };
       const sourcePath = await chooseAvatar(sender);
@@ -384,6 +407,89 @@ export function createProjectAgentApplicationService({
     }
     queueChanged(workspaceId);
     return { ok: true, profile: profileStore.read(workspaceId) };
+  }
+
+  async function rebindFolder(payload = {}, sender = null) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload?.workspaceId === 'string' ? payload.workspaceId.trim() : '';
+    if (!workspaceId) return { ok: false, code: 'INVALID_WORKSPACE' };
+    let targetPath = typeof payload?.workspacePath === 'string' ? payload.workspacePath.trim() : '';
+    if (!targetPath) {
+      if (typeof chooseFolder !== 'function') return { ok: false, code: 'FOLDER_PICKER_UNAVAILABLE' };
+      let currentPath = '';
+      try {
+        if (classicCoreBridge?.isAvailable?.()) {
+          const got = await classicCoreBridge.projectBotGet({ workspaceId });
+          if (typeof got?.path === 'string') currentPath = got.path;
+        } else {
+          const got = directory?.get?.(workspaceId);
+          if (typeof got?.path === 'string') currentPath = got.path;
+        }
+      } catch {
+        // Ignore lookup error and still open the folder picker.
+      }
+      const picked = await chooseFolder(sender, currentPath);
+      if (!picked) return { ok: false, code: 'CANCELLED' };
+      targetPath = picked;
+    }
+    if (classicCoreBridge?.isAvailable?.()) {
+      const result = await classicCoreBridge.projectBotRebindFolder({
+        workspaceId,
+        workspacePath: targetPath,
+      });
+      if (result?.ok) {
+        syncReboundWorkspace?.({
+          workspaceId,
+          previousPath: result.previousPath,
+          path: result.path,
+          name: result.profile?.displayName,
+        });
+        queueChanged(workspaceId);
+      }
+      return result;
+    }
+    const current = profileStore?.read?.(workspaceId);
+    if (!current) return { ok: false, code: 'NOT_FOUND' };
+    if (current.status === 'archived') return { ok: false, code: 'ARCHIVED' };
+    if (!isExistingDirectory(targetPath)) return { ok: false, code: 'FOLDER_NOT_FOUND' };
+    if (typeof relinkWorkspace !== 'function') return { ok: false, code: 'RELINK_UNAVAILABLE' };
+    const previousPath = directory?.get?.(workspaceId)?.path || '';
+    const moved = relinkWorkspace(workspaceId, targetPath);
+    if (!moved?.ok || !moved.entry?.path) {
+      const reason = moved?.reason;
+      const code = reason === 'taken'
+        ? 'PATH_TAKEN'
+        : reason === 'not-found'
+          ? 'NOT_FOUND'
+          : reason === 'missing-path'
+            ? 'INVALID_PATH'
+            : 'RELINK_FAILED';
+      return { ok: false, code };
+    }
+    const nextPath = moved.entry.path;
+    const unchanged = previousPath === nextPath;
+    let nextProfile = current;
+    if (current.managed === true && !unchanged) {
+      const saved = profileStore.save({ ...current, managed: false });
+      if (!saved?.ok) return saved;
+      nextProfile = saved.profile || profileStore.read(workspaceId) || { ...current, managed: false };
+    }
+    syncReboundWorkspace?.({
+      workspaceId,
+      previousPath,
+      path: nextPath,
+      name: nextProfile?.displayName,
+    });
+    queueChanged(workspaceId);
+    return {
+      ok: true,
+      workspaceId,
+      path: nextPath,
+      previousPath,
+      pathExists: true,
+      unchanged,
+      profile: nextProfile,
+    };
   }
 
   async function deleteBot(payload = {}) {
@@ -469,6 +575,9 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     try {
       const answerTo = typeof payload.answerTo === 'string' ? payload.answerTo.trim() : '';
+      const taskRefs = Array.isArray(payload.taskRefs)
+        ? [...new Set(payload.taskRefs.map(item => (typeof item === 'string' ? item : item?.sessionId || '').trim()).filter(Boolean))].slice(0, 16)
+        : [];
       if (rustBotHostActive()) {
         if (
           Array.isArray(payload.resourceFeedback)
@@ -483,6 +592,7 @@ export function createProjectAgentApplicationService({
                 inputId: existing.inputId,
                 surface: existing.surface || payload.surface || 'desktop',
                 text: existing.text || '',
+                ...(taskRefs.length ? { taskRefs } : {}),
                 ...(answerTo ? { answerTo } : {}),
               });
             }
@@ -499,6 +609,7 @@ export function createProjectAgentApplicationService({
             text: payload.text,
             anchorRefs: payload.anchorRefs,
             quoteRefs: payload.quoteRefs,
+            ...(taskRefs.length ? { taskRefs } : {}),
             attachmentRefs: payload.attachmentRefs,
             attachments: payload.attachments,
             resourceFeedback: payload.resourceFeedback,
@@ -512,6 +623,7 @@ export function createProjectAgentApplicationService({
             text: persisted.text || '',
             ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
             ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
+            ...(taskRefs.length ? { taskRefs } : {}),
             ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
             ...(payload.attachments ? { attachments: payload.attachments } : {}),
             ...(answerTo ? { answerTo } : {}),
@@ -524,6 +636,7 @@ export function createProjectAgentApplicationService({
           text: payload.text,
           ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
           ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
+          ...(taskRefs.length ? { taskRefs } : {}),
           ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
           ...(payload.attachments ? { attachments: payload.attachments } : {}),
           ...(answerTo ? { answerTo } : {}),
@@ -925,6 +1038,12 @@ export function createProjectAgentApplicationService({
     if (!result || result.error) return { ok: false, code: result?.error || 'RESUME_FAILED' };
     queueChanged(workspaceId);
     return { ok: true, session: result };
+  }
+
+  async function verifySession(payload = {}) {
+    if (!open()) return disabled();
+    if (rustBotHostActive()) return classicCoreBridge.projectBotVerifySession(payload);
+    return { ok: false, code: 'HOST_OFFLINE' };
   }
 
   function listApprovals(payload = {}) {
@@ -1361,6 +1480,7 @@ export function createProjectAgentApplicationService({
     readAvatar,
     create,
     updateProfile,
+    rebindFolder,
     updateModelSelection: createBotModelSelectionUpdater({ get, updateProfile }),
     deleteBot,
     submitInput,
@@ -1377,6 +1497,7 @@ export function createProjectAgentApplicationService({
     readUnknownOutcomePolicy,
     setUnknownOutcomePolicy,
     resumeSession,
+    verifySession,
     listApprovals,
     decideApproval,
     markRead,

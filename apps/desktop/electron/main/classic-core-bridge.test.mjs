@@ -2898,7 +2898,12 @@ test('C4b-2b-2b-1 readConversation (4 modes + cards), listSessions, and getSessi
     assert.equal(sessionsByWork.sessions.length, 1);
     assert.equal(sessionsByWork.sessions[0].sessionId, 'sess-conv-e2e');
     const sessionsEmpty = await appService.listSessions({ workspaceId: ws, status: 'accepted' });
-    assert.deepEqual(sessionsEmpty, { ok: true, sessions: [] });
+    assert.deepEqual(sessionsEmpty, { ok: true, sessions: [], totalCount: 0, nextCursor: null });
+    const sessionsActive = await appService.listSessions({ workspaceId: ws, scope: 'active', limit: 5 });
+    assert.equal(sessionsActive.ok, true);
+    assert.equal(sessionsActive.totalCount, 1);
+    assert.equal(sessionsActive.nextCursor, null);
+    assert.equal(sessionsActive.sessions[0].sessionId, 'sess-conv-e2e');
 
     // 5. getSession (summary + detail: 'report' + NOT_FOUND)
     const gotSession = await appService.getSession({ sessionId: 'sess-conv-e2e', detail: 'report' });
@@ -3308,10 +3313,34 @@ test('E2E: C4b-2b-2b-2b hostConfigure(enabled:false), obligationGrants push, and
     assert.equal(bridge.isProjectBotWorkspaceOnline(ws), true);
     bridge.handleNotification('project.bot.activity', {
       workspaceId: ws,
-      activity: { workspaceId: ws, conversationId: 'c1', turnId: 't1', revision: 1, startedAt: '2026-11-22T00:00:00.000Z', replyTo: [], phase: 'thinking', replyText: '' },
+      activity: { workspaceId: ws, conversationId: 'c1', turnId: 't1', revision: 1, startedAt: '2026-11-22T00:00:00.000Z', phase: 'thinking' },
       status: 'thinking',
     });
     assert.equal(bridge.readProjectBotAgentStatus(ws), 'thinking');
+    assert.deepEqual(bridge.readProjectBotActivity(ws), {
+      workspaceId: ws,
+      conversationId: 'c1',
+      turnId: 't1',
+      revision: 1,
+      startedAt: '2026-11-22T00:00:00.000Z',
+      phase: 'thinking',
+      replyTo: [],
+      replyText: '',
+      segments: [],
+    });
+    const lastActivityEvent = broadcasts.filter((e) => e.channel === 'project-agent:activity').at(-1);
+    assert.deepEqual(lastActivityEvent?.payload?.segments, []);
+    assert.deepEqual(lastActivityEvent?.payload?.replyTo, []);
+    assert.equal(lastActivityEvent?.payload?.replyText, '');
+
+    bridge.handleNotification('project.bot.activity', {
+      workspaceId: ws,
+      activity: { workspaceId: ws, conversationId: 'c1', turnId: 't1', revision: 2, startedAt: '2026-11-22T00:00:00.000Z', phase: 'disposed', replyTo: [], replyText: '', segments: [] },
+      status: 'idle',
+    });
+    assert.equal(bridge.readProjectBotAgentStatus(ws), 'idle');
+    assert.equal(bridge.readProjectBotActivity(ws), null);
+    assert.equal(broadcasts.filter((e) => e.channel === 'project-agent:activity').at(-1)?.payload?.phase, 'disposed');
 
     bridge.handleUnexpectedExit();
     assert.equal(bridge.isProjectBotHostActive(), false);
@@ -3527,6 +3556,24 @@ test('E2E: remote-device-connector (setupRemoteAccess + createRemoteProjectAcces
     }));
     assert.equal(missingSess.status, 'rejected');
     assert.equal(missingSess.code, 'TASK_DENIED');
+
+    // 5. project.bot.rebindFolder updates registry path and reports pathExists: true via Rust daemon
+    const movedWorkspace = path.join(root, 'workspace-moved');
+    mkdirSync(movedWorkspace, { recursive: true });
+    const rebound = await bridge.projectBotRebindFolder({
+      workspaceId,
+      workspacePath: movedWorkspace,
+    });
+    assert.equal(rebound.ok, true, `rebind failed: ${JSON.stringify(rebound)}`);
+    assert.equal(rebound.path, movedWorkspace);
+    assert.equal(rebound.previousPath, workspace);
+    assert.equal(rebound.pathExists, true);
+    assert.equal(rebound.unchanged, false);
+
+    const detailAfterRebind = await bridge.projectBotGet({ workspaceId });
+    assert.equal(detailAfterRebind.ok, true);
+    assert.equal(detailAfterRebind.path, movedWorkspace);
+    assert.equal(detailAfterRebind.pathExists, true);
   } finally {
     remote?.stop();
     await client.dispose();

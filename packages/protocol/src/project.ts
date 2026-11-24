@@ -5,6 +5,7 @@
 
 import type { ProjectModelPolicy } from './model-routing.ts';
 import type { PendingApprovalState, WorkSessionStatus } from './delegation.ts';
+import type { FollowUpProjection } from './task-overview.ts';
 
 export interface DiagnosticText { readonly length: number; readonly sha256: string }
 export interface ProjectAgentDiagnosticTiming {
@@ -61,6 +62,8 @@ export type BotAvatarReadResult =
   | { readonly ok: true; readonly dataUrl: string }
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'INVALID_IMAGE' };
 
+export type BotCommunicationStyle = 'natural' | 'concise' | 'detailed' | 'technical';
+
 export interface BotProfile {
   readonly workspaceId: string;
   readonly displayName: string;
@@ -68,6 +71,7 @@ export interface BotProfile {
   readonly managed?: boolean;
   readonly agentConversationId?: string;
   readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
+  readonly communicationStyle?: BotCommunicationStyle;
   /** Absent means this bot uses memory. */
   readonly memoryEnabled?: boolean;
   readonly planApproval?: 'never' | 'writes' | 'always';
@@ -97,6 +101,9 @@ export interface BotListItem {
   readonly preview: string;
   readonly lastActiveAt: string;
   readonly state: BotRowState;
+  readonly activeSessions?: readonly BotListSession[];
+  readonly activeSessionTotal?: number;
+  readonly historySessionTotal?: number;
 }
 
 export interface BotListFilter {
@@ -178,8 +185,18 @@ export type ProjectAgentStopResponseResult =
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_OFFLINE' | 'STALE_TURN' | 'INVALID_INPUT' };
 
 export interface BotListSession {
+  readonly sessionId?: string;
+  readonly title?: string;
   readonly status: WorkSessionStatus;
   readonly updatedAt?: string;
+  readonly followUp?: FollowUpProjection;
+  readonly phaseLabel?: string;
+  readonly anchorMessageId?: string;
+  readonly planId?: string;
+  readonly conversationId?: string;
+  readonly queueReason?: string;
+  readonly resultConfirmationRequired?: boolean;
+  readonly completionReviewRequired?: boolean;
 }
 
 export interface BotListApproval {

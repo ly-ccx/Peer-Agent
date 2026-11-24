@@ -1080,13 +1080,14 @@ export interface BootstrapPreloadApi {
   readonly mcpConnectAndRegister: (params: { serverUrl: string; serverName: string }) => Promise<McpConnectionProbeResult & { readonly success: boolean; readonly toolCount: number }>;
   readonly projectAgentListAttention: (params?: import('@peer-agent/protocol').BotAttentionRequest) => Promise<import('@peer-agent/protocol').BotAttentionResult>;
   readonly projectAgentList: (params?: { query?: string; needsYouOnly?: boolean }) => Promise<{ ok: boolean; code?: string; items?: readonly import('@peer-agent/protocol').BotListItem[] }>;
-  readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; profile?: import('@peer-agent/protocol').BotProfile; modelOptions?: readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]; modelViews?: import('@peer-agent/protocol').BotModelViews }>;
+  readonly projectAgentGet: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; item?: import('@peer-agent/protocol').BotListItem; path?: string; pathExists?: boolean; profile?: import('@peer-agent/protocol').BotProfile; modelOptions?: readonly import('@peer-agent/protocol').ModelRoutingMenuOption[]; modelViews?: import('@peer-agent/protocol').BotModelViews }>;
   readonly projectAgentReadAvatar: (params: { workspaceId: string }) => Promise<import('@peer-agent/protocol').BotAvatarReadResult>;
   readonly projectAgentReadAccessPolicy: (params: import('@peer-agent/protocol').BotAccessPolicyReadRequest) => Promise<import('@peer-agent/protocol').BotAccessPolicyResult>;
   readonly projectAgentUpdateAccessPolicy: (params: import('@peer-agent/protocol').BotAccessPolicyUpdateRequest) => Promise<import('@peer-agent/protocol').BotAccessPolicyResult>;
   readonly projectAgentCreate: (params: { kind: 'bind' } | { kind: 'managed'; name: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentUpdateModelSelection: (params: import('@peer-agent/protocol').BotModelSelectionUpdateRequest) => Promise<import('@peer-agent/protocol').BotModelSelectionUpdateResult>;
-  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; autoHandoffOnPolicyAccept?: boolean; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentUpdateProfile: (params: { workspaceId: string; displayName?: string; proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted'; communicationStyle?: import('@peer-agent/protocol').BotCommunicationStyle; regenerateAvatar?: boolean; avatarColor?: string; chooseAvatar?: boolean; planApproval?: 'never' | 'writes' | 'always'; acceptancePolicy?: 'auto' | 'confirm'; autoHandoffOnPolicyAccept?: boolean; modelPolicy?: import('@peer-agent/protocol').ProjectModelPolicy | null }) => Promise<{ ok: boolean; code?: string; profile?: import('@peer-agent/protocol').BotProfile }>;
+  readonly projectAgentRebindFolder: (params: { workspaceId: string; workspacePath?: string }) => Promise<{ ok: boolean; code?: string; workspaceId?: string; path?: string; previousPath?: string; pathExists?: boolean; unchanged?: boolean; profile?: import('@peer-agent/protocol').BotProfile }>;
   readonly projectAgentDelete: (params: { workspaceId: string; confirmManaged?: boolean }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentReadInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftReadRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftReadResult>;
   readonly projectAgentWriteInputDraft: (params: import('@peer-agent/protocol').ProjectInputDraftWriteRequest) => Promise<import('@peer-agent/protocol').ProjectInputDraftWriteResult>;
@@ -1099,13 +1100,14 @@ export interface BootstrapPreloadApi {
     resourceFeedback?: readonly import('@peer-agent/protocol').ResourceFeedback[];
     quoteRefs?: readonly string[];
     anchorRefs?: readonly string[];
+    taskRefs?: readonly (string | import('@peer-agent/protocol').InputDraftTaskRef)[];
     attachmentRefs?: readonly string[];
     createdAt?: string;
     answerTo?: string;
   }) => Promise<import('@peer-agent/protocol').ProjectAgentSubmitInputResult>;
   readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; recovery?: import('@peer-agent/protocol').BotRecoveryStatus | null; recoveryAttention?: boolean; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
   readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
-  readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
+  readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; scope?: 'all' | 'active' | 'history'; category?: 'all' | 'settled' | 'canceled' | 'failed'; query?: string; cursor?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[]; totalCount?: number; nextCursor?: string | null }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentListObligationGrants: (params: { workspaceId: string; parentConversationId?: string }) => Promise<{ ok: boolean; code?: string; grants?: readonly { grantId: string; status: string; items: readonly { sessionId: string; title?: string; displayTitle?: string | null; shortId?: string | null; gaps?: readonly string[]; actions?: readonly string[] }[] }[]; writer?: { ok: boolean; code?: string | null; check?: string | null; seal?: string | null; change?: string | null; file?: string | null } }>;
@@ -1114,6 +1116,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentReadUnknownOutcomePolicy: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; policy?: { tier: 'ask' | 'bot_verified'; policyId: string; revision: number; delegatedAt?: string; updatedAt: string } | null }>;
   readonly projectAgentSetUnknownOutcomePolicy: (params: { workspaceId: string; tier: 'ask' | 'bot_verified' }) => Promise<{ ok: boolean; code?: string; policy?: { tier: 'ask' | 'bot_verified'; policyId: string; revision: number; delegatedAt?: string; updatedAt: string } | null }>;
   readonly projectAgentResumeSession: (params: { sessionId: string; workspaceId: string; requestId: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentVerifySession: (params: { sessionId: string; workspaceId: string; focus?: string }) => Promise<{ ok: boolean; code?: string; message?: string; sessionId?: string; result?: unknown }>;
   readonly projectAgentListApprovals: (params?: { workspaceId?: string }) => Promise<{ ok: boolean; code?: string; approvals?: readonly unknown[] }>;
   readonly projectAgentDecideApproval: (params: {
     workspaceId: string;

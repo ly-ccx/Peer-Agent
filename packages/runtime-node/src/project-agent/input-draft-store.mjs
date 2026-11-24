@@ -46,8 +46,8 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
       || !record(saved.draft) || !Array.isArray(saved.pending) || saved.pending.length > MAX_PENDING || !record(saved.uploads)
       || Object.values(saved.uploads).some(value => !/^[a-f0-9]{64}$/.test(value))) throw Error('DRAFT_UNAVAILABLE');
     const known = (value, fields) => record(value) && Object.keys(value).every(key => fields.includes(key));
-    if (!known(saved, ['schemaVersion', 'revision', 'draft', 'pending', 'uploads']) || !known(saved.draft, ['text', 'quote', 'resourceFeedback', 'attachmentIds'])
-      || saved.pending.some(item => !known(item, ['inputId', 'text', 'createdAt', 'resourceFeedback', 'quoteRefs', 'answerTo', 'attachmentIds']))) throw Error('DRAFT_UNAVAILABLE');
+    if (!known(saved, ['schemaVersion', 'revision', 'draft', 'pending', 'uploads']) || !known(saved.draft, ['text', 'quote', 'resourceFeedback', 'taskRefs', 'attachmentIds'])
+      || saved.pending.some(item => !known(item, ['inputId', 'text', 'createdAt', 'resourceFeedback', 'taskRefs', 'quoteRefs', 'answerTo', 'attachmentIds']))) throw Error('DRAFT_UNAVAILABLE');
     if (saved.schemaVersion < 3 && [saved.draft, ...saved.pending].some(item => item.resourceFeedback?.some?.(row => row?.resource?.kind === 'interactive'))) throw Error('DRAFT_UNAVAILABLE');
     return saved;
   }
@@ -73,7 +73,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
           return item;
         });
       };
-      const draft = { text: text(saved.draft.text), quote: quote(saved.draft.quote), ...feedback(saved.draft.resourceFeedback, request.workspaceId, validateInteractiveFeedback), attachments: hydrate(saved.draft.attachmentIds) };
+      const draft = { text: text(saved.draft.text), quote: quote(saved.draft.quote), ...feedback(saved.draft.resourceFeedback, request.workspaceId, validateInteractiveFeedback), ...taskRefs(saved.draft.taskRefs), attachments: hydrate(saved.draft.attachmentIds) };
       if (saved.pending.length > MAX_PENDING) throw Error('DRAFT_UNAVAILABLE');
       const pending = saved.pending.map(item => ({ ...envelope(item, request.workspaceId, validateInteractiveFeedback), attachments: hydrate(item.attachmentIds) }));
       if (Buffer.byteLength(JSON.stringify([draft.resourceFeedback ?? [], ...pending.map(item => item.resourceFeedback ?? [])])) > 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
@@ -139,7 +139,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
           || values.some(id => typeof id !== 'string' || !uploads[id])) throw Error('INVALID_DRAFT');
         return [...values];
       };
-      const draft = { text: text(request.draft?.text), quote: quote(request.draft?.quote), ...feedback(request.draft?.resourceFeedback, request.workspaceId, validateInteractiveFeedback), attachmentIds: refs(request.draft?.attachmentIds) };
+      const draft = { text: text(request.draft?.text), quote: quote(request.draft?.quote), ...feedback(request.draft?.resourceFeedback, request.workspaceId, validateInteractiveFeedback), ...taskRefs(request.draft?.taskRefs), attachmentIds: refs(request.draft?.attachmentIds) };
       if (!Array.isArray(request.pending) || request.pending.length > MAX_PENDING) throw Error('DRAFT_LIMIT');
       const pending = request.pending.map(item => ({ ...envelope(item, request.workspaceId, validateInteractiveFeedback), attachmentIds: refs(item.attachmentIds) }));
       if (new Set(pending.map(item => item.inputId)).size !== pending.length) throw Error('INVALID_DRAFT');
@@ -204,9 +204,27 @@ function quote(value) {
   if (value == null) return null;
   return { messageId: text(value.messageId, 512), text: text(value.text) };
 }
+function taskRefs(value) {
+  if (value == null) return {};
+  if (!Array.isArray(value) || value.length > 16) throw Error('INVALID_DRAFT');
+  const seen = new Set();
+  const rows = [];
+  for (const item of value) {
+    if (!record(item)) throw Error('INVALID_DRAFT');
+    const sessionId = text(item.sessionId, 128).trim();
+    if (!ID.test(sessionId)) throw Error('INVALID_DRAFT');
+    if (seen.has(sessionId)) continue;
+    seen.add(sessionId);
+    const title = text(item.title, 240);
+    const status = typeof item.status === 'string' && item.status.trim() ? text(item.status, 64) : undefined;
+    const anchorMessageId = typeof item.anchorMessageId === 'string' && item.anchorMessageId.trim() ? text(item.anchorMessageId, 256) : undefined;
+    rows.push({ sessionId, title, ...(status ? { status } : {}), ...(anchorMessageId ? { anchorMessageId } : {}) });
+  }
+  return rows.length ? { taskRefs: rows } : {};
+}
 function envelope(item, workspaceId, validateInteractiveFeedback) {
   if (!ID.test(item?.inputId || '') || !Number.isFinite(Date.parse(item?.createdAt))) throw Error('INVALID_DRAFT');
   if (!Array.isArray(item.quoteRefs) || item.quoteRefs.length > 64) throw Error('INVALID_DRAFT');
-  return { inputId: item.inputId, text: text(item.text), createdAt: item.createdAt, ...feedback(item.resourceFeedback, workspaceId, validateInteractiveFeedback),
+  return { inputId: item.inputId, text: text(item.text), createdAt: item.createdAt, ...feedback(item.resourceFeedback, workspaceId, validateInteractiveFeedback), ...taskRefs(item.taskRefs),
     quoteRefs: item.quoteRefs.map(ref => text(ref)), ...(item.answerTo ? { answerTo: text(item.answerTo, 512) } : {}) };
 }

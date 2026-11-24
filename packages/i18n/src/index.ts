@@ -259,6 +259,7 @@ export type TranslationKey =
   | 'projectAgent.chat.activity.memory'
   | 'projectAgent.chat.activity.memoryUpdate'
   | 'projectAgent.chat.activity.directory'
+  | 'projectAgent.chat.activity.git'
   | 'projectAgent.chat.toolLabel.read'
   | 'projectAgent.chat.toolLabel.search'
   | 'projectAgent.chat.toolLabel.edit'
@@ -343,6 +344,7 @@ export type TranslationKey =
   | 'projectAgent.chat.disposition.outOfScope'
   | 'projectAgent.chat.quote'
   | 'projectAgent.chat.quoteRemove'
+  | 'projectAgent.chat.protocolLeakFallback'
   | 'projectAgent.chat.placeholder'
   | 'projectAgent.chat.attach'
   | 'projectAgent.chat.previewAttachment'
@@ -434,6 +436,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
   | 'projectAgent.chat.work.resultSettling'
+  | 'projectAgent.chat.work.verificationFailed'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
@@ -485,6 +488,8 @@ export type TranslationKey =
   | 'projectAgent.chat.surfacing.digest'
   | 'projectAgent.chat.surfacing.silent'
   | 'projectAgent.chat.approve'
+  | 'projectAgent.chat.approvePlan'
+  | 'projectAgent.chat.planApprovalPending'
   | 'projectAgent.chat.allowOnce'
   | 'projectAgent.chat.allowTask'
   | 'projectAgent.chat.allowImage'
@@ -570,6 +575,14 @@ export type TranslationKey =
   | 'projectAgent.drawer.tab.memory'
   | 'projectAgent.drawer.tab.settings'
   | 'projectAgent.drawer.folder'
+  | 'projectAgent.drawer.folderMissing'
+  | 'projectAgent.drawer.rebindFolder'
+  | 'projectAgent.drawer.changeFolder'
+  | 'projectAgent.drawer.rebinding'
+  | 'projectAgent.drawer.rebindSuccess'
+  | 'projectAgent.drawer.rebindError.pathTaken'
+  | 'projectAgent.drawer.rebindError.notFound'
+  | 'projectAgent.drawer.rebindError.failed'
   | 'projectAgent.drawer.noPath'
   | 'projectAgent.drawer.reveal'
   | 'projectAgent.drawer.brief'
@@ -799,6 +812,12 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.proactivity.standard'
   | 'projectAgent.drawer.settings.proactivity.high'
   | 'projectAgent.drawer.settings.proactivity.muted'
+  | 'projectAgent.drawer.settings.communicationStyle'
+  | 'projectAgent.drawer.settings.communicationStyle.natural'
+  | 'projectAgent.drawer.settings.communicationStyle.concise'
+  | 'projectAgent.drawer.settings.communicationStyle.detailed'
+  | 'projectAgent.drawer.settings.communicationStyle.technical'
+  | 'projectAgent.drawer.settings.communicationStyleHint'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -1995,6 +2014,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.memory': '正在查阅项目记忆',
     'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
     'projectAgent.chat.activity.directory': '正在查看文件目录',
+    'projectAgent.chat.activity.git': '正在查看仓库状态',
     'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
     'projectAgent.chat.toolLabel.edit': '编辑文件',
@@ -2079,6 +2099,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': '这句话针对的是『{title}』，没有影响其他任务',
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
+    'projectAgent.chat.protocolLeakFallback': '该回复仅包含无效的工具调用格式，已自动隐藏。请重试或继续追问。',
     'projectAgent.chat.placeholder': '给 {name} 发消息',
     'projectAgent.chat.attach': '添加文件或图片',
     'projectAgent.chat.previewAttachment': '预览图片',
@@ -2170,6 +2191,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
     'projectAgent.chat.work.resultSettling': '正在核对结果',
+    'projectAgent.chat.work.verificationFailed': '核验未通过',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
@@ -2221,6 +2243,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': '收进小结',
     'projectAgent.chat.surfacing.silent': '不打扰',
     'projectAgent.chat.approve': '批准',
+    'projectAgent.chat.approvePlan': '批准计划',
+    'projectAgent.chat.planApprovalPending': '待批准计划',
     'projectAgent.chat.allowOnce': '仅这一次',
     'projectAgent.chat.allowTask': '本任务重复此操作',
     'projectAgent.chat.allowImage': '本轮允许此图片',
@@ -2306,6 +2330,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.memory': '记忆',
     'projectAgent.drawer.tab.settings': '设置',
     'projectAgent.drawer.folder': '绑定文件夹',
+    'projectAgent.drawer.folderMissing': '文件夹不存在或已移动，重新绑定后会保留当前对话与记忆。',
+    'projectAgent.drawer.rebindFolder': '重新绑定文件夹',
+    'projectAgent.drawer.changeFolder': '更换文件夹',
+    'projectAgent.drawer.rebinding': '正在绑定…',
+    'projectAgent.drawer.rebindSuccess': '已绑定到新文件夹',
+    'projectAgent.drawer.rebindError.pathTaken': '这个文件夹已经绑定给另一个机器人了。',
+    'projectAgent.drawer.rebindError.notFound': '所选文件夹不存在或无法访问。',
+    'projectAgent.drawer.rebindError.failed': '重新绑定失败，请稍后重试。',
     'projectAgent.drawer.noPath': '还没有文件夹',
     'projectAgent.drawer.reveal': '在访达中显示',
     'projectAgent.drawer.brief': '项目简报',
@@ -2535,6 +2567,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.standard': '标准',
     'projectAgent.drawer.settings.proactivity.high': '多',
     'projectAgent.drawer.settings.proactivity.muted': '静音',
+    'projectAgent.drawer.settings.communicationStyle': '沟通风格',
+    'projectAgent.drawer.settings.communicationStyle.natural': '自然搭档（默认）',
+    'projectAgent.drawer.settings.communicationStyle.concise': '干练直给',
+    'projectAgent.drawer.settings.communicationStyle.detailed': '温和详尽',
+    'projectAgent.drawer.settings.communicationStyle.technical': '专业深度',
+    'projectAgent.drawer.settings.communicationStyleHint': '调整 Bot 与你交流时的语气与详略；无论选哪一档，都会用自然人话交流，不会把内部系统术语丢进对话。',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -3471,6 +3509,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.memory': 'Looking through project memory',
     'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',
     'projectAgent.chat.activity.directory': 'Looking through the folder',
+    'projectAgent.chat.activity.git': 'Checking repository status',
     'projectAgent.chat.toolLabel.read': 'file reading',
     'projectAgent.chat.toolLabel.search': 'project search',
     'projectAgent.chat.toolLabel.edit': 'file editing',
@@ -3555,6 +3594,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': 'This message was about “{title}” and did not affect the others',
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
+    'projectAgent.chat.protocolLeakFallback': 'This reply contained only invalid tool-call markup and was hidden. Please retry or ask again.',
     'projectAgent.chat.placeholder': 'Message {name}',
     'projectAgent.chat.attach': 'Attach files or images',
     'projectAgent.chat.previewAttachment': 'Preview image',
@@ -3646,6 +3686,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
     'projectAgent.chat.work.resultSettling': 'Reviewing the result',
+    'projectAgent.chat.work.verificationFailed': 'Verification failed',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
@@ -3697,6 +3738,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': 'Keep for the digest',
     'projectAgent.chat.surfacing.silent': 'Stay quiet',
     'projectAgent.chat.approve': 'Approve',
+    'projectAgent.chat.approvePlan': 'Approve plan',
+    'projectAgent.chat.planApprovalPending': 'Plan approval required',
     'projectAgent.chat.allowOnce': 'Allow once',
     'projectAgent.chat.allowTask': 'Repeat this operation for this task',
     'projectAgent.chat.allowImage': 'Allow this image for this session',
@@ -3782,6 +3825,14 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.memory': 'Memory',
     'projectAgent.drawer.tab.settings': 'Settings',
     'projectAgent.drawer.folder': 'Bound folder',
+    'projectAgent.drawer.folderMissing': 'Folder not found or moved. Rebinding keeps this conversation and memory.',
+    'projectAgent.drawer.rebindFolder': 'Rebind folder',
+    'projectAgent.drawer.changeFolder': 'Change folder',
+    'projectAgent.drawer.rebinding': 'Binding…',
+    'projectAgent.drawer.rebindSuccess': 'Bound to the new folder',
+    'projectAgent.drawer.rebindError.pathTaken': 'This folder is already bound to another bot.',
+    'projectAgent.drawer.rebindError.notFound': 'The selected folder does not exist or cannot be accessed.',
+    'projectAgent.drawer.rebindError.failed': 'Could not rebind the folder. Please try again.',
     'projectAgent.drawer.noPath': 'No folder yet',
     'projectAgent.drawer.reveal': 'Show in Finder',
     'projectAgent.drawer.brief': 'Project brief',
@@ -4011,6 +4062,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.standard': 'Standard',
     'projectAgent.drawer.settings.proactivity.high': 'High',
     'projectAgent.drawer.settings.proactivity.muted': 'Muted',
+    'projectAgent.drawer.settings.communicationStyle': 'Communication style',
+    'projectAgent.drawer.settings.communicationStyle.natural': 'Natural partner (default)',
+    'projectAgent.drawer.settings.communicationStyle.concise': 'Direct & concise',
+    'projectAgent.drawer.settings.communicationStyle.detailed': 'Warm & thorough',
+    'projectAgent.drawer.settings.communicationStyle.technical': 'Technical peer',
+    'projectAgent.drawer.settings.communicationStyleHint': 'Controls tone and level of detail in conversation. Internal runtime jargon stays out of replies in every style.',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

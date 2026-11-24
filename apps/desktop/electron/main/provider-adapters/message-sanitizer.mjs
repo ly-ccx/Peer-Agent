@@ -18,13 +18,11 @@ function isEmptyAssistantMessage(message) {
 // 断流）。这里只“中和”而非删除：把标签起始尖括号转义为 &lt;，打断语法链，但保留
 // invoke/parameter 字样可读，分析含工具调用 trace 的会话不受影响。
 // 仅作用于纯文本正文，绝不触碰结构化 tool_use block 的 input / openai tool_calls。
-const TOOL_CALL_SYNTAX_PATTERN = /<(\/?)(?:(antml:)?(tool_call|function_calls|invoke|parameter)|(functions\.[a-zA-Z0-9_.-]+))\b/gi;
+const TOOL_CALL_SYNTAX_PATTERN = /<(\s*\/?\s*(?:[｜|]\s*DSML\s*[｜|]|(?:antml:)?(?:tool_call|function_calls|invoke|parameter)\b|functions\.[a-zA-Z0-9_.-]+\b))/gi;
 
 export function neutralizeToolCallSyntax(text) {
   if (typeof text !== 'string' || text.indexOf('<') === -1) return text;
-  return text.replace(TOOL_CALL_SYNTAX_PATTERN, (_match, slash = '', namespace = '', claudeName = '', openAiName = '') => (
-    `&lt;${slash}${namespace || ''}${claudeName || openAiName}`
-  ));
+  return text.replace(TOOL_CALL_SYNTAX_PATTERN, (_match, body) => `&lt;${body}`);
 }
 
 // 对单个 content block 做中和：只处理 text 块的 text、tool_result 块的 content。
