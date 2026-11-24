@@ -9,10 +9,19 @@
  *   5. 纯黑禁 / 纯白仅环境层 6. 状态不只靠颜色
  *   7. 阴影限定 2 场景      8. 表面圆角 ≤ 16px（输入框、胶囊及圆形按用途）
  *
- * 本文件提供三套变量：
- *   1. Frost 正名 token（--chrome-*, --paper-*, --control-*, --graphite-*, --azure-*, --state-*）—— 新代码必须用
- *   2. Vellum 兼容别名（--surface-vellum-*, --ink-*, --cinnabar-*）—— 18 个旧文件继续可用，值已切到 Frost
- *   3. --za-* 别名 —— 既有 18 个 CSS/TSX 文件继续使用，值已切到 Frost
+ * 本文件提供三套变量（CI 门禁：apps/desktop/renderer/src/styles/frostTokenContract.test.ts）：
+ *   1. Frost 正名 token（--chrome-*, --paper-*, --control-*, --graphite-*, --azure-*, --state-*, --ui-radius-*）—— 所有新代码与新建 CSS 必须 100% 使用
+ *   2. Vellum 兼容别名（--surface-vellum-*, --ink-*, --cinnabar-*）—— 已冻结，禁止新增引用
+ *   3. --za-* / --pa-* 颜色/表面兼容别名 —— 已冻结（只许经 var(...) 映射正名 Frost token，禁止硬写 hex、禁止向新 CSS 扩散）；
+ *      仅 --za-motion-* / --za-ease-* / --za-code-font-size / --pa-drawer-width 作为共享动效/排版/布局接口继续开放
+ *
+ * v2.0 (2026-11-24) — Peer Frost A × G 哑光分层协议：
+ *   - 深色默认底面收敛为纯中性哑光黑曜石（#151518 壳层 → #19191C 浮起纸面 → #212125 抬升卡 → #26262B 悬停/内嵌），
+ *     严禁旧蓝灰偏色（RGB 通道差 <= 7）与顶部白色高光线（--glass-edge-highlight: 0 0 0 0 transparent）。
+ *   - 双级激活语法（A × G 黄金分层）：
+ *       A 级（多行/高卡，如 Bot 列表行）：--chrome-glass-row-active / --chrome-glass-row-border（纯平哑光磨砂）
+ *       G 级（单行导航、子任务行、分段切换、主 CTA）：--chrome-keycap-bg / --chrome-keycap-fg（高对比实色粉笔/石墨键帽）
+ *   - 同心圆角阶梯：4 / 8 / 10 / 12 / 16 / 18 / 20px；禁止用 --azure-trace 铺大块卡片/面板背景。
  *
  * v1.0 (2026-05-27) — Peer Frost 立项：
  *   Vellum 经过 v0.2 → v0.2.1 → v0.2.2 → v0.2.3 四次"去黄"迭代仍然没能满足
