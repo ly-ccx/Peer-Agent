@@ -20,24 +20,33 @@
     <title>Peer Agent — Changelog</title>
     <style>
       :root {
-        --graphite-btn: #1a1d21;
-        --graphite-btn-ink: #f5f7fa;
-        --bg: #f5f5f7;
-        --bg-elevated: #ffffff;
-        --ink: #1d1d1f;
-        --ink-soft: #6e6e73;
-        --ink-fade: #86868b;
-        --line: rgba(0, 0, 0, 0.08);
-        --graphite: #1a1d21;
-        --graphite-hover: #2a2d33;
-        --azure: #3b7fab;
-        --azure-soft: #d8e4ee;
-        --hairline: #dce0e8;
-        --shadow-soft: 0 1px 2px rgba(0,0,0,.04), 0 12px 28px rgba(0,0,0,.06);
+        --graphite-btn: #181c22;
+        --graphite-btn-ink: #fcfdff;
+        --bg: #f7f9fc;
+        --bg-elevated: #fcfdff;
+        --ink: #181c22;
+        --ink-soft: #4e5664;
+        --ink-fade: #616a79;
+        --line: #dde4ee;
+        --graphite: #181c22;
+        --graphite-hover: #262c35;
+        --azure: #286891;
+        --azure-soft: #e1ecf4;
+        --good: #296e5d;
+        --warn: #32639b;
+        --danger: #963850;
+        --hairline: #dde4ee;
+        --shadow-soft: 0 1px 2px rgba(24, 28, 34, 0.05), 0 12px 28px rgba(24, 28, 34, 0.08);
         --wide: 1120px;
-        --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-          "Inter", "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
-        --mono: "SF Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+        --font: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+        --nav-bg: hsla(215, 22%, 96%, 0.78);
+        --nav-border: #dde4ee;
+        --chip-bg: #eaeff5;
+        --chip-active-bg: #fcfdff;
+        --hover-fill: #e8eef6;
+        --card-bg: #fcfdff;
+        --glass-edge: inset 0 1px 0 hsla(210, 45%, 100%, 0.78);
       }
 
       html[data-theme="light"] {
@@ -45,50 +54,38 @@
       }
       html[data-theme="dark"] {
         color-scheme: dark;
-        --bg: #0f1114;
-        --bg-elevated: #161a20;
-        --ink: #f2f4f7;
-        --ink-soft: #c2c9d2;
-        --ink-fade: #98a1ad;
-        --line: rgba(255, 255, 255, 0.10);
-        --line-strong: rgba(255, 255, 255, 0.14);
-        --graphite: #f5f7fa;
-        --graphite-hover: #ffffff;
-        --graphite-btn: #f5f7fa;
-        --graphite-btn-ink: #121417;
-        --azure: #6eb0d6;
-        --azure-strong: #8fc4e2;
-        --azure-soft: rgba(110, 176, 214, 0.18);
-        --paper: #12161c;
-        --fill: #1b212a;
-        --composer: #1a2028;
-        --hairline: rgba(255, 255, 255, 0.10);
-        --code-bg: #0b0d10;
-        --code-ink: #d8e0ea;
+        --bg: #13171f;
+        --bg-elevated: #1e2430;
+        --ink: #eef2f7;
+        --ink-soft: #b2bccb;
+        --ink-fade: #8c98a9;
+        --line: #27303e;
+        --line-strong: #4a5362;
+        --graphite: #eef2f7;
+        --graphite-hover: #d7dfea;
+        --graphite-btn: #eef2f7;
+        --graphite-btn-ink: #13171f;
+        --azure: #76b0d4;
+        --azure-strong: #76b0d4;
+        --azure-soft: #1d2e3f;
+        --good: #63b39d;
+        --warn: #76a5d6;
+        --danger: #d97c92;
+        --paper: #171c25;
+        --fill: #252c3a;
+        --composer: #1e2430;
+        --hairline: #27303e;
+        --code-bg: #0d1016;
+        --code-ink: #b2bccb;
         --shadow: 0 2px 8px rgba(0,0,0,.35), 0 28px 60px rgba(0,0,0,.45);
         --shadow-soft: 0 1px 2px rgba(0,0,0,.35), 0 12px 28px rgba(0,0,0,.35);
-        --nav-bg: rgba(15, 17, 20, 0.78);
-        --nav-border: rgba(255, 255, 255, 0.08);
-        --chip-bg: rgba(255, 255, 255, 0.06);
-        --chip-active-bg: #1c222b;
-        --hover-fill: rgba(255, 255, 255, 0.06);
-        --card-bg: rgba(255, 255, 255, 0.03);
-      }
-      html[data-theme="light"] {
-        --nav-bg: rgba(245, 245, 247, 0.72);
-        --nav-border: rgba(0, 0, 0, 0.06);
-        --chip-bg: rgba(0, 0, 0, 0.04);
-        --chip-active-bg: #ffffff;
-        --hover-fill: rgba(0, 0, 0, 0.04);
-        --card-bg: #ffffff;
-      }
-      :root {
-        --nav-bg: rgba(245, 245, 247, 0.72);
-        --nav-border: rgba(0, 0, 0, 0.06);
-        --chip-bg: rgba(0, 0, 0, 0.04);
-        --chip-active-bg: #ffffff;
-        --hover-fill: rgba(0, 0, 0, 0.04);
-        --card-bg: #ffffff;
+        --nav-bg: hsla(218, 22%, 11%, 0.76);
+        --nav-border: #27303e;
+        --chip-bg: #0d1016;
+        --chip-active-bg: #1e2430;
+        --hover-fill: #1b212d;
+        --card-bg: #1e2430;
+        --glass-edge: inset 0 1px 0 hsla(214, 40%, 100%, 0.08);
       }
       .theme-toggle {
         appearance: none;
@@ -129,9 +126,9 @@
       button { font: inherit; }
 
       .nav {
-        position: sticky; top: 0; z-index: 40; height: 48px;
-        backdrop-filter: saturate(180%) blur(20px);
-        -webkit-backdrop-filter: saturate(180%) blur(20px);
+        position: sticky; top: 0; z-index: 40; height: 64px;
+        backdrop-filter: saturate(165%) blur(20px);
+        -webkit-backdrop-filter: saturate(165%) blur(20px);
         background: var(--nav-bg);
         border-bottom: 1px solid var(--nav-border);
       }
@@ -194,7 +191,7 @@
         font-size: clamp(36px, 5vw, 52px);
         line-height: 1.08;
         letter-spacing: -0.03em;
-        font-weight: 650;
+        font-weight: 600;
       }
       .subhead {
         margin: 0 auto;
@@ -213,29 +210,31 @@
       }
       .release-nav {
         position: sticky;
-        top: 78px;
+        top: 84px;
         background: var(--bg-elevated);
-        border-radius: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
         padding: 14px;
-        box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+        box-shadow: var(--glass-edge), var(--shadow-soft);
       }
-      .release-nav-title { margin: 0 0 10px; padding: 0 4px; font-size: 12px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
+      .release-nav-title { margin: 0 0 10px; padding: 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
       .version-link, .retry-button { border: 0; font: inherit; cursor: pointer; color: var(--ink-soft); }
       .version-list { display: grid; gap: 4px; max-height: calc(100vh - 190px); overflow: auto; }
       .version-link {
         display: flex; justify-content: space-between; gap: 8px; width: 100%;
-        border-radius: 10px; padding: 9px 10px; background: transparent; text-align: left;
-        font-family: var(--mono); font-size: 13px;
+        border-radius: 12px; padding: 9px 10px; background: transparent; text-align: left;
+        font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
       }
-      .version-link:hover, .version-link[aria-current="true"] { color: var(--ink); background: var(--bg); }
+      .version-link:hover, .version-link[aria-current="true"] { color: var(--ink); background: var(--chip-bg); }
       .timeline { min-width: 0; }
       .status-card { text-align: center; color: var(--ink-fade); padding: 56px 24px; }
-      .retry-button { margin-top: 14px; border-radius: 980px; padding: 8px 14px; background: var(--azure); color: white; }
+      .retry-button { margin-top: 14px; border-radius: 980px; padding: 8px 14px; background: var(--graphite-btn); color: var(--graphite-btn-ink); font-weight: 500; }
       .release {
         background: var(--bg-elevated);
-        border-radius: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
         padding: 24px 24px 18px;
-        box-shadow: 0 1px 0 rgba(0,0,0,0.03);
+        box-shadow: var(--glass-edge), var(--shadow-soft);
       }
       .release-head {
         display: flex;
@@ -249,7 +248,7 @@
         margin: 0;
         font-size: 22px;
         letter-spacing: -0.02em;
-        font-weight: 650;
+        font-weight: 600;
         font-family: var(--mono);
       }
       .badge {
@@ -258,7 +257,7 @@
         height: 24px;
         padding: 0 10px;
         border-radius: 980px;
-        background: rgba(59,127,171,0.12);
+        background: var(--azure-soft);
         color: var(--azure);
         font-size: 12px;
         font-weight: 600;
@@ -269,15 +268,15 @@
       .section h3 {
         margin: 0 0 8px;
         font-size: 13px;
-        font-weight: 650;
+        font-weight: 600;
         letter-spacing: 0.02em;
         text-transform: uppercase;
         color: var(--ink-fade);
       }
-      .section.added > h3 { color: #3e7a6b; }
-      .section.fixed > h3 { color: #9a5b3c; }
+      .section.added > h3 { color: var(--good); }
+      .section.fixed > h3 { color: var(--warn); }
       .section.improved > h3 { color: var(--azure); }
-      .section.breaking > h3 { color: #a33b3b; }
+      .section.breaking > h3 { color: var(--danger); }
       .subsection {
         margin-top: 14px;
       }
@@ -285,7 +284,7 @@
         margin: 0 0 8px;
         color: var(--ink);
         font-size: 16px;
-        font-weight: 650;
+        font-weight: 600;
         letter-spacing: -0.01em;
       }
       ul {
@@ -305,9 +304,9 @@
         padding: 40px 0;
       }
       @media (max-width: 720px) {
-        .release-browser { grid-template-columns: 1fr; }
-        .release-nav { position: static; }
-        .version-list { display: flex; max-height: none; overflow-x: auto; padding-bottom: 4px; }
+        .release-browser { grid-template-columns: minmax(0, 1fr); }
+        .release-nav { position: static; min-width: 0; }
+        .version-list { display: flex; max-height: none; overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
         .version-link { flex: 0 0 auto; width: auto; }
       }
 
@@ -327,7 +326,9 @@
       .preview-note {
         position: fixed; right: 14px; bottom: 14px; z-index: 50;
         font-size: 11px; color: var(--ink-soft);
-        background: rgba(255,255,255,0.9);
+        background: var(--nav-bg);
+        backdrop-filter: saturate(165%) blur(16px);
+        -webkit-backdrop-filter: saturate(165%) blur(16px);
         border: 1px solid var(--line); border-radius: 980px;
         padding: 6px 10px; box-shadow: var(--shadow-soft);
       }
@@ -345,8 +346,9 @@
           <span>Peer Agent</span>
         </a>
         <div class="nav-links">
+          <a href="./index.html#product" data-i18n="nav.product">Product</a>
+          <a href="./index.html#how" data-i18n="nav.how">How it works</a>
           <a href="./docs.html" data-i18n="nav.docs">Docs</a>
-          <a href="./index.html#mechanisms" data-i18n="nav.mechanisms">Why Peer</a>
           <a class="active" href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
           <a href="https://github.com/ly-ccx/Peer-Agent" target="_blank" rel="noreferrer" data-i18n="nav.github">GitHub</a>
           <a class="btn-link" href="./index.html#get" data-i18n="nav.download">Download</a>
@@ -381,7 +383,7 @@
       </section>
       <p class="channel-note">
         <span data-i18n="channel.scope">Switch between stable and pre-release notes below.</span>
-        <a href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.29" data-i18n="channel.preview">Open the 0.1 project Bot preview release (RC29)</a>
+        <a href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.1.0-rc.40" data-i18n="channel.preview">Open the 0.1 project Bot preview release (RC40)</a>
         <span aria-hidden="true"> · </span>
         <a href="https://github.com/ly-ccx/Peer-Agent/releases" data-i18n="channel.all">All releases</a>
       </p>
@@ -417,8 +419,9 @@
 
         var ui = {
           en: {
+            "nav.product": "Product",
+            "nav.how": "How it works",
             "nav.docs": "Docs",
-            "nav.mechanisms": "Why Peer",
             "nav.changelog": "Changelog",
             "nav.github": "GitHub",
             "nav.download": "Download",
@@ -436,7 +439,7 @@
             "channel.beta": "Pre-release",
             "nav.releases": "Stable versions",
             "channel.scope": "Switch between stable and pre-release notes below.",
-            "channel.preview": "Open the 0.1 project Bot preview release (RC29)",
+            "channel.preview": "Open the 0.1 project Bot preview release (RC40)",
             "channel.all": "All releases",
             "loading": "Loading release notes…",
             "loadError": "Release notes could not be loaded.",
@@ -445,8 +448,9 @@
             documentTitle: "Peer Agent — Changelog"
           },
           zh: {
+            "nav.product": "产品",
+            "nav.how": "原理",
             "nav.docs": "文档",
-            "nav.mechanisms": "为什么",
             "nav.changelog": "更新日志",
             "nav.github": "GitHub",
             "nav.download": "下载",
@@ -464,7 +468,7 @@
             "channel.beta": "预发布",
             "nav.releases": "正式版版本",
             "channel.scope": "下方可切换查看正式版与预发布更新记录。",
-            "channel.preview": "打开 0.1 项目 Bot 预览版发布页（RC29）",
+            "channel.preview": "打开 0.1 项目 Bot 预览版发布页（RC40）",
             "channel.all": "全部发布记录",
             "loading": "正在加载版本说明…",
             "loadError": "版本说明加载失败。",
