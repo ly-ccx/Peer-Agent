@@ -518,6 +518,8 @@ mod tests {
                             }
                             Action::ReplaceAnchor if checks == 3 => {
                                 std::fs::rename(&watched, &retained).unwrap();
+                                #[cfg(windows)]
+                                std::thread::sleep(std::time::Duration::from_millis(25));
                                 std::fs::create_dir(&watched).unwrap();
                                 applied = true;
                             }
@@ -541,6 +543,8 @@ mod tests {
                             }
                             Action::ReplaceDirectory if watched.join("new").exists() => {
                                 std::fs::rename(watched.join("new"), &retained).unwrap();
+                                #[cfg(windows)]
+                                std::thread::sleep(std::time::Duration::from_millis(25));
                                 std::fs::create_dir(watched.join("new")).unwrap();
                                 applied = true;
                             }
