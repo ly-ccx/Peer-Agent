@@ -135,8 +135,11 @@ fn validate_legacy_metadata(settings: &Value) -> Result<(), &'static str> {
                 "shellIntroPending" | "shellIntroDismissed" => {
                     return Err("context_settings_invalid");
                 }
-                "proactivity" | "digestTime" if value.is_null() || value.is_string() => {}
-                "proactivity" | "digestTime" => return Err("context_settings_invalid"),
+                "proactivity" | "digestTime" | "communicationStyle"
+                    if value.is_null() || value.is_string() => {}
+                "proactivity" | "digestTime" | "communicationStyle" => {
+                    return Err("context_settings_invalid");
+                }
                 "quietHours" if value.is_null() || value.is_object() => {}
                 "quietHours" => return Err("context_settings_invalid"),
                 "concurrency" if value.is_null() || value.is_number() => {}

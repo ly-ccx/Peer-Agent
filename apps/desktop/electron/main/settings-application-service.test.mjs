@@ -230,6 +230,7 @@ test('project agent settings keep the standard level and merge quiet hours', () 
   assert.deepEqual(first.projectAgent, {
     concurrency: 4,
     proactivity: 'high',
+    communicationStyle: 'natural',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '18:30',
     interactiveResults: false,
@@ -237,6 +238,9 @@ test('project agent settings keep the standard level and merge quiet hours', () 
     shellIntroPending: false,
     shellIntroDismissed: false,
   });
+  const styled = service.update({ projectAgent: { communicationStyle: 'concise' } });
+  assert.equal(styled.projectAgent.communicationStyle, 'concise');
+  assert.equal(service.update({ projectAgent: { communicationStyle: 'invalid' } }).projectAgent.communicationStyle, 'natural');
   const second = service.update({ projectAgent: { quietHours: { enabled: true, start: '21:00' } } });
   assert.equal(second.projectAgent.proactivity, 'high');
   assert.deepEqual(second.projectAgent.quietHours, { enabled: true, start: '21:00', end: '08:00' });

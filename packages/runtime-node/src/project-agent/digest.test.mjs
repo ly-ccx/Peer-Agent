@@ -183,12 +183,17 @@ test('缺省设置是标准档、关闭的安静时段和 09:00', () => {
     concurrency: 4,
     interactiveResults: false,
     proactivity: 'standard',
+    communicationStyle: 'natural',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
     shell: 'bots',
     shellIntroPending: false,
     shellIntroDismissed: false,
   });
+  for (const style of ['natural', 'concise', 'detailed', 'technical']) {
+    assert.equal(normalizeProjectAgentSettings({ communicationStyle: style }).communicationStyle, style);
+  }
+  assert.equal(normalizeProjectAgentSettings({ communicationStyle: 'robotic' }).communicationStyle, 'natural');
   assert.equal(normalizeProjectAgentSettings({ shell: 'classic' }).shell, 'classic');
   assert.equal(normalizeProjectAgentSettings({ interactiveResults: true }).interactiveResults, true);
   for (const value of [1, 'true', {}, null]) assert.equal(normalizeProjectAgentSettings({ interactiveResults: value }).interactiveResults, false);

@@ -122,7 +122,7 @@ export function OverviewTab({
         {running.length > 3 ? <button type="button" onClick={onOpenTasks}>{i18n.t('projectAgent.chat.work.more', { count: running.length - 3 })}<PeerIcon name="chevronRight" size={14} /></button> : null}
       </section>
       <section className="bot-overview-details">
-        <div><span>{i18n.t('projectAgent.drawer.settings.communicationStyle')}</span><strong>{i18n.t(`projectAgent.drawer.settings.communicationStyle.${profile.communicationStyle ?? 'natural'}`)}</strong></div>
+        <div><span>{i18n.t('projectAgent.drawer.settings.communicationStyle')}</span><strong>{i18n.t(`projectAgent.drawer.settings.communicationStyle.${profile.communicationStyle ?? 'inherit'}`)}</strong></div>
         <div><span>{i18n.t('projectAgent.drawer.settings.proactivity')}</span><strong>{i18n.t(`projectAgent.drawer.settings.proactivity.${profile.proactivity ?? 'inherit'}`)}</strong></div>
         <div>
           <span>{i18n.t('projectAgent.drawer.acceptance')}</span>

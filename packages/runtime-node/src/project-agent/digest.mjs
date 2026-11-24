@@ -11,6 +11,7 @@ import { decideSurfacing } from '@peer-agent/protocol';
 export const GLOBAL_LEVELS = Object.freeze(['quiet', 'low', 'standard', 'high']);
 export const BOT_LEVELS = Object.freeze(['inherit', 'quiet', 'low', 'standard', 'high', 'muted']);
 export const TOOL_LEVELS = Object.freeze(['quiet', 'low', 'standard', 'high', 'muted']);
+export const COMMUNICATION_STYLES = Object.freeze(['natural', 'concise', 'detailed', 'technical']);
 
 const PROTOCOL = {
   quiet: 'off',
@@ -29,6 +30,7 @@ export function defaultProjectAgentSettings() {
     concurrency: 4,
     interactiveResults: false,
     proactivity: 'standard',
+    communicationStyle: 'natural',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
     shell: 'bots',
@@ -47,6 +49,9 @@ export function normalizeProjectAgentSettings(value) {
     concurrency: normalizeConcurrency(source.concurrency),
     interactiveResults: source.interactiveResults === true,
     proactivity: GLOBAL_LEVELS.includes(source.proactivity) ? source.proactivity : defaults.proactivity,
+    communicationStyle: COMMUNICATION_STYLES.includes(source.communicationStyle)
+      ? source.communicationStyle
+      : defaults.communicationStyle,
     quietHours: {
       enabled: hours.enabled === true,
       start: clock(hours.start) || defaults.quietHours.start,

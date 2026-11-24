@@ -24,7 +24,6 @@ use std::{
 const AVATAR_MAX_BYTES: u64 = 1024 * 1024;
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const BOT_PROACTIVITY_LEVELS: [&str; 6] = ["inherit", "quiet", "low", "standard", "high", "muted"];
-const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
 const MODEL_POLICY_ROLES: [&str; 8] = [
     "project_agent",
     "session_worker",
@@ -289,7 +288,11 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
     let communication_style = match obj.get("communicationStyle") {
         None => None,
         Some(v) => match v.as_str() {
-            Some(style) if BOT_COMMUNICATION_STYLES.contains(&style) => Some(style),
+            Some(style)
+                if peer_project_agent::BOT_PROFILE_COMMUNICATION_STYLES.contains(&style) =>
+            {
+                Some(style)
+            }
             _ => return Ok(ok_fail("INVALID_COMMUNICATION_STYLE")),
         },
     };

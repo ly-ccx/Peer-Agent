@@ -63,6 +63,7 @@ export type BotAvatarReadResult =
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'INVALID_IMAGE' };
 
 export type BotCommunicationStyle = 'natural' | 'concise' | 'detailed' | 'technical';
+export type BotProfileCommunicationStyle = 'inherit' | BotCommunicationStyle;
 
 export interface BotProfile {
   readonly workspaceId: string;
@@ -71,7 +72,7 @@ export interface BotProfile {
   readonly managed?: boolean;
   readonly agentConversationId?: string;
   readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
-  readonly communicationStyle?: BotCommunicationStyle;
+  readonly communicationStyle?: BotProfileCommunicationStyle;
   /** Absent means this bot uses memory. */
   readonly memoryEnabled?: boolean;
   readonly planApproval?: 'never' | 'writes' | 'always';

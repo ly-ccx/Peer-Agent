@@ -813,6 +813,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.proactivity.high'
   | 'projectAgent.drawer.settings.proactivity.muted'
   | 'projectAgent.drawer.settings.communicationStyle'
+  | 'projectAgent.drawer.settings.communicationStyle.inherit'
   | 'projectAgent.drawer.settings.communicationStyle.natural'
   | 'projectAgent.drawer.settings.communicationStyle.concise'
   | 'projectAgent.drawer.settings.communicationStyle.detailed'
@@ -2568,11 +2569,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.high': '多',
     'projectAgent.drawer.settings.proactivity.muted': '静音',
     'projectAgent.drawer.settings.communicationStyle': '沟通风格',
-    'projectAgent.drawer.settings.communicationStyle.natural': '自然搭档（默认）',
+    'projectAgent.drawer.settings.communicationStyle.inherit': '跟随全局默认',
+    'projectAgent.drawer.settings.communicationStyle.natural': '自然搭档',
     'projectAgent.drawer.settings.communicationStyle.concise': '干练直给',
     'projectAgent.drawer.settings.communicationStyle.detailed': '温和详尽',
     'projectAgent.drawer.settings.communicationStyle.technical': '专业深度',
-    'projectAgent.drawer.settings.communicationStyleHint': '调整 Bot 与你交流时的语气与详略；无论选哪一档，都会用自然人话交流，不会把内部系统术语丢进对话。',
+    'projectAgent.drawer.settings.communicationStyleHint': '覆盖此机器人的默认沟通风格；选「跟随全局默认」时自动沿用设置 → 个性化中的配置。',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -4063,11 +4065,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.high': 'High',
     'projectAgent.drawer.settings.proactivity.muted': 'Muted',
     'projectAgent.drawer.settings.communicationStyle': 'Communication style',
-    'projectAgent.drawer.settings.communicationStyle.natural': 'Natural partner (default)',
+    'projectAgent.drawer.settings.communicationStyle.inherit': 'Follow global default',
+    'projectAgent.drawer.settings.communicationStyle.natural': 'Natural partner',
     'projectAgent.drawer.settings.communicationStyle.concise': 'Direct & concise',
     'projectAgent.drawer.settings.communicationStyle.detailed': 'Warm & thorough',
     'projectAgent.drawer.settings.communicationStyle.technical': 'Technical peer',
-    'projectAgent.drawer.settings.communicationStyleHint': 'Controls tone and level of detail in conversation. Internal runtime jargon stays out of replies in every style.',
+    'projectAgent.drawer.settings.communicationStyleHint': 'Overrides the global style for this bot. Choose "Follow global default" to inherit Settings → Personalization.',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

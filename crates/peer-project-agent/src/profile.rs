@@ -26,6 +26,8 @@ pub const BOT_AVATAR_COLORS: [&str; 8] = [
 ];
 
 pub const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
+pub const BOT_PROFILE_COMMUNICATION_STYLES: [&str; 5] =
+    ["inherit", "natural", "concise", "detailed", "technical"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -136,9 +138,16 @@ impl BotProfile {
     }
 
     pub fn communication_style_str(&self) -> &str {
+        self.effective_communication_style("natural")
+    }
+
+    pub fn effective_communication_style<'a>(&'a self, global_default: &'a str) -> &'a str {
         match self.communication_style.as_deref() {
             Some(style @ ("natural" | "concise" | "detailed" | "technical")) => style,
-            _ => "natural",
+            _ => match global_default {
+                "natural" | "concise" | "detailed" | "technical" => global_default,
+                _ => "natural",
+            },
         }
     }
 

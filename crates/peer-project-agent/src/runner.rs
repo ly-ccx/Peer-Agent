@@ -1729,10 +1729,11 @@ impl ProjectAgentRunner {
             .as_ref()
             .map(|p| p.display_name.as_str())
             .unwrap_or("Peer Bot");
+        let global_communication_style = read_global_communication_style(&self.data_home);
         let communication_style = profile
             .as_ref()
-            .map(|p| p.communication_style_str())
-            .unwrap_or("natural");
+            .map(|p| p.effective_communication_style(&global_communication_style))
+            .unwrap_or(global_communication_style.as_str());
         let memory_enabled = profile.as_ref().is_none_or(|p| p.is_memory_enabled());
         let memories = if memory_enabled {
             MemoryStore::new(&self.data_home)
@@ -1760,7 +1761,7 @@ impl ProjectAgentRunner {
             .list(opts.workspace_id)
             .unwrap_or_default();
         let instructions =
-            ProjectInstructions::observe_host(opts.workspace_path, &self.data_home, cancel)
+            ProjectInstructions::observe_desktop_host(opts.workspace_path, &self.data_home, None, cancel)
                 .unwrap_or_default();
         let retry_continuity = read_retry_continuity_in(
             Some(&self.data_home),
@@ -3088,11 +3089,80 @@ impl ProjectAgentRunner {
     }
 }
 
+fn read_global_communication_style(data_home: &Path) -> String {
+    let Ok(raw) = std::fs::read_to_string(data_home.join("settings.json")) else {
+        return "natural".to_owned();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return "natural".to_owned();
+    };
+    match value
+        .get("projectAgent")
+        .and_then(|pa| pa.get("communicationStyle"))
+        .and_then(Value::as_str)
+    {
+        Some(style @ ("natural" | "concise" | "detailed" | "technical")) => style.to_owned(),
+        _ => "natural".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex as StdMutex;
     use tempfile::tempdir;
+
+    #[test]
+    fn global_personalization_style_and_system_instructions_reach_project_bot() {
+        let dir = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            json!({
+                "schemaVersion": 3,
+                "systemInstructions": "先给结论，少用内部术语。",
+                "shortcuts": { "toggleSidebar": "Cmd+\\" },
+                "projectAgent": {
+                    "shell": "bots",
+                    "interactiveResults": true,
+                    "communicationStyle": "concise"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let global_style = read_global_communication_style(dir.path());
+        assert_eq!(global_style, "concise");
+
+        let (mut profile, _) = BotProfileStore::new(dir.path())
+            .create(&crate::CreateBotProfile {
+                workspace_id: "ws-style-inherit",
+                display_name: "Demo",
+                managed: false,
+                agent_conversation_id: "conv-1",
+                avatar_salt: "salt",
+            })
+            .unwrap();
+        // Unset or "inherit" follows global default ("concise")
+        assert_eq!(profile.effective_communication_style(&global_style), "concise");
+        profile.communication_style = Some("inherit".to_owned());
+        assert_eq!(profile.effective_communication_style(&global_style), "concise");
+        // Explicit per-bot override wins over global default
+        profile.communication_style = Some("technical".to_owned());
+        assert_eq!(profile.effective_communication_style(&global_style), "technical");
+
+        // Desktop-only keys in settings.json must NOT prevent systemInstructions from loading
+        let cancel = CancellationToken::new();
+        let instructions =
+            ProjectInstructions::observe_desktop_host(workspace.path(), dir.path(), None, &cancel)
+                .expect("observe_desktop_host succeeds with desktop keys");
+        let rendered = instructions.sections().into_iter().map(|s| s.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(
+            rendered.contains("先给结论，少用内部术语。"),
+            "systemInstructions must reach project bot instructions, got: {rendered}"
+        );
+    }
 
     #[test]
     fn per_workspace_activity_and_listener_emit_status_transitions() {

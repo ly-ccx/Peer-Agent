@@ -387,7 +387,7 @@ export function createProjectAgentApplicationService({
       if (!saved?.ok) return saved;
     }
     if (typeof payload.communicationStyle === 'string') {
-      if (!['natural', 'concise', 'detailed', 'technical'].includes(payload.communicationStyle)) {
+      if (!['inherit', 'natural', 'concise', 'detailed', 'technical'].includes(payload.communicationStyle)) {
         return { ok: false, code: 'INVALID_COMMUNICATION_STYLE' };
       }
       const latest = profileStore.read(workspaceId) || current;

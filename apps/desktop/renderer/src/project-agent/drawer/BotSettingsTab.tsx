@@ -5,7 +5,7 @@ import { useSettingsAction } from '../../ui/forms/useSettingsAction';
 import { readBotDetails } from '../state/botDetails';
 import { BotModelFeedback } from '../BotModelFeedback';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { BOT_AVATAR_COLORS, type BotCommunicationStyle, type BotProfile } from '@peer-agent/protocol';
+import { BOT_AVATAR_COLORS, type BotProfile, type BotProfileCommunicationStyle } from '@peer-agent/protocol';
 import { useEffect, useId, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Dropdown } from '../../app/components/Dropdown';
@@ -19,7 +19,7 @@ import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 
 const PROACTIVITY_LEVELS = ['inherit', 'quiet', 'low', 'standard', 'high', 'muted'] as const;
 type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
-const COMMUNICATION_STYLES: readonly BotCommunicationStyle[] = ['natural', 'concise', 'detailed', 'technical'] as const;
+const COMMUNICATION_STYLES: readonly BotProfileCommunicationStyle[] = ['inherit', 'natural', 'concise', 'detailed', 'technical'] as const;
 const COLOR_NAME_KEYS = [
   'projectAgent.drawer.settings.avatarColor.0',
   'projectAgent.drawer.settings.avatarColor.1',
@@ -35,7 +35,7 @@ function isProactivityLevel(value: string): value is ProactivityLevel {
   return (PROACTIVITY_LEVELS as readonly string[]).includes(value);
 }
 
-function isCommunicationStyle(value: string): value is BotCommunicationStyle {
+function isCommunicationStyle(value: string): value is BotProfileCommunicationStyle {
   return (COMMUNICATION_STYLES as readonly string[]).includes(value);
 }
 
@@ -73,7 +73,7 @@ export function BotSettingsTab({
     if (previousName.current !== profile.displayName && !nameForm.saving) void nameForm.reload();
     previousName.current = profile.displayName;
   }, [profile.displayName, nameForm.reload]);
-  const name = nameForm.draft, level = profile.proactivity || 'inherit', communicationStyle: BotCommunicationStyle = profile.communicationStyle || 'natural';
+  const name = nameForm.draft, level = profile.proactivity || 'inherit', communicationStyle: BotProfileCommunicationStyle = profile.communicationStyle || 'inherit';
   const busy = action.busy || nameForm.saving || concurrencyForm.saving;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const saveConcurrency = async (value: string) => { concurrencyForm.edit(value); await concurrencyForm.save(); };
