@@ -100,6 +100,11 @@
   --chrome-hover: #E6E6EA;
   --chrome-active: #DCDCE1;
   --chrome-hairline: rgba(0, 0, 0, 0.085);
+  --chrome-hairline-strong: rgba(0, 0, 0, 0.18);
+  --chrome-scrollbar-thumb: rgba(126, 130, 140, 0.26);
+  --chrome-sidebar-width: 264px;
+  --chrome-sidebar-active-bg: var(--glass-chrome-hover);
+  --chrome-sidebar-active-border: #DCE0E8;
 
   /* ─── A × G 侧栏与玻璃交互语义（浅色瓷白）─── */
   --chrome-glass-input: rgba(0, 0, 0, 0.048);
@@ -146,12 +151,45 @@
   --state-active-on: #1A1D21;
   --state-confirm: #1F6B9B;
   --state-success: #3E7A6B;
+  --state-success-soft: rgba(62, 122, 107, 0.10);
   --state-warn: #3B6FAB;
+  --state-warn-soft: rgba(59, 111, 171, 0.10);
   /* 与 confirm 同 hue 区，靠 icon+文案区分 */
   --state-danger: #7A3E50;
+  --state-danger-soft: rgba(122, 62, 80, 0.10);
   --state-denied: #5C5A70;
   /* 运行中/信息指示：冷蓝（对齐 azure-seal，非 Tailwind blue-500） */
   --state-info: #3B7FAB;
+
+  /* ─── Bot 头像与子 Agent 语义色调 ─── */
+  --bot-avatar-ink: #17212b;
+  --bot-tone-violet: #7254b4;
+  --bot-tone-cyan: #26798b;
+  --bot-tone-amber: #8d650c;
+  --bot-tone-rose: #a54976;
+  --bot-keycap-azure: #7BA8C8;
+  --bot-keycap-danger: #D88A9E;
+  --paper-thread-glow: rgba(59, 127, 171, 0.025);
+
+  /* ─── 外观缩略图与固定明暗预览标尺（恒定代表浅色/深色系统样张）─── */
+  --preview-thumb-light-top: #FAFAFB;
+  --preview-thumb-light-bot: #EFEFF2;
+  --preview-thumb-dark-top: #19191C;
+  --preview-thumb-dark-bot: #131316;
+  --preview-thumb-light-ink: #1A1B1E;
+  --preview-thumb-dark-ink: #F2F3F5;
+  --preview-thumb-accent: #5D9CBF;
+  --preview-code-string: #7EC699;
+
+  /* ─── Diff 正名语义 token ─── */
+  --diff-add-fg: var(--state-success);
+  --diff-add-bg: var(--state-success-soft);
+  --diff-del-fg: var(--state-danger);
+  --diff-del-bg: var(--state-danger-soft);
+  --diff-gutter-bg: var(--control-fill);
+  --diff-gutter-fg: var(--graphite-mute);
+  --diff-hunk-fg: var(--azure-seal);
+  --diff-hunk-bg: color-mix(in srgb, var(--azure-seal) 12%, transparent);
 
   /* ─── Spacing / Radius / Shadow ─── */
   --space-1: 4px;
@@ -182,7 +220,10 @@
   --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
   --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
   --shadow-popover: 0 6px 20px rgba(26, 29, 33, 0.07), 0 1px 3px rgba(26, 29, 33, 0.04);
+  --shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --shadow-xs: none;
   --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
+  --ui-focus-glow: rgba(59, 127, 171, 0.25);
   /* 弹窗专用磨砂：浅色主题不能整块发白，面板采样顶部浮条的 blur，但用更薄的冷灰玻璃和明确边界。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-sunken) 30%, transparent);
   --glass-modal-background:
@@ -238,7 +279,7 @@
   --za-surface-1: var(--control-fill);
   --za-surface-2: var(--control-fill-active);
   --za-line: var(--chrome-hairline);
-  --za-line-strong: rgba(0, 0, 0, 0.18);
+  --za-line-strong: var(--chrome-hairline-strong);
   --za-text: var(--graphite-base);
   --za-text-soft: var(--graphite-soft);
   --za-text-muted: var(--graphite-fade);
@@ -247,14 +288,14 @@
   --za-accent-soft: var(--azure-trace);
   --za-accent-ink: var(--paper-raised);
   --za-good: var(--state-success);
-  --za-good-soft: rgba(62, 122, 107, 0.10);
+  --za-good-soft: var(--state-success-soft);
   --za-warn: var(--state-warn);
-  --za-warn-soft: rgba(59, 111, 171, 0.10);
+  --za-warn-soft: var(--state-warn-soft);
   --za-danger: var(--state-danger);
-  --za-danger-soft: rgba(122, 62, 80, 0.10);
+  --za-danger-soft: var(--state-danger-soft);
   --za-app-bg: var(--chrome-canvas);
   --za-thread-bg: var(--paper-base);
-  --za-thread-glow: rgba(59, 127, 171, 0.025);
+  --za-thread-glow: var(--paper-thread-glow);
   --za-hover: var(--paper-hover);
   --za-active: var(--paper-active);
   --za-sidebar-bg: var(--chrome-canvas);
@@ -263,10 +304,10 @@
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   /* 选中态：发丝边 + 毛玻璃底，不用投影抬升，也不画左侧印记。 */
   --za-sidebar-active-border: #DCE0E8;
-  --za-sidebar-width: 264px;
+  --za-sidebar-width: var(--chrome-sidebar-width);
   --za-inset-highlight: var(--paper-raised);
-  --za-focus: rgba(59, 127, 171, 0.25);
-  --za-scrollbar-thumb: rgba(126, 130, 140, 0.26);
+  --za-focus: var(--ui-focus-glow);
+  --za-scrollbar-thumb: var(--chrome-scrollbar-thumb);
   --za-popover-bg: var(--paper-raised);
   --za-header-bg: var(--chrome-canvas);
   --za-message-bg: var(--paper-raised);
@@ -278,7 +319,7 @@
   --za-control-ink: var(--graphite-base);
   --za-primary-control-bg: var(--chrome-keycap-bg);
   --za-primary-control-ink: var(--chrome-keycap-fg);
-  --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --za-shadow-panel: var(--shadow-panel);
   --za-shadow-popover: var(--shadow-popover);
   --za-radius: var(--ui-radius-panel);
   --za-radius-sm: var(--ui-radius-control-compact);
@@ -446,6 +487,10 @@
   --chrome-hover: rgba(255, 255, 255, 0.06);
   --chrome-active: rgba(255, 255, 255, 0.11);
   --chrome-hairline: rgba(255, 255, 255, 0.085);
+  --chrome-hairline-strong: rgba(255, 255, 255, 0.18);
+  --chrome-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --chrome-sidebar-active-bg: var(--glass-chrome-hover);
+  --chrome-sidebar-active-border: var(--chrome-hairline);
 
   /* ─── A × G 侧栏与玻璃交互语义（暗色黑曜石）───
    *   大面积多行选中态（Bot 行）→ A 液态受光玻璃（--chrome-glass-row-*）
@@ -488,14 +533,26 @@
   --state-active-on: #EDF1F6;
   --state-confirm: #4F9BCB;
   --state-success: #6EAA9B;
+  --state-success-soft: rgba(110, 170, 155, 0.14);
   --state-warn: #6B9FCB;
+  --state-warn-soft: rgba(107, 159, 203, 0.14);
   --state-danger: #AA6E80;
+  --state-danger-soft: rgba(170, 110, 128, 0.14);
   --state-denied: #8C8AA0;
   --state-info: #5D9CBF;
+  --bot-tone-violet: #b79be9;
+  --bot-tone-cyan: #6bc0cf;
+  --bot-tone-amber: #e4be68;
+  --bot-tone-rose: #e39abb;
+  --bot-keycap-azure: #1D6B96;
+  --bot-keycap-danger: #8C334C;
+  --paper-thread-glow: rgba(93, 156, 191, 0.04);
+  --ui-focus-glow: rgba(93, 156, 191, 0.30);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
   --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
   --shadow-popover: 0 6px 20px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
   --shadow-drag: 0 4px 16px rgba(0, 0, 0, 0.55);
   /* 弹窗专用磨砂：深色主题保持顶部浮条的真实 blur，但用深色玻璃，避免浅色 token 把暗底洗灰。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-canvas) 62%, transparent);
@@ -542,7 +599,7 @@
   --za-surface-1: var(--control-fill);
   --za-surface-2: var(--paper-base);
   --za-line: var(--chrome-hairline);
-  --za-line-strong: rgba(255, 255, 255, 0.18);
+  --za-line-strong: var(--chrome-hairline-strong);
   --za-text: var(--graphite-base);
   --za-text-soft: var(--graphite-soft);
   --za-text-muted: var(--graphite-fade);
@@ -551,14 +608,14 @@
   --za-accent-soft: var(--azure-trace);
   --za-accent-ink: var(--chrome-canvas);
   --za-good: var(--state-success);
-  --za-good-soft: rgba(110, 170, 155, 0.14);
+  --za-good-soft: var(--state-success-soft);
   --za-warn: var(--state-warn);
-  --za-warn-soft: rgba(107, 159, 203, 0.14);
+  --za-warn-soft: var(--state-warn-soft);
   --za-danger: var(--state-danger);
-  --za-danger-soft: rgba(170, 110, 128, 0.14);
+  --za-danger-soft: var(--state-danger-soft);
   --za-app-bg: var(--chrome-canvas);
   --za-thread-bg: var(--paper-base);
-  --za-thread-glow: rgba(93, 156, 191, 0.04);
+  --za-thread-glow: var(--paper-thread-glow);
   --za-hover: var(--paper-hover);
   --za-active: var(--paper-active);
   --za-sidebar-bg: var(--chrome-canvas);
@@ -566,8 +623,8 @@
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   --za-sidebar-active-border: var(--chrome-hairline);
   --za-inset-highlight: var(--paper-raised);
-  --za-focus: rgba(93, 156, 191, 0.30);
-  --za-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --za-focus: var(--ui-focus-glow);
+  --za-scrollbar-thumb: var(--chrome-scrollbar-thumb);
   --za-popover-bg: var(--paper-raised);
   --za-header-bg: var(--chrome-canvas);
   --za-message-bg: var(--paper-raised);
@@ -579,7 +636,7 @@
   --za-control-ink: var(--graphite-base);
   --za-primary-control-bg: var(--chrome-keycap-bg);
   --za-primary-control-ink: var(--chrome-keycap-fg);
-  --za-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
+  --za-shadow-panel: var(--shadow-panel);
   --za-shadow-popover: var(--shadow-popover);
   --za-user-accent: var(--azure-seal);
   --za-user-background: var(--paper-base);
@@ -606,6 +663,9 @@
   --chrome-hover: #E6E9EF;
   --chrome-active: #CCD0DA;   /* surface0 */
   --chrome-hairline: #BCC0CC; /* surface1 */
+  --chrome-hairline-strong: #9CA0B0;
+  --chrome-scrollbar-thumb: rgba(156, 160, 176, 0.45);
+  --chrome-sidebar-active-border: #BCC0CC;
   --paper-base: #E6E9EF;
   --paper-sheet: #EFF1F5;
   --paper-raised: #F7F8FB;
@@ -639,10 +699,15 @@
   --state-active-on: #4C4F69;
   --state-confirm: #1E66F5;
   --state-success: #40A02B;   /* green */
+  --state-success-soft: rgba(64, 160, 43, 0.12);
   --state-warn: #DF8E1D;      /* yellow */
+  --state-warn-soft: rgba(223, 142, 29, 0.12);
   --state-danger: #D20F39;    /* red */
+  --state-danger-soft: rgba(210, 15, 57, 0.12);
   --state-denied: #6C6F85;
   --state-info: #1E66F5;      /* blue */
+  --ui-focus-glow: rgba(30, 102, 245, 0.30);
+  --paper-thread-glow: rgba(30, 102, 245, 0.03);
 
   /* --za-* 别名层（组件实际消费） */
   --za-bg-0: #EFF1F5;
@@ -706,6 +771,9 @@
   --chrome-hover: #313244;    /* surface0 */
   --chrome-active: #45475A;   /* surface1 */
   --chrome-hairline: #45475A;
+  --chrome-hairline-strong: #585B70;
+  --chrome-scrollbar-thumb: rgba(108, 112, 134, 0.40);
+  --chrome-sidebar-active-border: #585B70;
   --paper-base: #181825;
   --paper-sheet: #1E1E2E;
   --paper-raised: #252639;
@@ -739,10 +807,15 @@
   --state-active-on: #CDD6F4;
   --state-confirm: #89B4FA;
   --state-success: #A6E3A1;   /* green */
+  --state-success-soft: rgba(166, 227, 161, 0.14);
   --state-warn: #F9E2AF;      /* yellow */
+  --state-warn-soft: rgba(249, 226, 175, 0.14);
   --state-danger: #F38BA8;    /* red */
+  --state-danger-soft: rgba(243, 139, 168, 0.14);
   --state-denied: #6C7086;
   --state-info: #89B4FA;      /* blue */
+  --ui-focus-glow: rgba(137, 180, 250, 0.30);
+  --paper-thread-glow: rgba(137, 180, 250, 0.05);
 
   /* --za-* 别名层（组件实际消费） */
   --za-bg-0: #1E1E2E;

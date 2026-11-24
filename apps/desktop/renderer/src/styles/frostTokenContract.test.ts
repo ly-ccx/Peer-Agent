@@ -19,7 +19,7 @@ import test from 'node:test';
  */
 
 const ALLOWED_SHARED_LEGACY_VARS =
-  /^--(?:za-motion-|za-ease-|za-code-font-size$|za-font-|pa-drawer-width$|pa-focus-)/i;
+  /^--(?:za-motion-|za-ease-|za-code-font-size$|za-font-|za-sidebar-current-width$|za-workbench-current-width$|za-workbench-width$|pa-drawer-width$|pa-dropdown-menu-width$|pa-update-pct$|pa-focus-)/i;
 
 const AZURE_BG_WASH_PATTERN =
   /background(?:-color)?\s*:[^;]*--(?:azure-trace|cinnabar-trace|za-accent-soft)\b/i;
@@ -30,99 +30,15 @@ const TOP_WHITE_SPECULAR_PATTERN =
 const RAW_HEX_PATTERN = /#[0-9a-fA-F]{3,8}\b/g;
 const LEGACY_VAR_USAGE_PATTERN = /var\(\s*(--(?:za|pa|ink|cinnabar|surface-vellum)-[a-z0-9-]+)/gi;
 
-// ─── Frozen Ratchet Baselines (ONLY decrease or delete entries as legacy CSS is migrated) ───
+// ─── Frozen Ratchet Baselines (ALL ZEROED — zero legacy CSS debt allowed!) ───
 
-const LEGACY_AZURE_BG_WASH_BASELINE: Readonly<Record<string, number>> = {
-  'app/components/mcp-settings.css': 1,
-  'automations/automations.css': 1,
-  'chat/styles/chat-surface.css': 7,
-  'chat/styles/timeline.css': 1,
-  'styles/composer.css': 2,
-  'styles/llm-settings.css': 1,
-};
+const LEGACY_AZURE_BG_WASH_BASELINE: Readonly<Record<string, number>> = {};
 
-const LEGACY_TOP_WHITE_SPECULAR_BASELINE: Readonly<Record<string, number>> = {
-  'styles/llm-settings.css': 1,
-};
+const LEGACY_TOP_WHITE_SPECULAR_BASELINE: Readonly<Record<string, number>> = {};
 
-const LEGACY_RAW_HEX_BASELINE: Readonly<Record<string, number>> = {
-  'app/components/mcp-settings.css': 3,
-  'appearance/appearance.css': 23,
-  'capabilities/capability-workbench.css': 40,
-  'chat/styles/chat-surface.css': 41,
-  'chat/styles/goal-investigation.css': 2,
-  'chat/styles/goal-panel.css': 14,
-  'chat/styles/markdown.css': 4,
-  'project-agent/styles/bot-conversation.css': 11,
-  'project-agent/styles/bot-drawer.css': 13,
-  'project-agent/styles/bot-list.css': 6,
-  'styles/base.css': 3,
-  'styles/confirm-dialog.css': 2,
-  'styles/conversation-search.css': 2,
-  'styles/global-workbench.css': 20,
-  'styles/llm-settings.css': 71,
-  'styles/overlay.css': 16,
-  'styles/quick-chat.css': 23,
-  'styles/settings-page.css': 16,
-  'styles/shell.css': 4,
-  'styles/sidebar.css': 13,
-  'styles/task-artifact-preview-overlay.css': 2,
-  'styles/task-overview.css': 57,
-  'styles/tooltip.css': 1,
-  'styles/workbench.css': 72,
-};
+const LEGACY_RAW_HEX_BASELINE: Readonly<Record<string, number>> = {};
 
-const LEGACY_COLOR_ALIAS_BASELINE: Readonly<Record<string, number>> = {
-  'app/components/dropdown.css': 10,
-  'app/components/mcp-settings.css': 70,
-  'app/components/remote-access.css': 21,
-  'app/components/settings-controls.css': 11,
-  'app/components/settings/model-routing.css': 1,
-  'appearance/appearance.css': 103,
-  'automations/automations.css': 133,
-  'capabilities/capability-workbench.css': 226,
-  'chat/components/SelectionQuoteAction.css': 1,
-  'chat/styles/chat-composer.css': 45,
-  'chat/styles/chat-surface.css': 91,
-  'chat/styles/code-highlight.css': 16,
-  'chat/styles/goal-investigation.css': 7,
-  'chat/styles/goal-panel.css': 244,
-  'chat/styles/markdown.css': 42,
-  'chat/styles/message.css': 42,
-  'chat/styles/permission-gate-strip.css': 21,
-  'chat/styles/sidebar.css': 63,
-  'chat/styles/thread.css': 17,
-  'chat/styles/timeline.css': 18,
-  'project-agent/diagnostics/diagnostics.css': 1,
-  'project-agent/styles/bot-conversation.css': 13,
-  'project-agent/styles/bot-drawer.css': 61,
-  'project-agent/styles/bot-evidence-list.css': 1,
-  'project-agent/styles/bot-list.css': 6,
-  'project-agent/styles/bot-model-controls.css': 1,
-  'project-agent/styles/bot-task-detail.css': 3,
-  'project-agent/styles/bot-task-workspace.css': 6,
-  'project-agent/styles/bot-touchbar.css': 6,
-  'styles/base.css': 6,
-  'styles/card.css': 1,
-  'styles/composer.css': 23,
-  'styles/confirm-dialog.css': 18,
-  'styles/conversation-search.css': 18,
-  'styles/fallback.css': 9,
-  'styles/global-workbench.css': 53,
-  'styles/llm-settings.css': 28,
-  'styles/motion.css': 2,
-  'styles/overlay.css': 2,
-  'styles/quick-chat.css': 3,
-  'styles/settings-page.css': 124,
-  'styles/shell.css': 45,
-  'styles/sidebar.css': 39,
-  'styles/task-artifact-preview-overlay.css': 7,
-  'styles/task-overview.css': 331,
-  'styles/updater.css': 52,
-  'styles/workbench.css': 186,
-  'ui/boolean-controls/boolean-controls.css': 4,
-  'ui/model-picker/model-selection.css': 2,
-};
+const LEGACY_COLOR_ALIAS_BASELINE: Readonly<Record<string, number>> = {};
 
 function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '');

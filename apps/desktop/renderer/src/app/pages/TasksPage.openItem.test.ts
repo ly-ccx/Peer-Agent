@@ -82,6 +82,6 @@ test('paused goal rows keep abandon beside open in the same action column', asyn
   assert.match(tasksPageSource, /void clientApi\.goalPlansDelete\(\{ planId: item\.taskId \}\)/);
   assert.match(styles, /\.task-row-actions\s*\{/);
   assert.match(styles, /\.task-row-abandon\s*\{/);
-  assert.match(styles, /color: var\(--state-danger, #c0392b\);/);
+  assert.match(styles, /color: var\(--state-danger\);/);
   assert.match(styles, /grid-template-columns: minmax\(0, 1\.6fr\) minmax\(8rem, 0\.9fr\) minmax\(8rem, 0\.9fr\) 5rem 7\.5rem;/);
 });

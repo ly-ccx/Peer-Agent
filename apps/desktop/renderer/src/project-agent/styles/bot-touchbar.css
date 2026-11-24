@@ -175,16 +175,16 @@
 
 .bot-tb-chip.is-open,
 .bot-tb-chip.is-cta {
-  background: var(--za-primary-control-bg, var(--graphite-base));
-  color: var(--za-primary-control-ink, var(--paper-sheet));
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
   border-color: transparent;
 }
 
 .bot-tb-chip.is-open:hover:not(:disabled),
 .bot-tb-chip.is-cta:hover:not(:disabled) {
   opacity: 0.9;
-  background: var(--za-primary-control-bg, var(--graphite-base));
-  color: var(--za-primary-control-ink, var(--paper-sheet));
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
 }
 
 .bot-tb-count {
@@ -582,8 +582,8 @@
 }
 
 .bot-tray-cite:hover {
-  background: var(--za-primary-control-bg, var(--graphite-base));
-  color: var(--za-primary-control-ink, var(--paper-sheet));
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
   border-color: transparent;
 }
 

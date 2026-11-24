@@ -10,7 +10,7 @@
   border: 1px solid var(--ui-border-subtle);
   border-radius: var(--ui-radius-panel);
   background: var(--ui-surface-elevated);
-  color: var(--za-text);
+  color: var(--graphite-base);
   box-shadow: var(--shadow-card);
   user-select: none;
 }

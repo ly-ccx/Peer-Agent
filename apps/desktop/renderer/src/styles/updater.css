@@ -8,7 +8,7 @@
     gap: 4px;
     position: relative;
     border-radius: var(--ui-radius-control);
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
     font-size: 11px;
     line-height: 1.4;
     -webkit-app-region: no-drag;
@@ -28,13 +28,13 @@
     line-height: inherit;
     cursor: pointer;
     transition:
-      background 0.15s ease,
-      color 0.15s ease;
+      background var(--za-motion-fast) var(--za-ease-standard),
+      color var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .sidebar-version-text-btn:hover {
-    background: var(--pa-surface-hover);
-    color: var(--pa-text-primary);
+    background: var(--paper-hover);
+    color: var(--graphite-base);
   }
 
   .sidebar-version-dev-tag {
@@ -42,10 +42,10 @@
     align-items: center;
     height: 15px;
     padding: 0 4px;
-    border: 1px solid color-mix(in srgb, var(--cinnabar-seal) 28%, transparent);
+    border: 1px solid color-mix(in srgb, var(--azure-seal) 28%, transparent);
     border-radius: var(--ui-radius-pill);
-    background: color-mix(in srgb, var(--cinnabar-seal) 9%, transparent);
-    color: var(--cinnabar-seal);
+    background: color-mix(in srgb, var(--azure-seal) 9%, transparent);
+    color: var(--azure-seal);
     font-size: 9px;
     font-weight: 600;
     line-height: 1;
@@ -54,7 +54,7 @@
   }
 
   .sidebar-version-badge.has-update .sidebar-version-text-btn {
-    color: var(--cinnabar-seal);
+    color: var(--azure-seal);
   }
 
   /* 有可用更新：版本号后的下载图标，与版本号共享点击区域。 */
@@ -83,61 +83,53 @@
   .sidebar-version-percent {
     font-size: 10px;
     font-weight: 600;
-    color: var(--cinnabar-seal);
+    color: var(--azure-seal);
     font-variant-numeric: tabular-nums;
     min-width: 24px;
   }
 
-  /* 完成态安装按钮：Codex 模式，版本号旁持久挂载 */
+  /* 完成态安装按钮：遵循 Frost 红线 1（Azure 不上 CTA），采用 G 级键帽 */
   .sidebar-version-install-btn {
     display: inline-flex;
     align-items: center;
     padding: 2px 10px;
     border-radius: var(--ui-radius-pill);
-    border: none;
-    background: var(--cinnabar-seal);
-    color: var(--za-accent-ink);
+    border: 1px solid var(--chrome-keycap-border);
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
     font-size: 10px;
     font-weight: 600;
     line-height: 1.4;
     cursor: pointer;
     white-space: nowrap;
     animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
-    transition: filter 0.15s ease;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .sidebar-version-install-btn:hover {
-    filter: brightness(1.08);
+    opacity: 0.88;
   }
 
   .sidebar-version-dot {
     width: 6px;
     height: 6px;
     border-radius: var(--ui-radius-circle);
-    background: var(--cinnabar-seal);
-    box-shadow: 0 0 0 2px var(--surface-vellum-base);
+    background: var(--azure-seal);
+    box-shadow: 0 0 0 2px var(--paper-base);
   }
 
-  /* 下载中：红点原地升级为 mini 环形进度，按 --pa-update-pct(0~100) 顺时针填充。
-     conic-gradient 描出进度弧，中心镂空成环；变量缺省 0 时为空环。 */
+  /* 下载中：圆点原地升级为 mini 环形进度，按 --pa-update-pct(0~100) 顺时针填充。 */
   .sidebar-version-dot.is-progress {
-    /* position:relative 必须显式声明：否则下方 ::after 镂空圆会以含
-       position:relative 的祖先 .sidebar-version-badge 为定位参照，被 inset:3px
-       撑成与徽标同宽的不透明圆角横条，盖住左上角品牌区（下载态遮挡 bug）。
-       这里把定位上下文收回到 12px 圆点本身。 */
     position: relative;
     width: 12px;
     height: 12px;
     background:
       conic-gradient(
-        var(--cinnabar-seal) calc(var(--pa-update-pct, 0) * 1%),
-        var(--surface-vellum-sunken) 0
+        var(--azure-seal) calc(var(--pa-update-pct, 0) * 1%),
+        var(--paper-sunken) 0
       );
     box-shadow: none;
-    transition: background 0.25s ease;
-    /* 进度环首次出现时播一次「注意力脉冲」，把视线钉到左上角；
-       动效基元 motion-pulse-attention（motion.css）。
-       prefers-reduced-motion 由 tokens.css 全局兜底降级。 */
+    transition: background var(--za-motion-medium) var(--za-ease-standard);
     animation: motion-pulse-attention var(--za-motion-slow) var(--za-ease-spring) both;
   }
 
@@ -146,7 +138,7 @@
     position: absolute;
     inset: 3px;
     border-radius: var(--ui-radius-circle);
-    background: var(--surface-vellum-base);
+    background: var(--paper-base);
   }
 
   /* 进度环出现时的一次性强调：从徽标向外扩散的柔光环（不占布局、不挡点击）。 */
@@ -156,8 +148,7 @@
     inset: -3px;
     border-radius: var(--ui-radius-circle);
     pointer-events: none;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cinnabar-seal) 55%, transparent);
-    /* 动效基元 motion-halo（motion.css），扩散色默认取品牌印泥红。 */
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--azure-seal) 55%, transparent);
     animation: motion-halo var(--za-motion-slow) var(--za-ease-decelerate) 2 both;
   }
 
@@ -168,7 +159,7 @@
     border-radius: var(--ui-radius-modal);
     /* 背景/边/阴影/blur 由 .pa-overlay-panel 统一 glass-popover 配方提供 */
     padding: 0;
-    color: var(--pa-text-primary);
+    color: var(--graphite-base);
     overflow: hidden;
   }
 
@@ -184,7 +175,7 @@
     font-size: 18px;
     font-weight: 600;
     letter-spacing: -0.01em;
-    color: var(--pa-text-primary);
+    color: var(--graphite-base);
   }
 
   .updater-modal-versions {
@@ -193,11 +184,11 @@
     gap: 8px;
     flex-wrap: wrap;
     font-size: 13px;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-version-to {
-    color: var(--cinnabar-seal);
+    color: var(--azure-seal);
     font-weight: 600;
   }
 
@@ -209,10 +200,10 @@
 
   .updater-modal-hero {
     padding: 20px 20px 14px;
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--chrome-hairline);
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--cinnabar-seal) 8%, transparent),
+      color-mix(in srgb, var(--graphite-base) 4%, transparent),
       transparent 88%
     );
   }
@@ -228,8 +219,8 @@
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.01em;
-    color: var(--cinnabar-seal);
-    background: color-mix(in srgb, var(--cinnabar-seal) 12%, transparent);
+    color: var(--azure-seal);
+    background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
   }
 
   .updater-modal-pill::before {
@@ -237,8 +228,8 @@
     width: 6px;
     height: 6px;
     border-radius: var(--ui-radius-circle);
-    background: var(--cinnabar-seal);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cinnabar-seal) 18%, transparent);
+    background: var(--azure-seal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--azure-seal) 18%, transparent);
   }
 
   .updater-modal-version-title {
@@ -247,14 +238,14 @@
     line-height: 1.15;
     font-weight: 700;
     letter-spacing: -0.03em;
-    color: var(--pa-text-primary);
+    color: var(--graphite-base);
     font-variant-numeric: tabular-nums;
   }
 
   .updater-modal-from {
     margin: 8px 0 0;
     font-size: 12.5px;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-changelog-body {
@@ -267,7 +258,7 @@
     font-weight: 650;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-notes-body {
@@ -275,7 +266,7 @@
     overflow-y: auto;
     font-size: 13px;
     line-height: 1.55;
-    color: var(--pa-text-primary);
+    color: var(--graphite-base);
   }
 
   /* 扁平 changelog：去掉厚重 sunken 灰盒 */
@@ -287,7 +278,7 @@
 
   .updater-modal-empty-notes {
     margin: 0;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-footer {
@@ -296,8 +287,8 @@
     justify-content: space-between;
     gap: 12px;
     padding: 14px 20px 16px;
-    border-top: 1px solid var(--za-line);
-    background: color-mix(in srgb, var(--pa-surface-card) 88%, var(--pa-text-primary) 3%);
+    border-top: 1px solid var(--chrome-hairline);
+    background: color-mix(in srgb, var(--paper-raised) 88%, var(--graphite-base) 3%);
   }
 
   .updater-modal-hint {
@@ -306,7 +297,7 @@
     min-width: 0;
     font-size: 11.5px;
     line-height: 1.4;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-footer .updater-modal-actions {
@@ -369,7 +360,7 @@
   }
 
   .updater-notes-rich a {
-    color: var(--cinnabar-seal);
+    color: var(--azure-seal);
     text-decoration: none;
   }
 
@@ -378,9 +369,9 @@
   }
 
   .updater-notes-rich code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
-    background: var(--pa-surface-hover);
+    background: var(--paper-hover);
     border-radius: var(--ui-radius-chip);
     padding: 1px 4px;
   }
@@ -388,8 +379,8 @@
   .updater-notes-rich blockquote {
     margin: 8px 0;
     padding-left: 10px;
-    border-left: 2px solid var(--za-line-strong);
-    color: var(--pa-text-secondary);
+    border-left: 2px solid var(--chrome-hairline-strong);
+    color: var(--graphite-soft);
   }
 
   .updater-notes-rich pre {
@@ -413,26 +404,27 @@
   .updater-btn {
     padding: 7px 16px;
     border-radius: var(--ui-radius-control);
-    border: 1px solid var(--za-line-strong);
-    background: var(--pa-surface-hover);
-    color: var(--pa-text-primary);
+    border: 1px solid var(--chrome-hairline-strong);
+    background: var(--paper-hover);
+    color: var(--graphite-base);
     font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--za-motion-fast) var(--za-ease-standard), opacity var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .updater-btn:hover {
-    background: var(--surface-vellum-active);
+    background: var(--paper-active);
   }
 
   .updater-btn.primary {
-    background: var(--cinnabar-seal);
-    border-color: var(--cinnabar-seal);
-    color: var(--za-accent-ink);
+    background: var(--chrome-keycap-bg);
+    border-color: var(--chrome-keycap-border);
+    color: var(--chrome-keycap-fg);
+    box-shadow: var(--chrome-keycap-shadow);
   }
 
   .updater-btn.primary:hover {
-    filter: brightness(1.08);
+    opacity: 0.9;
   }
 
   .updater-btn.ghost {
@@ -442,7 +434,7 @@
   .updater-modal-uptodate {
     margin: 0;
     font-size: 14px;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-error,
@@ -450,13 +442,13 @@
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .updater-modal-progress {
     height: 6px;
     border-radius: var(--ui-radius-pill);
-    background: var(--surface-vellum-sunken);
+    background: var(--paper-sunken);
     overflow: hidden;
   }
 
@@ -465,7 +457,7 @@
     height: 100%;
     width: calc(var(--pa-update-pct, 0) * 1%);
     border-radius: inherit;
-    background: var(--cinnabar-seal);
-    transition: width 0.2s ease;
+    background: var(--azure-seal);
+    transition: width var(--za-motion-medium) var(--za-ease-standard);
   }
 }

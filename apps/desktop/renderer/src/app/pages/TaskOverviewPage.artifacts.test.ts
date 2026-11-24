@@ -41,10 +41,10 @@ test('产物行内直接显示增删行数，不必悬停预览', async () => {
   assert.doesNotMatch(listSource, /task-artifact-icon/);
 
   const styles = await readStyles();
-  assert.match(styles, /\.task-artifact-stat-add\s*\{[^}]*--za-diff-add-fg/s);
-  assert.match(styles, /\.task-artifact-stat-del\s*\{[^}]*--za-diff-del-fg/s);
-  assert.match(styles, /\.task-artifact-preview-additions[\s\S]*?color:\s*var\(--za-diff-add-fg\)/s);
-  assert.match(styles, /\.task-artifact-preview-deletions[\s\S]*?color:\s*var\(--za-diff-del-fg\)/s);
+  assert.match(styles, /\.task-artifact-stat-add\s*\{[^}]*--diff-add-fg/s);
+  assert.match(styles, /\.task-artifact-stat-del\s*\{[^}]*--diff-del-fg/s);
+  assert.match(styles, /\.task-artifact-preview-additions[\s\S]*?color:\s*var\(--diff-add-fg\)/s);
+  assert.match(styles, /\.task-artifact-preview-deletions[\s\S]*?color:\s*var\(--diff-del-fg\)/s);
   assert.doesNotMatch(
     styles,
     /\.task-artifact-stat-add\s*\{[^}]*(?:--za-success|#238636)/s,

@@ -10,7 +10,7 @@
 .settings-panel__header h2,
 .settings-card h3 {
   margin: 0;
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
 }
 
 .settings-panel__header p,
@@ -28,9 +28,9 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: var(--pa-surface-card);
+  background: var(--paper-raised);
 }
 
 .settings-grid--two {
@@ -43,7 +43,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 0.78rem;
 }
 
@@ -59,7 +59,7 @@
 
 .settings-readonly-field input {
   flex: 1 1 auto;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
 }
 
 .settings-readonly-field button {
@@ -77,7 +77,7 @@
 }
 
 .settings-warning {
-  color: var(--state-warning);
+  color: var(--state-warn);
 }
 
 .settings-actions--wrap {
@@ -92,27 +92,28 @@
   justify-content: center;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--za-line-strong);
+  border: 1px solid var(--chrome-hairline-strong);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-card);
-  color: var(--pa-text-primary);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
   font-size: 0.82rem;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: var(--za-shadow-1, 0 1px 2px rgba(15, 18, 22, 0.06));
+  transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .settings-actions button:hover:not(:disabled),
 .settings-actions--wrap button:hover:not(:disabled) {
-  border-color: var(--za-line-strong);
-  background: var(--pa-surface-hover);
+  border-color: var(--chrome-hairline-strong);
+  background: var(--paper-hover);
 }
 
 .settings-actions button:disabled,
 .settings-actions--wrap button:disabled {
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
 @media (max-width: 900px) {

@@ -31,17 +31,17 @@
 .bot-task-verification summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--graphite-secondary); }
 .bot-task-verification summary::-webkit-details-marker { display: none; }
 .bot-task-verification details[open] > summary .peer-icon { transform: rotate(90deg); }
-.bot-task-verification summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
+.bot-task-verification summary:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
 .bot-task-verification details section { margin-top: 10px; }
 .bot-task-instructions p { font-size: 11px; line-height: 1.7; white-space: pre-wrap; color: var(--graphite-soft); }
-.bot-task-report-read { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--graphite-secondary); }
+.bot-task-report-read { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--graphite-soft); }
 .bot-task-report-read:has(p) { margin-top: 12px; }
 .bot-task-report-read p { margin: 0; }
 .bot-task-detail .bot-task-conversation { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 4px; padding: 5px 0; border: 0; border-radius: var(--ui-radius-chip); font-size: 12px; font-weight: 500; }
-.bot-task-detail .bot-task-conversation:hover { background: transparent; color: var(--za-accent); }
+.bot-task-detail .bot-task-conversation:hover { background: transparent; color: var(--azure-seal); }
 .bot-task-description p { font-size: 13px; line-height: 1.7; color: var(--graphite-soft); white-space: pre-wrap; }
 .bot-task-information { border-top: 1px solid var(--chrome-hairline); padding-top: 12px; }
-.bot-task-information > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-size: 12px; color: var(--graphite-secondary); }
+.bot-task-information > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-size: 12px; color: var(--graphite-soft); }
 .bot-task-information > summary::-webkit-details-marker { display: none; }
 .bot-task-information > summary .peer-icon { transition: transform var(--za-motion-fast) var(--za-ease-standard); }
 .bot-task-information[open] > summary .peer-icon { transform: rotate(90deg); }
@@ -51,7 +51,7 @@
 .bot-task-information code { font-family: var(--font-mono, monospace); font-size: 11px; }
 .bot-task-information ul { list-style: none; padding: 0; margin: 0; }
 .bot-task-detail button:focus-visible,
-.bot-task-information > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
+.bot-task-information > summary:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 3px; }
 @supports (interpolate-size: allow-keywords) {
   .bot-task-information { interpolate-size: allow-keywords; }
   .bot-task-information::details-content { height: 0; overflow: hidden; transition: height var(--za-motion-medium) var(--za-ease-out), content-visibility var(--za-motion-medium) allow-discrete; }

@@ -8,35 +8,35 @@
     margin: 0 auto 8px;
   }
 
-  /* Fallback composer — Vellum 扁平：1px 边线 + 暖纸底，不要 drop shadow（红线 §7） */
+  /* Fallback composer — Peer Frost 扁平：1px 边线 + 输入底座，无多余阴影（红线 §7） */
   .composer-box {
     @apply grid min-h-[76px] items-center gap-2 p-3;
     grid-template-columns: 38px minmax(0, 1fr) 38px;
     width: min(920px, 100%);
     margin: 0 auto;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-panel);
-    background: var(--za-composer-bg);
+    background: var(--control-composer);
   }
 
   .composer-box input {
     @apply h-[42px] border-0 bg-transparent outline-none;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .composer-box input::placeholder,
   .cloud-chat-composer input::placeholder {
-    color: var(--za-text-faint);
+    color: var(--graphite-mute);
   }
 
   .composer-box button,
   .send-button,
   .za-primary-button {
     @apply grid min-h-8 place-items-center px-3 text-[13px] font-semibold transition-colors duration-150;
-    border: 1px solid var(--za-line-strong);
+    border: 1px solid var(--chrome-hairline-strong);
     border-radius: var(--ui-radius-control);
-    color: var(--za-text);
-    background: var(--za-surface-2);
+    color: var(--graphite-base);
+    background: var(--control-fill);
   }
 
   .composer-box button,
@@ -45,30 +45,35 @@
   }
 
   .send-button {
-    border-color: var(--za-accent-soft);
-    color: var(--za-accent);
-    background: var(--za-accent-soft);
+    border-color: var(--chrome-keycap-border);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
   }
 
   .composer-box button:hover,
   .send-button:hover,
   .za-primary-button:hover {
-    border-color: var(--za-line-strong);
-    background: var(--za-hover);
+    border-color: var(--chrome-hairline-strong);
+    background: var(--paper-hover);
     transform: translate3d(0, -1px, 0);
   }
 
-  /* Pending task resume banner —— 重启后取回待办的确认条（方案 B）。
-     沿用 composer 设计语言：1px 边线 + surface 底、--za 设计 token，扁平无阴影。 */
+  .send-button:hover {
+    border-color: var(--chrome-keycap-border);
+    background: var(--chrome-keycap-bg);
+    opacity: 0.9;
+  }
+
+  /* Pending task resume banner —— 重启后取回待办的确认条（方案 B）。 */
   .pending-resume-banner {
     @apply flex items-center gap-3 px-3 py-2 mb-2 text-[13px];
     width: min(920px, 100%);
     margin-left: auto;
     margin-right: auto;
-    border: 1px solid var(--za-accent-soft);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control-compact);
-    color: var(--za-text);
-    background: var(--za-surface-2);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
   }
 
   .pending-resume-text {
@@ -76,7 +81,7 @@
   }
 
   .pending-resume-reason {
-    color: var(--za-text-faint);
+    color: var(--graphite-mute);
     font-size: 12px;
   }
 
@@ -87,22 +92,25 @@
   .pending-resume-continue,
   .pending-resume-dismiss {
     @apply px-3 py-1 text-[12px] font-semibold transition-colors duration-150;
-    border: 1px solid var(--za-line-strong);
+    border: 1px solid var(--chrome-hairline-strong);
     border-radius: var(--ui-radius-control-compact);
-    color: var(--za-text);
+    color: var(--graphite-base);
     background: transparent;
     cursor: pointer;
   }
 
   .pending-resume-continue {
-    border-color: var(--za-accent-soft);
-    color: var(--za-accent);
-    background: var(--za-accent-soft);
+    border-color: var(--chrome-keycap-border);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
   }
 
-  .pending-resume-continue:hover,
+  .pending-resume-continue:hover {
+    opacity: 0.9;
+  }
+
   .pending-resume-dismiss:hover {
-    border-color: var(--za-line-strong);
-    background: var(--za-hover);
+    border-color: var(--chrome-hairline-strong);
+    background: var(--paper-hover);
   }
 }

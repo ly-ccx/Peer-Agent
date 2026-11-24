@@ -135,15 +135,15 @@
   color: var(--azure-seal);
 }
 .bot-task-status-pill[data-tone="good"] {
-  background: var(--za-good-soft);
+  background: var(--state-success-soft);
   color: var(--state-success);
 }
 .bot-task-status-pill[data-tone="warn"] {
-  background: var(--za-warn-soft);
+  background: var(--state-warn-soft);
   color: var(--state-confirm);
 }
 .bot-task-status-pill[data-tone="danger"] {
-  background: var(--za-danger-soft);
+  background: var(--state-danger-soft);
   color: var(--state-danger);
 }
 
@@ -279,7 +279,7 @@
 }
 
 .bot-task-feedback.is-error {
-  background: var(--za-danger-soft);
+  background: var(--state-danger-soft);
   color: var(--state-danger);
 }
 
@@ -336,8 +336,8 @@
   height: 30px;
   border: 0;
   border-radius: 10px;
-  background: var(--za-primary-control-bg, var(--graphite-base));
-  color: var(--za-primary-control-ink, var(--paper-sheet));
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
   cursor: pointer;
 }
 

@@ -78,8 +78,8 @@ test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头
   assert.match(narrowRules, /backdrop-filter: blur\(var\(--blur-popover\)\) saturate\(var\(--blur-saturate\)\)/);
   assert.match(monitorView, /className="task-monitor-card" onAnimationEnd=/);
   // 分区：留白 + 28% 透明度细分隔线；行静止时无背景，hover 才有极轻底色。
-  assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--za-line[^)]*\) 28%, transparent\)/);
-  assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--za-line[^)]*\) 32%, transparent\)/);
+  assert.match(workbenchStyles, /\.task-monitor-section \+ \.task-monitor-section \{[\s\S]*?border-top: 1px solid color-mix\(in srgb, var\(--chrome-hairline[^)]*\) 28%, transparent\)/);
+  assert.match(workbenchStyles, /\.task-monitor-row--action:hover \{[\s\S]*?color-mix\(in srgb, var\(--chrome-hairline[^)]*\) 32%, transparent\)/);
   assert.doesNotMatch(workbenchStyles, /\.task-monitor-section \{[\s\S]{0,320}backdrop-filter/);
   assert.doesNotMatch(workbenchStyles, /task-monitor-tiles|task-monitor-section--tile/);
   // 分区数据源：技能与 MCP + 网页查阅 + 环境四行 + 查看更多。

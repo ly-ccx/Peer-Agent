@@ -17,7 +17,7 @@
 .mcp-server-detail h4,
 .mcp-server-detail h5 {
   margin: 0;
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
 }
 .mcp-settings-layout {
   display: grid;
@@ -43,16 +43,20 @@
   width: 100%;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface);
-  color: var(--pa-text-primary);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
   text-align: left;
   cursor: pointer;
+  transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
+}
+.mcp-server-list button:hover {
+  background: var(--paper-hover);
 }
 .mcp-server-list .is-active button {
-  border-color: var(--za-accent);
-  background: var(--za-accent-soft);
+  border-color: color-mix(in srgb, var(--graphite-base) 30%, var(--chrome-hairline));
+  background: var(--paper-hover);
 }
 .mcp-server-list button strong,
 .mcp-server-list button span {
@@ -82,17 +86,17 @@
   flex: 0 0 auto;
   padding: 3px 8px;
   border-radius: var(--ui-radius-pill);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-secondary);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   font-size: 0.72rem;
   text-transform: uppercase;
 }
 .mcp-health--ok {
-  background: color-mix(in srgb, var(--state-success) 16%, transparent);
+  background: var(--state-success-soft);
   color: var(--state-success);
 }
 .mcp-health--failed {
-  background: color-mix(in srgb, var(--state-danger) 14%, transparent);
+  background: var(--state-danger-soft);
   color: var(--state-danger);
 }
 .mcp-tool-list,
@@ -108,7 +112,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: 10px 0;
-  border-top: 1px solid var(--pa-border-subtle);
+  border-top: 1px solid var(--chrome-hairline);
 }
 .mcp-tool-list p {
   margin: 4px 0 0;
@@ -117,13 +121,13 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
 }
 .mcp-toggle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 0.78rem;
   white-space: nowrap;
 }
@@ -132,8 +136,8 @@
   overflow: auto;
   padding: var(--space-3);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-primary);
+  background: var(--control-fill);
+  color: var(--graphite-base);
   font-size: 0.76rem;
   white-space: pre-wrap;
 }
@@ -146,7 +150,7 @@
 .mcp-eyebrow {
   display: inline-flex;
   margin-bottom: 4px;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -167,38 +171,39 @@
   justify-content: center;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--za-line-strong);
+  border: 1px solid var(--chrome-hairline-strong);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-card);
-  color: var(--pa-text-primary);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
   font-size: 0.82rem;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: var(--za-shadow-1, 0 1px 2px rgba(15, 18, 22, 0.06));
+  transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 .mcp-hero__actions button:hover:not(:disabled),
 .mcp-detail-actions button:hover:not(:disabled),
 .mcp-empty-state button:hover:not(:disabled) {
-  border-color: var(--za-line-strong);
-  background: var(--pa-surface-hover);
+  border-color: var(--chrome-hairline-strong);
+  background: var(--paper-hover);
 }
 .mcp-hero__actions button:disabled,
 .mcp-detail-actions button:disabled,
 .mcp-empty-state button:disabled {
   cursor: not-allowed;
+  opacity: 0.55;
 }
 .mcp-hero__actions button:first-child,
 .mcp-empty-state button {
-  border-color: var(--graphite-base);
-  background: var(--graphite-base);
-  color: var(--za-accent-ink);
+  border-color: var(--chrome-keycap-border);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
+  box-shadow: var(--chrome-keycap-shadow);
 }
 .mcp-hero__actions button:first-child:hover:not(:disabled),
 .mcp-empty-state button:hover:not(:disabled) {
-  border-color: var(--graphite-base-hover);
-  background: var(--graphite-base-hover);
+  opacity: 0.9;
 }
 .mcp-summary-grid {
   display: grid;
@@ -210,9 +215,9 @@
   flex-direction: column;
   gap: 4px;
   padding: var(--space-4);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: color-mix(in srgb, var(--pa-surface-panel) 92%, transparent);
+  background: var(--paper-raised);
 }
 .mcp-summary-card span,
 .mcp-summary-card small,
@@ -221,7 +226,7 @@
 .mcp-detail-meta dt,
 .mcp-empty-state p,
 .mcp-credential-list em {
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
 }
 .mcp-summary-card span {
   font-size: 0.74rem;
@@ -230,18 +235,18 @@
   text-transform: uppercase;
 }
 .mcp-summary-card strong {
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
   font-size: 1.35rem;
   line-height: 1.15;
 }
 .mcp-status {
   padding: var(--space-3);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
+  background: var(--control-fill);
 }
 .mcp-add-card {
-  border-color: color-mix(in srgb, var(--za-accent) 24%, var(--pa-border-subtle));
+  border-color: color-mix(in srgb, var(--azure-seal) 24%, var(--chrome-hairline));
 }
 .mcp-modal-card {
   display: flex;
@@ -264,7 +269,7 @@
 }
 .mcp-modal-header h3 {
   margin: 0 0 4px;
-  font-family: var(--font-serif-zh);
+  font-family: var(--font-sans);
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--graphite-base);
@@ -335,13 +340,12 @@
   background: var(--chrome-hover);
 }
 .mcp-modal-confirm {
-  border-color: var(--graphite-base);
-  background: var(--graphite-base);
-  color: var(--za-accent-ink);
+  border-color: var(--chrome-keycap-border);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
 }
 .mcp-modal-confirm:hover:not(:disabled) {
-  border-color: var(--graphite-base-hover);
-  background: var(--graphite-base-hover);
+  opacity: 0.9;
 }
 .mcp-modal-footer button:disabled {
   opacity: 0.5;
@@ -353,7 +357,7 @@
   gap: 8px;
 }
 .mcp-field__label {
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 0.78rem;
 }
 .mcp-segment {
@@ -363,28 +367,28 @@
   gap: 4px;
   padding: 4px;
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
-  border: 1px solid var(--pa-border-subtle);
+  background: var(--paper-sunken);
+  border: 1px solid var(--chrome-hairline);
 }
 .mcp-segment__btn {
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: var(--ui-radius-chip);
   background: transparent;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 0.82rem;
   cursor: pointer;
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 .mcp-segment__btn:hover {
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
 }
 .mcp-segment__btn.is-active {
-  background: var(--pa-surface-card);
-  border-color: var(--pa-border-subtle);
-  color: var(--pa-text-primary);
+  background: var(--paper-raised);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-base);
   font-weight: 600;
-  box-shadow: var(--shadow-popover);
+  box-shadow: var(--chrome-glass-row-shadow);
 }
 .mcp-row {
   display: grid;
@@ -400,10 +404,10 @@
 .mcp-row input {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-card);
-  color: var(--pa-text-primary);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
   font-size: 0.84rem;
 }
 .mcp-row__remove {
@@ -412,29 +416,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-secondary);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   cursor: pointer;
 }
 .mcp-row__remove:hover {
-  color: var(--pa-text-primary);
-  border-color: color-mix(in srgb, var(--za-accent) 40%, var(--pa-border-subtle));
+  color: var(--graphite-base);
+  border-color: var(--chrome-hairline-strong);
 }
 .mcp-row__add {
   align-self: flex-start;
   padding: 8px 14px;
-  border: 1px dashed var(--pa-border-subtle);
+  border: 1px dashed var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-secondary);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   font-size: 0.82rem;
   cursor: pointer;
 }
 .mcp-row__add:hover {
-  color: var(--pa-text-primary);
-  border-color: var(--za-accent);
+  color: var(--graphite-base);
+  border-color: var(--azure-seal);
 }
 .mcp-main-grid {
   display: grid;
@@ -470,7 +474,7 @@
 }
 .mcp-section-header h3,
 .mcp-detail-header h3 {
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
   font-size: 1rem;
 }
 .mcp-section-header p,
@@ -488,12 +492,12 @@
   align-items: flex-start;
   gap: var(--space-2);
   padding: var(--space-4);
-  border: 1px dashed var(--pa-border-subtle);
+  border: 1px dashed var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: var(--pa-surface-muted);
+  background: var(--paper-raised);
 }
 .mcp-empty-state strong {
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
 }
 .mcp-empty-state p {
   margin: 0;
@@ -510,7 +514,7 @@
   gap: var(--space-3);
   margin-top: var(--space-4);
   padding-top: var(--space-4);
-  border-top: 1px solid var(--pa-border-subtle);
+  border-top: 1px solid var(--chrome-hairline);
 }
 .mcp-credential-list {
   display: flex;
@@ -533,26 +537,26 @@
   min-width: 0;
   gap: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
+  background: var(--control-fill);
   text-align: left;
 }
 .mcp-credential-delete {
   flex: 0 0 auto;
   padding: 0 var(--space-3);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-secondary);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   font-size: 0.78rem;
   cursor: pointer;
   transition: color var(--za-motion-fast), background var(--za-motion-fast), border-color var(--za-motion-fast);
 }
 .mcp-credential-delete:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--za-danger, #d14343) 60%, transparent);
-  background: color-mix(in srgb, var(--za-danger, #d14343) 12%, transparent);
-  color: var(--za-danger, #d14343);
+  border-color: color-mix(in srgb, var(--state-danger) 55%, transparent);
+  background: var(--state-danger-soft);
+  color: var(--state-danger);
 }
 .mcp-credential-delete:disabled {
   opacity: 0.5;
@@ -592,9 +596,9 @@
 .mcp-detail-meta div {
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--pa-border-subtle);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--pa-surface-muted);
+  background: var(--control-fill);
 }
 .mcp-detail-meta dt {
   margin-bottom: 4px;
@@ -606,7 +610,7 @@
 .mcp-detail-meta dd {
   overflow: hidden;
   margin: 0;
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
   font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -623,8 +627,8 @@
   gap: var(--space-4);
 }
 .mcp-health--disabled {
-  background: color-mix(in srgb, var(--pa-text-secondary) 14%, transparent);
-  color: var(--pa-text-secondary);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
 }
 @media (max-width: 1100px) {
   .mcp-summary-grid,

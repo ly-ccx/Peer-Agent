@@ -2,7 +2,7 @@
 @layer components {
   .gwb-page {
     @apply h-full min-h-0 min-w-0 overflow-y-auto;
-    background: var(--za-app-bg);
+    background: var(--chrome-canvas);
     /* 末卡离开外壳圆角裁切：gwb 是自持滚动器，等价契约必须落在自己的滚动区上 */
     padding-bottom: var(--ui-radius-panel);
   }
@@ -17,18 +17,18 @@
 
   .gwb-eyebrow {
     @apply mb-2 text-xs font-semibold;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-hero-copy h1 {
     @apply font-semibold leading-tight tracking-tight;
     font-size: var(--ui-font-heading-lg, 26px);
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-hero-copy p {
     @apply mt-2 max-w-xl text-sm leading-relaxed;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .gwb-layout {
@@ -62,24 +62,24 @@
 
   .gwb-panel {
     @apply overflow-hidden rounded-[var(--ui-radius-panel)] border;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
 
   .gwb-panel-head {
     @apply flex items-center justify-between gap-3 border-b px-5 py-4;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .gwb-panel-head h2 {
     @apply font-semibold tracking-tight;
     font-size: var(--ui-font-body-lg, 15px);
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-sub {
     @apply mt-0.5 text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   /* 侧栏卡片头：单行紧凑（标签 + 数量 + 动作），避免双行堆叠占空。 */
@@ -95,23 +95,23 @@
   .gwb-side-label {
     @apply shrink-0 font-semibold tracking-tight;
     font-size: var(--ui-font-control, 13px);
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-side-count {
     @apply min-w-0 truncate text-xs font-semibold tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   /* 与标题同一行、靠右显示的次要计数（如「预览 3 / 146」）。 */
   .gwb-side-meta {
     @apply shrink-0 whitespace-nowrap text-xs font-medium tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-link {
     @apply inline-flex items-center gap-0.5 text-xs font-semibold;
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .gwb-link-arrow {
@@ -132,7 +132,7 @@
   .gwb-item {
     @apply grid items-center gap-3 border-b px-5 py-3;
     grid-template-columns: 88px minmax(0, 1fr) auto;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .gwb-list > :last-child > .gwb-item {
@@ -148,18 +148,18 @@
   }
 
   .gwb-tag-need {
-    background: color-mix(in srgb, #9a7340 14%, transparent);
-    color: #9a7340;
+    background: var(--state-warn-soft);
+    color: var(--state-warn);
   }
 
   .gwb-tag-accept {
-    background: color-mix(in srgb, #3e7a6b 14%, transparent);
-    color: #3e7a6b;
+    background: var(--state-success-soft);
+    color: var(--state-success);
   }
 
   .gwb-type-note {
     @apply text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-body {
@@ -169,12 +169,12 @@
   .gwb-title {
     @apply font-semibold tracking-tight;
     font-size: var(--ui-font-body-lg, 15px);
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-desc {
     @apply mt-1 text-sm;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .gwb-chips {
@@ -184,13 +184,13 @@
   .gwb-chip {
     @apply inline-flex h-6 items-center rounded-[var(--ui-radius-pill)] px-2 font-semibold;
     font-size: var(--ui-font-caption, 11px);
-    background: color-mix(in srgb, var(--za-text) 6%, transparent);
-    color: var(--za-text-soft);
+    background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
+    color: var(--graphite-soft);
   }
 
   .gwb-chip-ws {
-    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+    color: var(--azure-seal);
   }
 
   .gwb-actions {
@@ -202,8 +202,8 @@
   }
 
   .gwb-btn-primary {
-    background: var(--za-text);
-    color: var(--za-surface-0);
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
   }
 
   .gwb-btn-arrow {
@@ -215,25 +215,25 @@
 
   .gwb-btn-ghost {
     @apply border;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
     background: transparent;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-empty {
     @apply flex flex-1 flex-col items-center justify-center rounded-[var(--ui-radius-panel)] border px-6 py-10 text-center;
     min-height: 310px;
-    border-color: var(--za-line);
-    background: var(--za-surface-0);
+    border-color: var(--chrome-hairline);
+    background: var(--paper-raised);
   }
 
   .gwb-empty p {
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .gwb-empty-hint {
     @apply mt-2 max-w-sm text-sm leading-relaxed;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-empty .gwb-btn {
@@ -242,7 +242,7 @@
 
   .gwb-side-empty {
     @apply px-5 py-6 text-sm;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-run-list {
@@ -252,7 +252,7 @@
   .gwb-run-row {
     @apply grid w-full items-center gap-2.5 border-t px-4 py-3 text-left;
     grid-template-columns: 20px minmax(0, 1fr) auto;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   /* 首行去掉顶边，避免与 panel-head 的 border-b 叠成双线。 */
@@ -265,7 +265,7 @@
   }
 
   .gwb-run-row:hover {
-    background: color-mix(in srgb, var(--za-text) 3%, transparent);
+    background: color-mix(in srgb, var(--graphite-base) 3%, transparent);
   }
 
   /* 行首 ThinkingOrb(canvas) 容器：只负责占位对齐，动画由 orb 自绘。 */
@@ -285,23 +285,23 @@
     width: 20px;
     height: 20px;
     margin-left: -4px;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-run-title {
     @apply block truncate font-semibold;
     font-size: var(--ui-font-control, 13px);
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-run-sub {
     @apply mt-0.5 block truncate text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .gwb-run-pct {
     @apply overflow-hidden text-xs font-semibold tabular-nums;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .gwb-run-pct-value {
@@ -322,7 +322,7 @@
 
   /* 脉搏卡复用 panel 外壳；body 负责内容区 padding。 */
   .gwb-pulse {
-    background: color-mix(in srgb, var(--za-surface-0) 80%, transparent);
+    background: color-mix(in srgb, var(--paper-raised) 80%, transparent);
   }
 
   /* 横向 padding 放在 row 上，让 hover/分隔线铺满卡片全宽。 */
@@ -333,7 +333,7 @@
   .gwb-pulse-row {
     @apply grid w-full items-center gap-2 border-t px-4 py-2 text-left text-xs;
     grid-template-columns: 1.4fr repeat(2, 0.8fr);
-    border-color: color-mix(in srgb, var(--za-line) 80%, transparent);
+    border-color: color-mix(in srgb, var(--chrome-hairline) 80%, transparent);
     background: transparent;
     cursor: pointer;
   }
@@ -343,22 +343,22 @@
   }
 
   .gwb-pulse-row:hover {
-    background: color-mix(in srgb, var(--za-text) 3%, transparent);
+    background: color-mix(in srgb, var(--graphite-base) 3%, transparent);
   }
 
   .gwb-pulse-name {
     @apply truncate font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .gwb-num {
     @apply text-center;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .gwb-num-alert {
     @apply font-semibold;
-    color: #8a4b55;
+    color: var(--state-danger);
   }
 
   /* 验收三段式动效：只叠加 phase 修饰，不改写默认 gwb-item 网格布局 */
@@ -371,22 +371,22 @@
   }
 
   .gwb-item--submitting {
-    border-color: color-mix(in srgb, var(--za-accent) 34%, var(--za-line));
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--za-accent) 18%, transparent);
+    border-color: color-mix(in srgb, var(--azure-seal) 34%, var(--chrome-hairline));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--azure-seal) 18%, transparent);
     transition:
       border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
       box-shadow 320ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .gwb-item--celebrating {
-    border-color: color-mix(in srgb, var(--za-success, #3e7a6b) 42%, var(--za-line));
+    border-color: color-mix(in srgb, var(--state-success) 42%, var(--chrome-hairline));
     background:
-      radial-gradient(circle at 12% 20%, color-mix(in srgb, #7dcea0 22%, transparent), transparent 42%),
-      radial-gradient(circle at 88% 18%, color-mix(in srgb, #f4d35e 18%, transparent), transparent 36%),
-      color-mix(in srgb, var(--za-success, #3e7a6b) 8%, var(--za-surface-0));
+      radial-gradient(circle at 12% 20%, color-mix(in srgb, var(--state-success) 22%, transparent), transparent 42%),
+      radial-gradient(circle at 88% 18%, color-mix(in srgb, var(--bot-tone-amber) 18%, transparent), transparent 36%),
+      color-mix(in srgb, var(--state-success) 8%, var(--paper-raised));
     box-shadow:
-      0 10px 28px color-mix(in srgb, var(--za-success, #3e7a6b) 14%, transparent),
-      0 0 0 1px color-mix(in srgb, var(--za-success, #3e7a6b) 20%, transparent);
+      0 10px 28px color-mix(in srgb, var(--state-success) 14%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--state-success) 20%, transparent);
     animation: gwb-item-celebrate-pop 520ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -429,38 +429,38 @@
 
   .gwb-item-celebration i:nth-child(1) {
     left: 18%;
-    background: #7dcea0;
+    background: var(--state-success);
     animation-delay: 40ms;
   }
   .gwb-item-celebration i:nth-child(2) {
     left: 32%;
-    background: #f4d35e;
+    background: var(--bot-tone-amber);
     animation-delay: 90ms;
   }
   .gwb-item-celebration i:nth-child(3) {
     left: 46%;
-    background: #6cb4ee;
+    background: var(--azure-seal);
     animation-delay: 130ms;
   }
   .gwb-item-celebration i:nth-child(4) {
     left: 58%;
-    background: #f28482;
+    background: var(--bot-tone-rose);
     animation-delay: 70ms;
   }
   .gwb-item-celebration i:nth-child(5) {
     left: 72%;
-    background: #b8b8ff;
+    background: var(--bot-tone-violet);
     animation-delay: 110ms;
   }
   .gwb-item-celebration i:nth-child(6) {
     left: 84%;
-    background: #84dcc6;
+    background: var(--bot-tone-cyan);
     animation-delay: 150ms;
   }
 
   .gwb-btn-primary--success {
-    background: color-mix(in srgb, var(--za-success, #3e7a6b) 88%, #000);
-    color: #fff;
+    background: color-mix(in srgb, var(--state-success) 88%, var(--graphite-base));
+    color: var(--paper-raised);
   }
 
   .gwb-accept-spinner {
@@ -496,7 +496,7 @@
 
   .source-checkout-panel__head {
     @apply text-sm;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .source-checkout-panel__files {
@@ -506,7 +506,7 @@
   .source-checkout-panel__empty,
   .source-checkout-panel__note {
     @apply text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .source-checkout-panel__actions {

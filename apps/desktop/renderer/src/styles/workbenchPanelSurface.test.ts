@@ -38,7 +38,7 @@ test('workbench panel uses the same paper surface as the chat area', () => {
   );
   assert.match(
     panel,
-    /background:\s*var\(--chrome-canvas,\s*var\(--za-app-bg\)\);/,
+    /background:\s*var\(--chrome-canvas\);/,
     '.workbench-panel must reference the chat paper token',
   );
   assert.doesNotMatch(
@@ -52,7 +52,7 @@ test('browser-view inside the panel uses the same paper surface', () => {
   const browser = ruleBody(workbenchCss, '.browser-view');
   assert.match(
     browser,
-    /background:\s*var\(--chrome-canvas,\s*var\(--za-app-bg\)\);/,
+    /background:\s*var\(--chrome-canvas\);/,
     '.browser-view must reference the chat paper token',
   );
 });

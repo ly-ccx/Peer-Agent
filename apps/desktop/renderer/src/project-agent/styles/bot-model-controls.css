@@ -14,7 +14,7 @@
 }
 .bot-model-source { margin: 5px 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: 1.5; }
 .bot-model-control .reasoning-effort-trigger { color: var(--graphite-soft); font-size: var(--ui-font-control); flex-shrink: 0; }
-.bot-model-control:not(.is-compact) .bot-model-picker > .model-selection-trigger { max-width: none; justify-content: space-between; border: 1px solid var(--ui-border-subtle, var(--za-line)); border-radius: var(--ui-radius-control); padding: 9px 10px; background: var(--paper-sheet); }
+.bot-model-control:not(.is-compact) .bot-model-picker > .model-selection-trigger { max-width: none; justify-content: space-between; border: 1px solid var(--ui-border-subtle); border-radius: var(--ui-radius-control); padding: 9px 10px; background: var(--paper-sheet); }
 .bot-model-control:not(.is-compact) .bot-model-picker .pa-cascading-value { flex: 1; text-align: left; }
 .bot-settings-row.bot-model-settings-row { align-items: start; grid-template-columns: minmax(0, 5rem) minmax(0, 1fr); }
 .bot-model-settings-row > span { padding-top: 9px; }

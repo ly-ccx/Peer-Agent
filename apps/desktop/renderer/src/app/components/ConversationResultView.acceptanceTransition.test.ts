@@ -163,7 +163,7 @@ test('result drawer splits into scrolling body and independent footer without an
   // footer 是 flex-none 的独立底部区域，用 margin-top:auto 贴底，动作右对齐（确认归档在右下角）。
   assert.match(
     styles,
-    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--za-line\);/,
+    /\.conversation-result-drawer__footer \{[\s\S]*?@apply flex flex-none items-start justify-end gap-3 px-5 pb-4 pt-3;[\s\S]*?margin-top: auto;[\s\S]*?border-top: 1px solid var\(--chrome-hairline\);/,
   );
   // 抽屉本体自己吃满 panel，不再依赖粉碎包裹层撑高度。
   assert.match(

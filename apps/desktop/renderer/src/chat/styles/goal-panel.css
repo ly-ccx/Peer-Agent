@@ -15,7 +15,7 @@
   width: auto;
   max-width: min(100%, var(--chat-content-max));
   margin: 0;
-  border: 1px solid var(--chrome-hairline, var(--ui-border-subtle, var(--za-line)));
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   /* Goal 灯条/侧栏表面统一 glass-popover 毛玻璃。
      不叠 glass-edge-highlight：暗色下顶部 inset 高光会变成一条刺眼亮线。 */
@@ -34,7 +34,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .goal-panel--docked {
-    background: var(--ui-surface-raised, var(--za-surface-1));
+    background: var(--ui-surface-raised, var(--paper-raised));
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     box-shadow: var(--shadow-popover, 0 8px 24px rgba(16, 24, 40, 0.12));
@@ -48,8 +48,8 @@
   gap: 10px;
   min-width: 0;
   padding: 8px 12px;
-  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
-  color: var(--za-text-soft);
+  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
 }
 
@@ -57,8 +57,8 @@
   flex: none;
   padding: 2px 7px;
   border-radius: var(--ui-radius-pill);
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
+  background: var(--state-warn-soft);
+  color: var(--state-warn);
   font-weight: 600;
   line-height: 18px;
 }
@@ -66,7 +66,7 @@
 .goal-plan-compact-approval-title {
   min-width: 0;
   overflow: hidden;
-  color: var(--za-text);
+  color: var(--graphite-base);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -74,7 +74,7 @@
 
 .goal-plan-compact-approval-progress {
   flex: none;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   font-variant-numeric: tabular-nums;
 }
 
@@ -91,27 +91,27 @@
   border: 0;
   border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font: inherit;
   cursor: pointer;
 }
 
 .goal-plan-compact-approval-action:hover:not(:disabled) {
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-base);
 }
 
 .goal-plan-compact-approval-action--start {
-  background: var(--za-primary-control-bg);
-  color: var(--za-primary-control-ink);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
 }
 
 .goal-plan-compact-approval-action--start:hover:not(:disabled) {
-  background: var(--za-active);
+  background: color-mix(in srgb, var(--chrome-keycap-bg) 88%, var(--chrome-keycap-fg));
 }
 
 .goal-plan-compact-approval-action--cancel {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 .goal-plan-compact-approval-action:disabled {
@@ -140,14 +140,14 @@
   padding: 6px 10px;
   border: none;
   background: transparent;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-control, 13px);
   cursor: pointer;
   text-align: left;
 }
 
 .goal-panel-toggle:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
 }
 
 .goal-panel-toggle-caret {
@@ -158,7 +158,7 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
 }
 
 .goal-panel-toggle-caret svg {
@@ -192,7 +192,7 @@
 }
 
 .goal-panel-toggle-summary .goal-panel-current-activity {
-  color: color-mix(in srgb, var(--za-text-soft) 35%, var(--za-text-muted));
+  color: color-mix(in srgb, var(--graphite-soft) 35%, var(--graphite-fade));
   font-size: var(--ui-font-caption, 11px);
   font-weight: 400;
   max-width: 140px;
@@ -203,7 +203,7 @@
 }
 
 .goal-panel-current-activity {
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-caption, 12px);
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -332,7 +332,7 @@
    不带任何动画（停止扫光/呼吸），用完成色（--state-success 绿）做柔和描边，
    传达「已完成、已停下」的稳定感，与执行中的流动光形成对比。 */
 .goal-panel--completed {
-  border-color: color-mix(in srgb, var(--state-success) 45%, var(--za-line));
+  border-color: color-mix(in srgb, var(--state-success) 45%, var(--chrome-hairline));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--state-success) 22%, transparent);
 }
 
@@ -357,7 +357,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
 }
 
@@ -368,13 +368,13 @@
   padding: 2px 4px;
   margin: -2px -4px;
   border-radius: var(--ui-radius-chip);
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   font-size: var(--ui-font-caption, 11px);
   font-family: var(--font-mono, monospace);
 }
 
 .goal-panel-toggle-active-handoff {
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 /* 折叠灯条 hover：显示该 goal 全部步骤（每行左状态图标 + 右标题） */
@@ -427,28 +427,28 @@
   justify-content: center;
   width: 14px;
   height: 14px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-panel-toggle-progress-tooltip__icon--running {
-  color: var(--za-accent, #5b8cff);
+  color: var(--azure-seal);
 }
 
 .goal-panel-toggle-progress-tooltip__icon--completed {
-  color: var(--state-success, #3fbf7f);
+  color: var(--state-success);
 }
 
 .goal-panel-toggle-progress-tooltip__icon--failed {
-  color: var(--za-danger, #e35d5d);
+  color: var(--state-danger);
 }
 
 .goal-panel-toggle-progress-tooltip__icon--waiting_user {
-  color: var(--za-warn, #d4a017);
+  color: var(--state-warn);
 }
 
 .goal-panel-toggle-progress-tooltip__icon--cancelled,
 .goal-panel-toggle-progress-tooltip__icon--pending {
-  color: var(--za-text-faint, #8b93a7);
+  color: var(--graphite-mute);
 }
 
 .goal-panel-toggle-progress-tooltip__icon-svg {
@@ -465,7 +465,7 @@
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--za-text, #e8ecf5);
+  color: var(--graphite-base);
   font-size: 12px;
   line-height: 1.3;
   font-weight: 500;
@@ -488,7 +488,7 @@
    避免长目标契约把对话列表和底部输入区撑出 overflow:hidden 容器且无法滚动。
    Workbench portal 的 body 不在 .goal-panel--docked 子树内，因此不会命中。 */
 .goal-panel--docked .goal-panel-body {
-  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   max-height: min(55vh, 520px);
   min-height: 0;
   overflow-y: auto;
@@ -505,9 +505,9 @@
 
 .goal-panel--empty {
   padding: 16px;
-  border: 1px dashed var(--ui-border-subtle, var(--za-line));
+  border: 1px dashed var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-panel);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   font-size: var(--ui-font-control, 13px);
   text-align: center;
 }
@@ -515,8 +515,8 @@
 .goal-panel-error {
   padding: 8px 12px;
   border-radius: var(--ui-radius-control);
-  background: var(--za-danger-soft);
-  color: var(--za-danger);
+  background: var(--state-danger-soft);
+  color: var(--state-danger);
   font-size: var(--ui-font-control, 13px);
 }
 
@@ -525,7 +525,7 @@
   flex-direction: column;
   border: 1px solid transparent;
   border-radius: var(--ui-radius-panel);
-  background: var(--ui-surface-float-bg, var(--ui-surface-raised, var(--za-surface-1)));
+  background: var(--ui-surface-float-bg, var(--paper-raised));
   box-shadow: none;
   overflow: hidden;
   transform: none;
@@ -534,7 +534,7 @@
 }
 
 .goal-plan-card:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
   border-color: transparent;
   box-shadow: none;
   transform: none;
@@ -575,36 +575,36 @@
 }
 .goal-plan-head-toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--ui-focus-glow));
   border-radius: var(--ui-radius-chip);
 }
 
 .goal-plan-head-timing {
   flex: none;
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
   border-radius: var(--ui-radius-pill);
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
   white-space: nowrap;
 }
 .goal-plan-head-timing--live {
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 .goal-plan-head-progress,
 .goal-plan-head-handoff {
   flex: none;
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   font-variant-numeric: tabular-nums;
   padding: 1px 6px;
   border-radius: var(--ui-radius-pill);
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
 }
 
 .goal-plan-head-handoff {
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-family: var(--font-mono, monospace);
 }
 
@@ -613,7 +613,7 @@
   display: inline-flex;
   width: 14px;
   height: 14px;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   transition: transform 160ms var(--za-ease-standard, ease);
 }
 .goal-plan-head-caret svg {
@@ -627,7 +627,7 @@
 .goal-plan-title {
   font-weight: 600;
   font-size: var(--ui-font-control, 13px);
-  color: var(--za-text);
+  color: var(--graphite-base);
   margin-right: auto;
   min-width: 0;
   overflow: hidden;
@@ -642,7 +642,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-plan-delivery-route {
@@ -650,7 +650,7 @@
   min-width: 0;
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.45;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -664,23 +664,23 @@
   margin: 0 0 8px;
   padding: 8px 10px;
   border-radius: var(--ui-radius-control);
-  background: var(--chrome-sunken, var(--za-surface-2));
+  background: var(--chrome-sunken);
 }
 
 .goal-plan-merge-route.is-blocked {
-  background: color-mix(in srgb, var(--za-warn, #3B6FAB) 12%, var(--chrome-sunken, #EBEEF3));
+  background: color-mix(in srgb, var(--state-warn) 12%, var(--chrome-sunken));
 }
 
 .goal-plan-merge-route.is-ok {
-  background: color-mix(in srgb, var(--state-success, #3E7A6B) 12%, var(--chrome-sunken, #EBEEF3));
+  background: color-mix(in srgb, var(--state-success) 12%, var(--chrome-sunken));
 }
 
 .goal-plan-merge-node {
   min-width: 0;
   padding: 6px 8px;
   border-radius: var(--ui-radius-control);
-  background: var(--za-surface-1, #fff);
-  border: 1px solid var(--chrome-hairline, var(--za-line));
+  background: var(--paper-raised);
+  border: 1px solid var(--chrome-hairline);
 }
 
 .goal-plan-merge-k {
@@ -688,7 +688,7 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   margin-bottom: 2px;
 }
 
@@ -700,16 +700,16 @@
   font-family: var(--font-mono, monospace);
   font-size: var(--ui-font-caption, 11px);
   font-weight: 620;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .goal-plan-merge-arrow {
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   font-size: 16px;
 }
 
 .goal-plan-merge-route.is-blocked .goal-plan-merge-arrow {
-  color: var(--za-warn, #3B6FAB);
+  color: var(--state-warn);
 }
 
 .goal-plan-delivery-handoff-row,
@@ -725,17 +725,17 @@
   min-width: 0;
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.45;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-plan-delivery-retry,
 .goal-plan-delivery-action {
   box-sizing: border-box;
   padding: 2px 8px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-pill);
-  background: var(--za-surface-1);
-  color: var(--za-text-soft);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
   cursor: pointer;
@@ -745,26 +745,26 @@
 /* 交付区药丸必须有三态反馈：否则看起来像一行说明文字而不是按钮。 */
 .goal-plan-delivery-retry:not(:disabled):hover,
 .goal-plan-delivery-action:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--za-text) 26%, transparent);
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text);
+  border-color: color-mix(in srgb, var(--graphite-base) 26%, transparent);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-base);
 }
 
 .goal-plan-delivery-retry:not(:disabled):active,
 .goal-plan-delivery-action:not(:disabled):active {
-  background: color-mix(in srgb, var(--za-text) 10%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 10%, transparent);
 }
 
 .goal-plan-delivery-retry:focus-visible,
 .goal-plan-delivery-action:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--za-text) 30%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--graphite-base) 30%, transparent);
   outline-offset: 2px;
 }
 
 /* retry 是阻塞时唯一的主操作：静止态也要一眼是按钮（更实的边框与文字）。 */
 .goal-plan-delivery-retry {
-  border-color: color-mix(in srgb, var(--za-text) 34%, transparent);
-  color: var(--za-text);
+  border-color: color-mix(in srgb, var(--graphite-base) 34%, transparent);
+  color: var(--graphite-base);
   font-weight: 520;
 }
 
@@ -775,21 +775,21 @@
 }
 
 .goal-plan-delivery-action--danger {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 /* 危险操作悬停仍保持警告色，不被通用 hover 覆盖。 */
 .goal-plan-delivery-action--danger:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--za-warn) 40%, transparent);
-  background: color-mix(in srgb, var(--za-warn) 8%, transparent);
-  color: var(--za-warn);
+  border-color: color-mix(in srgb, var(--state-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--state-warn) 8%, transparent);
+  color: var(--state-warn);
 }
 
 .goal-plan-delivery-error {
   margin: 0;
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.45;
-  color: var(--za-danger);
+  color: var(--state-danger);
 }
 
 .goal-plan-status {
@@ -797,18 +797,18 @@
   padding: 2px 8px;
   border-radius: var(--ui-radius-pill);
   font-size: var(--ui-font-caption, 11px);
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text-soft);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-soft);
 }
 
-.goal-plan-status--awaiting_approval { color: var(--za-warn); background: var(--za-warn-soft); }
+.goal-plan-status--awaiting_approval { color: var(--state-warn); background: var(--state-warn-soft); }
 .goal-plan-status--executing { color: var(--state-confirm); background: color-mix(in srgb, var(--state-confirm) 14%, transparent); }
 /* executing 的掩盖态：生命周期结论接管头部 pill（waiting_agent=主 Bot 跟进）。 */
 .goal-plan-status--waiting_agent { color: var(--state-info); background: color-mix(in srgb, var(--state-info) 14%, transparent); }
-.goal-plan-status--waiting_user { color: var(--za-warn); background: var(--za-warn-soft); }
-.goal-plan-status--completed { color: var(--za-good); background: var(--za-good-soft); }
+.goal-plan-status--waiting_user { color: var(--state-warn); background: var(--state-warn-soft); }
+.goal-plan-status--completed { color: var(--state-success); background: var(--state-success-soft); }
 .goal-plan-status--failed,
-.goal-plan-status--cancelled { color: var(--za-danger); background: var(--za-danger-soft); }
+.goal-plan-status--cancelled { color: var(--state-danger); background: var(--state-danger-soft); }
 
 /* body：折叠态不渲染，展开态出现在 head 下方 */
 .goal-plan-body {
@@ -822,7 +822,7 @@
   margin: 0;
   font-size: var(--ui-font-control, 13px);
   line-height: 1.5;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 /* 描述块：默认完整可见，位于进度条上方。 */
@@ -840,7 +840,7 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+  border-top: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
 }
 
 .goal-plan-body > .goal-projection:first-child {
@@ -867,14 +867,14 @@
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.2;
   font-weight: 700;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .goal-projection-title {
   min-width: 0;
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.35;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   overflow-wrap: anywhere;
 }
 
@@ -885,7 +885,7 @@
   text-align: right;
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.4;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
@@ -898,19 +898,19 @@
   margin: 0;
   font-size: var(--ui-font-control, 13px);
   line-height: 1.55;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .goal-contract-text--current {
-  color: var(--za-text);
+  color: var(--graphite-base);
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.45;
 }
 
 .goal-contract-text--empty {
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
 }
 
 .goal-criteria-list {
@@ -937,8 +937,8 @@
   flex: none;
   padding: 1px 6px;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text-soft);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-soft);
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.4;
 }
@@ -946,19 +946,19 @@
 .goal-criterion-text {
   flex: 1 1 150px;
   min-width: 0;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .goal-criterion-result--passed {
-  color: var(--za-good);
-  background: var(--za-good-soft);
+  color: var(--state-success);
+  background: var(--state-success-soft);
 }
 
 .goal-criterion-result--failed {
-  color: var(--za-warn);
-  background: var(--za-warn-soft);
+  color: var(--state-warn);
+  background: var(--state-warn-soft);
 }
 
 .goal-boundary-meta {
@@ -966,7 +966,7 @@
   gap: 6px;
   flex-wrap: wrap;
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
 }
 
 .goal-boundary-meta span {
@@ -984,7 +984,7 @@
   gap: 6px;
   flex-wrap: wrap;
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .goal-run-trace-summary span {
@@ -997,7 +997,7 @@
 .goal-run-event-note {
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.45;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
 }
 
 .goal-run-trace-list {
@@ -1021,8 +1021,8 @@
   height: 8px;
   margin-top: 6px;
   border-radius: var(--ui-radius-circle);
-  background: var(--za-text-faint);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-text-faint) 12%, transparent);
+  background: var(--graphite-mute);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--graphite-mute) 12%, transparent);
 }
 
 .goal-run-event-body {
@@ -1042,7 +1042,7 @@
 
 .goal-run-event-type {
   min-width: 0;
-  color: var(--za-text);
+  color: var(--graphite-base);
   font-size: var(--ui-font-meta, 12px);
   font-weight: 600;
   line-height: 1.35;
@@ -1051,14 +1051,14 @@
 
 .goal-run-event-time {
   flex: none;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   font-size: var(--ui-font-caption, 11px);
   font-variant-numeric: tabular-nums;
 }
 
 .goal-run-event-summary {
   min-width: 0;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -1076,26 +1076,26 @@
   max-width: 100%;
   padding: 1px 5px;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text-faint);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-mute);
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 .goal-run-event--success .goal-run-event-rail {
-  background: var(--za-good);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-good) 16%, transparent);
+  background: var(--state-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-success) 16%, transparent);
 }
 
 .goal-run-event--issue .goal-run-event-rail {
-  background: var(--za-warn);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-warn) 18%, transparent);
+  background: var(--state-warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-warn) 18%, transparent);
 }
 
 .goal-run-event--correction .goal-run-event-rail {
-  background: var(--za-danger);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-danger) 14%, transparent);
+  background: var(--state-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-danger) 14%, transparent);
 }
 
 .goal-run-event--checkpoint .goal-run-event-rail {
@@ -1104,41 +1104,41 @@
 }
 
 .goal-run-event--validation .goal-run-event-rail {
-  background: var(--za-primary-control-bg);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-primary-control-bg) 14%, transparent);
+  background: var(--chrome-keycap-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chrome-keycap-bg) 14%, transparent);
 }
 
 .goal-run-event--route .goal-run-event-rail {
-  background: var(--za-text-muted);
+  background: var(--graphite-fade);
 }
 
 .goal-run-trace-toggle {
   align-self: flex-start;
   max-width: 100%;
   padding: 3px 8px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
   cursor: pointer;
   overflow-wrap: anywhere;
 }
 
 .goal-run-trace-toggle:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--za-text);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-base);
 }
 
 .goal-plan-card:focus-visible,
 .goal-task:focus-visible {
-  outline: 2px solid var(--za-accent);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 2px;
 }
 
 /* 主卡：当前计划永远置顶展开，靠背景高亮拉开层级，与会话列表一致不描边。 */
 .goal-plan-card--main {
-  background: var(--ui-surface-float-bg, var(--za-surface-1));
+  background: var(--ui-surface-float-bg, var(--paper-raised));
   border-color: transparent;
   box-shadow: none;
 }
@@ -1146,7 +1146,7 @@
 /* 浅色目标项统一复用展开态的中性悬浮层色，不再额外制造灰蓝层级。 */
 :root:not([data-theme="dark"]) .goal-plan-card,
 :root:not([data-theme="dark"]) .goal-plan-card:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
 }
 
 .goal-plan-card--main .goal-plan-head-caret {
@@ -1164,7 +1164,7 @@
   font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   padding: 2px 2px 0;
 }
 
@@ -1175,7 +1175,7 @@
   padding-bottom: 6px;
 }
 .goal-plan-history .goal-plan-card:not(.goal-plan-card--expanded) .goal-plan-title {
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-weight: 500;
 }
 
@@ -1199,11 +1199,11 @@
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-standard, ease);
 }
 .goal-plan-progress:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
 }
 .goal-plan-progress:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--ui-focus-glow));
 }
 
 /* track 强制独占一行（flex-basis 100%），承载进度条本体。 */
@@ -1219,7 +1219,7 @@
   position: relative;
   height: 6px;
   border-radius: var(--ui-radius-pill);
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
   background-image: linear-gradient(var(--state-confirm), var(--state-confirm));
   background-repeat: no-repeat;
   background-size: 0% 100%;
@@ -1252,13 +1252,13 @@
 .goal-plan-progress-text {
   flex: 1 1 auto;
   font-size: var(--ui-font-meta, 12px);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 .goal-plan-progress-caret {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   transition: transform var(--za-motion-medium, 200ms) var(--za-ease-standard, ease);
 }
 .goal-plan-progress--open .goal-plan-progress-caret {
@@ -1280,9 +1280,9 @@
 }
 
 .goal-task--card {
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-raised, var(--za-surface-1));
+  background: var(--ui-surface-raised, var(--paper-raised));
   overflow: hidden;
 }
 
@@ -1303,7 +1303,7 @@
 }
 .goal-task-head:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
+  box-shadow: inset 0 0 0 2px var(--ui-focus-ring, var(--ui-focus-glow));
 }
 
 .goal-task-status {
@@ -1313,18 +1313,18 @@
   border-radius: var(--ui-radius-control);
   font-size: var(--ui-font-caption, 11px);
   text-align: center;
-  background: var(--za-hover);
-  color: var(--za-text-soft);
+  background: var(--paper-hover);
+  color: var(--graphite-soft);
 }
 
-.goal-task-status--completed { color: var(--za-good); background: var(--za-good-soft); }
+.goal-task-status--completed { color: var(--state-success); background: var(--state-success-soft); }
 .goal-task-status--running { color: var(--state-confirm); background: color-mix(in srgb, var(--state-confirm) 14%, transparent); }
-.goal-task-status--failed { color: var(--za-danger); background: var(--za-danger-soft); }
-.goal-task-status--waiting_user { color: var(--za-warn); background: var(--za-warn-soft); }
+.goal-task-status--failed { color: var(--state-danger); background: var(--state-danger-soft); }
+.goal-task-status--waiting_user { color: var(--state-warn); background: var(--state-warn-soft); }
 
 .goal-task-title {
   font-size: var(--ui-font-control, 13px);
-  color: var(--za-text);
+  color: var(--graphite-base);
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
@@ -1336,7 +1336,7 @@
   display: inline-flex;
   width: 14px;
   height: 14px;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   transition: transform 160ms var(--za-ease-standard, ease);
 }
 .goal-task-caret svg {
@@ -1351,20 +1351,20 @@
   margin: 0 10px 8px;
   padding: 4px 8px;
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.5;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 .goal-task-summary--error {
-  background: var(--za-danger-soft);
-  color: var(--za-danger);
+  background: var(--state-danger-soft);
+  color: var(--state-danger);
 }
 .goal-task-summary--warn {
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
+  background: var(--state-warn-soft);
+  color: var(--state-warn);
 }
 
 .goal-task-detail-wrap {
@@ -1377,16 +1377,16 @@
 .goal-task-detail {
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.5;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
-.goal-task-detail--error { color: var(--za-danger); }
-.goal-task-detail--warn { color: var(--za-warn); }
+.goal-task-detail--error { color: var(--state-danger); }
+.goal-task-detail--warn { color: var(--state-warn); }
 
 .goal-task-detail-label {
   font-size: var(--ui-font-caption, 11px);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--za-text-faint);
+  color: var(--graphite-mute);
   margin-bottom: 4px;
 }
 
@@ -1402,14 +1402,14 @@
 .goal-task-evidence-item {
   font-family: var(--font-mono, monospace);
   font-size: var(--ui-font-caption, 11px);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   overflow-wrap: anywhere;
   word-break: break-all;
 }
 
 .goal-plan-empty-tasks {
   font-size: var(--ui-font-meta, 12px);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .goal-plan-actions {
@@ -1427,7 +1427,7 @@
 .goal-plan-actions button {
   padding: 6px 14px;
   border-radius: var(--ui-radius-control);
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   font-size: var(--ui-font-control, 13px);
   cursor: pointer;
   transition: background var(--za-motion-fast, 120ms) var(--za-ease-out, ease);
@@ -1456,9 +1456,9 @@
 
 .goal-plan-approve,
 .goal-plan-action--start {
-  background: var(--za-primary-control-bg);
-  color: var(--za-primary-control-ink);
-  border-color: var(--za-primary-control-bg);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
+  border-color: var(--chrome-keycap-bg);
 }
 
 /* 内联场景下，主按钮也用透明边框，保证与其他操作按钮等高。 */
@@ -1469,33 +1469,33 @@
 
 .goal-plan-approve:hover:not(:disabled),
 .goal-plan-action--start:hover:not(:disabled) {
-  background: var(--za-active);
-  color: var(--za-text);
+  background: color-mix(in srgb, var(--chrome-keycap-bg) 88%, var(--chrome-keycap-fg));
+  color: var(--chrome-keycap-fg);
 }
 
 .goal-plan-reject,
 .goal-plan-action--adjust,
 .goal-plan-action--cancel {
-  background: var(--za-surface-1);
-  color: var(--za-text-soft);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
 }
 
 .goal-plan-action--cancel {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 .goal-plan-next-guidance {
   padding: 8px 10px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-muted, var(--za-surface-2));
-  color: var(--za-text-soft);
+  background: var(--ui-surface-muted, var(--paper-sunken));
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.5;
 }
 
 .goal-plan-reject:hover:not(:disabled) {
-  background: var(--ui-surface-hover, var(--za-hover));
+  background: var(--ui-surface-hover, var(--paper-hover));
 }
 
 /* Goal Runner 托管状态区：表达 runner 编排状态，不替代任务 Evidence。 */
@@ -1505,9 +1505,9 @@
   gap: 8px;
   margin-top: 10px;
   padding: 10px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-panel);
-  background: var(--ui-surface-raised, var(--za-surface-1));
+  background: var(--ui-surface-raised, var(--paper-raised));
 }
 
 /* 底部栏：左侧计数（轮次/工具/探索），右侧控制按钮（暂停/继续/清除），单行两端对齐。 */
@@ -1521,7 +1521,7 @@
 
 .goal-runner-counters {
   font-size: var(--ui-font-meta, 12px);
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1537,25 +1537,25 @@
   flex: none;
   max-width: 100%;
   padding: 2px 7px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-pill);
-  background: var(--za-surface-2);
-  color: var(--za-text);
+  background: var(--paper-sunken);
+  color: var(--graphite-base);
   font-size: var(--ui-font-caption, 11px);
   line-height: 1.4;
   white-space: nowrap;
 }
 
 .goal-runner-phase--blocked {
-  border-color: var(--za-warn);
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
+  border-color: var(--state-warn);
+  background: var(--state-warn-soft);
+  color: var(--state-warn);
 }
 
 .goal-runner-phase--verify,
 .goal-runner-phase--synthesize {
-  border-color: var(--za-primary-control-bg);
-  color: var(--za-primary-control-bg);
+  border-color: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-bg);
 }
 
 .goal-runner-status-strip {
@@ -1564,9 +1564,9 @@
   justify-content: space-between;
   gap: 10px;
   padding: 7px 8px;
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-control);
-  background: var(--za-surface-2);
+  background: var(--paper-sunken);
 }
 
 .goal-runner-status-main {
@@ -1580,39 +1580,39 @@
   font-size: 10px;
   line-height: 1.3;
   text-transform: uppercase;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-runner-status-text {
   min-width: 0;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--za-text);
+  color: var(--graphite-base);
   overflow-wrap: anywhere;
 }
 
 .goal-runner-status-meta {
   flex: none;
   font-size: 11px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .goal-runner-status-strip--verifier {
-  border-color: color-mix(in srgb, var(--za-primary-control-bg) 34%, var(--za-line));
+  border-color: color-mix(in srgb, var(--chrome-keycap-bg) 34%, var(--chrome-hairline));
 }
 
 .goal-runner-status-strip--passed {
-  border-color: color-mix(in srgb, var(--za-primary-control-bg) 34%, var(--za-line));
+  border-color: color-mix(in srgb, var(--chrome-keycap-bg) 34%, var(--chrome-hairline));
 }
 
 .goal-runner-status-strip--blocker,
 .goal-runner-status-strip--failed,
 .goal-runner-status-strip--blocked,
 .goal-runner-status-strip--error {
-  border-color: color-mix(in srgb, var(--za-warn) 34%, var(--za-line));
-  background: var(--za-warn-soft);
+  border-color: color-mix(in srgb, var(--state-warn) 34%, var(--chrome-hairline));
+  background: var(--state-warn-soft);
 }
 
 .goal-manual-dod {
@@ -1620,9 +1620,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  border: 1px solid var(--za-primary-control-bg);
+  border: 1px solid var(--chrome-keycap-bg);
   border-radius: var(--ui-radius-control);
-  background: var(--za-surface-2);
+  background: var(--paper-sunken);
 }
 
 .goal-manual-dod-head {
@@ -1636,19 +1636,19 @@
   min-width: 0;
   font-size: 12px;
   font-weight: 600;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .goal-manual-dod-count,
 .goal-manual-dod-note {
   font-size: 12px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-manual-dod-list {
   margin: 0;
   padding-left: 18px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1669,17 +1669,17 @@
 
 .goal-runner-btn {
   padding: 3px 10px;
-  border: 1px solid var(--za-line);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--za-surface-1);
-  color: var(--za-text-soft);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
   font-size: 12px;
   cursor: pointer;
 }
 
 .goal-runner-btn:hover:not(:disabled) {
-  background: var(--za-hover);
-  color: var(--za-text);
+  background: var(--paper-hover);
+  color: var(--graphite-base);
 }
 
 .goal-runner-btn:disabled {
@@ -1688,9 +1688,9 @@
 }
 
 .goal-runner-btn--primary {
-  border-color: var(--za-primary-control-bg);
-  background: var(--za-primary-control-bg);
-  color: var(--za-primary-control-ink);
+  border-color: var(--chrome-keycap-bg);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
 }
 
 .goal-runner-btn--ghost {
@@ -1708,7 +1708,7 @@
   gap: 4px;
   list-style: none;
   cursor: pointer;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   user-select: none;
 }
 
@@ -1739,7 +1739,7 @@
 .goal-runner-explorer {
   padding: 6px 8px;
   border-radius: var(--ui-radius-control);
-  background: var(--za-hover);
+  background: var(--paper-hover);
 }
 
 .goal-runner-explorer-row {
@@ -1751,11 +1751,11 @@
 .goal-runner-explorer-status {
   flex: none;
   font-size: 11px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-runner-explorer-question {
-  color: var(--za-text);
+  color: var(--graphite-base);
   line-height: 1.4;
 }
 
@@ -1764,11 +1764,11 @@
   display: flex;
   gap: 10px;
   font-size: 11px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-runner-explorer-detail--error {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 .goal-runner-verifiers {
@@ -1777,7 +1777,7 @@
 
 .goal-runner-verifiers > summary {
   cursor: pointer;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   user-select: none;
 }
 
@@ -1793,7 +1793,7 @@
 .goal-runner-verifier {
   padding: 6px 8px;
   border-radius: var(--ui-radius-control);
-  background: var(--za-hover);
+  background: var(--paper-hover);
 }
 
 .goal-runner-verifier-row {
@@ -1805,20 +1805,20 @@
 .goal-runner-verifier-status {
   flex: none;
   font-size: 11px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-runner-verifier-status--passed {
-  color: var(--za-primary-control-bg);
+  color: var(--chrome-keycap-bg);
 }
 
 .goal-runner-verifier-status--failed,
 .goal-runner-verifier-status--blocked {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 .goal-runner-verifier-target {
-  color: var(--za-text);
+  color: var(--graphite-base);
   line-height: 1.4;
 }
 
@@ -1828,7 +1828,7 @@
   gap: 10px;
   flex-wrap: wrap;
   font-size: 11px;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .goal-runner-verifier-summary {
@@ -1893,9 +1893,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  border: 1px solid var(--za-line);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--za-surface-1);
+  background: var(--control-fill);
 }
 
 .chat-goal-approval-head {
@@ -1911,14 +1911,14 @@
   font-size: 12px;
   line-height: 1.5;
   border-radius: var(--ui-radius-pill);
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
+  background: var(--state-warn-soft);
+  color: var(--state-warn);
 }
 
 .chat-goal-approval-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--za-text);
+  color: var(--graphite-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1927,13 +1927,13 @@
 .chat-goal-approval-goal {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .chat-goal-next-guidance {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
 }
 
 .chat-goal-approval-actions {
@@ -1959,40 +1959,40 @@
 }
 
 .chat-goal-approval-btn--approve {
-  background: var(--za-primary-control-bg);
-  color: var(--za-primary-control-ink);
-  border-color: var(--za-primary-control-bg);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
+  border-color: var(--chrome-keycap-bg);
 }
 
 .chat-goal-approval-btn--approve:hover:not(:disabled) {
-  background: var(--za-active);
-  color: var(--za-text);
+  background: color-mix(in srgb, var(--chrome-keycap-bg) 88%, var(--chrome-keycap-fg));
+  color: var(--chrome-keycap-fg);
 }
 
 .chat-goal-approval-btn--adjust,
 .chat-goal-approval-btn--reject {
-  background: var(--za-surface-1);
-  color: var(--za-text-soft);
-  border-color: var(--za-line);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
+  border-color: var(--chrome-hairline);
 }
 
 .chat-goal-approval-btn--reject {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 
 .chat-goal-approval-btn--adjust:hover:not(:disabled),
 .chat-goal-approval-btn--reject:hover:not(:disabled) {
-  background: var(--za-hover);
+  background: var(--paper-hover);
 }
 
 .chat-goal-approval-error {
   font-size: 12px;
-  color: var(--za-warn, #c0392b);
+  color: var(--state-danger);
 }
 
 .chat-goal-approval-bounds {
   font-size: 12px;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .success-criteria-editor {
@@ -2004,7 +2004,7 @@
 .success-criteria-editor__label {
   font-size: 11px;
   font-weight: 600;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .success-criteria-editor__list {
@@ -2027,10 +2027,10 @@
   min-width: 0;
   box-sizing: border-box;
   padding: 6px 8px;
-  border: 1px solid var(--za-line);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control-compact);
-  background: var(--za-surface-0);
-  color: var(--za-text);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
   font-size: 13px;
 }
 
@@ -2038,7 +2038,7 @@
 .success-criteria-editor__add {
   border: 0;
   background: transparent;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   font-size: 13px;
   cursor: pointer;
 }
@@ -2056,11 +2056,11 @@
 
 .success-criteria-editor__add:hover:not(:disabled),
 .success-criteria-editor__remove:hover:not(:disabled) {
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .success-criteria-editor__error {
   margin: 0;
   font-size: 12px;
-  color: var(--za-warn, #c0392b);
+  color: var(--state-danger);
 }

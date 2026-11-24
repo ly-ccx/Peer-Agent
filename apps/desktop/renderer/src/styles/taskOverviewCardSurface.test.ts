@@ -16,14 +16,14 @@ test('keeps running and acceptance cards on the light shared surface', async () 
   const card = ruleBody(css, '.task-overview-work-item');
   const primaryButton = ruleBody(css, '.task-overview-btn--primary');
 
-  assert.match(card, /background:\s*var\(--za-surface-0\)/);
-  assert.match(card, /border-color:\s*var\(--za-line\)/);
-  assert.doesNotMatch(card, /var\(--za-surface-1\)/);
-  assert.doesNotMatch(card, /var\(--za-line-strong\)/);
+  assert.match(card, /background:\s*var\(--paper-raised\)/);
+  assert.match(card, /border-color:\s*var\(--chrome-hairline\)/);
+  assert.doesNotMatch(card, /var\(--control-fill\)/);
+  assert.doesNotMatch(card, /var\(--chrome-hairline-strong\)/);
   assert.doesNotMatch(card, /box-shadow\s*:/);
 
-  assert.match(primaryButton, /background:\s*var\(--za-text\)/);
-  assert.match(primaryButton, /color:\s*var\(--za-surface-0\)/);
+  assert.match(primaryButton, /background:\s*var\(--chrome-keycap-bg\)/);
+  assert.match(primaryButton, /color:\s*var\(--chrome-keycap-fg\)/);
 });
 
 test('keeps cancel-row runtime meta on the left and actions on the right', async () => {

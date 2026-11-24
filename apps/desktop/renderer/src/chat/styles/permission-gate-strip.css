@@ -4,10 +4,10 @@
     @apply flex flex-wrap items-center gap-2 px-3 py-2;
     max-width: var(--chat-content-max);
     margin: 0 auto 8px;
-    border: 1px solid var(--ui-border-subtle, var(--za-line));
+    border: 1px solid var(--ui-border-subtle);
     border-radius: var(--ui-radius-panel);
-    background: var(--za-control-fill);
-    color: var(--ink-base);
+    background: var(--control-fill);
+    color: var(--graphite-base);
     font-size: var(--ui-font-control, 13px);
     line-height: 1.4;
     --motion-enter-from: 8px;
@@ -17,10 +17,10 @@
   .permission-gate-strip .badge {
     flex-shrink: 0;
     padding: 1px 8px;
-    border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+    border: 1px solid var(--ui-border-subtle);
     border-radius: var(--ui-radius-pill);
     background: transparent;
-    color: var(--ink-soft);
+    color: var(--graphite-soft);
     font-family: var(--font-mono);
     font-size: var(--ui-font-caption, 11px);
     letter-spacing: 0;
@@ -30,51 +30,51 @@
   .permission-gate-strip--goal-scope,
   .permission-gate-strip--goal-irreversible,
   .permission-gate-strip--goal-high-risk {
-    background: var(--ui-surface-raised, var(--paper-sheet));
+    background: var(--ui-surface-raised);
   }
 
   .permission-gate-strip--goal-scope {
-    border-color: color-mix(in srgb, var(--state-confirm) 34%, var(--za-line));
+    border-color: color-mix(in srgb, var(--state-confirm) 34%, var(--chrome-hairline));
   }
 
   .permission-gate-strip--goal-irreversible {
-    border-color: color-mix(in srgb, var(--state-danger) 34%, var(--za-line));
+    border-color: color-mix(in srgb, var(--state-danger) 34%, var(--chrome-hairline));
   }
 
   .permission-gate-strip--goal-high-risk {
-    border-color: color-mix(in srgb, var(--state-warn) 34%, var(--za-line));
+    border-color: color-mix(in srgb, var(--state-warn) 34%, var(--chrome-hairline));
   }
 
   .permission-gate-strip--goal-scope .badge,
   .permission-gate-strip--goal-irreversible .badge,
   .permission-gate-strip--goal-high-risk .badge {
-    border-color: var(--ui-border-strong, var(--za-line-strong));
-    color: var(--ink-base);
+    border-color: var(--ui-border-strong);
+    color: var(--graphite-base);
   }
 
   .permission-gate-strip .capability {
     flex-shrink: 0;
-    color: var(--ink-base);
+    color: var(--graphite-base);
     font-family: var(--font-mono);
     font-size: var(--ui-font-control, 13px);
   }
 
   .permission-gate-strip .separator {
     flex-shrink: 0;
-    color: var(--ink-mute);
+    color: var(--graphite-mute);
   }
 
   .permission-gate-strip .preview {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap;
     flex: 1 1 0%;
-    color: var(--ink-soft);
+    color: var(--graphite-soft);
     font-family: var(--font-mono);
     font-size: var(--ui-font-meta, 12px);
   }
 
   .permission-gate-strip .more {
     flex-shrink: 0;
-    color: var(--ink-mute);
+    color: var(--graphite-mute);
     font-size: var(--ui-font-caption, 11px);
   }
 
@@ -86,10 +86,10 @@
 
   .permission-gate-strip button {
     padding: 4px 12px;
-    border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+    border: 1px solid var(--ui-border-subtle);
     border-radius: var(--ui-radius-control);
     background: transparent;
-    color: var(--ink-base);
+    color: var(--graphite-base);
     font-size: 12px;
     line-height: 1.4;
     cursor: pointer;
@@ -99,16 +99,16 @@
   }
 
   .permission-gate-strip button:hover {
-    background: var(--ui-surface-hover, var(--za-hover));
-    border-color: var(--ink-soft);
+    background: var(--ui-surface-hover);
+    border-color: var(--graphite-soft);
   }
 
   .permission-gate-strip button.allow {
-    background: var(--za-control-fill-hover);
+    background: var(--control-fill-hover);
   }
 
   .permission-gate-strip button.allow:hover {
-    background: var(--ui-surface-hover, var(--za-hover));
+    background: var(--ui-surface-hover);
   }
 
   .permission-gate-strip--goal-irreversible button.allow {
@@ -129,7 +129,7 @@
   }
 
   .permission-gate-strip button.allow-always {
-    border-color: var(--ui-selected-border, var(--za-accent, var(--azure-trace)));
+    border-color: var(--ui-selected-border);
   }
 
   /* 点击即时反馈：按钮按下微缩 */

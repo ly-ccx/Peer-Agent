@@ -3,15 +3,15 @@
 .app-layout {
   display: grid;
   /* 第 1 列：左栏当前宽度（可被 Resizer 拖拽时直接覆盖 --za-sidebar-current-width；
-     缺省回落到写死基准 token --za-sidebar-width）。 */
+     缺省回落到基准 token --chrome-sidebar-width）。 */
   grid-template-columns:
-    var(--za-sidebar-current-width, var(--za-sidebar-width))
+    var(--za-sidebar-current-width, var(--chrome-sidebar-width))
     minmax(0, 1fr)
     var(--za-workbench-current-width, 0px);
   height: 100vh;
   min-height: 0;
   /* 三栏共享同一层 Chrome 材质；直接子列只负责布局与内容表面。 */
-  background: var(--glass-chrome, var(--chrome-canvas, var(--za-app-bg)));
+  background: var(--glass-chrome, var(--chrome-canvas));
   -webkit-backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   backdrop-filter: blur(var(--blur-chrome, 24px)) saturate(1.2);
   transition: grid-template-columns var(--za-motion-medium, 200ms) var(--za-ease-out, ease);
@@ -84,7 +84,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .app-layout {
-    background: var(--za-app-bg);
+    background: var(--chrome-canvas);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -124,11 +124,11 @@
 .sidebar-resizer:hover::after,
 .sidebar-resizer:focus-visible::after,
 .sidebar-resizer[data-active='true']::after {
-  background: var(--za-accent, #4c8dff);
+  background: var(--azure-seal);
 }
 /* 阻尼区视觉提示：宽度已拖到最小展开宽度以下、即将触发收起。 */
 .sidebar-resizer[data-damping='true']::after {
-  background: var(--za-warning, #f0a020);
+  background: var(--state-warn);
 }
 
 /* 非 darwin 全屏没有系统交通灯,顶部预留只是死空白,收成 12px。
@@ -187,7 +187,7 @@
   border: none;
   border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--pa-text-secondary, var(--graphite-soft));
+  color: var(--graphite-soft);
   cursor: pointer;
   transition:
     background var(--za-motion-fast),
@@ -195,8 +195,8 @@
   -webkit-app-region: no-drag;
 }
 .sidebar-search-icon-btn:hover {
-  background: var(--za-sidebar-active-bg);
-  color: var(--graphite-ink, var(--graphite-base));
+  background: var(--chrome-sidebar-active-bg);
+  color: var(--graphite-base);
 }
 .sidebar-search-icon-btn:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
@@ -227,14 +227,14 @@
   white-space: nowrap;
 }
 .sidebar-runtime-badge.main {
-  color: #2f6f95;
-  border-color: rgba(47, 111, 149, 0.25);
-  background: rgba(47, 111, 149, 0.08);
+  color: var(--azure-seal);
+  border-color: color-mix(in srgb, var(--azure-seal) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 10%, transparent);
 }
 .sidebar-runtime-badge.lab {
-  color: #9a4c14;
-  border-color: rgba(154, 76, 20, 0.24);
-  background: rgba(154, 76, 20, 0.09);
+  color: var(--bot-tone-amber);
+  border-color: color-mix(in srgb, var(--bot-tone-amber) 28%, transparent);
+  background: color-mix(in srgb, var(--bot-tone-amber) 11%, transparent);
 }
 .sidebar-runtime-badge.packaged {
   color: var(--graphite-mute);
@@ -333,7 +333,7 @@
 }
 
 .sidebar-workspace-row:hover {
-  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
+  background: var(--chrome-sidebar-active-bg, var(--chrome-sunken));
 }
 
 .sidebar-workspace-node.is-active > .sidebar-workspace-row,
@@ -514,7 +514,7 @@
 
 .sidebar-workspace-task-more:hover {
   color: var(--graphite-base);
-  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
+  background: var(--chrome-sidebar-active-bg, var(--chrome-sunken));
 }
 
 .sidebar-workspace-tasks.channel-conversation-list .conversation-row {
@@ -571,8 +571,8 @@
   line-height: 1;
   padding: 3px 5px;
   border-radius: var(--ui-radius-control-compact);
-  border: 1px solid var(--za-line);
-  color: var(--pa-text-tertiary, var(--graphite-soft));
+  border: 1px solid var(--chrome-hairline);
+  color: var(--graphite-soft);
   flex: 0 0 auto;
   font-family: inherit;
   font-weight: 500;
@@ -586,7 +586,7 @@
   width: 100%;
   padding: 7px var(--space-3);
   /* Outline primary: faint border + transparent fill (not selected-row gray). */
-  border: 1px solid color-mix(in srgb, var(--za-line, var(--chrome-hairline)) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
   border-radius: var(--ui-radius-panel);
   background: transparent;
   color: var(--graphite-base);
@@ -601,9 +601,9 @@
   text-align: left;
 }
 .sidebar-new-chat:hover {
-  background: var(--za-sidebar-active-bg);
-  border-color: var(--za-line, var(--chrome-hairline));
-  color: var(--graphite-ink, var(--graphite-base));
+  background: var(--chrome-sidebar-active-bg);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-base);
 }
 .sidebar-return-chat {
   color: var(--graphite-soft);
@@ -649,12 +649,12 @@
 
 .sidebar-top .sidebar-automation-nav:hover,
 .sidebar-top .sidebar-nav-btn:hover {
-  background: var(--za-sidebar-active-bg, var(--chrome-sunken));
+  background: var(--chrome-sidebar-active-bg, var(--chrome-sunken));
 }
 .sidebar-top .sidebar-automation-nav.active,
 .sidebar-top .sidebar-nav-btn.active {
-  background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.05));
-  color: var(--graphite-ink, var(--graphite-base));
+  background: var(--chrome-sidebar-active-bg, rgba(0, 0, 0, 0.05));
+  color: var(--graphite-base);
 }
 
 
@@ -703,7 +703,7 @@
     color var(--za-motion-fast);
 }
 .channel-conversation-list .conversation-row:hover {
-  background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
+  background: var(--ui-surface-hover, var(--chrome-sidebar-active-bg));
   border-color: transparent;
   box-shadow: none;
   color: var(--graphite-base);
@@ -711,17 +711,17 @@
 /* 选中态：毛玻璃底 + 发丝边，不用投影抬升，也不画左侧印记。
    与 .sidebar-conversation-item.active 同一配方，侧栏内只有一套选中语言。 */
 .channel-conversation-list .conversation-row.active {
-  background: var(--za-sidebar-active-bg, var(--glass-chrome-hover));
+  background: var(--chrome-sidebar-active-bg, var(--glass-chrome-hover));
   -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
   backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
-  border-color: var(--za-sidebar-active-border, var(--chrome-hairline));
+  border-color: var(--chrome-sidebar-active-border, var(--chrome-hairline));
   color: var(--graphite-base);
   font-weight: 400;
 }
 /* 系统开启「减少透明度」时退回不透明选中底。 */
 @media (prefers-reduced-transparency: reduce) {
   .channel-conversation-list .conversation-row.active {
-    background: var(--ui-surface-selected, var(--za-sidebar-active-bg));
+    background: var(--ui-surface-selected, var(--chrome-sidebar-active-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none;
@@ -734,7 +734,7 @@
   color: var(--graphite-base);
 }
 .channel-conversation-list .conversation-row.is-pinned {
-  background: color-mix(in srgb, var(--za-sidebar-thread-active-bg) 45%, transparent);
+  background: color-mix(in srgb, var(--chrome-sidebar-active-bg) 45%, transparent);
 }
 .channel-conversation-list .conversation-row.is-dragging {
   opacity: 0.58;
@@ -820,7 +820,7 @@
   padding: 6px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: var(--za-surface-elevated, var(--za-sidebar-bg));
+  background: var(--paper-raised);
   box-shadow: var(--shadow-popover, 0 12px 32px rgb(0 0 0 / 18%));
   -webkit-app-region: no-drag;
 }
@@ -840,7 +840,7 @@
   text-align: left;
 }
 .sidebar-context-menu button:hover:not(:disabled) {
-  background: var(--za-sidebar-active-bg);
+  background: var(--chrome-sidebar-active-bg);
 }
 .sidebar-context-menu button:disabled {
   cursor: not-allowed;
@@ -889,24 +889,24 @@
     color var(--za-motion-fast);
 }
 .sidebar-conversation-item:hover {
-  background: var(--ui-surface-hover, var(--za-sidebar-active-bg));
+  background: var(--ui-surface-hover, var(--chrome-sidebar-active-bg));
   border-color: transparent;
   box-shadow: none;
   color: var(--graphite-base);
 }
 /* 云端式选中浮层：毛玻璃底 + 轻边，避免实心浅蓝灰底；不画左侧印记。 */
 .sidebar-conversation-item.active {
-  background: var(--glass-control, var(--ui-surface-selected, var(--za-sidebar-thread-active-bg)));
+  background: var(--glass-control, var(--ui-surface-selected, var(--chrome-sidebar-active-bg)));
   -webkit-backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
   backdrop-filter: blur(var(--blur-control, 16px)) saturate(1.15);
-  border-color: color-mix(in srgb, var(--chrome-hairline, var(--za-line)) 72%, transparent);
+  border-color: color-mix(in srgb, var(--chrome-hairline) 72%, transparent);
   color: var(--graphite-base);
   font-weight: 500;
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .sidebar-conversation-item.active {
-    background: var(--ui-surface-selected, var(--za-sidebar-thread-active-bg));
+    background: var(--ui-surface-selected, var(--chrome-sidebar-active-bg));
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow: none;
@@ -919,9 +919,9 @@
   max-width: 4.5rem;
   padding: 0 5px;
   border-radius: var(--ui-radius-pill);
-  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
-  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
-  color: var(--azure-seal, #4f7cff);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+  color: var(--azure-seal);
   font-size: 0.62rem;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -991,7 +991,7 @@
   border: 1px solid var(--azure-seal);
   border-radius: var(--ui-radius-control);
   outline: none;
-  background: var(--za-surface-glass);
+  background: var(--glass-control);
   color: var(--graphite-base);
   font: inherit;
   -webkit-app-region: no-drag;
@@ -1020,10 +1020,10 @@
   width: 9px;
   height: 9px;
   border-radius: var(--ui-radius-circle);
-  background: var(--state-success, #40a02b);
+  background: var(--state-success);
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--state-success, #40a02b) 22%, transparent),
-    0 0 8px color-mix(in srgb, var(--state-success, #40a02b) 48%, transparent);
+    0 0 0 2px color-mix(in srgb, var(--state-success) 22%, transparent),
+    0 0 8px color-mix(in srgb, var(--state-success) 48%, transparent);
 }
 .sidebar-conv-time {
   flex: 0 0 auto;
@@ -1101,8 +1101,8 @@
   white-space: nowrap;
   border-radius: var(--ui-radius-control);
   padding: 2px 7px;
-  background: var(--za-warn-soft);
-  color: var(--za-warn);
+  background: var(--state-warn-soft);
+  color: var(--state-warn);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.25;
@@ -1205,7 +1205,7 @@
   border-color: var(--state-danger);
 }
 .sidebar-conv-confirm .confirm-yes:hover {
-  background: var(--za-danger-soft);
+  background: var(--state-danger-soft);
 }
 .sidebar-conv-confirm .confirm-no {
   color: var(--graphite-mute);
@@ -1243,11 +1243,11 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 .sidebar-nav-btn:hover {
-  background: var(--za-sidebar-active-bg);
+  background: var(--chrome-sidebar-active-bg);
   color: var(--graphite-base);
 }
 .sidebar-nav-btn.active {
-  background: var(--za-sidebar-thread-active-bg);
+  background: var(--chrome-sidebar-active-bg);
   color: var(--graphite-base);
 }
 
@@ -1259,7 +1259,7 @@
   min-width: 260px;
   padding: 10px;
   border-radius: var(--ui-radius-panel);
-  background: var(--chrome-surface, #fff);
+  background: var(--paper-raised);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--chrome-hairline);
 }
@@ -1316,7 +1316,7 @@
 }
 
 .sidebar-project-popover-edit:hover {
-  background: var(--za-sidebar-active-bg);
+  background: var(--chrome-sidebar-active-bg);
 }
 
 .edit-project-dialog {
@@ -1467,6 +1467,6 @@
 }
 
 .edit-project-save {
-  background: var(--graphite-base, #111);
-  color: #fff;
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
 }

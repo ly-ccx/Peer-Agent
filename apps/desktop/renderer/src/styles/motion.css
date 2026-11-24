@@ -280,12 +280,12 @@
 @keyframes motion-halo {
   from {
     opacity: 0.9;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-halo-color, var(--cinnabar-seal)) 55%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--motion-halo-color, var(--azure-seal)) 55%, transparent);
   }
 
   to {
     opacity: 0;
-    box-shadow: 0 0 0 7px color-mix(in srgb, var(--motion-halo-color, var(--cinnabar-seal)) 0%, transparent);
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--motion-halo-color, var(--azure-seal)) 0%, transparent);
   }
 }
 
