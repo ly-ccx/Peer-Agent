@@ -2091,3 +2091,50 @@ test('reasoningEffortValues stays model-scoped across readAll/writeAll round tri
   const cleanedChannel = cleaned.channels.find((c) => c.id === created.groupId);
   assert.equal(cleanedChannel.reasoningEffortValues, undefined);
 }));
+
+test('refreshOAuthTokens syncs stale oauthExpires hints across the group without requiring Vault rewrite', async () => withStore(async ({
+  configFile,
+  credentialSecrets,
+}) => {
+  const store = createLlmConfigStore({ configFile });
+  const first = store.addProvider({
+    provider: 'openai',
+    channelId: 'grok',
+    authMethod: 'oauth_grok',
+    model: 'grok-4.7',
+  });
+  const second = store.addModel(first.groupId, { model: 'grok-4.7-build-fast' });
+  const expiredAt = Date.now() - 86_400_000;
+  const freshAt = Date.now() + 3_600_000;
+
+  // Persist stale expired hint on disk while Vault already holds fresh tokens (e.g. renewed by another host).
+  store.setOAuthTokens(first.id, {
+    access: 'old-access',
+    refresh: 'old-refresh',
+    expires: expiredAt,
+    scope: 'api:access',
+  });
+  credentialSecrets.set(modelOauthCredentialKey(first.groupId), JSON.stringify({
+    access: 'fresh-vault-access',
+    refresh: 'fresh-vault-refresh',
+    expires: freshAt,
+    scope: 'api:access',
+  }));
+
+  assert.equal(store.listProviders().find((p) => p.id === first.id)?.oauthStatus?.status, 'expired');
+  assert.equal(store.listProviders().find((p) => p.id === second.id)?.oauthStatus?.status, 'expired');
+
+  const cred = store.getCredential(first.id);
+  const renewed = await store.refreshOAuthTokens(first.id, cred.tokens, async () => {
+    throw new Error('should not hit network when Vault token is already fresh');
+  });
+  assert.equal(renewed.refreshed, false);
+  assert.equal(renewed.tokens.access, 'fresh-vault-access');
+
+  // Hints in llm-providers.json are now healed across all models in the group.
+  for (const item of store.listProviders()) {
+    assert.equal(item.oauthStatus?.status, 'connected');
+  }
+  const [persistedChannel] = readPersistedChannels(configFile);
+  assert.equal(persistedChannel.oauthExpires, freshAt);
+}));

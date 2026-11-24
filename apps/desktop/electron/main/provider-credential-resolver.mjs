@@ -96,17 +96,19 @@ export async function refreshExpiredOAuthProviders({
   if (!llmConfigStore?.listProviders) return { attempted: 0, refreshed: 0 };
 
   const providers = llmConfigStore.listProviders() || [];
-  const seenCredentialIds = new Set();
+  const seenCredentialKeys = new Set();
   const targets = [];
 
   for (const provider of providers) {
     if (!isOAuthAuthMethod(provider?.authMethod)) continue;
     if (provider?.oauthStatus?.status !== 'expired') continue;
+    const dedupeKey = provider.credentialId || provider.groupId || provider.id;
     const credentialId = provider.credentialId || provider.id;
-    if (!credentialId || seenCredentialIds.has(credentialId)) continue;
-    seenCredentialIds.add(credentialId);
+    if (!dedupeKey || !credentialId || seenCredentialKeys.has(dedupeKey)) continue;
+    seenCredentialKeys.add(dedupeKey);
     targets.push({
       id: provider.id,
+      groupId: provider.groupId,
       credentialId,
       authMethod: provider.authMethod,
     });
@@ -122,6 +124,15 @@ export async function refreshExpiredOAuthProviders({
         ensureFreshGeminiTokens,
         ensureFreshGrokAccessTokens,
       });
+      // Only broadcast a list refresh when the persisted oauthStatus actually left
+      // 'expired'; otherwise a stale hint would re-trigger list -> refresh in a loop.
+      if (resolveCredential === resolveProviderCredential) {
+        const latest = (llmConfigStore.listProviders() || []).find((item) => (
+          item.id === provider.id
+          || (provider.groupId && item.groupId === provider.groupId)
+        ));
+        if (latest?.oauthStatus?.status === 'expired') return;
+      }
       refreshed += 1;
     } catch {
       // 列表路径不得因单个渠道 refresh 失败而整页报错；UI 继续展示 expired。
