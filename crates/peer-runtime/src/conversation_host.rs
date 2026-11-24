@@ -669,6 +669,8 @@ impl NativeConversationRuntime {
             None,
             external,
             ExecutionSurface::Headless,
+            Vec::new(),
+            Vec::new(),
         )
         .await
     }
@@ -687,6 +689,32 @@ impl NativeConversationRuntime {
             None,
             external,
             ExecutionSurface::DelegatedWork,
+            Vec::new(),
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Run a delegated worker with host-mounted extra capability providers and
+    /// trusted context extensions (e.g. OpenUI interactive results catalog/provider).
+    pub async fn execute_delegated_with_extensions(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &NativeModel,
+        permission: &mut dyn PermissionInput,
+        external: &CancellationToken,
+        extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
+        context_extensions: Vec<Value>,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            None,
+            external,
+            ExecutionSurface::DelegatedWork,
+            extra_providers,
+            context_extensions,
         )
         .await
     }
@@ -706,6 +734,32 @@ impl NativeConversationRuntime {
             None,
             external,
             ExecutionSurface::DelegatedVerification,
+            Vec::new(),
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Run a delegated verifier with host-mounted read-only extra capability providers
+    /// and trusted context extensions (e.g. `inspect_interactive_result`).
+    pub async fn execute_verification_with_extensions(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &NativeModel,
+        permission: &mut dyn PermissionInput,
+        external: &CancellationToken,
+        extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
+        context_extensions: Vec<Value>,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            None,
+            external,
+            ExecutionSurface::DelegatedVerification,
+            extra_providers,
+            context_extensions,
         )
         .await
     }
@@ -725,6 +779,8 @@ impl NativeConversationRuntime {
             output,
             external,
             ExecutionSurface::Observed,
+            Vec::new(),
+            Vec::new(),
         )
         .await
     }
@@ -743,9 +799,12 @@ impl NativeConversationRuntime {
             output,
             external,
             ExecutionSurface::Interactive,
+            Vec::new(),
+            Vec::new(),
         )
         .await
     }
+    #[allow(clippy::too_many_arguments)]
     async fn execute_owned<'a>(
         &self,
         options: &ConversationOptions<'_>,
@@ -754,6 +813,8 @@ impl NativeConversationRuntime {
         output: Option<&'a mut dyn ConversationOutput>,
         external: &CancellationToken,
         surface: ExecutionSurface,
+        mut extra_providers: Vec<Box<dyn crate::providers::CapabilityProvider>>,
+        context_extensions: Vec<Value>,
     ) -> Result<ConversationOutcome, HostError> {
         let headless = matches!(surface, ExecutionSurface::Headless);
         let delegated = matches!(surface, ExecutionSurface::DelegatedWork);
@@ -916,6 +977,9 @@ impl NativeConversationRuntime {
             crate::providers::ShellHostMode::Conversation,
         )?;
         providers.add_ordinary_tools(options.mode, interactive_user_input);
+        for extra in extra_providers.drain(..) {
+            providers.register(extra);
+        }
         let mut delegated_allowlist = None;
         if delegated {
             let mut allowlist = options
@@ -1040,7 +1104,7 @@ impl NativeConversationRuntime {
             goal_hooks: None,
             runtime_reminders: Vec::new(),
             context_attachments: Vec::new(),
-            context_extensions: Vec::new(),
+            context_extensions,
             automation_policy: None,
         };
         let mut runner_stop = None;

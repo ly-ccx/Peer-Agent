@@ -2,13 +2,23 @@
 //! (`packages/runtime-node/src/project-agent/work-session-profile.mjs`,
 //! `verifier-report.mjs`, `verifier-lifecycle.mjs`, ADR 80 / ADR 88 / ADR 103).
 
-use crate::{BotCapabilityPolicy, ProjectError};
-use peer_protocol::LocalAccessLevel;
+use crate::{
+    BotCapabilityPolicy, INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL,
+    InteractiveContentBridge, ProjectError, WorkSessionInteractiveContext,
+    WorkSessionInteractiveProvider, interactive_context_extension,
+};
+use peer_protocol::{
+    LocalAccessLevel,
+    interactive_result::{
+        INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, INTERACTIVE_RESULT_PREFIX,
+        InteractiveOwner,
+    },
+};
 use peer_runtime::{
     CancellationToken,
     conversation_host::{ConversationAccess, ConversationOptions, NativeConversationRuntime},
     model::NativeModel,
-    providers::RuntimeMode,
+    providers::{CapabilityProvider, RuntimeMode},
     session_host::{LocalPermissionDecision, PermissionInput},
 };
 use peer_store::{EvidenceIndexStore, McpRegistryStore, SkillCatalog};
@@ -17,6 +27,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const MAX_VERIFIER_TEXT: usize = 100_000;
@@ -101,6 +112,12 @@ fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
         "local.web.fetch" | "web_fetch" | "web-fetch" | "web" | "fetch" => {
             vec!["local.web.fetch"]
         }
+        "local.interactive.publish" | "publish_interactive_result" => {
+            vec![INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_INSPECT_CAPABILITY]
+        }
+        "local.interactive.inspect" | "inspect_interactive_result" => {
+            vec![INTERACTIVE_INSPECT_CAPABILITY]
+        }
         _ => Vec::new(),
     }
 }
@@ -108,11 +125,21 @@ fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
 /// Computes the governed capability profile for a delegated work-session role
 /// (`"worker"`, `"explorer"`, `"verifier"`). Intersects requested capabilities
 /// against strict role ceilings and never admits control/delegation/write caps
-/// in read-only roles.
+/// in read-only roles (except the ADR 118 §9.1 internal interactive publication
+/// exception when `interactive_enabled` is true for `"worker"`).
 pub fn resolve_work_session_profile(
     plan: &Value,
     agent_kind: &str,
     workspace_access: LocalAccessLevel,
+) -> Option<WorkSessionProfile> {
+    resolve_work_session_profile_with_interactive(plan, agent_kind, workspace_access, false)
+}
+
+pub fn resolve_work_session_profile_with_interactive(
+    plan: &Value,
+    agent_kind: &str,
+    workspace_access: LocalAccessLevel,
+    interactive_enabled: bool,
 ) -> Option<WorkSessionProfile> {
     let origin = plan["delegationOrigin"].as_object()?;
     let read_only_origin = origin
@@ -126,6 +153,8 @@ pub fn resolve_work_session_profile(
     } else {
         &WORKER_CAPABILITY_CEILING
     };
+    let mut requested_interactive_publish = false;
+    let mut requested_interactive_inspect = false;
     let requested: Vec<String> = origin
         .get("requiredCapabilities")
         .and_then(Value::as_array)
@@ -134,7 +163,17 @@ pub fn resolve_work_session_profile(
         .filter_map(Value::as_str)
         .flat_map(expand_requested_capabilities)
         .filter(|c| !is_excluded_capability(c))
-        .filter(|c| ceiling.contains(c))
+        .filter(|c| {
+            if *c == INTERACTIVE_PUBLISH_CAPABILITY {
+                requested_interactive_publish = true;
+                return false;
+            }
+            if *c == INTERACTIVE_INSPECT_CAPABILITY {
+                requested_interactive_inspect = true;
+                return false;
+            }
+            ceiling.contains(c)
+        })
         .map(str::to_owned)
         .collect();
 
@@ -189,6 +228,38 @@ pub fn resolve_work_session_profile(
             }
         }
     }
+
+    // ADR 118 §9.1: When interactive results are enabled on Desktop, workers (including
+    // readOnly workers) receive `local.interactive.publish` + `local.interactive.inspect`,
+    // whereas verifiers receive `local.interactive.inspect` ONLY (never publish).
+    if interactive_enabled {
+        match agent_kind {
+            "worker" => {
+                if requested_interactive_publish || requested_interactive_inspect || !read_only {
+                    push_unique(
+                        INTERACTIVE_PUBLISH_CAPABILITY.to_owned(),
+                        &mut allowlist,
+                        &mut seen,
+                    );
+                    push_unique(
+                        INTERACTIVE_INSPECT_CAPABILITY.to_owned(),
+                        &mut allowlist,
+                        &mut seen,
+                    );
+                }
+            }
+            "verifier" | "visual_verifier" => {
+                push_unique(
+                    INTERACTIVE_INSPECT_CAPABILITY.to_owned(),
+                    &mut allowlist,
+                    &mut seen,
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let _ = (INTERACTIVE_PUBLISH_TOOL, INTERACTIVE_INSPECT_TOOL);
 
     Some(WorkSessionProfile {
         agent_kind: agent_kind.to_owned(),
@@ -729,6 +800,18 @@ fn build_verifier_prompt(
         format!("\nAdditional review question (within the existing criteria and read-only permissions): {text}\n")
     }).unwrap_or_default();
 
+    let interactive_hint = if allowed_refs
+        .iter()
+        .any(|r| r.starts_with(INTERACTIVE_RESULT_PREFIX))
+    {
+        "\nInteractive Results Verification:\n\
+         - Published interactive results (`interactive-result://<workspaceId>/<conversationId>/<resultId>/<sha256>`) are listed in `Known Worker Evidence Refs`.\n\
+         - Use `inspect_interactive_result` (`view: \"metadata\" | \"program\" | \"data\" | \"evaluate\"`) to verify the actual OpenUI program, bindings, and evaluated output rather than trusting worker prose.\n\
+         - Copy the exact `interactive-result://...` locator into `evidenceRefs` when passing.\n"
+    } else {
+        ""
+    };
+
     format!(
         "You are an independent read-only Verification Reviewer.\n\
          Verify the completed delegated session strictly against persisted disk state and indexed host Evidence.\n\
@@ -736,7 +819,7 @@ fn build_verifier_prompt(
          Verify changed workspace files and git state directly via git_query/read_file/search_files; do not waste turns guessing internal host storage directories.\n\n\
          Task Title: {title}\n\
          Goal / Brief: {goal}\n\
-         Success Criteria: {criteria_json}\n{focus}\
+         Success Criteria: {criteria_json}\n{focus}{interactive_hint}\
          Known Worker Evidence Refs: {known_json}\n\
          Worker Output Summary:\n{worker_output}\n\n\
          Evidence citation rules:\n\
@@ -830,13 +913,47 @@ pub(crate) async fn run_independent_verifier_with_focus(
     verifier_model: &NativeModel,
     cancel: &CancellationToken,
 ) -> Result<VerifierOutcome, ProjectError> {
+    run_independent_verifier_with_interactive(
+        data_home,
+        plan,
+        worker_evidence_refs,
+        focus,
+        verifier_model,
+        None,
+        false,
+        cancel,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_independent_verifier_with_interactive(
+    data_home: &Path,
+    plan: &Value,
+    worker_evidence_refs: &HashSet<String>,
+    focus: Option<&str>,
+    verifier_model: &NativeModel,
+    interactive_bridge: Option<Arc<dyn InteractiveContentBridge>>,
+    interactive_enabled: bool,
+    cancel: &CancellationToken,
+) -> Result<VerifierOutcome, ProjectError> {
     let target_ws = plan["targetWorkspacePath"]
         .as_str()
         .or_else(|| plan["originWorkspacePath"].as_str())
         .map(PathBuf::from)
         .ok_or_else(|| ProjectError::code("WORKSPACE_NOT_FOUND"))?;
-    let profile = resolve_work_session_profile(plan, "verifier", LocalAccessLevel::SessionLocal)
-        .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
+    let has_interactive_refs = worker_evidence_refs
+        .iter()
+        .any(|r| r.starts_with(INTERACTIVE_RESULT_PREFIX));
+    let mount_interactive =
+        interactive_bridge.is_some() && (interactive_enabled || has_interactive_refs);
+    let profile = resolve_work_session_profile_with_interactive(
+        plan,
+        "verifier",
+        LocalAccessLevel::SessionLocal,
+        mount_interactive,
+    )
+    .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
 
     let worker_model_id = plan["delegationOrigin"]["modelSelection"]["worker"]["modelId"]
         .as_str()
@@ -877,7 +994,43 @@ pub(crate) async fn run_independent_verifier_with_focus(
             Some(profile.allowlist.as_slice())
         };
         let max_turns = if is_repair { Some(1) } else { Some(12) };
-        let mut conv_out = Box::pin(runtime.execute_verification(
+        let mut extra_providers: Vec<Box<dyn CapabilityProvider>> = Vec::new();
+        let mut context_extensions: Vec<Value> = Vec::new();
+        if !is_repair
+            && mount_interactive
+            && let Some(ref bridge) = interactive_bridge
+            && let (Some(ws_id), Some(parent_cid), Some(plan_id), Some(sess_id), Some(plan_cid)) = (
+                plan["delegationOrigin"]["workspaceId"].as_str(),
+                plan["delegationOrigin"]["parentConversationId"].as_str(),
+                plan["planId"].as_str(),
+                plan["delegationOrigin"]["sessionId"].as_str(),
+                plan["conversationId"].as_str(),
+            )
+        {
+            let epoch = plan["delegationOrigin"]["executionGeneration"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(plan_id)
+                .to_owned();
+            extra_providers.push(Box::new(WorkSessionInteractiveProvider::new(
+                WorkSessionInteractiveContext {
+                    data_home: data_home.to_path_buf(),
+                    owner: InteractiveOwner {
+                        workspace_id: ws_id.to_owned(),
+                        conversation_id: parent_cid.to_owned(),
+                    },
+                    plan_id: plan_id.to_owned(),
+                    session_id: sess_id.to_owned(),
+                    plan_conversation_id: plan_cid.to_owned(),
+                    execution_epoch: epoch,
+                    role: "verifier".to_owned(),
+                    can_publish: false,
+                    bridge: Arc::clone(bridge),
+                },
+            )));
+            context_extensions.push(interactive_context_extension(Some(bridge.as_ref()), false));
+        }
+        let mut conv_out = Box::pin(runtime.execute_verification_with_extensions(
             &ConversationOptions {
                 workspace: &target_ws,
                 conversation_id: reuse_conv_id,
@@ -894,6 +1047,8 @@ pub(crate) async fn run_independent_verifier_with_focus(
             verifier_model,
             &mut deny_perm,
             cancel,
+            extra_providers,
+            context_extensions,
         ))
         .await?;
 

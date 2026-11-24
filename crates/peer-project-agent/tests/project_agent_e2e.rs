@@ -4886,9 +4886,74 @@ async fn conversation_search_index_fts5_trigram_chinese_and_redaction_with_memor
 
 #[tokio::test]
 async fn interactive_result_slash_result_lookup_from_task_evidence_refs() {
+    struct StubBridge;
+    impl peer_project_agent::InteractiveContentBridge for StubBridge {
+        fn validate_draft(
+            &self,
+            draft: Value,
+            bindings: Value,
+            _cancel: CancellationToken,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<Value, peer_project_agent::InteractiveValidationError>,
+                    > + Send,
+            >,
+        > {
+            Box::pin(async move {
+                Ok(json!({
+                    "schemaVersion": 1,
+                    "libraryVersion": "peer-basic-1",
+                    "title": draft["title"],
+                    "textFallback": draft["textFallback"],
+                    "program": draft["program"],
+                    "specHash": "sha256:37505cc28779ca4e18facf09edb86db7a01a64d58b0acc22841b168707dc3d24",
+                    "stateSchemaHash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+                    "stateSchema": {},
+                    "initialValues": {},
+                    "bindings": bindings,
+                }))
+            })
+        }
+
+        fn evaluate_content(
+            &self,
+            _content: Value,
+            _values: Value,
+            _cancel: CancellationToken,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<Value, peer_project_agent::InteractiveValidationError>,
+                    > + Send,
+            >,
+        > {
+            Box::pin(async move {
+                Ok(json!({ "projection": { "text": "metric=99", "truncated": false } }))
+            })
+        }
+
+        fn catalog_prompt(&self) -> Option<String> {
+            Some("Peer interactive catalog stub".to_owned())
+        }
+    }
+
     let data_dir = tempdir().unwrap();
     let ws = tempdir().unwrap();
-    let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", Some(1)).unwrap();
+    fs::write(
+        data_dir.path().join("settings.json"),
+        json!({ "schemaVersion": 3, "projectAgent": { "shell": "bots", "interactiveResults": true } })
+            .to_string(),
+    )
+    .unwrap();
+    let host = NativeProjectHost::new_for_surface(
+        data_dir.path(),
+        peer_protocol::HostSurface::Desktop,
+        "0.1.0-test",
+        Some(1),
+    )
+    .unwrap();
+    host.set_interactive_bridge(Some(std::sync::Arc::new(StubBridge)));
     let (entry, profile) = host
         .bind_workspace(ws.path(), Some("TaskResultBot"))
         .unwrap();
@@ -4915,7 +4980,7 @@ async fn interactive_result_slash_result_lookup_from_task_evidence_refs() {
                 parent_conversation_id: conv_id.clone(),
                 anchor_message_ids: vec![input_message_id("in-task-ir-1").unwrap()],
                 input_id: "in-task-ir-1".into(),
-                surface: "tui".into(),
+                surface: "desktop".into(),
                 title: "Build Interactive Report".into(),
                 brief: "Generate fixed interactive summary".into(),
                 kind: "research".into(),

@@ -1,5 +1,5 @@
 use super::*;
-use crate::verifier::{VerifierOutcome, run_independent_verifier_with_focus};
+use crate::verifier::{VerifierOutcome, run_independent_verifier_with_interactive};
 
 const MAX_VERIFIER_RUNS: usize = 3;
 const VERIFIER_TIMEOUT: Duration = Duration::from_secs(300);
@@ -53,11 +53,13 @@ impl SessionSupervisor {
         cancel: &CancellationToken,
     ) {
         let child = cancel.child_token();
+        let interactive_bridge = self.interactive_bridge();
+        let interactive_enabled = self.is_interactive_publishing_available();
         let result = tokio::select! {
             biased;
             _ = cancel.cancelled() => Err(ProjectError::code("CANCELLED")),
-            result = tokio::time::timeout(VERIFIER_TIMEOUT, Box::pin(run_independent_verifier_with_focus(
-                &self.data_home, updated, ev_refs, focus, model, &child,
+            result = tokio::time::timeout(VERIFIER_TIMEOUT, Box::pin(run_independent_verifier_with_interactive(
+                &self.data_home, updated, ev_refs, focus, model, interactive_bridge, interactive_enabled, &child,
             ))) => result.unwrap_or_else(|_| Err(ProjectError::code("verifier_timeout"))),
         };
         child.cancel();

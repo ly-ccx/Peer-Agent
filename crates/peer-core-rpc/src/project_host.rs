@@ -12,8 +12,9 @@ use crate::{
     server::LocalBackgroundSpawner,
 };
 use peer_project_agent::{
-    BotProfile, LeaseStatus, NativeProjectHost, ProjectAgentActivity, ProjectError,
-    is_valid_workspace_id, needs_recovery_attention, now_iso, now_iso_offset_ms, sha256_json,
+    BotProfile, InteractiveContentBridge, InteractiveValidationError, LeaseStatus,
+    NativeProjectHost, ProjectAgentActivity, ProjectError, is_valid_workspace_id,
+    needs_recovery_attention, now_iso, now_iso_offset_ms, sha256_json,
 };
 use peer_protocol::{HostSurface, approval_args_digest};
 use peer_runtime::{
@@ -31,7 +32,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -42,6 +43,95 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const MAINTENANCE_TICKS: u64 = 12; // 12 * 5s = 60s
 const DEFAULT_PERMISSION_WAIT: Duration = Duration::from_secs(300);
 const HOST_LEASE_YIELD_COOLDOWN: Duration = Duration::from_secs(20);
+const INTERACTIVE_VALIDATION_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct RpcInteractiveContentBridge {
+    peer: RpcPeer,
+    catalog_prompt: Arc<RwLock<Option<String>>>,
+}
+
+impl RpcInteractiveContentBridge {
+    async fn call_validate(
+        peer: RpcPeer,
+        params: Value,
+        cancel: CancellationToken,
+    ) -> Result<Value, InteractiveValidationError> {
+        match peer
+            .call_host_with_timeout(
+                "host.interactive.validate",
+                params,
+                INTERACTIVE_VALIDATION_RPC_TIMEOUT,
+                &cancel,
+            )
+            .await
+        {
+            Ok(val) => {
+                if val.get("ok").and_then(Value::as_bool) == Some(true) {
+                    Ok(val["result"].clone())
+                } else {
+                    Err(InteractiveValidationError::new(
+                        val.get("code")
+                            .and_then(Value::as_str)
+                            .unwrap_or("interactive_validation_failed"),
+                        val.get("path").and_then(Value::as_str).unwrap_or(""),
+                        val.get("details").and_then(Value::as_str).unwrap_or(""),
+                    ))
+                }
+            }
+            Err(rpc_err) => Err(InteractiveValidationError::new(
+                if cancel.is_cancelled() {
+                    "interactive_cancelled"
+                } else {
+                    "interactive_worker_failed"
+                },
+                "",
+                rpc_err.message,
+            )),
+        }
+    }
+}
+
+impl InteractiveContentBridge for RpcInteractiveContentBridge {
+    fn validate_draft(
+        &self,
+        draft: Value,
+        bindings: Value,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, InteractiveValidationError>> + Send>> {
+        let peer = self.peer.clone();
+        Box::pin(Self::call_validate(
+            peer,
+            json!({
+                "operation": "validate",
+                "draft": draft,
+                "bindings": bindings,
+            }),
+            cancel,
+        ))
+    }
+
+    fn evaluate_content(
+        &self,
+        content: Value,
+        values: Value,
+        cancel: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, InteractiveValidationError>> + Send>> {
+        let peer = self.peer.clone();
+        Box::pin(Self::call_validate(
+            peer,
+            json!({
+                "operation": "evaluate",
+                "content": content,
+                "values": values,
+            }),
+            cancel,
+        ))
+    }
+
+    fn catalog_prompt(&self) -> Option<String> {
+        self.catalog_prompt.read().ok().and_then(|g| g.clone())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct HostRuntimeSettings {
@@ -95,6 +185,7 @@ pub struct ProjectHostRuntime {
     active_wakes: Mutex<HashSet<String>>,
     yielded_until: Mutex<HashMap<String, tokio::time::Instant>>,
     loop_cancel: Mutex<Option<CancellationToken>>,
+    interactive_catalog: Arc<RwLock<Option<String>>>,
 }
 
 impl ProjectHostRuntime {
@@ -111,6 +202,11 @@ impl ProjectHostRuntime {
             app_version,
             None,
         )?);
+        let interactive_catalog = Arc::new(RwLock::new(None));
+        host.set_interactive_bridge(Some(Arc::new(RpcInteractiveContentBridge {
+            peer: peer.clone(),
+            catalog_prompt: Arc::clone(&interactive_catalog),
+        })));
         Ok(Self {
             data_home,
             host,
@@ -129,6 +225,7 @@ impl ProjectHostRuntime {
             active_wakes: Mutex::new(HashSet::new()),
             yielded_until: Mutex::new(HashMap::new()),
             loop_cancel: Mutex::new(None),
+            interactive_catalog,
         })
     }
 
@@ -284,6 +381,17 @@ impl ProjectHostRuntime {
                 st.heartbeat_interval_ms = hb.clamp(50, 60_000);
             }
         }
+        if let Some(ir_enabled) = params.get("interactiveResults").and_then(Value::as_bool) {
+            self.host.set_interactive_enabled_override(Some(ir_enabled));
+        }
+        if let Some(ir_ctx) = params
+            .get("interactiveContext")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            && let Ok(mut guard) = self.interactive_catalog.write()
+        {
+            *guard = Some(ir_ctx.to_owned());
+        }
 
         if let Some(workspaces) = params.get("workspaces").and_then(Value::as_array) {
             for item in workspaces {
@@ -397,6 +505,7 @@ impl ProjectHostRuntime {
                 HostSurface::Desktop => "desktop",
                 HostSurface::Tui => "tui",
             },
+            "interactiveResultsEnabled": self.host.is_interactive_publishing_available(),
             "ownedWorkspaces": owned,
             "recoveryStatus": rec_out,
             "activities": activities,
@@ -1050,9 +1159,12 @@ impl ProjectHostRuntime {
             .load_model_for_role(workspace_id, "session_worker", cancel)
             .await
         {
+            let provider = pid.unwrap_or_else(|| m.provider().to_owned());
             return json!({
-                "modelProviderId": pid.unwrap_or_else(|| m.provider().to_owned()),
+                "providerId": provider,
+                "modelProviderId": provider,
                 "modelId": m.model_id(),
+                "family": m.provider(),
                 "reasoningEffort": "default",
             });
         }
