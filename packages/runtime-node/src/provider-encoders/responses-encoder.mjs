@@ -13,6 +13,8 @@ import { normalizeOpenAIMessages } from './message-normalizer.mjs';
 // Peer Agent 的 off 不发 reasoning；其余档位按目标模型能力与 provider wire 契约透传。
 // medium 是 Grok 4.5 等渠道的原生档位，必须直通。
 const REASONING_EFFORT = {
+  none: 'none',
+  minimal: 'minimal',
   low: 'low',
   medium: 'medium',
   default: 'medium',

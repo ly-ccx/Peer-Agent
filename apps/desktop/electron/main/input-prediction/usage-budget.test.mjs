@@ -11,7 +11,7 @@ function setup(t) {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'requests.jsonl'), log = createUsageRequestLog({ logFile: file });
   const budget = createInputPredictionBudget({ log });
-  const input = { id: 'untrusted-repeated-id', tokens: 4224,
+  const input = { id: 'untrusted-repeated-id', tokens: 4352,
     workspaceId: 'w', conversationId: 'c', settings: { dailyRequestLimit: 100, dailyTokenLimit: 100_000 },
     route: { provider: { id: 'p', model: 'fast-model', inputPrice: 1, outputPrice: 1 }, routing: {} } };
   return { directory, file, log, budget, input };
@@ -19,7 +19,7 @@ function setup(t) {
 
 test('durable reservations survive restart and settlements count each prediction only once', t => {
   const f = setup(t), reservation = f.budget.reserve(f.input);
-  assert.ok(reservation); assert.equal(f.budget.summary().tokens, 4224);
+  assert.ok(reservation); assert.equal(f.budget.summary().tokens, 4352);
   const restarted = createInputPredictionBudget({ log: createUsageRequestLog({ logFile: f.file }) });
   assert.equal(restarted.summary().requests, 1); assert.equal(restarted.summary().estimated, true);
   f.budget.settle(reservation, { inputTokens: 20, outputTokens: 10 });
@@ -31,9 +31,9 @@ test('durable reservations survive restart and settlements count each prediction
 test('cancelled or missing usage stays conservative; observed partial usage may only raise the estimate', t => {
   const f = setup(t), reservation = f.budget.reserve(f.input);
   f.budget.settle(reservation, { inputTokens: 8, outputTokens: 0 }, { complete: false });
-  assert.equal(f.budget.summary().tokens, 4224); assert.equal(f.budget.summary().estimated, true);
-  f.budget.settle(reservation, { inputTokens: 6000, outputTokens: 200 }, { complete: false });
-  assert.equal(f.budget.summary().tokens, 6200);
+  assert.equal(f.budget.summary().tokens, 4352); assert.equal(f.budget.summary().estimated, true);
+  f.budget.settle(reservation, { inputTokens: 6000, outputTokens: 300 }, { complete: false });
+  assert.equal(f.budget.summary().tokens, 6300);
 });
 
 test('request ids cannot reset counters; caps aggregate across workspaces and reject zero or unknown spend', t => {

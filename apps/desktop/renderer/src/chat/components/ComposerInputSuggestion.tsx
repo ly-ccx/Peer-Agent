@@ -30,10 +30,43 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
         textIndent: style.textIndent, textAlign: style.textAlign, tabSize: style.tabSize,
         overflowWrap: style.overflowWrap, wordBreak: style.wordBreak, direction: style.direction });
       overlay.scrollTop = node.scrollTop; overlay.scrollLeft = node.scrollLeft;
-      const range = document.createRange(); range.selectNodeContents(suffix.current);
-      const rects = [...range.getClientRects()];
-      const inside = rects.length > 0 && rects.every(rect => rect.top >= field.top - 1 && rect.bottom <= field.bottom + 1
+      const suffixNode = suffix.current;
+      const fullText = candidate.insertionText;
+      const fitsInside = (rects: readonly DOMRect[]) => rects.length > 0 && rects.every(rect =>
+        rect.top >= field.top - 1 && rect.bottom <= field.bottom + 1
         && rect.left >= field.left - 1 && rect.right <= field.right + 1);
+      const measureRects = (value: string) => {
+        suffixNode.textContent = value;
+        const range = document.createRange();
+        range.selectNodeContents(suffixNode);
+        return [...range.getClientRects()];
+      };
+      const fullRects = measureRects(fullText);
+      let inside = fitsInside(fullRects);
+      // When the composer starts at single-line height, a longer suggestion can wrap past field.bottom.
+      // Clip the visual ghost preview with an ellipsis so the suggestion and Tab affordance remain usable
+      // while accepting still inserts the full candidate.insertionText.
+      if (!inside && fullRects.length > 0
+        && fullRects[0].top >= field.top - 1 && fullRects[0].bottom <= field.bottom + 1
+        && fullRects[0].left >= field.left - 1) {
+        const chars = Array.from(fullText);
+        let lo = 1, hi = chars.length - 1, best = 0;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (fitsInside(measureRects(`${chars.slice(0, mid).join('')}…`))) {
+            best = mid;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
+        }
+        if (best > 0) {
+          suffixNode.textContent = `${chars.slice(0, best).join('')}…`;
+          inside = true;
+        } else {
+          suffixNode.textContent = fullText;
+        }
+      }
       overlay.style.visibility = inside ? 'visible' : 'hidden';
       prediction.markPresented(inside); setFits(inside);
     };

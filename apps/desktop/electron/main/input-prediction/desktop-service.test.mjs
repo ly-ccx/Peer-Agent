@@ -89,3 +89,41 @@ test('the real ConversationChangeEvent changeType retires a candidate before acc
   f.publish({ conversationId: 'c', changeType: 'messages-updated', revision: 'new-revision' });
   assert.equal((await f.service.validate({ ...f.request, candidateId: result.candidate.candidateId }, f.sender)).kind, 'stale');
 });
+
+test('reasoning-capable models disable thinking (reasoning_effort=none) and handle long Chinese threads + fenced JSON', async t => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'peer-prediction-reasoning-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const sender = new EventEmitter(); sender.id = 9;
+  const settings = { workspaces: [{ id: 'w', path: directory }],
+    inputPrediction: { enabled: true, continuationEnabled: true },
+    modelRouting: { roles: { input_predictor: { mode: 'fixed', modelProviderId: 'deepseek-flash' } } } };
+  const meta = { id: 'c', role: 'project_agent', workspacePath: directory, contentRevision: 1 };
+  const history = { messages: [
+    { id: 'u1', role: 'user', kind: 'user_input', content: '查一下为什么输入建议没有生效。' },
+    { id: 'a1', role: 'assistant', kind: 'agent_reply', content: '详细排查记录：' + '中文分析内容。'.repeat(800) + '要不要一起把这 4 个问题修完？' },
+  ] };
+  const bodies = [];
+  const bot = { ok: true, path: directory, profile: { agentConversationId: 'c' }, item: { state: { needsYou: 0 } } };
+  const service = createDesktopInputPrediction({ getSettings: () => settings,
+    listModels: () => [{ id: 'deepseek-flash', model: 'deepseek-v4.1-flash', provider: 'openai', baseUrl: 'http://127.0.0.1:1/v1',
+      enabled: true, apiKeyConfigured: true, supportsReasoning: true,
+      reasoningEffortValues: ['none', 'minimal', 'low', 'medium', 'high'], contextWindow: 1000000 }],
+    conversationStore: { listConversations: () => [meta], getPersistedConversationHistory: () => history, subscribeChanges: () => () => {} },
+    getProjectAgent: () => ({ projectAccess: { directory: { get: () => bot } } }),
+    llmConfigStore: { getDecryptedApiKey: () => 'fixture-key' },
+    trustedWindows: { getRole: value => value === sender ? 'main' : null },
+    usageLog: createUsageRequestLog({ logFile: path.join(directory, 'usage.jsonl') }),
+    fetchImpl: async (_url, init) => {
+      bodies.push(JSON.parse(init.body));
+      const fenced = '```json\n{"kind":"next_turn","text":"一起修完并提 PR。"}\n```';
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: fenced } }], usage: { prompt_tokens: 180, completion_tokens: 18 } })}\n\ndata: [DONE]\n\n`);
+    },
+  });
+  t.after(service.dispose);
+  const result = await service.request({ requestId: 'r-long', composerInstanceId: 'i', workspaceId: 'w', conversationId: 'c',
+    surface: 'desktop_bot', mode: 'next_turn', draftVersion: 1, draftText: '', selectionStart: 0, selectionEnd: 0 }, sender);
+  assert.equal(result.kind, 'candidate');
+  assert.equal(result.candidate.insertionText, '一起修完并提 PR。');
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].reasoning_effort, 'none', 'reasoning models supporting none must explicitly disable thinking');
+});
