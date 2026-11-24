@@ -87,7 +87,7 @@ test('brand startup uses bouncy kitten silhouette entrance and cutout perspectiv
 
   // 使用 Frost 语义 token，无流体泼墨引擎
   assert.match(shellCss, /fill:\s*var\(--graphite-base\)/);
-  assert.match(shellCss, /fill:\s*var\(--za-app-bg\)/);
+  assert.match(shellCss, /fill:\s*var\(--chrome-canvas\)/);
   assert.doesNotMatch(loader, /getContext\('2d'/);
   assert.doesNotMatch(loader, /startInkWash/);
   assert.doesNotMatch(shellCss, /brand-startup-loader__ink-canvas/);

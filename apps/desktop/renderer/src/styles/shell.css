@@ -341,11 +341,11 @@
   }
 
   .brand-startup-loader__scrim {
-    fill: var(--za-app-bg);
+    fill: var(--chrome-canvas);
   }
 
   .brand-startup-loader__portal-veil {
-    fill: var(--za-app-bg);
+    fill: var(--chrome-canvas);
   }
 
   .brand-startup-loader__portal-rim {
