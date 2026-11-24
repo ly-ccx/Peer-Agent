@@ -1095,11 +1095,17 @@ impl ServerContext {
             "project.bot.hostStatus" => project_bot_live::handle_host_status(self, params),
             "project.bot.create" => project_bot_live::handle_create(self, params).await,
             "project.bot.delete" => project_bot_live::handle_delete(self, params).await,
+            "project.bot.rebindFolder" => {
+                project_bot_live::handle_rebind_folder(self, params).await
+            }
             "project.bot.submitInput" => project_bot_live::handle_submit_input(self, params).await,
             "project.bot.stopResponse" => project_bot_live::handle_stop_response(self, params),
             "project.bot.cancelSession" => project_bot_live::handle_cancel_session(self, params),
             "project.bot.resumeSession" => {
                 project_bot_live::handle_resume_session(self, params).await
+            }
+            "project.bot.verifySession" => {
+                project_bot_live::handle_verify_session(self, params).await
             }
             "project.bot.decideObligation" => {
                 project_bot_live::handle_decide_obligation(self, params).await
@@ -1162,7 +1168,16 @@ where
     let loop_result: io::Result<()> = loop {
         while tasks.try_join_next().is_some() {}
 
-        let next = line_reader.next_line(&shutdown).await;
+        let next = tokio::select! {
+            biased;
+            _ = client_writer.closed() => {
+                break Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "JSON-RPC output writer closed",
+                ));
+            }
+            line = line_reader.next_line(&shutdown) => line,
+        };
         let frame = match next {
             Ok(Some(frame)) => frame,
             Ok(None) => break Ok(()),
@@ -1331,8 +1346,13 @@ where
                     let method_owned = method.to_owned();
                     tasks.spawn(async move {
                         let res = ctx.handle_request(&method_owned, params).await;
-                        let response = format_reply(id, res);
-                        let _ = w.send_value(&response).await;
+                        let response = format_reply(id.clone(), res);
+                        if let Err(err) = w.send_value(&response).await
+                            && err.kind() == io::ErrorKind::InvalidData
+                        {
+                            let fallback = RpcError::internal_error(err.to_string()).to_response(id);
+                            let _ = w.send_value(&fallback).await;
+                        }
                     });
                 }
             },

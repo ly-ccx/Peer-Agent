@@ -179,6 +179,7 @@ export function createPeerCoreClient(options = {}) {
   let registeredExternalCapabilities = [];
   let restartCount = 0;
   let exitWaiters = [];
+  let healthProbeGeneration = null;
 
   const pending = new Map();
 
@@ -258,12 +259,56 @@ export function createPeerCoreClient(options = {}) {
     });
   }
 
-  function sendRequestOnChannel(targetChannel, method, params = {}, { timeoutMs = requestTimeoutMs } = {}) {
+  function probeDaemonChannelHealth(targetChannel) {
+    if (
+      !targetChannel
+      || targetChannel.kind !== 'daemon'
+      || targetChannel !== channel
+      || state !== 'ready'
+      || healthProbeGeneration === targetChannel.generation
+    ) {
+      return;
+    }
+    healthProbeGeneration = targetChannel.generation;
+    sendRequestOnChannel(targetChannel, 'core.ping', {}, { timeoutMs: 2_500, skipHealthProbe: true })
+      .catch(() => {
+        if (targetChannel !== channel || state === 'disposing' || state === 'disposed') {
+          return;
+        }
+        logger?.warn?.('[peer-core] daemon socket unresponsive after RPC timeout, resetting connection');
+        try {
+          targetChannel.socket?.destroy(new Error('Peer Core daemon socket unresponsive after RPC timeout'));
+        } catch {
+          // Ignore socket destroy failures.
+        }
+      })
+      .finally(() => {
+        if (healthProbeGeneration === targetChannel.generation) {
+          healthProbeGeneration = null;
+        }
+      });
+  }
+
+  function sendRequestOnChannel(
+    targetChannel,
+    method,
+    params = {},
+    { timeoutMs = requestTimeoutMs, skipHealthProbe = false } = {},
+  ) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`Peer Core RPC timeout for ${method} (${timeoutMs}ms)`));
+        if (
+          !skipHealthProbe
+          && targetChannel?.kind === 'daemon'
+          && method !== 'core.ping'
+          && method !== 'core.initialize'
+          && method !== 'core.shutdown'
+        ) {
+          probeDaemonChannelHealth(targetChannel);
+        }
       }, timeoutMs);
       timer.unref?.();
 

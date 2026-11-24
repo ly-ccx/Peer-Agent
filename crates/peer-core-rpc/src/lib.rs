@@ -408,4 +408,98 @@ mod tests {
         drop(client);
         server_handle.await.expect("join").expect("clean exit");
     }
+
+    struct FailAfterOneWrite {
+        writes: usize,
+        sink: tokio::io::DuplexStream,
+    }
+
+    impl tokio::io::AsyncWrite for FailAfterOneWrite {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            if self.writes >= 1 {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "simulated writer failure",
+                )));
+            }
+            self.writes += 1;
+            std::pin::Pin::new(&mut self.sink).poll_write(cx, buf)
+        }
+
+        fn poll_flush(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.sink).poll_flush(cx)
+        }
+
+        fn poll_shutdown(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.sink).poll_shutdown(cx)
+        }
+    }
+
+    #[tokio::test]
+    async fn serve_connection_exits_when_writer_fails_while_reader_open() {
+        let (client_write, server_read) = tokio::io::duplex(64 * 1024);
+        let (server_write_sink, _client_read) = tokio::io::duplex(64 * 1024);
+        let flaky_writer = FailAfterOneWrite {
+            writes: 0,
+            sink: server_write_sink,
+        };
+        let shutdown = CancellationToken::new();
+        let config = CoreServerConfig {
+            reverse_request_timeout: Duration::from_secs(5),
+            ..CoreServerConfig::new("0.1.0-test", tempfile::tempdir().expect("tempdir").keep())
+        };
+        let engine = CoreEngine::new(config, shutdown, None).expect("core engine");
+        let server_handle = tokio::spawn(async move {
+            serve_connection(engine, server_read, flaky_writer).await
+        });
+
+        let mut writer = client_write;
+        // First request (core.initialize) succeeds on write #1.
+        let init_line = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "core.initialize",
+            "params": {
+                "protocolVersion": PROTOCOL_VERSION,
+                "client": { "name": "peer-desktop", "version": "0.1.0" },
+                "externalCapabilities": []
+            }
+        }))
+        .unwrap();
+        writer
+            .write_all(format!("{init_line}\n").as_bytes())
+            .await
+            .unwrap();
+        // Second request runs in spawned task; its write fails with BrokenPipe.
+        let ping_line = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "core.ping",
+            "params": {}
+        }))
+        .unwrap();
+        writer
+            .write_all(format!("{ping_line}\n").as_bytes())
+            .await
+            .unwrap();
+        writer.flush().await.unwrap();
+
+        // Keep `writer` open so reader does NOT receive EOF — serve_connection must still exit promptly!
+        let result = tokio::time::timeout(Duration::from_secs(2), server_handle)
+            .await
+            .expect("serve_connection must terminate promptly when writer dies")
+            .expect("join");
+        assert!(result.is_err());
+        drop(writer);
+    }
 }

@@ -107,7 +107,10 @@ impl FrameWriterHandle {
                         .unwrap_or_else(|_| {
                             Err(io::Error::new(io::ErrorKind::TimedOut, "write timeout"))
                         });
-                        write_res?;
+                        if let Err(err) = write_res {
+                            let _ = writer.shutdown().await;
+                            return Err(err);
+                        }
                     }
                     WriterMsg::Close => break,
                 }
@@ -150,6 +153,10 @@ pub(crate) fn encode_frame(message: &Value) -> io::Result<Vec<u8>> {
 }
 
 impl FrameWriter {
+    pub(crate) async fn closed(&self) {
+        self.tx.closed().await;
+    }
+
     pub(crate) async fn send_preencoded(&self, bytes: Vec<u8>) -> io::Result<()> {
         self.tx
             .send(WriterMsg::Frame(bytes))

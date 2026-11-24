@@ -170,19 +170,22 @@ fn write_daemon_descriptor_atomic(
 }
 
 pub fn cleanup_stale_descriptor(data_home: &Path, existing: &DaemonDescriptor) {
+    #[cfg(unix)]
+    if existing.transport == "unix" {
+        let sock = Path::new(&existing.endpoint);
+        if sock.exists() && std::os::unix::net::UnixStream::connect(sock).is_ok() {
+            return;
+        }
+        if sock.exists() {
+            let _ = fs::remove_file(sock);
+        }
+    }
     if read_daemon_descriptor(data_home)
         .ok()
         .flatten()
         .is_some_and(|cur| cur.auth_token == existing.auth_token && cur.pid == existing.pid)
     {
         let _ = fs::remove_file(daemon_descriptor_path(data_home));
-    }
-    #[cfg(unix)]
-    if existing.transport == "unix" {
-        let sock = Path::new(&existing.endpoint);
-        if sock.exists() && std::os::unix::net::UnixStream::connect(sock).is_err() {
-            let _ = fs::remove_file(sock);
-        }
     }
 }
 
