@@ -2052,7 +2052,7 @@ dependencies = [
 
 [[package]]
 name = "peer-cli"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "base64 0.22.1",
  "crossterm",
@@ -2079,7 +2079,7 @@ dependencies = [
 
 [[package]]
 name = "peer-core-rpc"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "peer-project-agent",
  "peer-protocol",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "peer-credential-helper"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -2111,7 +2111,7 @@ dependencies = [
 
 [[package]]
 name = "peer-project-agent"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "flate2",
  "peer-protocol",
@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "peer-protocol"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "ryu-js",
  "serde",
@@ -2141,7 +2141,7 @@ dependencies = [
 
 [[package]]
 name = "peer-runtime"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2188,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "peer-store"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "fs2",
  "peer-protocol",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "peer-tui"
-version = "0.1.0-rc.40"
+version = "0.1.0-rc.42"
 dependencies = [
  "crossterm",
  "ratatui",
