@@ -74,6 +74,78 @@ pub fn clean_display_name(value: &str) -> String {
     trimmed.chars().take(NAME_MAX).collect()
 }
 
+/// Bot-level Skill & MCP mounting overrides inherited by all derived child work sessions.
+/// Absent or empty means inherit global/workspace defaults.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotCapabilityPolicy {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled_skill_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_skill_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled_mcp_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_mcp_ids: Vec<String>,
+}
+
+impl BotCapabilityPolicy {
+    pub fn is_empty(&self) -> bool {
+        self.enabled_skill_ids.is_empty()
+            && self.disabled_skill_ids.is_empty()
+            && self.enabled_mcp_ids.is_empty()
+            && self.disabled_mcp_ids.is_empty()
+    }
+
+    pub fn effective_skill_enabled(&self, skill_id: &str, default_enabled: bool) -> bool {
+        if self.disabled_skill_ids.iter().any(|x| x == skill_id) {
+            false
+        } else if self.enabled_skill_ids.iter().any(|x| x == skill_id) {
+            true
+        } else {
+            default_enabled
+        }
+    }
+
+    pub fn effective_mcp_enabled(&self, mcp_id: &str, default_enabled: bool) -> bool {
+        if self.disabled_mcp_ids.iter().any(|x| x == mcp_id) {
+            false
+        } else if self.enabled_mcp_ids.iter().any(|x| x == mcp_id) {
+            true
+        } else {
+            default_enabled
+        }
+    }
+
+    pub fn normalize(self) -> Option<Self> {
+        let dedup = |items: Vec<String>| -> Vec<String> {
+            let mut seen = HashSet::new();
+            items
+                .into_iter()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty() && seen.insert(s.clone()))
+                .collect()
+        };
+        let disabled_skill_ids = dedup(self.disabled_skill_ids);
+        let enabled_skill_ids: Vec<String> = dedup(self.enabled_skill_ids)
+            .into_iter()
+            .filter(|id| !disabled_skill_ids.contains(id))
+            .collect();
+        let disabled_mcp_ids = dedup(self.disabled_mcp_ids);
+        let enabled_mcp_ids: Vec<String> = dedup(self.enabled_mcp_ids)
+            .into_iter()
+            .filter(|id| !disabled_mcp_ids.contains(id))
+            .collect();
+        let normalized = Self {
+            enabled_skill_ids,
+            disabled_skill_ids,
+            enabled_mcp_ids,
+            disabled_mcp_ids,
+        };
+        (!normalized.is_empty()).then_some(normalized)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotProfile {
@@ -102,6 +174,8 @@ pub struct BotProfile {
     pub auto_handoff_on_policy_accept: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_policy: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_policy: Option<BotCapabilityPolicy>,
     #[serde(default = "default_status")]
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -374,6 +448,7 @@ impl BotProfileStore {
             acceptance_policy: None,
             auto_handoff_on_policy_accept: false,
             model_policy: None,
+            capability_policy: None,
             status: "active".to_owned(),
             readme_offer: None,
             familiarize: None,

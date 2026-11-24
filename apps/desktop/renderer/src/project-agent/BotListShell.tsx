@@ -17,6 +17,8 @@ import { NewBotSheet } from './NewBotSheet';
 import { useBotWorkSessions } from './state/useBotWorkSessions';
 import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
+import { useBotCapabilities } from './state/useBotCapabilities';
+import { BotCapabilitiesButton } from './BotCapabilitiesPopover';
 import { BotConversation } from './conversation/BotConversation';
 import type { CiteTaskRequest } from './conversation/BotConversationComposer';
 import { BotDocumentPreview } from './conversation/BotDocumentPreview';
@@ -224,6 +226,7 @@ export function BotListShell({
   const openedAvatarMood = opened ? avatarMoods.get(opened.workspaceId) ?? botAvatarMood(opened.state) : 'idle';
   const work = useBotWorkSessions(opened?.workspaceId ?? null, activePage === 'chat');
   const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
+  const capabilities = useBotCapabilities(opened?.workspaceId ?? null, openedWorkspacePath, opened?.profile ?? null, list.updateProfile);
   const openedIdRef = useRef(list.openedId);
   const firstVisibleIdRef = useRef(list.visible[0]?.workspaceId ?? '');
   openedIdRef.current = list.openedId;
@@ -280,7 +283,7 @@ export function BotListShell({
   }, [opened?.workspaceId]);
 
   useEffect(() => {
-    if (!opened?.workspaceId || !activeTaskSessionId) return;
+    if (!opened?.workspaceId) return;
     let cancelled = false;
     void clientApi.projectAgentGet({ workspaceId: opened.workspaceId }).then((got) => {
       if (!cancelled && got?.ok && typeof got.path === 'string') {
@@ -288,7 +291,15 @@ export function BotListShell({
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [opened?.workspaceId, activeTaskSessionId]);
+  }, [opened?.workspaceId]);
+
+  const previousPageRef = useRef(activePage);
+  useEffect(() => {
+    if (previousPageRef.current === 'tools' && activePage !== 'tools') {
+      void capabilities.refresh();
+    }
+    previousPageRef.current = activePage;
+  }, [activePage, capabilities.refresh]);
 
   useEffect(() => () => {
     if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
@@ -734,6 +745,17 @@ export function BotListShell({
                     <PeerIcon name="chevronRight" size={14} className="bot-crumb-sep" />
                     <span className="bot-crumb-current">{activeTaskTitle}</span>
                   </nav>
+                  <BotCapabilitiesButton
+                    mode="inherited"
+                    botName={opened.profile.displayName}
+                    capabilities={capabilities}
+                    i18n={i18n}
+                    onAdjustOnBot={() => {
+                      openBotView(opened.workspaceId);
+                      setInspect(null);
+                      setDrawerMemory((current) => openDrawer(current, 'capabilities'));
+                    }}
+                  />
                   <button
                     ref={inspectorButtonRef}
                     type="button"
@@ -755,6 +777,17 @@ export function BotListShell({
                   <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
                     animate mood={openedAvatarMood} />
                   <p className="bot-main-title">{opened.profile.displayName}</p>
+                  <BotCapabilitiesButton
+                    mode="bot"
+                    botName={opened.profile.displayName}
+                    capabilities={capabilities}
+                    i18n={i18n}
+                    onOpenDrawerCapabilities={() => {
+                      setInspect(null);
+                      setDrawerMemory((current) => openDrawer(current, 'capabilities'));
+                    }}
+                    onOpenGlobalPlugins={onOpenCapabilities}
+                  />
                   <button
                     ref={profileButtonRef}
                     type="button"
@@ -890,6 +923,7 @@ export function BotListShell({
           profile={opened.profile}
           replayEntrance={replayDrawerEntrance}
           modelControls={modelControls}
+          capabilities={capabilities}
           memory={currentDrawerMemory}
           locateSessionId={null}
           inspect={inspect}
@@ -918,6 +952,7 @@ export function BotListShell({
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}
+          onOpenCapabilities={onOpenCapabilities}
           onDeleted={() => {
             setDrawerMemory((current) => closeDrawer(current));
             setNav((current) => pruneDeletedWorkspace(current, opened.workspaceId));

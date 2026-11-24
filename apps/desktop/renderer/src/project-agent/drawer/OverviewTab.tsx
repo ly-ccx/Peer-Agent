@@ -13,6 +13,9 @@ export function OverviewTab({
   brief,
   running,
   modelLabel,
+  mountedSkillCount = 0,
+  mountedMcpCount = 0,
+  onOpenCapabilities,
   i18n,
   onReveal,
   onRebind,
@@ -28,6 +31,9 @@ export function OverviewTab({
   readonly brief: string;
   readonly running: readonly DrawerSession[];
   readonly modelLabel: string;
+  readonly mountedSkillCount?: number;
+  readonly mountedMcpCount?: number;
+  readonly onOpenCapabilities?: () => void;
   readonly i18n: I18nRuntime;
   readonly onReveal: () => void;
   readonly onRebind?: () => void;
@@ -131,6 +137,25 @@ export function OverviewTab({
         <div>
           <span>{i18n.t('projectAgent.drawer.model')}</span>
           <strong title={modelLabel}>{modelLabel || i18n.t('projectAgent.drawer.modelEmpty')}</strong>
+        </div>
+        <div>
+          <span>{i18n.t('projectAgent.capabilities.overviewLabel')}</span>
+          {onOpenCapabilities ? (
+            <button type="button" className="bot-overview-cap-link" onClick={onOpenCapabilities}>
+              <span>
+                {mountedSkillCount > 0 || mountedMcpCount > 0
+                  ? i18n.t('projectAgent.capabilities.overviewSummary', { skills: mountedSkillCount, mcps: mountedMcpCount })
+                  : i18n.t('projectAgent.capabilities.overviewEmpty')}
+              </span>
+              <PeerIcon name="chevronRight" size={14} />
+            </button>
+          ) : (
+            <strong>
+              {mountedSkillCount > 0 || mountedMcpCount > 0
+                ? i18n.t('projectAgent.capabilities.overviewSummary', { skills: mountedSkillCount, mcps: mountedMcpCount })
+                : i18n.t('projectAgent.capabilities.overviewEmpty')}
+            </strong>
+          )}
         </div>
       </section>
     </div>

@@ -572,8 +572,43 @@ export type TranslationKey =
   | 'projectAgent.drawer.tab.overview'
   | 'projectAgent.drawer.tab.tasks'
   | 'projectAgent.drawer.tab.objectives'
+  | 'projectAgent.drawer.tab.capabilities'
   | 'projectAgent.drawer.tab.memory'
   | 'projectAgent.drawer.tab.settings'
+  | 'projectAgent.capabilities.trigger'
+  | 'projectAgent.capabilities.triggerCount'
+  | 'projectAgent.capabilities.inheritedTrigger'
+  | 'projectAgent.capabilities.title'
+  | 'projectAgent.capabilities.subtitle'
+  | 'projectAgent.capabilities.inheritedTitle'
+  | 'projectAgent.capabilities.inheritedSubtitle'
+  | 'projectAgent.capabilities.inheritedReadOnlyHint'
+  | 'projectAgent.capabilities.adjustOnBot'
+  | 'projectAgent.capabilities.resetGlobal'
+  | 'projectAgent.capabilities.manageGlobal'
+  | 'projectAgent.capabilities.openInDrawer'
+  | 'projectAgent.capabilities.group.skills'
+  | 'projectAgent.capabilities.group.mcp'
+  | 'projectAgent.capabilities.group.builtin'
+  | 'projectAgent.capabilities.builtinHint'
+  | 'projectAgent.capabilities.builtin.files'
+  | 'projectAgent.capabilities.builtin.shell'
+  | 'projectAgent.capabilities.builtin.web'
+  | 'projectAgent.capabilities.empty.skills'
+  | 'projectAgent.capabilities.empty.mcp'
+  | 'projectAgent.capabilities.empty.inherited'
+  | 'projectAgent.capabilities.badge.workspace'
+  | 'projectAgent.capabilities.badge.overrideOn'
+  | 'projectAgent.capabilities.badge.overrideOff'
+  | 'projectAgent.capabilities.badge.globalOff'
+  | 'projectAgent.capabilities.badge.unhealthy'
+  | 'projectAgent.capabilities.badge.untrusted'
+  | 'projectAgent.capabilities.toolsCount'
+  | 'projectAgent.capabilities.overviewLabel'
+  | 'projectAgent.capabilities.overviewSummary'
+  | 'projectAgent.capabilities.overviewEmpty'
+  | 'projectAgent.capabilities.saveFailed'
+  | 'projectAgent.capabilities.loading'
   | 'projectAgent.drawer.folder'
   | 'projectAgent.drawer.folderMissing'
   | 'projectAgent.drawer.rebindFolder'
@@ -2328,8 +2363,43 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.overview': '概况',
     'projectAgent.drawer.tab.tasks': '任务',
     'projectAgent.drawer.tab.objectives': '目标',
+    'projectAgent.drawer.tab.capabilities': '能力',
     'projectAgent.drawer.tab.memory': '记忆',
     'projectAgent.drawer.tab.settings': '设置',
+    'projectAgent.capabilities.trigger': '机器人能力挂载',
+    'projectAgent.capabilities.triggerCount': '已挂载 {count} 项能力',
+    'projectAgent.capabilities.inheritedTrigger': '查看从「{bot}」继承的共享能力',
+    'projectAgent.capabilities.title': '挂载能力',
+    'projectAgent.capabilities.subtitle': '该机器人派生的所有子任务自动共用这套能力。',
+    'projectAgent.capabilities.inheritedTitle': '继承自「{bot}」',
+    'projectAgent.capabilities.inheritedSubtitle': '当前子任务共享所属机器人的能力配置，不单独挂载。',
+    'projectAgent.capabilities.inheritedReadOnlyHint': '当前为只读任务，自动过滤非只读 MCP 工具。',
+    'projectAgent.capabilities.adjustOnBot': '前往机器人调整',
+    'projectAgent.capabilities.resetGlobal': '恢复跟随全局',
+    'projectAgent.capabilities.manageGlobal': '管理全局插件库',
+    'projectAgent.capabilities.openInDrawer': '在抽屉中展开',
+    'projectAgent.capabilities.group.skills': 'Skills',
+    'projectAgent.capabilities.group.mcp': 'MCP 服务',
+    'projectAgent.capabilities.group.builtin': '内置基础能力（只读）',
+    'projectAgent.capabilities.builtinHint': '由机器人权限档位与任务只读策略统一控制。',
+    'projectAgent.capabilities.builtin.files': '文件与代码读写',
+    'projectAgent.capabilities.builtin.shell': '本地终端执行',
+    'projectAgent.capabilities.builtin.web': '联网检索与抓取',
+    'projectAgent.capabilities.empty.skills': '暂未安装 Skill，可前往全局插件库安装。',
+    'projectAgent.capabilities.empty.mcp': '暂未配置 MCP 服务，可前往全局插件库添加。',
+    'projectAgent.capabilities.empty.inherited': '当前机器人未挂载任何 Skill 或 MCP，子任务仅使用内置基础能力。',
+    'projectAgent.capabilities.badge.workspace': '项目',
+    'projectAgent.capabilities.badge.overrideOn': '单独开启',
+    'projectAgent.capabilities.badge.overrideOff': '单独关闭',
+    'projectAgent.capabilities.badge.globalOff': '全局关闭',
+    'projectAgent.capabilities.badge.unhealthy': '连接异常',
+    'projectAgent.capabilities.badge.untrusted': '未信任',
+    'projectAgent.capabilities.toolsCount': '{count} 个工具',
+    'projectAgent.capabilities.overviewLabel': '挂载能力',
+    'projectAgent.capabilities.overviewSummary': '{skills} 个 Skill · {mcps} 个 MCP',
+    'projectAgent.capabilities.overviewEmpty': '仅内置基础能力',
+    'projectAgent.capabilities.saveFailed': '能力配置保存失败，请稍后重试。',
+    'projectAgent.capabilities.loading': '正在读取能力列表…',
     'projectAgent.drawer.folder': '绑定文件夹',
     'projectAgent.drawer.folderMissing': '文件夹不存在或已移动，重新绑定后会保留当前对话与记忆。',
     'projectAgent.drawer.rebindFolder': '重新绑定文件夹',
@@ -3824,8 +3894,43 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.overview': 'Overview',
     'projectAgent.drawer.tab.tasks': 'Tasks',
     'projectAgent.drawer.tab.objectives': 'Objectives',
+    'projectAgent.drawer.tab.capabilities': 'Tools',
     'projectAgent.drawer.tab.memory': 'Memory',
     'projectAgent.drawer.tab.settings': 'Settings',
+    'projectAgent.capabilities.trigger': 'Bot mounted capabilities',
+    'projectAgent.capabilities.triggerCount': '{count} mounted capabilities',
+    'projectAgent.capabilities.inheritedTrigger': 'View shared capabilities inherited from "{bot}"',
+    'projectAgent.capabilities.title': 'Mounted Capabilities',
+    'projectAgent.capabilities.subtitle': 'All child tasks spawned by this bot automatically share this capability set.',
+    'projectAgent.capabilities.inheritedTitle': 'Inherited from "{bot}"',
+    'projectAgent.capabilities.inheritedSubtitle': 'Child tasks share their parent bot’s capabilities and do not mount separately.',
+    'projectAgent.capabilities.inheritedReadOnlyHint': 'Read-only task: write/external MCP tools are filtered automatically.',
+    'projectAgent.capabilities.adjustOnBot': 'Adjust on bot',
+    'projectAgent.capabilities.resetGlobal': 'Reset to global',
+    'projectAgent.capabilities.manageGlobal': 'Manage global plugins',
+    'projectAgent.capabilities.openInDrawer': 'Open in drawer',
+    'projectAgent.capabilities.group.skills': 'Skills',
+    'projectAgent.capabilities.group.mcp': 'MCP Services',
+    'projectAgent.capabilities.group.builtin': 'Built-in capabilities (read-only)',
+    'projectAgent.capabilities.builtinHint': 'Governed by the bot’s access level and task read-only policy.',
+    'projectAgent.capabilities.builtin.files': 'Files & workspace inspection',
+    'projectAgent.capabilities.builtin.shell': 'Local shell execution',
+    'projectAgent.capabilities.builtin.web': 'Web fetch & research',
+    'projectAgent.capabilities.empty.skills': 'No skills installed yet. Install them in the global plugins library.',
+    'projectAgent.capabilities.empty.mcp': 'No MCP servers configured yet. Add them in the global plugins library.',
+    'projectAgent.capabilities.empty.inherited': 'No Skills or MCP servers are mounted on this bot; this task uses built-in capabilities only.',
+    'projectAgent.capabilities.badge.workspace': 'Project',
+    'projectAgent.capabilities.badge.overrideOn': 'Bot on',
+    'projectAgent.capabilities.badge.overrideOff': 'Bot off',
+    'projectAgent.capabilities.badge.globalOff': 'Global off',
+    'projectAgent.capabilities.badge.unhealthy': 'Unhealthy',
+    'projectAgent.capabilities.badge.untrusted': 'Untrusted',
+    'projectAgent.capabilities.toolsCount': '{count} tools',
+    'projectAgent.capabilities.overviewLabel': 'Mounted capabilities',
+    'projectAgent.capabilities.overviewSummary': '{skills} Skills · {mcps} MCP',
+    'projectAgent.capabilities.overviewEmpty': 'Built-ins only',
+    'projectAgent.capabilities.saveFailed': 'Failed to save capability changes. Please retry.',
+    'projectAgent.capabilities.loading': 'Loading capabilities…',
     'projectAgent.drawer.folder': 'Bound folder',
     'projectAgent.drawer.folderMissing': 'Folder not found or moved. Rebinding keeps this conversation and memory.',
     'projectAgent.drawer.rebindFolder': 'Rebind folder',

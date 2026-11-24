@@ -2,7 +2,7 @@
 //! (`packages/runtime-node/src/project-agent/work-session-profile.mjs`,
 //! `verifier-report.mjs`, `verifier-lifecycle.mjs`, ADR 80 / ADR 88 / ADR 103).
 
-use crate::ProjectError;
+use crate::{BotCapabilityPolicy, ProjectError};
 use peer_protocol::LocalAccessLevel;
 use peer_runtime::{
     CancellationToken,
@@ -11,11 +11,11 @@ use peer_runtime::{
     providers::RuntimeMode,
     session_host::{LocalPermissionDecision, PermissionInput},
 };
-use peer_store::EvidenceIndexStore;
+use peer_store::{EvidenceIndexStore, McpRegistryStore, SkillCatalog};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -201,6 +201,155 @@ pub fn resolve_work_session_profile(
         allowlist,
         exclude_prefixes: WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES.to_vec(),
     })
+}
+
+fn is_read_only_mcp_risk(risk_level: Option<&str>) -> bool {
+    matches!(
+        risk_level,
+        Some("L0_inert" | "L1_local_read" | "L1_readonly")
+    )
+}
+
+/// Extends a delegated `"worker"` work-session profile's allowlist with the
+/// parent Bot's mounted Skills (`local.skill.*`) and MCP tools (`local.mcp.*`).
+/// Independent `"verifier"` / `"explorer"` roles remain strictly restricted to
+/// `READ_ONLY_CAPABILITY_CEILING`. Read-only worker tasks receive all mounted
+/// Skills (L1_readonly) plus read-only MCP tools only.
+pub fn extend_worker_allowlist_with_bot_capabilities(
+    data_home: &Path,
+    workspace: &Path,
+    policy: Option<&BotCapabilityPolicy>,
+    profile: &mut WorkSessionProfile,
+) {
+    if profile.agent_kind != "worker" {
+        return;
+    }
+    let empty: Vec<String> = Vec::new();
+    let enabled_skills = policy.map_or(empty.as_slice(), |p| p.enabled_skill_ids.as_slice());
+    let disabled_skills = policy.map_or(empty.as_slice(), |p| p.disabled_skill_ids.as_slice());
+    let enabled_mcps = policy.map_or(empty.as_slice(), |p| p.enabled_mcp_ids.as_slice());
+    let disabled_mcps = policy.map_or(empty.as_slice(), |p| p.disabled_mcp_ids.as_slice());
+
+    let mut seen: HashSet<String> = profile.allowlist.iter().cloned().collect();
+
+    if let Ok(catalog) =
+        SkillCatalog::observe_with_overrides(data_home, workspace, enabled_skills, disabled_skills)
+    {
+        for skill in catalog.mounted {
+            let cap_id = format!("local.skill.{}", skill.manifest.id);
+            if !is_excluded_capability(&cap_id) && seen.insert(cap_id.clone()) {
+                profile.allowlist.push(cap_id);
+            }
+        }
+    }
+
+    if let Ok(snapshot) =
+        McpRegistryStore::new(data_home).read_with_overrides(enabled_mcps, disabled_mcps)
+    {
+        for manifest in &snapshot.inventory.manifests {
+            let Some(cap_id) = manifest["capabilityId"].as_str() else {
+                continue;
+            };
+            if is_excluded_capability(cap_id) {
+                continue;
+            }
+            if profile.read_only && !is_read_only_mcp_risk(manifest["riskLevel"].as_str()) {
+                continue;
+            }
+            if seen.insert(cap_id.to_owned()) {
+                profile.allowlist.push(cap_id.to_owned());
+            }
+        }
+    }
+}
+
+/// Builds a concise factual summary of this Bot's mounted Skills & MCP services
+/// for `L4_CAPABILITIES` in the project-agent system context, so the Bot knows
+/// which mounted capabilities all delegated child work sessions automatically inherit.
+pub fn render_bot_mounted_capabilities_summary(
+    data_home: &Path,
+    workspace: &Path,
+    policy: Option<&BotCapabilityPolicy>,
+) -> Option<String> {
+    let empty: Vec<String> = Vec::new();
+    let enabled_skills = policy.map_or(empty.as_slice(), |p| p.enabled_skill_ids.as_slice());
+    let disabled_skills = policy.map_or(empty.as_slice(), |p| p.disabled_skill_ids.as_slice());
+    let enabled_mcps = policy.map_or(empty.as_slice(), |p| p.enabled_mcp_ids.as_slice());
+    let disabled_mcps = policy.map_or(empty.as_slice(), |p| p.disabled_mcp_ids.as_slice());
+
+    let mut skill_lines = Vec::new();
+    if let Ok(catalog) =
+        SkillCatalog::observe_with_overrides(data_home, workspace, enabled_skills, disabled_skills)
+    {
+        for entry in catalog.mounted.iter().take(24) {
+            let m = &entry.manifest;
+            let desc: String = m.description.trim().chars().take(120).collect();
+            if desc.is_empty() {
+                skill_lines.push(format!("  - {} ({})", m.id, m.name));
+            } else {
+                skill_lines.push(format!("  - {} ({}): {}", m.id, m.name, desc));
+            }
+        }
+    }
+
+    let mut mcp_groups: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
+    if let Ok(snapshot) =
+        McpRegistryStore::new(data_home).read_with_overrides(enabled_mcps, disabled_mcps)
+    {
+        for manifest in &snapshot.inventory.manifests {
+            let provider_id = manifest["providerId"].as_str().unwrap_or("").trim();
+            if provider_id.is_empty() {
+                continue;
+            }
+            let provider_label = manifest["providerLabel"]
+                .as_str()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(provider_id);
+            let tool_name = manifest["origin"]["toolName"]
+                .as_str()
+                .or_else(|| manifest["name"].as_str())
+                .unwrap_or("");
+            let entry = mcp_groups
+                .entry(provider_id.to_owned())
+                .or_insert_with(|| (provider_label.to_owned(), Vec::new()));
+            if !tool_name.is_empty() && entry.1.len() < 12 {
+                entry.1.push(tool_name.to_owned());
+            }
+        }
+    }
+
+    if skill_lines.is_empty() && mcp_groups.is_empty() {
+        return None;
+    }
+
+    let mut out = String::from(
+        "Bot Mounted Capabilities (shared and automatically inherited by all child tasks spawned by this Bot):\n",
+    );
+    if !skill_lines.is_empty() {
+        out.push_str(&format!("- Mounted Skills ({}):\n", skill_lines.len()));
+        for line in &skill_lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if !mcp_groups.is_empty() {
+        out.push_str(&format!("- Mounted MCP Services ({}):\n", mcp_groups.len()));
+        for (provider_id, (label, tools)) in mcp_groups.iter().take(16) {
+            let tools_preview = if tools.is_empty() {
+                "no visible tools".to_owned()
+            } else {
+                tools.join(", ")
+            };
+            out.push_str(&format!(
+                "  - {} ({}): {}\n",
+                label, provider_id, tools_preview
+            ));
+        }
+    }
+    out.push_str(
+        "When delegating tasks via `spawn_session`, child workers automatically share these mounted Skills and MCP tools (read-only tasks receive Skills and read-only MCP tools only). Reference relevant Skills or MCP services in the task brief when useful.",
+    );
+    Some(out)
 }
 
 pub fn model_family(model_id: &str) -> String {
@@ -1106,5 +1255,143 @@ mod tests {
         assert!(repair.contains("/repo/.git/config"));
         assert!(repair.contains("tool-result://call-v1"));
         assert!(repair.contains("tool-result://call-1"));
+    }
+
+    #[test]
+    fn bot_mounted_capabilities_inherited_by_worker_and_isolated_from_verifier() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let home = dir.path().join("home");
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(home.join("skills/alpha-skill")).unwrap();
+        std::fs::create_dir_all(home.join("skills/beta-skill")).unwrap();
+        std::fs::create_dir_all(ws.join("skills/local-skill")).unwrap();
+
+        std::fs::write(
+            home.join("skills/alpha-skill/SKILL.md"),
+            "---\nname: Alpha Skill\ndescription: Global enabled skill\n---\nBody alpha\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("skills/beta-skill/SKILL.md"),
+            "---\nname: Beta Skill\ndescription: Global disabled skill\n---\nBody beta\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ws.join("skills/local-skill/SKILL.md"),
+            "---\nname: Local Skill\ndescription: Workspace skill\n---\nBody local\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("skills/settings.json"),
+            r#"{"disabled":["beta-skill"],"workspaceDisabled":{},"workspaceEnabled":{}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join("mcp-registry.json"),
+            serde_json::to_string_pretty(&json!({
+                "version": 1,
+                "servers": [
+                    {
+                        "id": "docs-mcp",
+                        "displayName": "Docs Server",
+                        "enabled": true,
+                        "transport": "streamable_http",
+                        "url": "https://example.com/mcp",
+                        "auth": { "mode": "none" },
+                        "policy": { "trusted": true, "visibleByDefault": true, "requirePermission": true },
+                        "tools": [
+                            { "name": "search_docs", "description": "Search docs", "riskLevel": "L1_local_read" },
+                            { "name": "publish_doc", "description": "Publish doc", "riskLevel": "L3_external_write" }
+                        ]
+                    },
+                    {
+                        "id": "ops-mcp",
+                        "displayName": "Ops Server",
+                        "enabled": false,
+                        "transport": "streamable_http",
+                        "url": "https://ops.example.com/mcp",
+                        "auth": { "mode": "none" },
+                        "policy": { "trusted": true, "visibleByDefault": true, "requirePermission": true },
+                        "tools": [
+                            { "name": "deploy_app", "description": "Deploy", "riskLevel": "L3_external_write" }
+                        ]
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let rw_plan = json!({
+            "delegationOrigin": {
+                "readOnly": false,
+                "requiredCapabilities": ["local.file.read", "local.file.edit"]
+            }
+        });
+        let ro_plan = json!({
+            "delegationOrigin": {
+                "readOnly": true,
+                "requiredCapabilities": ["local.file.read"]
+            }
+        });
+
+        // 1. Default inherit: alpha-skill + local-skill + docs-mcp tools; beta-skill & ops-mcp excluded.
+        let mut rw_default =
+            resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
+                .unwrap();
+        extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut rw_default);
+        assert!(rw_default.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
+        assert!(rw_default.allowlist.contains(&"local.skill.local-skill".to_owned()));
+        assert!(!rw_default.allowlist.contains(&"local.skill.beta-skill".to_owned()));
+        assert!(rw_default.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
+        assert!(rw_default.allowlist.contains(&"local.mcp.docs-mcp.publish_doc".to_owned()));
+        assert!(!rw_default.allowlist.contains(&"local.mcp.ops-mcp.deploy_app".to_owned()));
+
+        // 2. Per-Bot overrides: disable alpha-skill & docs-mcp, enable beta-skill & ops-mcp.
+        let policy = BotCapabilityPolicy {
+            enabled_skill_ids: vec!["beta-skill".into()],
+            disabled_skill_ids: vec!["alpha-skill".into()],
+            enabled_mcp_ids: vec!["ops-mcp".into()],
+            disabled_mcp_ids: vec!["docs-mcp".into()],
+        };
+        let mut rw_override =
+            resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
+                .unwrap();
+        extend_worker_allowlist_with_bot_capabilities(&home, &ws, Some(&policy), &mut rw_override);
+        assert!(!rw_override.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
+        assert!(rw_override.allowlist.contains(&"local.skill.beta-skill".to_owned()));
+        assert!(rw_override.allowlist.contains(&"local.skill.local-skill".to_owned()));
+        assert!(!rw_override.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
+        assert!(rw_override.allowlist.contains(&"local.mcp.ops-mcp.deploy_app".to_owned()));
+
+        // 3. Read-only worker inherits mounted skills + read-only MCP only (no L3_external_write MCP).
+        let mut ro_worker =
+            resolve_work_session_profile(&ro_plan, "worker", LocalAccessLevel::SessionLocal)
+                .unwrap();
+        extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut ro_worker);
+        assert!(ro_worker.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
+        assert!(ro_worker.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
+        assert!(!ro_worker.allowlist.contains(&"local.mcp.docs-mcp.publish_doc".to_owned()));
+
+        // 4. Independent verifier NEVER gets skills or MCP.
+        let mut verifier_profile =
+            resolve_work_session_profile(&rw_plan, "verifier", LocalAccessLevel::SessionLocal)
+                .unwrap();
+        extend_worker_allowlist_with_bot_capabilities(
+            &home,
+            &ws,
+            Some(&policy),
+            &mut verifier_profile,
+        );
+        assert!(!verifier_profile.allowlist.iter().any(|c| c.starts_with("local.skill.")));
+        assert!(!verifier_profile.allowlist.iter().any(|c| c.starts_with("local.mcp.")));
+
+        // 5. Summary reflects Bot overrides for L4_CAPABILITIES.
+        let summary = render_bot_mounted_capabilities_summary(&home, &ws, Some(&policy))
+            .expect("summary expected");
+        assert!(summary.contains("beta-skill"));
+        assert!(!summary.contains("alpha-skill"));
+        assert!(summary.contains("Ops Server"));
+        assert!(!summary.contains("Docs Server"));
     }
 }

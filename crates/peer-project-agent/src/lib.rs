@@ -128,8 +128,8 @@ pub use obligation::{
 };
 pub use profile::{
     BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BOT_COMMUNICATION_STYLES,
-    BOT_PROFILE_COMMUNICATION_STYLES, BotAvatar, BotProfile, BotProfileStore, CreateBotProfile,
-    clean_display_name, generate_avatar,
+    BOT_PROFILE_COMMUNICATION_STYLES, BotAvatar, BotCapabilityPolicy, BotProfile, BotProfileStore,
+    CreateBotProfile, clean_display_name, generate_avatar,
 };
 pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
 pub use recovery::{
@@ -173,7 +173,9 @@ pub use system_context::{ProjectAgentContextInput, assemble_project_agent_contex
 pub use verifier::{
     READ_ONLY_CAPABILITY_CEILING, VerifierIssue, VerifierOutcome, VerifierReport,
     WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, WORKER_CAPABILITY_CEILING, WorkSessionProfile,
-    decode_verifier_report, model_family, resolve_work_session_profile, run_independent_verifier,
+    decode_verifier_report, extend_worker_allowlist_with_bot_capabilities, model_family,
+    render_bot_mounted_capabilities_summary, resolve_work_session_profile,
+    run_independent_verifier,
 };
 pub use watchdog::{
     FailureDescription, PROGRESS_THROTTLE_MS, SAME_CAUSE_RETRY_LIMIT, STALL_WINDOW_MS,

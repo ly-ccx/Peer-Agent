@@ -28,9 +28,11 @@ import {
 import { BotDrawerResizer } from './BotDrawerResizer';
 import { HistorySheet, type HistoryConversation } from '../HistorySheet';
 import { AgentProcessView } from './AgentProcessView';
+import type { BotCapabilitiesState } from '../state/useBotCapabilities';
 import type { BotModelsControlState } from '../state/useBotModels';
 import { BotDrawerSegments } from './BotDrawerSegments';
 import type { BotInspect } from './agentProcess';
+import { BotCapabilitiesTab } from './BotCapabilitiesTab';
 import { BotSettingsTab } from './BotSettingsTab';
 import { MemoryTab } from './MemoryTab';
 import { ObjectivesTab } from './ObjectivesTab';
@@ -42,9 +44,18 @@ import { ConversationSceneDrawer, SessionDetail } from './SessionDetail';
 import { TasksTab, type ClassicGoalRow } from './TasksTab';
 import '../styles/bot-drawer.css';
 
-const TABS: readonly { id: DrawerTab; key: 'projectAgent.drawer.tab.overview' | 'projectAgent.drawer.tab.objectives' | 'projectAgent.drawer.tab.memory' | 'projectAgent.drawer.tab.settings' }[] = [
+const TABS: readonly {
+  id: DrawerTab;
+  key:
+    | 'projectAgent.drawer.tab.overview'
+    | 'projectAgent.drawer.tab.objectives'
+    | 'projectAgent.drawer.tab.capabilities'
+    | 'projectAgent.drawer.tab.memory'
+    | 'projectAgent.drawer.tab.settings';
+}[] = [
   { id: 'overview', key: 'projectAgent.drawer.tab.overview' },
   { id: 'objectives', key: 'projectAgent.drawer.tab.objectives' },
+  { id: 'capabilities', key: 'projectAgent.drawer.tab.capabilities' },
   { id: 'memory', key: 'projectAgent.drawer.tab.memory' },
   { id: 'settings', key: 'projectAgent.drawer.tab.settings' },
 ];
@@ -53,6 +64,7 @@ export function BotProfileDrawer({
   workspaceId,
   profile,
   modelControls,
+  capabilities,
   memory,
   locateSessionId,
   inspect = null,
@@ -69,6 +81,7 @@ export function BotProfileDrawer({
   onDeleted,
   onOpenConversation,
   onOpenAutomations,
+  onOpenCapabilities,
   onOpenTask,
   taskContext,
   onTaskConversation,
@@ -77,6 +90,7 @@ export function BotProfileDrawer({
   readonly workspaceId: string;
   readonly profile: BotProfile;
   readonly modelControls: BotModelsControlState;
+  readonly capabilities: BotCapabilitiesState;
   readonly memory: DrawerMemory;
   readonly locateSessionId: string | null;
   readonly inspect?: BotInspect | null;
@@ -93,6 +107,7 @@ export function BotProfileDrawer({
   readonly onDeleted: () => void;
   readonly onOpenConversation?: (conversationId: string) => void;
   readonly onOpenAutomations?: () => void;
+  readonly onOpenCapabilities?: () => void;
   readonly onOpenTask?: (sessionId: string) => void;
   readonly taskContext: TaskConversationContext | null;
   readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
@@ -354,6 +369,9 @@ export function BotProfileDrawer({
           brief={memories.find(item => item.kind === 'responsibility' && item.status === 'active')?.text ?? ''}
           running={groupDrawerSessions(sessions).running}
           modelLabel={modelLabel}
+          mountedSkillCount={capabilities.mountedSkillCount}
+          mountedMcpCount={capabilities.mountedMcpCount}
+          onOpenCapabilities={() => onMemory({ ...memory, open: true, tab: 'capabilities', sessionId: null })}
           i18n={i18n}
           onReveal={() => {
             if (!path) return;
@@ -436,6 +454,13 @@ export function BotProfileDrawer({
             }
             onMemory({ ...memory, tab: 'tasks', sessionId });
           }} onOpenAutomations={onOpenAutomations} />
+      ) : null}
+      {memory.tab === 'capabilities' ? (
+        <BotCapabilitiesTab
+          capabilities={capabilities}
+          i18n={i18n}
+          onOpenGlobalPlugins={onOpenCapabilities}
+        />
       ) : null}
       {memory.tab === 'memory' ? (
         <MemoryTab workspaceId={workspaceId} i18n={i18n} onItems={setMemories} />

@@ -56,5 +56,39 @@ export function profilePolicyPatch(payload, models = []) {
       patch.modelPolicy = policy;
     }
   }
+  if (payload.capabilityPolicy !== undefined) {
+    if (payload.capabilityPolicy === null) {
+      patch.capabilityPolicy = null;
+    } else {
+      const cap = payload.capabilityPolicy;
+      const isObj = cap && typeof cap === 'object' && !Array.isArray(cap);
+      const allowedKeys = new Set(['enabledSkillIds', 'disabledSkillIds', 'enabledMcpIds', 'disabledMcpIds']);
+      const validIdList = (value) => Array.isArray(value)
+        && value.length <= 256
+        && value.every((id) => typeof id === 'string' && id.trim().length > 0 && id.trim().length <= 200 && !/[\u0000-\u001f\u007f]/.test(id));
+      if (!isObj || Object.keys(cap).some((key) => !allowedKeys.has(key))) {
+        return { ok: false, code: 'INVALID_CAPABILITY_POLICY' };
+      }
+      for (const key of allowedKeys) {
+        if (cap[key] !== undefined && !validIdList(cap[key])) {
+          return { ok: false, code: 'INVALID_CAPABILITY_POLICY' };
+        }
+      }
+      const dedup = (arr) => [...new Set((arr || []).map((id) => id.trim()).filter(Boolean))];
+      const disabledSkillIds = dedup(cap.disabledSkillIds);
+      const disabledSkillSet = new Set(disabledSkillIds);
+      const enabledSkillIds = dedup(cap.enabledSkillIds).filter((id) => !disabledSkillSet.has(id));
+      const disabledMcpIds = dedup(cap.disabledMcpIds);
+      const disabledMcpSet = new Set(disabledMcpIds);
+      const enabledMcpIds = dedup(cap.enabledMcpIds).filter((id) => !disabledMcpSet.has(id));
+      const normalized = {
+        ...(enabledSkillIds.length ? { enabledSkillIds } : {}),
+        ...(disabledSkillIds.length ? { disabledSkillIds } : {}),
+        ...(enabledMcpIds.length ? { enabledMcpIds } : {}),
+        ...(disabledMcpIds.length ? { disabledMcpIds } : {}),
+      };
+      patch.capabilityPolicy = Object.keys(normalized).length > 0 ? normalized : null;
+    }
+  }
   return { ok: true, patch };
 }

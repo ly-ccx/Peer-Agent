@@ -305,12 +305,22 @@ pub struct GoalPlanRunOutcome {
     pub error: Option<&'static str>,
     pub goal: Option<Value>,
 }
+/// Optional per-Bot Skill and MCP mounting overrides applied to delegated child runs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CapabilityOverrides {
+    pub enabled_skill_ids: Vec<String>,
+    pub disabled_skill_ids: Vec<String>,
+    pub enabled_mcp_ids: Vec<String>,
+    pub disabled_mcp_ids: Vec<String>,
+}
+
 /// One Host instance owns the bounded live registry across ordinary sessions.
 /// Discovery is read-only. A dropped runner stays unknown, never implicitly idle.
 pub struct NativeConversationRuntime {
     home: PathBuf,
     live: ExecutionRegistry,
     access: ConversationAccess,
+    capability_overrides: CapabilityOverrides,
 }
 #[derive(Clone, Copy)]
 enum ExecutionSurface {
@@ -327,7 +337,12 @@ impl NativeConversationRuntime {
             home: home.as_ref().into(),
             live: ExecutionRegistry::default(),
             access,
+            capability_overrides: CapabilityOverrides::default(),
         }
+    }
+    pub fn with_capability_overrides(mut self, overrides: CapabilityOverrides) -> Self {
+        self.capability_overrides = overrides;
+        self
     }
     pub fn update_chat_model(
         &self,
@@ -793,7 +808,12 @@ impl NativeConversationRuntime {
             return Err(HostError("CANCELLED"));
         }
         let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
-        let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
+        let skills = Arc::new(peer_store::SkillCatalog::observe_with_overrides(
+            &self.home,
+            &workspace,
+            &self.capability_overrides.enabled_skill_ids,
+            &self.capability_overrides.disabled_skill_ids,
+        )?);
         // Delegated hosts only consume prompt settings and enforce their own
         // capability allowlist. Desktop metadata such as managedRoot is inert here.
         let instructions = if delegated || delegated_verification {
@@ -802,7 +822,10 @@ impl NativeConversationRuntime {
             ProjectInstructions::observe_host(&workspace, &self.home, external)
         }
         .map_err(HostError)?;
-        let inventory = McpRegistryStore::new(&self.home).read()?;
+        let inventory = McpRegistryStore::new(&self.home).read_with_overrides(
+            &self.capability_overrides.enabled_mcp_ids,
+            &self.capability_overrides.disabled_mcp_ids,
+        )?;
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let owner = crate::recorder::local_recorder(
             &format!("native-conversation-{}", uuid::Uuid::new_v4()),

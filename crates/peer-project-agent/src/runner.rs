@@ -1849,6 +1849,11 @@ impl ProjectAgentRunner {
         } else {
             None
         };
+        let mounted_capabilities_summary = crate::render_bot_mounted_capabilities_summary(
+            &self.data_home,
+            opts.workspace_path,
+            profile.as_ref().and_then(|p| p.capability_policy.as_ref()),
+        );
 
         let LoadedBotHistory {
             mut continuity_summary,
@@ -1939,6 +1944,7 @@ impl ProjectAgentRunner {
                 working_context: working_context.as_ref(),
                 agent_messages: &agent_messages,
                 skill_pack_catalog: skill_pack_catalog.as_deref(),
+                mounted_capabilities_summary: mounted_capabilities_summary.as_deref(),
             })
         };
         let mut system_prompt = build_system_prompt(continuity_summary.as_deref());

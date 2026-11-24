@@ -328,6 +328,12 @@ export interface LocalMcpServerView {
   readonly resources: readonly McpResourceSummary[];
   readonly prompts: readonly McpPromptSummary[];
   readonly health: McpHealthView;
+  readonly policy?: {
+    readonly trusted?: boolean;
+    readonly requirePermission?: boolean;
+    readonly visibleByDefault?: boolean;
+    readonly maxRiskLevel?: string;
+  };
   readonly manifestUpdatedAt?: string | null;
   readonly lastError?: string | null;
   readonly createdAt?: string;

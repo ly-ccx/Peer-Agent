@@ -765,6 +765,56 @@ async fn project_bot_profile_access_read_approvals_history_and_search_roundtrip(
     assert_eq!(with_img["profile"]["avatar"]["kind"], "image");
     assert_eq!(with_img["profile"]["modelPolicy"], Value::Null);
 
+    let bad_cap = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "capabilityPolicy": { "unknownKey": ["x"] },
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(bad_cap["ok"], false);
+    assert_eq!(bad_cap["code"], "INVALID_CAPABILITY_POLICY");
+
+    let with_cap = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "capabilityPolicy": {
+                    "enabledSkillIds": ["beta-skill", "conflict-skill"],
+                    "disabledSkillIds": ["alpha-skill", "conflict-skill"],
+                    "disabledMcpIds": ["docs-mcp"],
+                },
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(with_cap["ok"], true);
+    assert_eq!(
+        with_cap["profile"]["capabilityPolicy"],
+        json!({
+            "enabledSkillIds": ["beta-skill"],
+            "disabledSkillIds": ["alpha-skill", "conflict-skill"],
+            "disabledMcpIds": ["docs-mcp"],
+        })
+    );
+
+    let cleared_cap = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "capabilityPolicy": null,
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(cleared_cap["ok"], true);
+    assert!(cleared_cap["profile"].get("capabilityPolicy").is_none());
+
     let avatar_res = client
         .call(
             "project.profile.readAvatar",

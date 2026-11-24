@@ -28,6 +28,7 @@ pub struct ProjectAgentContextInput<'a> {
     pub working_context: Option<&'a Value>,
     pub agent_messages: &'a [Value],
     pub skill_pack_catalog: Option<&'a str>,
+    pub mounted_capabilities_summary: Option<&'a str>,
 }
 
 fn hash(s: &str) -> String {
@@ -149,6 +150,20 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
             "L4_CAPABILITIES",
             10,
             catalog.to_owned(),
+            "runtime",
+        ));
+    }
+
+    if let Some(mounted) = input
+        .mounted_capabilities_summary
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sections.push(section(
+            "project-agent.mounted-capabilities",
+            "L4_CAPABILITIES",
+            15,
+            mounted.to_owned(),
             "runtime",
         ));
     }
@@ -358,6 +373,7 @@ mod tests {
             working_context: None,
             agent_messages: &[],
             skill_pack_catalog: None,
+            mounted_capabilities_summary: None,
         }
     }
 

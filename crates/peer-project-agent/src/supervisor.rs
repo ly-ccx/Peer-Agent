@@ -2131,19 +2131,39 @@ impl SessionSupervisor {
                 .read_existing(workspace_id)
                 .map(|p| p.access_level)
                 .unwrap_or(LocalAccessLevel::SessionLocal);
-            let session_profile = match resolve_work_session_profile(&plan, "worker", ws_access) {
-                Some(p) => p,
-                None => {
-                    let _ = self.fail_session(
-                        workspace_id,
-                        session_id,
-                        "INVALID_PLAN",
-                        "Invalid work session profile",
-                        holds_lease,
-                    );
-                    return Err(ProjectError::code("INVALID_PLAN"));
-                }
-            };
+            let mut session_profile =
+                match resolve_work_session_profile(&plan, "worker", ws_access) {
+                    Some(p) => p,
+                    None => {
+                        let _ = self.fail_session(
+                            workspace_id,
+                            session_id,
+                            "INVALID_PLAN",
+                            "Invalid work session profile",
+                            holds_lease,
+                        );
+                        return Err(ProjectError::code("INVALID_PLAN"));
+                    }
+                };
+            let bot_cap_policy = self
+                .profiles
+                .read(workspace_id)
+                .and_then(|p| p.capability_policy);
+            crate::extend_worker_allowlist_with_bot_capabilities(
+                &self.data_home,
+                &target_ws,
+                bot_cap_policy.as_ref(),
+                &mut session_profile,
+            );
+            let worker_cap_overrides = bot_cap_policy
+                .as_ref()
+                .map(|p| peer_runtime::conversation_host::CapabilityOverrides {
+                    enabled_skill_ids: p.enabled_skill_ids.clone(),
+                    disabled_skill_ids: p.disabled_skill_ids.clone(),
+                    enabled_mcp_ids: p.enabled_mcp_ids.clone(),
+                    disabled_mcp_ids: p.disabled_mcp_ids.clone(),
+                })
+                .unwrap_or_default();
             let mut prompt = format!(
                 "Delegated Task: {}\n\nObjective:\n{}\n",
                 plan["title"].as_str().unwrap_or(""),
@@ -2220,7 +2240,8 @@ impl SessionSupervisor {
             let runtime = NativeConversationRuntime::new(
                 &self.data_home,
                 ConversationAccess::new(session_profile.access_level),
-            );
+            )
+            .with_capability_overrides(worker_cap_overrides);
             let conv_res = Box::pin(
                 runtime.execute_delegated(
                     &ConversationOptions {

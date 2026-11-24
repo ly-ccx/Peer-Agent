@@ -34,9 +34,17 @@ impl McpRegistryStore {
         }
     }
     pub fn read(&self) -> Result<McpRegistrySnapshot, StoreError> {
+        self.read_with_overrides(&[], &[])
+    }
+
+    pub fn read_with_overrides(
+        &self,
+        enabled_ids: &[String],
+        disabled_ids: &[String],
+    ) -> Result<McpRegistrySnapshot, StoreError> {
         let before = files::identity(&self.file)?;
         let raw = files::read(&self.file, 1024 * 1024)?;
-        let value = match raw {
+        let mut value = match raw {
             None => serde_json::json!({"version":1,"servers":[]}),
             Some(bytes) => {
                 peer_protocol::decode_json_bounded(
@@ -54,6 +62,29 @@ impl McpRegistryStore {
         };
         if files::identity(&self.file)? != before {
             return Err(StoreError::VersionChanged);
+        }
+        if !enabled_ids.is_empty() || !disabled_ids.is_empty() {
+            let apply = |servers: &mut [serde_json::Value]| {
+                for server in servers {
+                    let id = server["id"]
+                        .as_str()
+                        .or_else(|| server["mcpId"].as_str())
+                        .unwrap_or("");
+                    if id.is_empty() {
+                        continue;
+                    }
+                    if disabled_ids.iter().any(|x| x == id) {
+                        server["enabled"] = serde_json::json!(false);
+                    } else if enabled_ids.iter().any(|x| x == id) {
+                        server["enabled"] = serde_json::json!(true);
+                    }
+                }
+            };
+            if let Some(arr) = value.as_array_mut() {
+                apply(arr);
+            } else if let Some(arr) = value["servers"].as_array_mut() {
+                apply(arr);
+            }
         }
         let inventory = peer_protocol::project_mcp_inventory(&value)
             .map_err(|_| StoreError::McpInventoryInvalid)?;

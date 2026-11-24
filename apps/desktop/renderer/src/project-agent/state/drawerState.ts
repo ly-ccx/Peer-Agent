@@ -21,7 +21,7 @@ export function clampDrawerWidth(width: number): number {
   return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, Math.round(width)));
 }
 
-export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings';
+export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'capabilities' | 'memory' | 'settings';
 export type DrawerLayout = 'push' | 'cover';
 export type TaskGroup = 'needsYou' | 'running' | 'queued' | 'paused' | 'done';
 
@@ -103,7 +103,7 @@ export interface MemoryFilter {
   readonly status: string;
 }
 
-const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
+const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'capabilities', 'memory', 'settings']);
 const NEEDS_YOU = new Set(['waiting_user', 'result_ready']);
 const RUNNING = new Set(['starting', 'running', 'waiting_agent', 'stopping', 'awaiting_outcome', 'verifying']);
 const QUEUED = new Set(['queued']);

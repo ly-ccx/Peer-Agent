@@ -126,12 +126,31 @@ impl SkillCatalog {
     }
 
     pub fn observe(data_home: &Path, workspace: &Path) -> Result<Self, StoreError> {
+        Self::observe_with_overrides(data_home, workspace, &[], &[])
+    }
+
+    pub fn observe_with_overrides(
+        data_home: &Path,
+        workspace: &Path,
+        enabled_ids: &[String],
+        disabled_ids: &[String],
+    ) -> Result<Self, StoreError> {
         let discovered = Self::discover(data_home, workspace)?;
         let result = Self {
             mounted: discovered
                 .entries
                 .into_iter()
-                .filter_map(|(skill, is_enabled)| is_enabled.then_some(skill))
+                .filter_map(|(skill, default_enabled)| {
+                    let id = skill.manifest.id.as_str();
+                    let effective = if disabled_ids.iter().any(|x| x == id) {
+                        false
+                    } else if enabled_ids.iter().any(|x| x == id) {
+                        true
+                    } else {
+                        default_enabled
+                    };
+                    effective.then_some(skill)
+                })
                 .collect(),
             inventories: discovered.inventories,
         };

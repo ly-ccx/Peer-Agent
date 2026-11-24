@@ -258,6 +258,14 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
             Some(v.clone())
         }
     };
+    let capability_policy = match obj.get("capabilityPolicy") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => match validate_capability_policy_shape(v) {
+            Ok(normalized) => Some(normalized),
+            Err(code) => return Ok(ok_fail(code)),
+        },
+    };
     let display_name = match obj.get("displayName").and_then(Value::as_str) {
         None => None,
         Some(raw) => {
@@ -353,6 +361,7 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
         || plan_approval.is_some()
         || acceptance_policy.is_some()
         || model_policy.is_some()
+        || capability_policy.is_some()
     {
         let Some(mut cur) = store.read(ws) else {
             return Ok(ok_fail("NOT_FOUND"));
@@ -369,6 +378,9 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
         if let Some(mp) = model_policy {
             cur.model_policy = Some(mp);
         }
+        if let Some(cp) = capability_policy {
+            cur.capability_policy = cp;
+        }
         if let Err(err) = store.save(cur) {
             return Ok(ok_fail(err.code));
         }
@@ -378,6 +390,56 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
         Some(profile) => Ok(json!({ "ok": true, "profile": profile })),
         None => Ok(ok_fail("NOT_FOUND")),
     }
+}
+
+fn validate_capability_policy_shape(
+    value: &Value,
+) -> Result<Option<peer_project_agent::BotCapabilityPolicy>, &'static str> {
+    let Some(obj) = value.as_object() else {
+        return Err("INVALID_CAPABILITY_POLICY");
+    };
+    const ALLOWED_KEYS: [&str; 4] = [
+        "enabledSkillIds",
+        "disabledSkillIds",
+        "enabledMcpIds",
+        "disabledMcpIds",
+    ];
+    if obj.keys().any(|k| !ALLOWED_KEYS.contains(&k.as_str())) {
+        return Err("INVALID_CAPABILITY_POLICY");
+    }
+    let parse_list = |key: &str| -> Result<Vec<String>, &'static str> {
+        let Some(raw) = obj.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(arr) = raw.as_array() else {
+            return Err("INVALID_CAPABILITY_POLICY");
+        };
+        if arr.len() > 256 {
+            return Err("INVALID_CAPABILITY_POLICY");
+        }
+        let mut out = Vec::with_capacity(arr.len());
+        for item in arr {
+            let Some(s) = item.as_str() else {
+                return Err("INVALID_CAPABILITY_POLICY");
+            };
+            let trimmed = s.trim();
+            if trimmed.is_empty()
+                || trimmed.len() > 200
+                || trimmed.chars().any(|c| c.is_control())
+            {
+                return Err("INVALID_CAPABILITY_POLICY");
+            }
+            out.push(trimmed.to_owned());
+        }
+        Ok(out)
+    };
+    let policy = peer_project_agent::BotCapabilityPolicy {
+        enabled_skill_ids: parse_list("enabledSkillIds")?,
+        disabled_skill_ids: parse_list("disabledSkillIds")?,
+        enabled_mcp_ids: parse_list("enabledMcpIds")?,
+        disabled_mcp_ids: parse_list("disabledMcpIds")?,
+    };
+    Ok(policy.normalize())
 }
 
 // ---------------------------------------------------------------------------
