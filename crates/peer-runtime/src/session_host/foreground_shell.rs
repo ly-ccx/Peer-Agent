@@ -130,12 +130,7 @@ impl NativeSessionHost {
         {
             return Err(INVALID);
         }
-        let pid = rustix::process::Pid::from_raw(child.pid as i32).ok_or(INVALID)?;
-        if !matches!(rustix::process::getpgid(Some(pid)), Ok(group) if group==pid)
-            && rustix::process::getpgid(Some(pid)) != Err(rustix::io::Errno::SRCH)
-        {
-            return Err(HostError("native_process_group_unproven"));
-        }
+        crate::recorder::verify_spawned_process_group(child.pid, INVALID.0)?;
         process.child = Some(child);
         process.state = State::Running;
         dispatch

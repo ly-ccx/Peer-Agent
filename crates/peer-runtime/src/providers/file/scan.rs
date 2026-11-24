@@ -68,8 +68,9 @@ fn visit_entries(
     run: &RunGuard,
     mut visit: impl FnMut(std::ffi::OsString, EntryType) -> Result<(), HostError>,
 ) -> Result<(), HostError> {
-    let unavailable = |_| HostError("file_unavailable");
+    #[cfg(unix)]
     if run.port.confined_reads {
+        let unavailable = |_| HostError("file_unavailable");
         use rustix::fs::{AtFlags, Dir, FileType, statat};
         use std::os::unix::ffi::OsStrExt;
         let directory = target::directory(path)?;
@@ -98,24 +99,49 @@ fn visit_entries(
                 },
             )?;
         }
-    } else {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if run.port.confined_reads {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        target::verify_directory(path)?;
         for entry in std::fs::read_dir(path).map_err(|_| HostError("file_unavailable"))? {
             run.cancel()?;
             let entry = entry.map_err(|_| HostError("file_unavailable"))?;
-            let kind = entry
-                .file_type()
+            let meta = std::fs::symlink_metadata(entry.path())
                 .map_err(|_| HostError("file_unavailable"))?;
-            visit(
-                entry.file_name(),
-                if kind.is_dir() {
-                    EntryType::Dir
-                } else if kind.is_file() {
-                    EntryType::File
-                } else {
-                    EntryType::Other
-                },
-            )?;
+            let entry_type = if meta.file_type().is_symlink()
+                || (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+            {
+                EntryType::Other
+            } else if meta.is_dir() {
+                EntryType::Dir
+            } else if meta.is_file() {
+                EntryType::File
+            } else {
+                EntryType::Other
+            };
+            visit(entry.file_name(), entry_type)?;
         }
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(path).map_err(|_| HostError("file_unavailable"))? {
+        run.cancel()?;
+        let entry = entry.map_err(|_| HostError("file_unavailable"))?;
+        let kind = entry
+            .file_type()
+            .map_err(|_| HostError("file_unavailable"))?;
+        visit(
+            entry.file_name(),
+            if kind.is_dir() {
+                EntryType::Dir
+            } else if kind.is_file() {
+                EntryType::File
+            } else {
+                EntryType::Other
+            },
+        )?;
     }
     Ok(())
 }

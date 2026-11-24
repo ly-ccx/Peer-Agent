@@ -143,18 +143,8 @@ impl ExecutionResourceStore {
         if !path.exists() {
             missing_ledger_check(&directory)?;
             cancel(cancelled)?;
-            match rustix::fs::open(
-                &path,
-                rustix::fs::OFlags::CREATE
-                    | rustix::fs::OFlags::EXCL
-                    | rustix::fs::OFlags::RDWR
-                    | rustix::fs::OFlags::NOFOLLOW,
-                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-            ) {
-                Ok(fd) => drop(fd),
-                Err(rustix::io::Errno::EXIST) => {}
-                _ => return Err(ResourceError::Unavailable),
-            }
+            crate::platform::create_new_private_file(&path)
+                .map_err(|_| ResourceError::Unavailable)?;
         }
         let file = SqliteFile::existing(&path).map_err(mapped)?;
         let read = file

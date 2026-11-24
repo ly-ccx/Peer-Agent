@@ -97,6 +97,11 @@ pub(super) async fn open(
         .kill_on_drop(true);
     #[cfg(unix)]
     command.process_group(0);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::recorder::CREATE_NO_WINDOW);
+    }
     let mut child = command.spawn().map_err(|_| "mcp_spawn_failed")?;
     let output = child.stdout.take().unwrap();
     let input = child.stdin.take().unwrap();

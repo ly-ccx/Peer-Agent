@@ -14,15 +14,15 @@ pub(crate) struct FileIdentity {
     pub changed_ns: i128,
 }
 
-#[cfg(unix)]
 fn from_metadata(meta: &Metadata) -> FileIdentity {
-    use std::os::unix::fs::MetadataExt;
+    let (dev, ino) = crate::platform::metadata_dev_ino(meta);
+    let (modified_ns, changed_ns) = crate::platform::metadata_times_ns(meta);
     FileIdentity {
-        dev: meta.dev(),
-        ino: meta.ino(),
+        dev,
+        ino,
         size: meta.len(),
-        modified_ns: i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
-        changed_ns: i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+        modified_ns,
+        changed_ns,
     }
 }
 
@@ -42,13 +42,7 @@ pub(crate) fn open(path: &Path, max: u64) -> Result<Option<(File, FileIdentity)>
     if before.size > max {
         return Err(StoreError::HistoryLimit);
     }
-    let fd = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|_| StoreError::ReadFailed)?;
-    let file = File::from(fd);
+    let file = crate::platform::open_readonly_nofollow(path).map_err(|_| StoreError::ReadFailed)?;
     let meta = file.metadata().map_err(|_| StoreError::ReadFailed)?;
     if !meta.is_file() || from_metadata(&meta) != before {
         return Err(StoreError::VersionChanged);

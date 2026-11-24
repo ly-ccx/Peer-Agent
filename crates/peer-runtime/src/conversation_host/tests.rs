@@ -65,6 +65,7 @@ fn server_with_reply_gate(
             };
             // Darwin may inherit O_NONBLOCK from the listening socket. This
             // worker uses bounded blocking I/O, just like the public CLI fixture.
+            #[cfg(unix)]
             eprintln!(
                 "ordinary HTTP request {request_index}: inherited_nonblocking={}",
                 rustix::fs::fcntl_getfl(&socket)

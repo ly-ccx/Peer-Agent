@@ -15,7 +15,10 @@ pub struct GitStatusProbe {
 impl Default for GitStatusProbe {
     fn default() -> Self {
         Self {
+            #[cfg(unix)]
             binary: PathBuf::from("/usr/bin/git"),
+            #[cfg(windows)]
+            binary: PathBuf::from("git.exe"),
         }
     }
 }

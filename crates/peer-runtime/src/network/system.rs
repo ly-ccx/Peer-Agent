@@ -198,6 +198,7 @@ mod tests {
             assert_eq!(serde_json::to_value(actual).unwrap(), case["expected"]);
         }
     }
+    #[cfg(unix)]
     #[tokio::test]
     async fn bounded_query_cancellation_and_output_exhaustion_reap_the_owned_process() {
         use std::ffi::OsStr;

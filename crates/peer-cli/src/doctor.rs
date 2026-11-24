@@ -4,22 +4,39 @@ use std::{
     io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
 };
+#[cfg(unix)]
 fn accessible(path: &Path, access: rustix::fs::Access) -> bool {
     rustix::fs::access(path, access).is_ok()
 }
 fn executable(path: &Path) -> bool {
-    path.is_file() && accessible(path, rustix::fs::Access::EXEC_OK)
+    #[cfg(unix)]
+    {
+        path.is_file() && accessible(path, rustix::fs::Access::EXEC_OK)
+    }
+    #[cfg(windows)]
+    {
+        path.is_file()
+    }
 }
 fn writable_directory(path: &Path) -> bool {
     let mut parent = path;
     loop {
         match std::fs::metadata(parent) {
             Ok(meta) => {
-                return meta.is_dir()
-                    && accessible(
+                if !meta.is_dir() {
+                    return false;
+                }
+                #[cfg(unix)]
+                {
+                    return accessible(
                         parent,
                         rustix::fs::Access::WRITE_OK | rustix::fs::Access::EXEC_OK,
                     );
+                }
+                #[cfg(windows)]
+                {
+                    return tempfile::NamedTempFile::new_in(parent).is_ok();
+                }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let Some(next) = parent.parent() else {
@@ -44,10 +61,12 @@ fn display(path: &Path) -> String {
 }
 pub fn run() -> io::Result<CliExit> {
     let peer = std::env::current_exe()?;
-    let helper = peer
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("peer-credential-helper");
+    let helper_name = if cfg!(windows) {
+        "peer-credential-helper.exe"
+    } else {
+        "peer-credential-helper"
+    };
+    let helper = peer.parent().unwrap_or(Path::new(".")).join(helper_name);
     let data = peer_protocol::data_home().map(|p| {
         if p.is_absolute() {
             p

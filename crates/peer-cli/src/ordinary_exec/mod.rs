@@ -49,44 +49,88 @@ fn json_output(value: &Value) -> io::Result<String> {
     Ok(crate::text::escape_json_controls(&encoded))
 }
 async fn stdin_prompt(cancel: &CancellationToken) -> Result<String, &'static str> {
-    let input = io::stdin();
-    let mut bytes = vec![];
-    loop {
-        if cancel.is_cancelled() {
-            return Err("CANCELLED");
+    #[cfg(unix)]
+    {
+        let input = io::stdin();
+        let mut bytes = vec![];
+        loop {
+            if cancel.is_cancelled() {
+                return Err("CANCELLED");
+            }
+            let mut poll = [rustix::event::PollFd::new(
+                &input,
+                rustix::event::PollFlags::IN,
+            )];
+            let ready = rustix::event::poll(
+                &mut poll,
+                Some(&rustix::event::Timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                }),
+            )
+            .map_err(|_| "stdin_unavailable")?;
+            if ready == 0 {
+                tokio::select! {biased;_=cancel.cancelled()=>return Err("CANCELLED"),_=tokio::time::sleep(Duration::from_millis(10))=>{}}
+                continue;
+            }
+            let mut chunk = [0u8; 4096];
+            let n = match rustix::io::read(&input, &mut chunk) {
+                Ok(n) => n,
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => return Err("stdin_unavailable"),
+            };
+            if n == 0 {
+                break;
+            }
+            if bytes.len() + n > 1024 * 1024 {
+                return Err("prompt_limit");
+            }
+            bytes.extend_from_slice(&chunk[..n]);
+            tokio::task::yield_now().await;
         }
-        let mut poll = [rustix::event::PollFd::new(
-            &input,
-            rustix::event::PollFlags::IN,
-        )];
-        let ready = rustix::event::poll(
-            &mut poll,
-            Some(&rustix::event::Timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            }),
-        )
-        .map_err(|_| "stdin_unavailable")?;
-        if ready == 0 {
-            tokio::select! {biased;_=cancel.cancelled()=>return Err("CANCELLED"),_=tokio::time::sleep(Duration::from_millis(10))=>{}}
-            continue;
-        }
-        let mut chunk = [0u8; 4096];
-        let n = match rustix::io::read(&input, &mut chunk) {
-            Ok(n) => n,
-            Err(rustix::io::Errno::INTR) => continue,
-            Err(_) => return Err("stdin_unavailable"),
-        };
-        if n == 0 {
-            break;
-        }
-        if bytes.len() + n > 1024 * 1024 {
-            return Err("prompt_limit");
-        }
-        bytes.extend_from_slice(&chunk[..n]);
-        tokio::task::yield_now().await;
+        String::from_utf8(bytes).map_err(|_| "prompt_invalid_utf8")
     }
-    String::from_utf8(bytes).map_err(|_| "prompt_invalid_utf8")
+    #[cfg(windows)]
+    {
+        use std::io::Read;
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<io::Result<Vec<u8>>>(8);
+        std::thread::spawn(move || {
+            let mut input = io::stdin().lock();
+            let mut buf = [0u8; 4096];
+            loop {
+                match input.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if tx.blocking_send(Ok(buf[..n].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        let _ = tx.blocking_send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+        let mut bytes = Vec::new();
+        loop {
+            let chunk = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err("CANCELLED"),
+                next = rx.recv() => next,
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
+            let chunk = chunk.map_err(|_| "stdin_unavailable")?;
+            if bytes.len() + chunk.len() > 1024 * 1024 {
+                return Err("prompt_limit");
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        String::from_utf8(bytes).map_err(|_| "prompt_invalid_utf8")
+    }
 }
 pub fn run(options: &Options) -> io::Result<CliExit> {
     let started = Instant::now();

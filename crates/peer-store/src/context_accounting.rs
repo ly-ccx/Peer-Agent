@@ -266,9 +266,7 @@ impl ConversationStore {
         let folder = directory.join(".context-snapshots");
         if files::identity(&folder)?.is_none() {
             std::fs::create_dir(&folder).map_err(|_| StoreError::ReadFailed)?;
-            std::fs::File::open(&directory)
-                .and_then(|f| f.sync_all())
-                .map_err(|_| StoreError::ReadFailed)?;
+            crate::platform::sync_dir(&directory).map_err(|_| StoreError::ReadFailed)?;
         }
         if !std::fs::symlink_metadata(&folder)
             .map_err(|_| StoreError::ReadFailed)?

@@ -462,6 +462,7 @@ mod tests {
             stream_id: stream.into(),
         }
     }
+    #[cfg(unix)]
     #[tokio::test]
     async fn scoped_stop_awaits_the_real_owner_without_cancelling_another_stream() {
         let registry = ExecutionRegistry::default();

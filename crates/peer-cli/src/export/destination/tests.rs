@@ -87,6 +87,7 @@ fn publication_uncertainty_retains_the_committed_copy_and_explicit_fresh_force_c
         .unwrap();
     assert_eq!(fs::read_to_string(path).unwrap(), "next complete copy");
 }
+#[cfg(unix)]
 #[test]
 fn cancelled_lock_wait_cleans_only_its_temp_preserves_the_target_and_admits_a_later_export() {
     let root = tempfile::tempdir().unwrap();

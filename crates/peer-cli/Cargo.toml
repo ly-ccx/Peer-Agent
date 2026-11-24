@@ -24,14 +24,23 @@ tempfile = "3.23.0"
 crossterm.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
-signal-hook = "0.3.18"
 sha2 = { workspace = true, optional = true }
 tokio = { version = "=1.48.0", features = ["rt", "time", "io-std", "io-util"] }
-rustix = { version = "1.1.4", features = ["event", "pty", "fs"] }
 uuid = { version = "=1.18.1", features = ["v4"] }
 
-[dev-dependencies]
+[target.'cfg(unix)'.dependencies]
+crossterm = { workspace = true, features = ["use-dev-tty"] }
+signal-hook = "0.3.18"
+rustix = { version = "1.1.4", features = ["event", "pty", "fs"] }
+
+[target.'cfg(windows)'.dependencies]
+fs2 = "0.4.3"
+tokio = { version = "=1.48.0", features = ["signal"] }
+
+[target.'cfg(unix)'.dev-dependencies]
 rustix = { version = "1.1.4", features = ["pipe"] }
+
+[dev-dependencies]
 md-5 = "=0.10.6"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }

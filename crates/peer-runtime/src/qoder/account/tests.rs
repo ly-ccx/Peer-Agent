@@ -155,6 +155,7 @@ fn invalid_or_cancelled_credentials_preserve_source_and_can_be_reloaded_after_re
         );
     }
 }
+#[cfg(unix)]
 #[test]
 fn bounded_regular_files_reject_symlinks_fifos_invalid_utf8_and_non_byte_compatible_machine_keys() {
     use std::os::unix::fs::symlink;

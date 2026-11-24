@@ -4,6 +4,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -11,6 +12,7 @@ on:
   push:
     branches:
       - PeerAgent/dev/0.1.0
+      - codex/native-rust-cli
 
 permissions:
   contents: read
@@ -161,3 +163,54 @@ jobs:
             ${{ runner.temp }}/bot-shell-protocol.log
             ${{ runner.temp }}/bot-shell-main-*
           if-no-files-found: ignore
+
+  windows-rust:
+    name: ci-windows-rust
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-rust-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Check native crate boundaries
+        run: node scripts/native-cli/check-boundaries.mjs
+
+      - name: Check workspace compilation on Windows MSVC
+        run: cargo check --locked --workspace
+
+      - name: Build Windows release binaries (peer-native + peer-credential-helper)
+        run: cargo build --locked --release -p peer-credential-helper --bin peer-credential-helper -p peer-cli --bin peer-native
+
+      - name: Run Windows Rust unit tests
+        run: cargo test --locked -p peer-protocol -p peer-store -p peer-runtime -p peer-project-agent -p peer-core-rpc -p peer-tui -p peer-cli --lib
+
+      - name: Run Windows cross-platform integration tests
+        run: cargo test --locked -p peer-core-rpc --test project_domains --test daemon_shared
+
+      - name: Smoke test peer-native.exe
+        shell: pwsh
+        run: |
+          $ver = (& target\release\peer-native.exe --version).Trim()
+          Write-Host "peer-native.exe --version -> $ver"
+          if (-not $ver.StartsWith("peer ")) { throw "unexpected version output: $ver" }
+          & target\release\peer-native.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "peer-native.exe --help failed with $LASTEXITCODE" }
+          & target\release\peer-credential-helper.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "peer-credential-helper.exe --help failed with $LASTEXITCODE" }

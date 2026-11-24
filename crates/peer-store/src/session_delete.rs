@@ -442,8 +442,8 @@ fn change_end(path: &Path) -> Result<u64, StoreError> {
     let Some((mut file, prior)) = files::open(path, u64::MAX)? else {
         return Ok(0);
     };
-    use std::os::unix::fs::MetadataExt;
-    if file.metadata().map_err(|_| StoreError::ReadFailed)?.nlink() != 1 {
+    let meta = file.metadata().map_err(|_| StoreError::ReadFailed)?;
+    if !crate::platform::metadata_nlink_is_one(&meta) {
         return Err(StoreError::ReadFailed);
     }
     if prior.size > 0 {

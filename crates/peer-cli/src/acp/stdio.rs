@@ -1,250 +1,399 @@
 //! A connection owns one bounded NDJSON reader and serializes protocol writes.
 //! The editor keeps stdin open while prompts or approvals are in progress.
 use peer_runtime::CancellationToken;
-use rustix::{
-    event::{PollFd, PollFlags, poll},
-    fs::{OFlags, fcntl_getfl, fcntl_setfl},
-    io::{Errno, read, write},
-};
 use serde_json::Value;
-use std::{io, os::fd::AsFd, time::Duration};
+use std::{io, time::Duration};
 
 const MAX_FRAME: usize = 2 * 1024 * 1024;
-const IO_POLL: Duration = Duration::from_millis(10);
 const WRITE_LIMIT: Duration = Duration::from_secs(5);
-const EMPTY_POLL: rustix::event::Timespec = rustix::event::Timespec {
-    tv_sec: 0,
-    tv_nsec: 0,
-};
 
-struct Nonblocking<F: AsFd> {
-    source: F,
-    original: OFlags,
-}
-impl<F: AsFd> Nonblocking<F> {
-    fn new(source: F) -> io::Result<Self> {
-        let original = fcntl_getfl(&source)?;
-        fcntl_setfl(&source, original | OFlags::NONBLOCK)?;
-        Ok(Self { source, original })
-    }
-}
-impl<F: AsFd> Drop for Nonblocking<F> {
-    fn drop(&mut self) {
-        let _ = fcntl_setfl(&self.source, self.original);
-    }
-}
+#[cfg(unix)]
+mod imp {
+    use super::*;
+    use rustix::{
+        event::{PollFd, PollFlags, poll},
+        fs::{OFlags, fcntl_getfl, fcntl_setfl},
+        io::{Errno, read, write},
+    };
+    use std::os::fd::AsFd;
 
-async fn ready(fd: &impl AsFd, flag: PollFlags, shutdown: &CancellationToken) -> io::Result<bool> {
-    loop {
-        if shutdown.is_cancelled() {
-            return Ok(false);
-        }
-        let mut requests = [PollFd::new(fd, flag)];
-        match poll(&mut requests, Some(&EMPTY_POLL)) {
-            Ok(0) => {
-                tokio::select! {
-                    biased;
-                    _ = shutdown.cancelled() => return Ok(false),
-                    _ = tokio::time::sleep(IO_POLL) => {}
-                }
-            }
-            Ok(_) => return Ok(true),
-            Err(Errno::INTR) => {}
-            Err(error) => return Err(error.into()),
+    const IO_POLL: Duration = Duration::from_millis(10);
+    const EMPTY_POLL: rustix::event::Timespec = rustix::event::Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    struct Nonblocking<F: AsFd> {
+        source: F,
+        original: OFlags,
+    }
+    impl<F: AsFd> Nonblocking<F> {
+        fn new(source: F) -> io::Result<Self> {
+            let original = fcntl_getfl(&source)?;
+            fcntl_setfl(&source, original | OFlags::NONBLOCK)?;
+            Ok(Self { source, original })
         }
     }
-}
-
-fn output_disconnected(events: PollFlags) -> io::Result<bool> {
-    if events.contains(PollFlags::NVAL) {
-        return Err(Errno::BADF.into());
-    }
-    Ok(events.intersects(PollFlags::ERR | PollFlags::HUP))
-}
-
-fn output_open(output: &impl AsFd) -> io::Result<bool> {
-    // Darwin pipes report HUP after the last reader closes when OUT is requested.
-    let mut requests = [PollFd::new(output, PollFlags::OUT)];
-    loop {
-        match poll(&mut requests, Some(&EMPTY_POLL)) {
-            Ok(_) => return Ok(!output_disconnected(requests[0].revents())?),
-            Err(Errno::INTR) => {}
-            Err(error) => return Err(error.into()),
+    impl<F: AsFd> Drop for Nonblocking<F> {
+        fn drop(&mut self) {
+            let _ = fcntl_setfl(&self.source, self.original);
         }
     }
-}
 
-async fn ready_to_read(
-    input: &impl AsFd,
-    output: &impl AsFd,
-    shutdown: &CancellationToken,
-) -> io::Result<bool> {
-    loop {
-        if shutdown.is_cancelled() {
-            return Ok(false);
-        }
-        let mut requests = [
-            PollFd::new(input, PollFlags::IN),
-            PollFd::new(output, PollFlags::OUT),
-        ];
-        match poll(&mut requests, Some(&EMPTY_POLL)) {
-            Ok(_) => {
-                if output_disconnected(requests[1].revents())? {
-                    return Ok(false);
-                }
-                if !requests[0].revents().is_empty() {
-                    return Ok(true);
-                }
-            }
-            Err(Errno::INTR) => continue,
-            Err(error) => return Err(error.into()),
-        }
-        tokio::select! {
-            biased;
-            _ = shutdown.cancelled() => return Ok(false),
-            _ = tokio::time::sleep(IO_POLL) => {}
-        }
-    }
-}
-
-pub(super) struct Reader<F: AsFd> {
-    input: Nonblocking<F>,
-    retained: Vec<u8>,
-    cursor: usize,
-}
-impl<F: AsFd> Reader<F> {
-    pub(super) fn new(input: F) -> io::Result<Self> {
-        Ok(Self {
-            input: Nonblocking::new(input)?,
-            retained: Vec::new(),
-            cursor: 0,
-        })
-    }
-
-    pub(super) async fn next_frame(
-        &mut self,
-        output: &impl AsFd,
+    async fn ready(
+        fd: &impl AsFd,
+        flag: PollFlags,
         shutdown: &CancellationToken,
-    ) -> io::Result<Option<Vec<u8>>> {
-        let mut searched = 0;
+    ) -> io::Result<bool> {
         loop {
             if shutdown.is_cancelled() {
-                return Ok(None);
+                return Ok(false);
             }
-            let remaining = &self.retained[self.cursor..];
-            if let Some(next) = remaining[searched..].iter().position(|b| *b == b'\n') {
-                if !output_open(output)? {
+            let mut requests = [PollFd::new(fd, flag)];
+            match poll(&mut requests, Some(&EMPTY_POLL)) {
+                Ok(0) => {
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.cancelled() => return Ok(false),
+                        _ = tokio::time::sleep(IO_POLL) => {}
+                    }
+                }
+                Ok(_) => return Ok(true),
+                Err(Errno::INTR) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    fn output_disconnected(events: PollFlags) -> io::Result<bool> {
+        if events.contains(PollFlags::NVAL) {
+            return Err(Errno::BADF.into());
+        }
+        Ok(events.intersects(PollFlags::ERR | PollFlags::HUP))
+    }
+
+    fn output_open(output: &impl AsFd) -> io::Result<bool> {
+        // Darwin pipes report HUP after the last reader closes when OUT is requested.
+        let mut requests = [PollFd::new(output, PollFlags::OUT)];
+        loop {
+            match poll(&mut requests, Some(&EMPTY_POLL)) {
+                Ok(_) => return Ok(!output_disconnected(requests[0].revents())?),
+                Err(Errno::INTR) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    async fn ready_to_read(
+        input: &impl AsFd,
+        output: &impl AsFd,
+        shutdown: &CancellationToken,
+    ) -> io::Result<bool> {
+        loop {
+            if shutdown.is_cancelled() {
+                return Ok(false);
+            }
+            let mut requests = [
+                PollFd::new(input, PollFlags::IN),
+                PollFd::new(output, PollFlags::OUT),
+            ];
+            match poll(&mut requests, Some(&EMPTY_POLL)) {
+                Ok(_) => {
+                    if output_disconnected(requests[1].revents())? {
+                        return Ok(false);
+                    }
+                    if !requests[0].revents().is_empty() {
+                        return Ok(true);
+                    }
+                }
+                Err(Errno::INTR) => continue,
+                Err(error) => return Err(error.into()),
+            }
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => return Ok(false),
+                _ = tokio::time::sleep(IO_POLL) => {}
+            }
+        }
+    }
+
+    pub(in crate::acp) struct Reader<F: AsFd> {
+        input: Nonblocking<F>,
+        retained: Vec<u8>,
+        cursor: usize,
+    }
+    impl<F: AsFd> Reader<F> {
+        pub(in crate::acp) fn new(input: F) -> io::Result<Self> {
+            Ok(Self {
+                input: Nonblocking::new(input)?,
+                retained: Vec::new(),
+                cursor: 0,
+            })
+        }
+
+        pub(in crate::acp) async fn next_frame(
+            &mut self,
+            output: &impl AsFd,
+            shutdown: &CancellationToken,
+        ) -> io::Result<Option<Vec<u8>>> {
+            let mut searched = 0;
+            loop {
+                if shutdown.is_cancelled() {
                     return Ok(None);
                 }
-                let newline = searched + next;
-                if newline > MAX_FRAME {
+                let remaining = &self.retained[self.cursor..];
+                if let Some(next) = remaining[searched..].iter().position(|b| *b == b'\n') {
+                    if !output_open(output)? {
+                        return Ok(None);
+                    }
+                    let newline = searched + next;
+                    if newline > MAX_FRAME {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "ACP input frame too large",
+                        ));
+                    }
+                    let line = remaining[..newline].to_vec();
+                    self.cursor += newline + 1;
+                    return Ok(Some(line));
+                }
+                if remaining.len() > MAX_FRAME {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "ACP input frame too large",
                     ));
                 }
-                let line = remaining[..newline].to_vec();
-                self.cursor += newline + 1;
-                return Ok(Some(line));
+                searched = remaining.len();
+                if self.cursor != 0 {
+                    self.retained.drain(..self.cursor);
+                    self.cursor = 0;
+                }
+                if !ready_to_read(&self.input.source, output, shutdown).await? {
+                    return Ok(None);
+                }
+                let mut buffer = [0u8; 4096];
+                match read(&self.input.source, &mut buffer) {
+                    Ok(0) if self.retained.is_empty() => return Ok(None),
+                    Ok(0) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "Incomplete ACP input frame",
+                        ));
+                    }
+                    Ok(n) => self.retained.extend_from_slice(&buffer[..n]),
+                    Err(Errno::INTR | Errno::AGAIN) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                tokio::task::yield_now().await;
             }
-            if remaining.len() > MAX_FRAME {
+        }
+    }
+
+    pub(in crate::acp) struct Writer<F: AsFd> {
+        output: tokio::sync::Mutex<Nonblocking<F>>,
+        shutdown: CancellationToken,
+    }
+    struct PartialFrame<'a> {
+        shutdown: &'a CancellationToken,
+        incomplete: bool,
+    }
+    impl Drop for PartialFrame<'_> {
+        fn drop(&mut self) {
+            if self.incomplete {
+                self.shutdown.cancel();
+            }
+        }
+    }
+    impl<F: AsFd> Writer<F> {
+        pub(in crate::acp) fn new(output: F, shutdown: &CancellationToken) -> io::Result<Self> {
+            Ok(Self {
+                output: tokio::sync::Mutex::new(Nonblocking::new(output)?),
+                shutdown: shutdown.clone(),
+            })
+        }
+
+        pub(in crate::acp) async fn send(&self, message: &Value) -> io::Result<()> {
+            let result = tokio::time::timeout(WRITE_LIMIT, self.send_inner(message))
+                .await
+                .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
+            if result.is_err() {
+                self.shutdown.cancel();
+            }
+            result
+        }
+
+        async fn send_inner(&self, message: &Value) -> io::Result<()> {
+            let output = tokio::select! {
+                biased;
+                _ = self.shutdown.cancelled() => return Err(io::ErrorKind::Interrupted.into()),
+                target = self.output.lock() => target,
+            };
+            let mut frame = serde_json::to_vec(message)?;
+            if frame.len() > MAX_FRAME {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "ACP input frame too large",
+                    "ACP output frame too large",
                 ));
             }
-            searched = remaining.len();
-            if self.cursor != 0 {
-                self.retained.drain(..self.cursor);
-                self.cursor = 0;
+            frame.push(b'\n');
+            let mut emission = PartialFrame {
+                shutdown: &self.shutdown,
+                incomplete: false,
+            };
+            let mut pending = frame.as_slice();
+            while !pending.is_empty() {
+                if !ready(&output.source, PollFlags::OUT, &self.shutdown).await? {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                match write(&output.source, pending) {
+                    Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                    Ok(n) => {
+                        pending = &pending[n..];
+                        emission.incomplete = !pending.is_empty();
+                    }
+                    Err(Errno::INTR | Errno::AGAIN) => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
-            if !ready_to_read(&self.input.source, output, shutdown).await? {
-                return Ok(None);
-            }
-            let mut buffer = [0u8; 4096];
-            match read(&self.input.source, &mut buffer) {
-                Ok(0) if self.retained.is_empty() => return Ok(None),
-                Ok(0) => {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use super::*;
+    use std::io::{Read, Write};
+
+    pub(in crate::acp) struct Reader<F> {
+        _marker: std::marker::PhantomData<F>,
+        rx: tokio::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
+        retained: Vec<u8>,
+        cursor: usize,
+    }
+    impl<F: Read + Send + 'static> Reader<F> {
+        pub(in crate::acp) fn new(mut input: F) -> io::Result<Self> {
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match input.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if tx.blocking_send(Ok(buf[..n].to_vec())).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                        Err(e) => {
+                            let _ = tx.blocking_send(Err(e));
+                            break;
+                        }
+                    }
+                }
+            });
+            Ok(Self {
+                _marker: std::marker::PhantomData,
+                rx,
+                retained: Vec::new(),
+                cursor: 0,
+            })
+        }
+
+        pub(in crate::acp) async fn next_frame(
+            &mut self,
+            _output: &impl Write,
+            shutdown: &CancellationToken,
+        ) -> io::Result<Option<Vec<u8>>> {
+            let mut searched = 0;
+            loop {
+                if shutdown.is_cancelled() {
+                    return Ok(None);
+                }
+                let remaining = &self.retained[self.cursor..];
+                if let Some(next) = remaining[searched..].iter().position(|b| *b == b'\n') {
+                    let newline = searched + next;
+                    if newline > MAX_FRAME {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "ACP input frame too large",
+                        ));
+                    }
+                    let line = remaining[..newline].to_vec();
+                    self.cursor += newline + 1;
+                    return Ok(Some(line));
+                }
+                if remaining.len() > MAX_FRAME {
                     return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "Incomplete ACP input frame",
+                        io::ErrorKind::InvalidData,
+                        "ACP input frame too large",
                     ));
                 }
-                Ok(n) => self.retained.extend_from_slice(&buffer[..n]),
-                Err(Errno::INTR | Errno::AGAIN) => {}
-                Err(error) => return Err(error.into()),
-            }
-            tokio::task::yield_now().await;
-        }
-    }
-}
-
-pub(super) struct Writer<F: AsFd> {
-    output: tokio::sync::Mutex<Nonblocking<F>>,
-    shutdown: CancellationToken,
-}
-struct PartialFrame<'a> {
-    shutdown: &'a CancellationToken,
-    incomplete: bool,
-}
-impl Drop for PartialFrame<'_> {
-    fn drop(&mut self) {
-        if self.incomplete {
-            self.shutdown.cancel();
-        }
-    }
-}
-impl<F: AsFd> Writer<F> {
-    pub(super) fn new(output: F, shutdown: &CancellationToken) -> io::Result<Self> {
-        Ok(Self {
-            output: tokio::sync::Mutex::new(Nonblocking::new(output)?),
-            shutdown: shutdown.clone(),
-        })
-    }
-
-    pub(super) async fn send(&self, message: &Value) -> io::Result<()> {
-        let result = tokio::time::timeout(WRITE_LIMIT, self.send_inner(message))
-            .await
-            .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
-        if result.is_err() {
-            self.shutdown.cancel();
-        }
-        result
-    }
-
-    async fn send_inner(&self, message: &Value) -> io::Result<()> {
-        let output = tokio::select! {
-            biased;
-            _ = self.shutdown.cancelled() => return Err(io::ErrorKind::Interrupted.into()),
-            target = self.output.lock() => target,
-        };
-        let mut frame = serde_json::to_vec(message)?;
-        if frame.len() > MAX_FRAME {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "ACP output frame too large",
-            ));
-        }
-        frame.push(b'\n');
-        let mut emission = PartialFrame {
-            shutdown: &self.shutdown,
-            incomplete: false,
-        };
-        let mut pending = frame.as_slice();
-        while !pending.is_empty() {
-            if !ready(&output.source, PollFlags::OUT, &self.shutdown).await? {
-                return Err(io::ErrorKind::Interrupted.into());
-            }
-            match write(&output.source, pending) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(n) => {
-                    pending = &pending[n..];
-                    emission.incomplete = !pending.is_empty();
+                searched = remaining.len();
+                if self.cursor != 0 {
+                    self.retained.drain(..self.cursor);
+                    self.cursor = 0;
                 }
-                Err(Errno::INTR | Errno::AGAIN) => {}
-                Err(error) => return Err(error.into()),
+                let chunk = tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => return Ok(None),
+                    next = self.rx.recv() => next,
+                };
+                match chunk {
+                    None if self.retained.is_empty() => return Ok(None),
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "Incomplete ACP input frame",
+                        ));
+                    }
+                    Some(Ok(bytes)) => self.retained.extend_from_slice(&bytes),
+                    Some(Err(error)) => return Err(error),
+                }
             }
         }
-        Ok(())
+    }
+
+    pub(in crate::acp) struct Writer<F> {
+        output: tokio::sync::Mutex<F>,
+        shutdown: CancellationToken,
+    }
+    impl<F: Write> Writer<F> {
+        pub(in crate::acp) fn new(output: F, shutdown: &CancellationToken) -> io::Result<Self> {
+            Ok(Self {
+                output: tokio::sync::Mutex::new(output),
+                shutdown: shutdown.clone(),
+            })
+        }
+
+        pub(in crate::acp) async fn send(&self, message: &Value) -> io::Result<()> {
+            let result = tokio::time::timeout(WRITE_LIMIT, self.send_inner(message))
+                .await
+                .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
+            if result.is_err() {
+                self.shutdown.cancel();
+            }
+            result
+        }
+
+        async fn send_inner(&self, message: &Value) -> io::Result<()> {
+            let mut output = tokio::select! {
+                biased;
+                _ = self.shutdown.cancelled() => return Err(io::ErrorKind::Interrupted.into()),
+                target = self.output.lock() => target,
+            };
+            let mut frame = serde_json::to_vec(message)?;
+            if frame.len() > MAX_FRAME {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ACP output frame too large",
+                ));
+            }
+            frame.push(b'\n');
+            output.write_all(&frame)?;
+            output.flush()
+        }
     }
 }
+
+pub(super) use imp::{Reader, Writer};

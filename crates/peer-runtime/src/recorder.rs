@@ -9,10 +9,86 @@ pub(crate) use recovery::stop_recorded_group;
 use std::io::Read;
 use std::time::Duration;
 
+#[cfg(windows)]
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub(crate) fn kill_process_tree(pid: u32) {
+    #[cfg(unix)]
+    {
+        if let Some(group) = rustix::process::Pid::from_raw(pid as i32) {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if pid != 0 && pid <= i32::MAX as u32 {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        }
+    }
+}
+
+pub(crate) fn verify_spawned_process_group(
+    pid: u32,
+    invalid_code: &'static str,
+) -> Result<(), crate::capability::CapabilityError> {
+    #[cfg(unix)]
+    {
+        let pid = rustix::process::Pid::from_raw(pid as i32)
+            .ok_or(crate::capability::CapabilityError(invalid_code))?;
+        let proven = match rustix::process::getpgid(Some(pid)) {
+            Ok(group) => group == pid,
+            // Darwin returns ESRCH for an exited, unreaped child while ps
+            // still observes its start identity. Preserve this owned launch
+            // as running/unsettled; only the actual Child wait plus group
+            // absence may later prove completion. This is no death proof.
+            Err(rustix::io::Errno::SRCH) => true,
+            Err(_) => false,
+        };
+        if !proven {
+            return Err(crate::capability::CapabilityError(
+                "native_process_group_unproven",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        if pid == 0 || pid > i32::MAX as u32 {
+            return Err(crate::capability::CapabilityError(invalid_code));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn group_absent(pid: u32) -> bool {
-    rustix::process::Pid::from_raw(pid as i32).is_some_and(|group| {
-        rustix::process::test_kill_process_group(group) == Err(rustix::io::Errno::SRCH)
-    })
+    #[cfg(unix)]
+    {
+        rustix::process::Pid::from_raw(pid as i32).is_some_and(|group| {
+            rustix::process::test_kill_process_group(group) == Err(rustix::io::Errno::SRCH)
+        })
+    }
+    #[cfg(windows)]
+    {
+        if pid == 0 || pid > i32::MAX as u32 {
+            return false;
+        }
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new();
+        let spid = Pid::from_u32(pid);
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[spid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        sys.process(spid).is_none()
+    }
 }
 
 /// A reaped leader can leave descendants in its group until their reaper runs.
@@ -25,9 +101,7 @@ pub(crate) async fn stop_owned_group(
     use tokio::time::{Instant, sleep_until, timeout_at};
 
     let deadline = Instant::now() + budget;
-    if let Some(group) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
-    }
+    kill_process_tree(pid);
     let _ = child.start_kill();
     if !timeout_at(deadline, child.wait())
         .await
@@ -197,11 +271,17 @@ async fn boot_id() -> Option<String> {
             .ok()?;
         Some(format!("boottime:{sec}.{usec}"))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    {
+        let sec = sysinfo::System::boot_time();
+        (sec > 0).then(|| format!("win-boottime:{sec}"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         None
     }
 }
+#[cfg(unix)]
 fn confirmed_absent(pid: u32) -> bool {
     rustix::process::Pid::from_raw(pid as i32)
         .is_some_and(|pid| rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH))
@@ -228,7 +308,29 @@ async fn process_start(pid: u32) -> ProcessStart {
     {
         mac::process_start(pid)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let mut sys = System::new();
+        let spid = Pid::from_u32(pid);
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[spid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        match sys.process(spid) {
+            Some(proc) => {
+                let start = proc.start_time();
+                if start > 0 {
+                    ProcessStart::Present(format!("win-v1:{start}"))
+                } else {
+                    ProcessStart::Unavailable
+                }
+            }
+            None => ProcessStart::Absent,
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         ProcessStart::Unavailable
     }

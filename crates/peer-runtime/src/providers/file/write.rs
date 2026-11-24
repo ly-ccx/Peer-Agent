@@ -97,13 +97,14 @@ impl FileEffect {
             .map_err(|_| HostError("execution_outcome_unknown"))?;
         parent.sync()?;
         if previous.is_none() {
-            use std::os::unix::fs::MetadataExt;
             let meta = file
                 .metadata()
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
+            let expected_identity = peer_store::file_metadata_identity(&meta)
+                .map_err(|_| HostError("execution_outcome_unknown"))?;
             let observed = peer_store::file_resource(&self.path, false)
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
-            if observed.identity != format!("{}:{}", meta.dev(), meta.ino()) {
+            if observed.identity != expected_identity {
                 return Err(HostError("execution_outcome_unknown"));
             }
             *materialization = Some(observed);

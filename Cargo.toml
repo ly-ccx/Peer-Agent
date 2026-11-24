@@ -22,4 +22,5 @@ sha2 = "0.10.9"
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 # The bounded tty poll source returns on EOF/hangup; the default Mio source
 # can spin inside a read loop without returning to our cancellation flag.
-crossterm = { version = "=0.29.0", features = ["bracketed-paste", "use-dev-tty"] }
+# `use-dev-tty` is enabled per-crate on Unix targets.
+crossterm = { version = "=0.29.0", features = ["bracketed-paste"] }

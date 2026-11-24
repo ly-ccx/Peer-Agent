@@ -20,15 +20,16 @@ fn absolute(path: &Path) -> Result<PathBuf, ResourceError> {
     if !path.is_absolute() || path.as_os_str().len() > 8192 {
         return Err(ResourceError::Scope);
     }
-    let mut result = PathBuf::from("/");
+    let mut result = PathBuf::new();
     for part in path.components() {
         match part {
+            Component::Prefix(prefix) => result.push(prefix.as_os_str()),
+            Component::RootDir => result.push(part.as_os_str()),
             Component::Normal(p) => result.push(p),
             Component::ParentDir => {
                 result.pop();
             }
-            Component::RootDir | Component::CurDir => {}
-            _ => return Err(ResourceError::Scope),
+            Component::CurDir => {}
         }
     }
     Ok(result)
@@ -55,12 +56,12 @@ fn resolved(
     }
     Ok((canonical, meta, missing))
 }
-fn identity(meta: &fs::Metadata) -> Result<String, ResourceError> {
-    use std::os::unix::fs::MetadataExt;
-    if meta.dev() > 9_007_199_254_740_991 || meta.ino() > 9_007_199_254_740_991 {
+pub fn file_metadata_identity(meta: &fs::Metadata) -> Result<String, ResourceError> {
+    let (dev, ino) = crate::platform::metadata_dev_ino(meta);
+    if dev > 9_007_199_254_740_991 || ino > 9_007_199_254_740_991 {
         return Err(ResourceError::Scope);
     }
-    Ok(format!("{}:{}", meta.dev(), meta.ino()))
+    Ok(format!("{dev}:{ino}"))
 }
 pub fn directory_resource(
     path: impl AsRef<Path>,
@@ -75,7 +76,7 @@ pub fn directory_resource(
         identity: if missing {
             "missing".into()
         } else {
-            identity(&meta)?
+            file_metadata_identity(&meta)?
         },
     })
 }
@@ -92,7 +93,7 @@ pub fn file_resource(
         identity: if missing {
             "missing".into()
         } else {
-            identity(&meta)?
+            file_metadata_identity(&meta)?
         },
     })
 }
@@ -106,12 +107,16 @@ pub fn resource_conflicts(first: &str, second: &str) -> bool {
         return first == second;
     };
     let inside = |child: &str, parent: &str| {
-        child == parent
-            || child.starts_with(&if parent.ends_with('/') {
-                parent.to_owned()
-            } else {
-                format!("{parent}/")
-            })
+        if child == parent {
+            return true;
+        }
+        if parent.ends_with('/') || parent.ends_with('\\') {
+            child.starts_with(parent)
+        } else if let Some(rest) = child.strip_prefix(parent) {
+            rest.starts_with('/') || rest.starts_with('\\')
+        } else {
+            false
+        }
     };
     if ad && bd {
         inside(&a, &b) || inside(&b, &a)

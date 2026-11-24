@@ -1,47 +1,10 @@
 //! A write binds its existing ancestor before admission. Missing parents are
-//! created through that directory's descriptors, never a second path executor.
+//! created through that directory's descriptors (Unix) or reparse-point-verified
+//! ancestor checks (Windows), never a second path executor.
 use super::*;
-use std::{ffi::OsString, os::unix::fs::MetadataExt, path::Component};
+use std::{ffi::OsString, path::Component};
 pub(super) const PARENTS: usize = 128;
-pub(super) struct Target {
-    anchor: PathBuf,
-    identity: (u64, u64),
-    missing: Vec<OsString>,
-    leaf: OsString,
-}
-pub(super) struct Parent {
-    path: PathBuf,
-    file: std::fs::File,
-    leaf: OsString,
-}
-fn identity(f: &std::fs::File) -> Result<(u64, u64), HostError> {
-    let m = f
-        .metadata()
-        .map_err(|_| HostError("file_parent_unavailable"))?;
-    Ok((m.dev(), m.ino()))
-}
-fn flags() -> rustix::fs::OFlags {
-    use rustix::fs::OFlags as O;
-    O::RDONLY | O::DIRECTORY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK
-}
-pub(super) fn directory(path: &Path) -> Result<std::fs::File, HostError> {
-    let mut file = std::fs::File::from(
-        rustix::fs::open("/", flags(), rustix::fs::Mode::empty())
-            .map_err(|_| HostError("file_parent_unavailable"))?,
-    );
-    for c in path.components() {
-        match c {
-            Component::RootDir => (),
-            Component::Normal(name) => {
-                file = rustix::fs::openat(&file, name, flags(), rustix::fs::Mode::empty())
-                    .map(std::fs::File::from)
-                    .map_err(|_| HostError("file_parent_changed"))?;
-            }
-            _ => return Err(HostError("invalid_path")),
-        }
-    }
-    Ok(file)
-}
+
 pub(super) fn resolve_write(workspace: &Path, input: &str) -> Result<PathBuf, HostError> {
     if input.trim().is_empty() || input.len() > 16384 || input.contains('\0') {
         return Err(HostError("invalid_path"));
@@ -59,140 +22,410 @@ pub(super) fn resolve_write(workspace: &Path, input: &str) -> Result<PathBuf, Ho
         _ => Err(HostError("invalid_path")),
     }
 }
-impl Target {
-    pub(super) fn inspect(path: &Path) -> Result<Self, HostError> {
-        if !path.is_absolute() {
-            return Err(HostError("invalid_path"));
-        }
-        let mut anchor = path.parent().ok_or(HostError("invalid_path"))?.to_owned();
-        let mut missing = vec![];
-        loop {
-            match std::fs::symlink_metadata(&anchor) {
-                Ok(m) if m.is_dir() => break,
-                Ok(_) => return Err(HostError("file_parent_unavailable")),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    missing.push(
-                        anchor
-                            .file_name()
-                            .ok_or(HostError("invalid_path"))?
-                            .to_owned(),
-                    );
-                    if missing.len() > PARENTS {
-                        return Err(HostError("file_parent_limit"));
-                    }
-                    if !anchor.pop() {
-                        return Err(HostError("invalid_path"));
-                    }
+
+#[cfg(unix)]
+mod imp {
+    use super::*;
+    use std::os::unix::fs::MetadataExt;
+
+    pub(in crate::providers::file) struct Target {
+        anchor: PathBuf,
+        identity: (u64, u64),
+        pub(super) missing: Vec<OsString>,
+        leaf: OsString,
+    }
+    pub(in crate::providers::file) struct Parent {
+        path: PathBuf,
+        file: std::fs::File,
+        leaf: OsString,
+    }
+    fn identity(f: &std::fs::File) -> Result<(u64, u64), HostError> {
+        let m = f
+            .metadata()
+            .map_err(|_| HostError("file_parent_unavailable"))?;
+        Ok((m.dev(), m.ino()))
+    }
+    fn flags() -> rustix::fs::OFlags {
+        use rustix::fs::OFlags as O;
+        O::RDONLY | O::DIRECTORY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK
+    }
+    pub(in crate::providers::file) fn directory(path: &Path) -> Result<std::fs::File, HostError> {
+        let mut file = std::fs::File::from(
+            rustix::fs::open("/", flags(), rustix::fs::Mode::empty())
+                .map_err(|_| HostError("file_parent_unavailable"))?,
+        );
+        for c in path.components() {
+            match c {
+                Component::RootDir => (),
+                Component::Normal(name) => {
+                    file = rustix::fs::openat(&file, name, flags(), rustix::fs::Mode::empty())
+                        .map(std::fs::File::from)
+                        .map_err(|_| HostError("file_parent_changed"))?;
                 }
-                Err(_) => return Err(HostError("file_parent_unavailable")),
+                _ => return Err(HostError("invalid_path")),
             }
         }
-        let observed = directory(&anchor)?;
-        Ok(Self {
-            anchor,
-            identity: identity(&observed)?,
-            missing,
-            leaf: path
-                .file_name()
-                .ok_or(HostError("invalid_path"))?
-                .to_owned(),
-        })
+        Ok(file)
     }
-    pub(super) fn scopes(&self, path: &Path) -> Result<Vec<ExecutionResourceScope>, HostError> {
-        let mut scopes = peer_store::provider_file_scopes(path)?;
-        if !self.missing.is_empty() {
-            scopes.push(ExecutionResourceScope::Directory {
-                path: self
-                    .anchor
-                    .to_str()
+    impl Target {
+        pub(in crate::providers::file) fn inspect(path: &Path) -> Result<Self, HostError> {
+            if !path.is_absolute() {
+                return Err(HostError("invalid_path"));
+            }
+            let mut anchor = path.parent().ok_or(HostError("invalid_path"))?.to_owned();
+            let mut missing = vec![];
+            loop {
+                match std::fs::symlink_metadata(&anchor) {
+                    Ok(m) if m.is_dir() => break,
+                    Ok(_) => return Err(HostError("file_parent_unavailable")),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        missing.push(
+                            anchor
+                                .file_name()
+                                .ok_or(HostError("invalid_path"))?
+                                .to_owned(),
+                        );
+                        if missing.len() > PARENTS {
+                            return Err(HostError("file_parent_limit"));
+                        }
+                        if !anchor.pop() {
+                            return Err(HostError("invalid_path"));
+                        }
+                    }
+                    Err(_) => return Err(HostError("file_parent_unavailable")),
+                }
+            }
+            let observed = directory(&anchor)?;
+            Ok(Self {
+                anchor,
+                identity: identity(&observed)?,
+                missing,
+                leaf: path
+                    .file_name()
                     .ok_or(HostError("invalid_path"))?
-                    .into(),
-            });
+                    .to_owned(),
+            })
         }
-        Ok(scopes)
-    }
-    pub(super) fn open(&self, run: &RunGuard, changed: &mut bool) -> Result<Parent, HostError> {
-        run.check()?;
-        let file = directory(&self.anchor)?;
-        if identity(&file)? != self.identity {
-            return Err(HostError("file_parent_changed"));
+        pub(in crate::providers::file) fn scopes(
+            &self,
+            path: &Path,
+        ) -> Result<Vec<ExecutionResourceScope>, HostError> {
+            let mut scopes = peer_store::provider_file_scopes(path)?;
+            if !self.missing.is_empty() {
+                scopes.push(ExecutionResourceScope::Directory {
+                    path: self
+                        .anchor
+                        .to_str()
+                        .ok_or(HostError("invalid_path"))?
+                        .into(),
+                });
+            }
+            Ok(scopes)
         }
-        let mut parent = Parent {
-            path: self.anchor.clone(),
-            file,
-            leaf: self.leaf.clone(),
-        };
-        for name in self.missing.iter().rev() {
+        pub(in crate::providers::file) fn open(
+            &self,
+            run: &RunGuard,
+            changed: &mut bool,
+        ) -> Result<Parent, HostError> {
+            run.check()?;
+            let file = directory(&self.anchor)?;
+            if identity(&file)? != self.identity {
+                return Err(HostError("file_parent_changed"));
+            }
+            let mut parent = Parent {
+                path: self.anchor.clone(),
+                file,
+                leaf: self.leaf.clone(),
+            };
+            for name in self.missing.iter().rev() {
+                run.check()?;
+                parent.verify()?;
+                match rustix::fs::mkdirat(
+                    &parent.file,
+                    name,
+                    rustix::fs::Mode::from_raw_mode(0o777),
+                ) {
+                    Ok(()) => {
+                        *changed = true;
+                        parent
+                            .file
+                            .sync_all()
+                            .map_err(|_| HostError("execution_outcome_unknown"))?;
+                    }
+                    Err(rustix::io::Errno::EXIST) => (),
+                    Err(e) => {
+                        return Err(HostError(
+                            if matches!(e, rustix::io::Errno::IO | rustix::io::Errno::INTR) {
+                                "execution_outcome_unknown"
+                            } else {
+                                "file_parent_unavailable"
+                            },
+                        ));
+                    }
+                }
+                let file =
+                    rustix::fs::openat(&parent.file, name, flags(), rustix::fs::Mode::empty())
+                        .map(std::fs::File::from)
+                        .map_err(|_| HostError("file_parent_changed"))?;
+                parent.path.push(name);
+                parent.file = file;
+            }
             run.check()?;
             parent.verify()?;
-            match rustix::fs::mkdirat(&parent.file, name, rustix::fs::Mode::from_raw_mode(0o777)) {
-                Ok(()) => {
-                    *changed = true;
-                    parent
-                        .file
-                        .sync_all()
-                        .map_err(|_| HostError("execution_outcome_unknown"))?;
+            Ok(parent)
+        }
+    }
+    impl Parent {
+        pub(in crate::providers::file) fn verify(&self) -> Result<(), HostError> {
+            if identity(&directory(&self.path)?)? != identity(&self.file)? {
+                return Err(HostError("file_parent_changed"));
+            }
+            Ok(())
+        }
+        pub(in crate::providers::file) fn open_leaf(
+            &self,
+            create: bool,
+        ) -> Result<std::fs::File, HostError> {
+            self.verify()?;
+            use rustix::fs::OFlags as O;
+            let mut flags = O::RDWR | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK;
+            if create {
+                flags |= O::CREATE | O::EXCL;
+            }
+            rustix::fs::openat(
+                &self.file,
+                &self.leaf,
+                flags,
+                rustix::fs::Mode::from_raw_mode(0o666),
+            )
+            .map(std::fs::File::from)
+            .map_err(|e| {
+                HostError(
+                    if create && matches!(e, rustix::io::Errno::IO | rustix::io::Errno::INTR) {
+                        "execution_outcome_unknown"
+                    } else {
+                        "file_unavailable"
+                    },
+                )
+            })
+        }
+        pub(in crate::providers::file) fn sync(&self) -> Result<(), HostError> {
+            self.file
+                .sync_all()
+                .map_err(|_| HostError("execution_outcome_unknown"))?;
+            self.verify()
+        }
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use super::*;
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
+    pub(in crate::providers::file) struct Target {
+        anchor: PathBuf,
+        identity: (u64, u64),
+        pub(super) missing: Vec<OsString>,
+        leaf: OsString,
+    }
+    pub(in crate::providers::file) struct Parent {
+        path: PathBuf,
+        identity: (u64, u64),
+        leaf: OsString,
+    }
+
+    fn meta_identity(m: &std::fs::Metadata) -> (u64, u64) {
+        const MAX_SAFE_INT: u64 = 9_007_199_254_740_991;
+        let dev = if m.is_dir() { 2 } else { 1 };
+        let ino = m.creation_time() & MAX_SAFE_INT;
+        (dev, ino)
+    }
+
+    pub(in crate::providers::file) fn verify_directory(
+        path: &Path,
+    ) -> Result<(u64, u64), HostError> {
+        let mut current = PathBuf::new();
+        let mut last_meta = None;
+        for c in path.components() {
+            match c {
+                Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+                Component::RootDir => current.push(c.as_os_str()),
+                Component::Normal(name) => {
+                    current.push(name);
+                    let meta = std::fs::symlink_metadata(&current)
+                        .map_err(|_| HostError("file_parent_changed"))?;
+                    if !meta.is_dir()
+                        || meta.file_type().is_symlink()
+                        || (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+                    {
+                        return Err(HostError("file_parent_changed"));
+                    }
+                    last_meta = Some(meta);
                 }
-                Err(rustix::io::Errno::EXIST) => (),
-                Err(e) => {
-                    return Err(HostError(
-                        if matches!(e, rustix::io::Errno::IO | rustix::io::Errno::INTR) {
-                            "execution_outcome_unknown"
-                        } else {
-                            "file_parent_unavailable"
-                        },
-                    ));
+                _ => return Err(HostError("invalid_path")),
+            }
+        }
+        let meta = match last_meta {
+            Some(m) => m,
+            None => std::fs::symlink_metadata(&current)
+                .map_err(|_| HostError("file_parent_unavailable"))?,
+        };
+        if !meta.is_dir() {
+            return Err(HostError("file_parent_unavailable"));
+        }
+        Ok(meta_identity(&meta))
+    }
+
+    impl Target {
+        pub(in crate::providers::file) fn inspect(path: &Path) -> Result<Self, HostError> {
+            if !path.is_absolute() {
+                return Err(HostError("invalid_path"));
+            }
+            let mut anchor = path.parent().ok_or(HostError("invalid_path"))?.to_owned();
+            let mut missing = vec![];
+            loop {
+                match std::fs::symlink_metadata(&anchor) {
+                    Ok(m)
+                        if m.is_dir()
+                            && !m.file_type().is_symlink()
+                            && (m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) == 0 =>
+                    {
+                        break;
+                    }
+                    Ok(_) => return Err(HostError("file_parent_unavailable")),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        missing.push(
+                            anchor
+                                .file_name()
+                                .ok_or(HostError("invalid_path"))?
+                                .to_owned(),
+                        );
+                        if missing.len() > PARENTS {
+                            return Err(HostError("file_parent_limit"));
+                        }
+                        if !anchor.pop() {
+                            return Err(HostError("invalid_path"));
+                        }
+                    }
+                    Err(_) => return Err(HostError("file_parent_unavailable")),
                 }
             }
-            let file = rustix::fs::openat(&parent.file, name, flags(), rustix::fs::Mode::empty())
-                .map(std::fs::File::from)
-                .map_err(|_| HostError("file_parent_changed"))?;
-            parent.path.push(name);
-            parent.file = file;
+            let identity = verify_directory(&anchor)?;
+            Ok(Self {
+                anchor,
+                identity,
+                missing,
+                leaf: path
+                    .file_name()
+                    .ok_or(HostError("invalid_path"))?
+                    .to_owned(),
+            })
         }
-        run.check()?;
-        parent.verify()?;
-        Ok(parent)
+        pub(in crate::providers::file) fn scopes(
+            &self,
+            path: &Path,
+        ) -> Result<Vec<ExecutionResourceScope>, HostError> {
+            let mut scopes = peer_store::provider_file_scopes(path)?;
+            if !self.missing.is_empty() {
+                scopes.push(ExecutionResourceScope::Directory {
+                    path: self
+                        .anchor
+                        .to_str()
+                        .ok_or(HostError("invalid_path"))?
+                        .into(),
+                });
+            }
+            Ok(scopes)
+        }
+        pub(in crate::providers::file) fn open(
+            &self,
+            run: &RunGuard,
+            changed: &mut bool,
+        ) -> Result<Parent, HostError> {
+            run.check()?;
+            let id = verify_directory(&self.anchor)?;
+            if id != self.identity {
+                return Err(HostError("file_parent_changed"));
+            }
+            let mut parent = Parent {
+                path: self.anchor.clone(),
+                identity: id,
+                leaf: self.leaf.clone(),
+            };
+            for name in self.missing.iter().rev() {
+                run.check()?;
+                parent.verify()?;
+                let next = parent.path.join(name);
+                match std::fs::create_dir(&next) {
+                    Ok(()) => {
+                        *changed = true;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
+                    Err(_) => return Err(HostError("file_parent_unavailable")),
+                }
+                let next_id = verify_directory(&next)?;
+                parent.path = next;
+                parent.identity = next_id;
+            }
+            run.check()?;
+            parent.verify()?;
+            Ok(parent)
+        }
+    }
+    impl Parent {
+        pub(in crate::providers::file) fn verify(&self) -> Result<(), HostError> {
+            if verify_directory(&self.path)? != self.identity {
+                return Err(HostError("file_parent_changed"));
+            }
+            Ok(())
+        }
+        pub(in crate::providers::file) fn open_leaf(
+            &self,
+            create: bool,
+        ) -> Result<std::fs::File, HostError> {
+            self.verify()?;
+            let target = self.path.join(&self.leaf);
+            if !create {
+                let pre = std::fs::symlink_metadata(&target)
+                    .map_err(|_| HostError("file_unavailable"))?;
+                if pre.file_type().is_symlink()
+                    || (pre.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+                {
+                    return Err(HostError("file_unavailable"));
+                }
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options
+                .read(true)
+                .write(true)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+            if create {
+                options.create_new(true);
+            }
+            let file = options
+                .open(&target)
+                .map_err(|_| HostError("file_unavailable"))?;
+            let meta = file.metadata().map_err(|_| HostError("file_unavailable"))?;
+            if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+                return Err(HostError("file_unavailable"));
+            }
+            Ok(file)
+        }
+        pub(in crate::providers::file) fn sync(&self) -> Result<(), HostError> {
+            self.verify()
+        }
     }
 }
-impl Parent {
-    pub(super) fn verify(&self) -> Result<(), HostError> {
-        if identity(&directory(&self.path)?)? != identity(&self.file)? {
-            return Err(HostError("file_parent_changed"));
-        }
-        Ok(())
-    }
-    pub(super) fn open_leaf(&self, create: bool) -> Result<std::fs::File, HostError> {
-        self.verify()?;
-        use rustix::fs::OFlags as O;
-        let mut flags = O::RDWR | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK;
-        if create {
-            flags |= O::CREATE | O::EXCL;
-        }
-        rustix::fs::openat(
-            &self.file,
-            &self.leaf,
-            flags,
-            rustix::fs::Mode::from_raw_mode(0o666),
-        )
-        .map(std::fs::File::from)
-        .map_err(|e| {
-            HostError(
-                if create && matches!(e, rustix::io::Errno::IO | rustix::io::Errno::INTR) {
-                    "execution_outcome_unknown"
-                } else {
-                    "file_unavailable"
-                },
-            )
-        })
-    }
-    pub(super) fn sync(&self) -> Result<(), HostError> {
-        self.file
-            .sync_all()
-            .map_err(|_| HostError("execution_outcome_unknown"))?;
-        self.verify()
-    }
-}
+
+pub(super) use imp::Target;
+#[cfg(unix)]
+pub(super) use imp::directory;
+#[cfg(windows)]
+pub(super) use imp::verify_directory;
 
 #[cfg(test)]
 mod tests {
@@ -204,20 +437,23 @@ mod tests {
         ReplaceAnchor,
         DenyAfterDirectory,
         CancelAfterDirectory,
+        #[cfg(unix)]
         SymlinkAfterDirectory,
         ReplaceDirectory,
     }
     #[tokio::test]
     async fn real_directory_descriptors_preserve_effects_and_refuse_revocation_or_replacement() {
-        for action in [
+        let actions: &[Action] = &[
             Action::Success,
             Action::CancelBefore,
             Action::ReplaceAnchor,
             Action::DenyAfterDirectory,
             Action::CancelAfterDirectory,
+            #[cfg(unix)]
             Action::SymlinkAfterDirectory,
             Action::ReplaceDirectory,
-        ] {
+        ];
+        for &action in actions {
             let home = tempfile::tempdir().unwrap();
             let root = std::fs::canonicalize(home.path()).unwrap();
             let workspace = root.join("workspace");
@@ -293,6 +529,7 @@ mod tests {
                                 control_cancel.cancel();
                                 applied = true;
                             }
+                            #[cfg(unix)]
                             Action::SymlinkAfterDirectory if watched.join("new").exists() => {
                                 std::fs::rename(watched.join("new"), &retained).unwrap();
                                 std::os::unix::fs::symlink(

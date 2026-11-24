@@ -165,9 +165,7 @@ impl<'a> Storage<'a> {
         })
     }
     fn sync_dir(path: &Path) -> Result<(), FenceError> {
-        File::open(path)
-            .and_then(|f| f.sync_all())
-            .map_err(|_| FenceError::Store(StoreError::ReadFailed))
+        crate::platform::sync_dir(path).map_err(|_| FenceError::Store(StoreError::ReadFailed))
     }
     fn create_dir(&self, relative: &str, new_only: bool) -> Result<(), FenceError> {
         self.guard()?;

@@ -93,18 +93,42 @@ pub(crate) async fn run_hook(
         ended,
         interrupted,
     };
-    let mut command = Command::new("/bin/sh");
+    #[cfg(unix)]
+    let mut command = {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg(&hook.command).process_group(0);
+        command
+    };
+    #[cfg(windows)]
+    let mut command = crate::providers::windows_shell_command(&hook.command);
     command
-        .arg("-c")
-        .arg(&hook.command)
         .current_dir(workspace)
         .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .process_group(0);
-    for key in ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] {
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    let env_keys: &[&str] = &["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"];
+    #[cfg(windows)]
+    let env_keys: &[&str] = &[
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "COMSPEC",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PSMODULEPATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+    ];
+    for key in env_keys {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
@@ -194,7 +218,7 @@ async fn stop(child: &mut Child, pid: u32) -> bool {
     stop_owned_group(child, pid, Duration::from_millis(2200)).await
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::hook_policy::HookDecision;

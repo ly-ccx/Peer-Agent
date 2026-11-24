@@ -123,7 +123,13 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
     if let Some(common) = request.common {
         command.env("GIT_COMMON_DIR", common);
     }
+    #[cfg(unix)]
     command.process_group(0);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::recorder::CREATE_NO_WINDOW);
+    }
     request.authority.check().await?;
     let (admission_deadline, admission_error) = match request.deadline {
         Deadline::Total(deadline) => (deadline, "git_query_timeout"),

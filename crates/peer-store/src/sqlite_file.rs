@@ -4,7 +4,6 @@ use rusqlite::{Connection, OpenFlags, config::DbConfig, limits::Limit};
 use std::{
     fmt::Write as _,
     fs,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -70,14 +69,7 @@ impl SqliteFile {
         mode: SqliteReadSnapshot,
         length_limit: i32,
     ) -> Result<Connection, SqliteFileError> {
-        let mut uri = String::from("file:");
-        for byte in self.path.as_os_str().as_bytes() {
-            if *byte == b'/' {
-                uri.push('/');
-            } else {
-                write!(uri, "%{byte:02X}").expect("writing to String is infallible");
-            }
-        }
+        let mut uri = sqlite_uri_path(&self.path)?;
         uri.push_str(match mode {
             SqliteReadSnapshot::Checkpointed => "?mode=ro&immutable=1",
             SqliteReadSnapshot::SharedWal => "?mode=ro&readonly_shm=1",
@@ -135,5 +127,42 @@ impl SqliteFile {
         }
         self.check_current()?;
         Ok(c)
+    }
+}
+
+fn sqlite_uri_path(path: &Path) -> Result<String, SqliteFileError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let mut uri = String::from("file:");
+        for byte in path.as_os_str().as_bytes() {
+            if *byte == b'/' {
+                uri.push('/');
+            } else {
+                write!(uri, "%{byte:02X}").expect("writing to String is infallible");
+            }
+        }
+        Ok(uri)
+    }
+    #[cfg(windows)]
+    {
+        let raw = path.to_str().ok_or(SqliteFileError::Unavailable)?;
+        let stripped = raw
+            .strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!("//{rest}"))
+            .or_else(|| raw.strip_prefix(r"\\?\").map(str::to_owned))
+            .unwrap_or_else(|| raw.to_owned());
+        let normalized = stripped.replace('\\', "/");
+        let mut uri = String::from("file:/");
+        for byte in normalized.trim_start_matches('/').as_bytes() {
+            if *byte == b'/' {
+                uri.push('/');
+            } else if byte.is_ascii_alphanumeric() || matches!(*byte, b':' | b'-' | b'_' | b'.') {
+                uri.push(*byte as char);
+            } else {
+                write!(uri, "%{byte:02X}").expect("writing to String is infallible");
+            }
+        }
+        Ok(uri)
     }
 }

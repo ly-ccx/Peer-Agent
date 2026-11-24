@@ -162,21 +162,8 @@ impl PolicyStore {
             .map_err(|_| StoreError::PolicyUnavailable)?;
         let directory = fs::canonicalize(directory).map_err(|_| StoreError::PolicyUnavailable)?;
         let path = directory.join("bot-access.sqlite");
-        let created_authority = match rustix::fs::open(
-            &path,
-            rustix::fs::OFlags::CREATE
-                | rustix::fs::OFlags::EXCL
-                | rustix::fs::OFlags::RDWR
-                | rustix::fs::OFlags::NOFOLLOW,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        ) {
-            Ok(file) => {
-                drop(file);
-                true
-            }
-            Err(rustix::io::Errno::EXIST) => false,
-            _ => return Err(StoreError::PolicyUnavailable),
-        };
+        let created_authority = crate::platform::create_new_private_file(&path)
+            .map_err(|_| StoreError::PolicyUnavailable)?;
         let preflight = self.open_existing(false)?;
         preflight
             .execute_batch("BEGIN DEFERRED")

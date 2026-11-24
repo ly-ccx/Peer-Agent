@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use std::{
     fs::{File, Metadata},
     io::Read,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -94,41 +93,80 @@ fn check_cancel(cancel: &CancellationToken) -> Result<(), HostError> {
     }
 }
 
+fn file_stamp(meta: &Metadata) -> (u64, u64, u64, i128, i128) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            meta.dev(),
+            meta.ino(),
+            meta.len(),
+            i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
+            i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+        )
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        (
+            u64::from(meta.file_attributes()),
+            meta.creation_time(),
+            meta.len(),
+            i128::from(meta.last_write_time()),
+            i128::from(meta.creation_time()),
+        )
+    }
+}
+
+fn open_attachment_nofollow(path: &Path) -> Result<File, HostError> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+        let fd = rustix::fs::open(
+            path,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| HostError("attachment_read_failed"))?;
+        Ok(File::from(fd))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|_| HostError("attachment_read_failed"))?;
+        let meta = file
+            .metadata()
+            .map_err(|_| HostError("attachment_read_failed"))?;
+        if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            return Err(HostError("attachment_not_regular"));
+        }
+        Ok(file)
+    }
+}
+
 fn read_regular(
     path: &Path,
     limit: usize,
     cancel: &CancellationToken,
 ) -> Result<Vec<u8>, HostError> {
-    use rustix::fs::{Mode, OFlags};
     let named = || std::fs::symlink_metadata(path).map_err(|_| HostError("attachment_read_failed"));
     let original = named()?;
     if !original.is_file() {
         return Err(HostError("attachment_not_regular"));
     }
-    let stamp = |meta: &Metadata| {
-        (
-            meta.dev(),
-            meta.ino(),
-            meta.len(),
-            meta.mtime(),
-            meta.mtime_nsec(),
-            meta.ctime(),
-            meta.ctime_nsec(),
-        )
-    };
-    let fd = rustix::fs::open(
-        path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|_| HostError("attachment_read_failed"))?;
-    let mut file = File::from(fd);
+    let mut file = open_attachment_nofollow(path)?;
     let metadata = |file: &File| {
         file.metadata()
             .map_err(|_| HostError("attachment_read_failed"))
     };
     let before = metadata(&file)?;
-    if !before.is_file() || stamp(&original) != stamp(&before) {
+    if !before.is_file() || file_stamp(&original) != file_stamp(&before) {
         return Err(HostError("attachment_source_changed"));
     }
     if before.len() == 0 {
@@ -157,8 +195,8 @@ fn read_regular(
     }
     let after = metadata(&file)?;
     if body.len() != size
-        || stamp(&before) != stamp(&after)
-        || named().ok().as_ref().map(stamp) != Some(stamp(&before))
+        || file_stamp(&before) != file_stamp(&after)
+        || named().ok().as_ref().map(file_stamp) != Some(file_stamp(&before))
     {
         return Err(HostError("attachment_source_changed"));
     }

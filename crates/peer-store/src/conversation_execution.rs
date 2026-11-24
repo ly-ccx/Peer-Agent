@@ -89,27 +89,14 @@ pub struct ConversationExecutionToken {
     recovery_control: Option<ConversationExecution>,
     recovery_directory: Option<(u64, u64)>,
 }
-fn directory_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    let metadata = file.metadata()?;
-    Ok((metadata.dev(), metadata.ino()))
-}
 impl ConversationExecutionToken {
     fn check_recovery_directory(&self) -> Result<(), StoreError> {
-        if let Some(expected) = self.recovery_directory {
-            use rustix::fs::{Mode, OFlags};
-            let named = rustix::fs::open(
-                &self.directory,
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(|_| StoreError::ExecutionChanged)?;
-            if directory_identity(&std::fs::File::from(named))
+        if let Some(expected) = self.recovery_directory
+            && crate::platform::directory_path_identity(&self.directory)
                 .map_err(|_| StoreError::ExecutionChanged)?
                 != expected
-            {
-                return Err(StoreError::ExecutionChanged);
-            }
+        {
+            return Err(StoreError::ExecutionChanged);
         }
         Ok(())
     }
@@ -300,19 +287,8 @@ impl ConversationStore {
             index[pos]["runtimeExecution"] = raw;
             cleanup = Some(Box::new(EmptyConversationClaim {
                 directory: directory.clone(),
-                location: {
-                    let fd = rustix::fs::open(
-                        &directory,
-                        rustix::fs::OFlags::RDONLY
-                            | rustix::fs::OFlags::DIRECTORY
-                            | rustix::fs::OFlags::NOFOLLOW
-                            | rustix::fs::OFlags::CLOEXEC,
-                        rustix::fs::Mode::empty(),
-                    )
-                    .map_err(|_| StoreError::ReadFailed)?;
-                    directory_identity(&std::fs::File::from(fd))
-                        .map_err(|_| StoreError::ReadFailed)?
-                },
+                location: crate::platform::directory_path_identity(&directory)
+                    .map_err(|_| StoreError::ReadFailed)?,
                 run: run.clone(),
             }));
             let receipt = self.publish_execution_metadata(&directory, &current, &index, cancel)?;

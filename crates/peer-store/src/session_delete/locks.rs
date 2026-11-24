@@ -1,38 +1,20 @@
 //! Tickets for this operation's own directories in the shared mkdir protocol.
-use crate::{StoreError, durable_jsonl as log, files};
-use rustix::fs::{CWD, FlockOperation, Mode, OFlags, RenameFlags, flock, renameat_with};
+use crate::{
+    StoreError, durable_jsonl as log, files,
+    platform::{DirectoryGuard, metadata_dev_ino, rename_noreplace},
+};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File},
-    os::unix::fs::MetadataExt,
+    fs,
     path::{Path, PathBuf},
 };
 
-pub(super) fn lock_directory(path: &Path) -> Result<File, StoreError> {
-    let directory = rustix::fs::open(
-        path,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map(File::from)
-    .map_err(|_| StoreError::ReadFailed)?;
-    flock(&directory, FlockOperation::NonBlockingLockExclusive).map_err(|error| {
-        if matches!(error, rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) {
-            StoreError::LockBusy
-        } else {
-            StoreError::ReadFailed
-        }
-    })?;
-    Ok(directory)
+pub(super) fn lock_directory(path: &Path) -> Result<DirectoryGuard, StoreError> {
+    DirectoryGuard::lock_nonblocking(path)
 }
 
-pub(super) fn check_directory(file: &File, path: &Path) -> Result<(), StoreError> {
-    let held = file.metadata().map_err(|_| StoreError::ReadFailed)?;
-    let current = fs::symlink_metadata(path).map_err(|_| StoreError::LockOwnershipChanged)?;
-    if !current.is_dir() || held.dev() != current.dev() || held.ino() != current.ino() {
-        return Err(StoreError::LockOwnershipChanged);
-    }
-    Ok(())
+pub(super) fn check_directory(guard: &DirectoryGuard, path: &Path) -> Result<(), StoreError> {
+    guard.check_path(path)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,10 +34,11 @@ impl Ticket {
         log::replace(&path.join("owner"), nonce.as_bytes(), None)?;
         log::sync_dir(parent)?;
         let meta = fs::symlink_metadata(&path).map_err(|_| StoreError::ReadFailed)?;
+        let (device, inode) = metadata_dev_ino(&meta);
         Ok(Self {
             nonce,
-            device: meta.dev(),
-            inode: meta.ino(),
+            device,
+            inode,
         })
     }
 
@@ -73,7 +56,8 @@ impl Ticket {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
             Err(_) => return Err(StoreError::ReadFailed),
         };
-        if !meta.is_dir() || meta.dev() != self.device || meta.ino() != self.inode {
+        let (dev, ino) = metadata_dev_ino(&meta);
+        if !meta.is_dir() || dev != self.device || ino != self.inode {
             return Ok(false);
         }
         Ok(files::read(&path.join("owner"), 36)?.as_deref() == Some(self.nonce.as_bytes()))
@@ -113,13 +97,7 @@ impl Ticket {
 }
 
 fn rename_exclusive(from: &Path, to: &Path) -> Result<(), StoreError> {
-    renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(|e| {
-        if e == rustix::io::Errno::EXIST {
-            StoreError::LockBusy
-        } else {
-            StoreError::ReadFailed
-        }
-    })
+    rename_noreplace(from, to)
 }
 
 pub(super) struct Held {

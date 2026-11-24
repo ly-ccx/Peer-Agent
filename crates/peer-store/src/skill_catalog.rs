@@ -307,6 +307,7 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn explicit_borrowed_mount_workspace_shadow_and_settings_are_read_together() {
         let parent = tempfile::tempdir().unwrap();
@@ -352,6 +353,7 @@ mod tests {
             [("disabled", false), ("linked", true), ("shared", true)]
         );
     }
+    #[cfg(unix)]
     #[test]
     fn load_binds_the_selected_package_to_its_observed_file_and_installation() {
         let root = tempfile::tempdir().unwrap();

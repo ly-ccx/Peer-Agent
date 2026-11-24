@@ -210,6 +210,7 @@ impl ToolArtifactStore {
         // uncertain exit; only this known-complete temporary link is removed below.
         let file = dir.file(&temp)?;
         file.sync_all().map_err(|_| Error::Unavailable)?;
+        drop(file);
         check(cancel)?;
         dir.publish(&temp, &reference.name())?;
         dir.check_path().map_err(|_| Error::CommitUnknown)?;

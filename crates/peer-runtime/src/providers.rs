@@ -26,6 +26,8 @@ mod tool_artifact;
 mod web;
 pub use crate::effect_admission::EffectAdmission;
 pub(crate) use crate::recorder::group_absent;
+#[cfg(windows)]
+pub(crate) use shell::windows_shell_command;
 pub(crate) use shell::{
     background_start_fields, restore_background_start_fields, shell_stop_outcome,
 };

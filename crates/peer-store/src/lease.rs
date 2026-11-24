@@ -146,9 +146,7 @@ fn temporary(directory: &Path, value: &Value) -> Result<NamedTempFile, StoreErro
     Ok(file)
 }
 fn sync_directory(directory: &Path) -> Result<(), StoreError> {
-    fs::File::open(directory)
-        .and_then(|f| f.sync_all())
-        .map_err(|_| StoreError::ReadFailed)
+    crate::platform::sync_dir(directory).map_err(|_| StoreError::ReadFailed)
 }
 fn fresh(record: &HostLeaseRecord, now: i64) -> Result<bool, StoreError> {
     Ok(now.saturating_sub(millis(&record.heartbeat_at)?) < HOST_LEASE_STALE_MS)

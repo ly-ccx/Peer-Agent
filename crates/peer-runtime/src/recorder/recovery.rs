@@ -25,13 +25,23 @@ pub(crate) async fn stop_recorded_group(
         return false;
     }
     if proof == RecorderProof::Alive {
-        let Some(pid) = rustix::process::Pid::from_raw(child.pid as i32) else {
-            return false;
-        };
-        if rustix::process::getpgid(Some(pid)).ok() != Some(pid)
-            || rustix::process::kill_process_group(pid, rustix::process::Signal::KILL).is_err()
+        #[cfg(unix)]
         {
-            return false;
+            let Some(pid) = rustix::process::Pid::from_raw(child.pid as i32) else {
+                return false;
+            };
+            if rustix::process::getpgid(Some(pid)).ok() != Some(pid)
+                || rustix::process::kill_process_group(pid, rustix::process::Signal::KILL).is_err()
+            {
+                return false;
+            }
+        }
+        #[cfg(windows)]
+        {
+            if child.pid == 0 || child.pid > i32::MAX as u32 {
+                return false;
+            }
+            kill_process_tree(child.pid);
         }
         // Once signalled, finish the actual bounded group observation even if
         // cancellation arrives. Cancellation is not a substitute for absence.

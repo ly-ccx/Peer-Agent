@@ -1,12 +1,11 @@
 //! Exclusive recovery scope over the existing directory, not a new execution
 //! owner or a dispatch token. The Runtime must supply actual OS observations.
 use super::*;
+use crate::platform::{DirectoryGuard, directory_path_identity};
 use peer_protocol::{NativeProcessState, NativeProcessStop};
-use rustix::fs::{FlockOperation, Mode, OFlags};
-use std::fs::File;
 
 pub struct ConversationRecovery {
-    directory: File,
+    directory: DirectoryGuard,
     pub(super) token: ConversationExecutionToken,
 }
 impl ConversationStore {
@@ -22,24 +21,11 @@ impl ConversationStore {
         {
             return Err(StoreError::ReadFailed);
         }
-        let directory = rustix::fs::open(
-            &path,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map(File::from)
-        .map_err(|_| StoreError::ReadFailed)?;
-        rustix::fs::flock(&directory, FlockOperation::NonBlockingLockExclusive).map_err(|e| {
-            if matches!(e, rustix::io::Errno::AGAIN | rustix::io::Errno::INTR) {
-                StoreError::LockBusy
-            } else {
-                StoreError::ReadFailed
-            }
-        })?;
+        let directory = DirectoryGuard::lock_nonblocking(&path)?;
         let run = self
             .read_conversation_execution(id)?
             .ok_or(StoreError::ExecutionChanged)?;
-        let location = directory_identity(&directory).map_err(|_| StoreError::ReadFailed)?;
+        let location = directory.identity().map_err(|_| StoreError::ReadFailed)?;
         let recovery = ConversationRecovery {
             directory,
             token: ConversationExecutionToken {
@@ -162,15 +148,12 @@ impl ConversationRecovery {
         if path != self.token.directory {
             return Err(StoreError::ExecutionChanged);
         }
-        let named = rustix::fs::open(
-            &path,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|_| StoreError::ExecutionChanged)?;
-        let held = rustix::fs::fstat(&self.directory).map_err(|_| StoreError::ReadFailed)?;
-        let named = rustix::fs::fstat(named).map_err(|_| StoreError::ExecutionChanged)?;
-        if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino) {
+        let held = self
+            .directory
+            .identity()
+            .map_err(|_| StoreError::ReadFailed)?;
+        let named = directory_path_identity(&path).map_err(|_| StoreError::ExecutionChanged)?;
+        if held != named {
             return Err(StoreError::ExecutionChanged);
         }
         Ok(())

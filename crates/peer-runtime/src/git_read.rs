@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 pub(crate) mod command;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests;
 fn contract() -> &'static Value {
     static DATA: OnceLock<Value> = OnceLock::new();
@@ -74,7 +74,10 @@ pub struct GitRead {
 impl Default for GitRead {
     fn default() -> Self {
         Self {
+            #[cfg(unix)]
             binary: "/usr/bin/git".into(),
+            #[cfg(windows)]
+            binary: "git.exe".into(),
         }
     }
 }

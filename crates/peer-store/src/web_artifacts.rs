@@ -1,17 +1,18 @@
-//! Legacy-compatible web files backed by held directory FDs, not a cache.
-use rustix::fs::{self, AtFlags, FileType, FlockOperation, Mode, OFlags};
+//! Legacy-compatible web files backed by held directory FDs (Unix) or
+//! reparse-point-verified paths with `fs2` locks (Windows), not a cache.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::os::unix::fs::MetadataExt;
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
 const ENTRIES: usize = 16384;
 const PATH_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WebArtifactError {
     pub code: &'static str,
@@ -23,46 +24,28 @@ impl std::fmt::Display for WebArtifactError {
     }
 }
 impl std::error::Error for WebArtifactError {}
+
 pub struct WebArtifactStore {
     home: PathBuf,
 }
+
 #[derive(Debug)]
 pub struct WebArtifactPublication {
     pub reference: String,
     pub artifact_refs: Vec<String>,
 }
-fn dir(parent: &File, name: &str) -> Result<File, &'static str> {
-    fs::openat(
-        parent,
-        name,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map(File::from)
-    .map_err(|_| "web_artifact_invalid")
-}
-fn home(path: &Path) -> Result<File, &'static str> {
-    fs::open(
-        path,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map(File::from)
-    .map_err(|_| "web_artifact_unavailable")
-}
-fn id(file: &File) -> Result<(u64, u64), &'static str> {
-    let m = file.metadata().map_err(|_| "web_artifact_unavailable")?;
-    Ok((m.dev(), m.ino()))
-}
+
 fn check(cancel: &impl Fn() -> bool) -> Result<(), &'static str> {
     if cancel() { Err("CANCELLED") } else { Ok(()) }
 }
+
 #[derive(Default)]
 struct Quota {
     bytes: u64,
     entries: usize,
     paths: usize,
 }
+
 // Stop while serializing, before allocating an arbitrarily large metadata copy.
 struct BoundedMetadata(Vec<u8>);
 impl Write for BoundedMetadata {
@@ -77,148 +60,208 @@ impl Write for BoundedMetadata {
         Ok(())
     }
 }
-fn scan(
-    fd: &File,
-    depth: usize,
-    prefix: usize,
-    q: &mut Quota,
-    cancel: &impl Fn() -> bool,
-) -> Result<(), &'static str> {
-    for entry in fs::Dir::read_from(fd).map_err(|_| "web_artifact_unavailable")? {
-        check(cancel)?;
-        let entry = entry.map_err(|_| "web_artifact_unavailable")?;
-        let name = entry.file_name();
-        if matches!(name.to_bytes(), b"." | b"..") {
-            continue;
-        }
-        q.entries += 1;
-        q.paths = q.paths.saturating_add(prefix + name.to_bytes().len());
-        if q.entries > ENTRIES || q.paths > PATH_BYTES {
-            return Err("web_artifact_limit");
-        }
-        let st =
-            fs::statat(fd, name, AtFlags::SYMLINK_NOFOLLOW).map_err(|_| "web_artifact_changed")?;
-        match FileType::from_raw_mode(st.st_mode) {
-            FileType::RegularFile => {
-                q.bytes = q
-                    .bytes
-                    .saturating_add(u64::try_from(st.st_size).map_err(|_| "web_artifact_invalid")?);
-                if q.bytes > MAX_BYTES {
-                    return Err("web_artifact_limit");
-                }
+
+fn validate_publish_inputs(
+    date: &str,
+    fetch: &str,
+    content: &str,
+    metadata: &Value,
+) -> Result<Vec<u8>, &'static str> {
+    if date.len() != 10
+        || !date.bytes().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
             }
-            FileType::Directory => {
-                if depth >= 4 {
-                    return Err("web_artifact_limit");
-                };
-                let child = fs::openat(
-                    fd,
-                    name,
-                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-                    Mode::empty(),
-                )
-                .map(File::from)
+        })
+        || uuid::Uuid::parse_str(fetch)
+            .ok()
+            .is_none_or(|id| id.hyphenated().to_string() != fetch)
+        || content.len() > 8 * 1024 * 1024
+    {
+        return Err("web_artifact_invalid");
+    }
+    let mut encoded = BoundedMetadata(Vec::new());
+    serde_json::to_writer_pretty(&mut encoded, metadata).map_err(|_| "web_artifact_limit")?;
+    encoded.write_all(b"\n").map_err(|_| "web_artifact_limit")?;
+    Ok(encoded.0)
+}
+
+#[cfg(unix)]
+mod imp {
+    use super::*;
+    use rustix::fs::{self, AtFlags, FileType, FlockOperation, Mode, OFlags};
+    use std::os::unix::fs::MetadataExt;
+
+    fn dir(parent: &File, name: &str) -> Result<File, &'static str> {
+        fs::openat(
+            parent,
+            name,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| "web_artifact_invalid")
+    }
+
+    fn home(path: &Path) -> Result<File, &'static str> {
+        fs::open(
+            path,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| "web_artifact_unavailable")
+    }
+
+    fn id(file: &File) -> Result<(u64, u64), &'static str> {
+        let m = file.metadata().map_err(|_| "web_artifact_unavailable")?;
+        Ok((m.dev(), m.ino()))
+    }
+
+    fn scan(
+        fd: &File,
+        depth: usize,
+        prefix: usize,
+        q: &mut Quota,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), &'static str> {
+        for entry in fs::Dir::read_from(fd).map_err(|_| "web_artifact_unavailable")? {
+            check(cancel)?;
+            let entry = entry.map_err(|_| "web_artifact_unavailable")?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            q.entries += 1;
+            q.paths = q.paths.saturating_add(prefix + name.to_bytes().len());
+            if q.entries > ENTRIES || q.paths > PATH_BYTES {
+                return Err("web_artifact_limit");
+            }
+            let st = fs::statat(fd, name, AtFlags::SYMLINK_NOFOLLOW)
                 .map_err(|_| "web_artifact_changed")?;
-                scan(
-                    &child,
-                    depth + 1,
-                    prefix + name.to_bytes().len() + 1,
-                    q,
-                    cancel,
-                )?;
+            match FileType::from_raw_mode(st.st_mode) {
+                FileType::RegularFile => {
+                    q.bytes = q.bytes.saturating_add(
+                        u64::try_from(st.st_size).map_err(|_| "web_artifact_invalid")?,
+                    );
+                    if q.bytes > MAX_BYTES {
+                        return Err("web_artifact_limit");
+                    }
+                }
+                FileType::Directory => {
+                    if depth >= 4 {
+                        return Err("web_artifact_limit");
+                    };
+                    let child = fs::openat(
+                        fd,
+                        name,
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )
+                    .map(File::from)
+                    .map_err(|_| "web_artifact_changed")?;
+                    scan(
+                        &child,
+                        depth + 1,
+                        prefix + name.to_bytes().len() + 1,
+                        q,
+                        cancel,
+                    )?;
+                }
+                _ => return Err("web_artifact_invalid"),
             }
-            _ => return Err("web_artifact_invalid"),
         }
+        Ok(())
     }
-    Ok(())
-}
-type FileVersion = (u64, u64, u64, i64, i64, i64, i64);
-fn version(file: &File) -> Result<FileVersion, &'static str> {
-    let m = file.metadata().map_err(|_| "web_artifact_unavailable")?;
-    if !m.is_file() || m.nlink() != 1 || m.mode() & 0o777 != 0o600 {
-        return Err("web_artifact_changed");
-    };
-    Ok((
-        m.dev(),
-        m.ino(),
-        m.len(),
-        m.mtime(),
-        m.mtime_nsec(),
-        m.ctime(),
-        m.ctime_nsec(),
-    ))
-}
-fn write_verified(
-    fd: &File,
-    name: &str,
-    bytes: &[u8],
-    cancel: &impl Fn() -> bool,
-) -> Result<(), &'static str> {
-    let mut file = fs::openat(
-        fd,
-        name,
-        OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::from_raw_mode(0o600),
-    )
-    .map(File::from)
-    .map_err(|_| "web_artifact_unavailable")?;
-    for part in bytes.chunks(65536) {
-        check(cancel)?;
-        file.write_all(part)
-            .map_err(|_| "web_artifact_unavailable")?;
+
+    type FileVersion = (u64, u64, u64, i64, i64, i64, i64);
+
+    fn version(file: &File) -> Result<FileVersion, &'static str> {
+        let m = file.metadata().map_err(|_| "web_artifact_unavailable")?;
+        if !m.is_file() || m.nlink() != 1 || m.mode() & 0o777 != 0o600 {
+            return Err("web_artifact_changed");
+        };
+        Ok((
+            m.dev(),
+            m.ino(),
+            m.len(),
+            m.mtime(),
+            m.mtime_nsec(),
+            m.ctime(),
+            m.ctime_nsec(),
+        ))
     }
-    file.sync_all().map_err(|_| "web_artifact_commit_unknown")?;
-    let before = version(&file)?;
-    if before.2 != bytes.len() as u64 {
-        return Err("web_artifact_changed");
-    }
-    file.seek(SeekFrom::Start(0))
+
+    fn write_verified(
+        fd: &File,
+        name: &str,
+        bytes: &[u8],
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), &'static str> {
+        let mut file = fs::openat(
+            fd,
+            name,
+            OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .map(File::from)
         .map_err(|_| "web_artifact_unavailable")?;
-    let mut hash = Sha256::new();
-    let mut buf = [0; 65536];
-    let mut read_bytes = 0usize;
-    loop {
-        check(cancel)?;
-        let n = file
-            .read(&mut buf)
-            .map_err(|_| "web_artifact_unavailable")?;
-        if n == 0 {
-            break;
+        for part in bytes.chunks(65536) {
+            check(cancel)?;
+            file.write_all(part)
+                .map_err(|_| "web_artifact_unavailable")?;
         }
-        read_bytes = read_bytes.saturating_add(n);
-        if read_bytes > bytes.len() {
+        file.sync_all().map_err(|_| "web_artifact_commit_unknown")?;
+        let before = version(&file)?;
+        if before.2 != bytes.len() as u64 {
             return Err("web_artifact_changed");
         }
-        hash.update(&buf[..n]);
-    }
-    let observed = hash.finalize();
-    if observed[..] != Sha256::digest(bytes)[..] || before != version(&file)? {
-        return Err("web_artifact_changed");
-    }
-    let named = fs::openat(
-        fd,
-        name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map(File::from)
-    .map_err(|_| "web_artifact_changed")?;
-    if version(&named)? != before {
-        return Err("web_artifact_changed");
-    }
-    Ok(())
-}
-impl WebArtifactStore {
-    pub fn new(home: impl AsRef<Path>) -> Self {
-        Self {
-            home: home.as_ref().into(),
+        file.seek(SeekFrom::Start(0))
+            .map_err(|_| "web_artifact_unavailable")?;
+        let mut hash = Sha256::new();
+        let mut buf = [0; 65536];
+        let mut read_bytes = 0usize;
+        loop {
+            check(cancel)?;
+            let n = file
+                .read(&mut buf)
+                .map_err(|_| "web_artifact_unavailable")?;
+            if n == 0 {
+                break;
+            }
+            read_bytes = read_bytes.saturating_add(n);
+            if read_bytes > bytes.len() {
+                return Err("web_artifact_changed");
+            }
+            hash.update(&buf[..n]);
         }
+        let observed = hash.finalize();
+        if observed[..] != Sha256::digest(bytes)[..] || before != version(&file)? {
+            return Err("web_artifact_changed");
+        }
+        let named = fs::openat(
+            fd,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| "web_artifact_changed")?;
+        if version(&named)? != before {
+            return Err("web_artifact_changed");
+        }
+        Ok(())
     }
-    /// A read-only early check; publication repeats this under the actual root lock.
-    pub fn check_capacity(&self, cancel: &impl Fn() -> bool) -> Result<(), WebArtifactError> {
+
+    pub(super) fn check_capacity(
+        store_home: &Path,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), WebArtifactError> {
         let result = (|| {
             check(cancel)?;
-            let h = home(&self.home)?;
+            let h = home(store_home)?;
             match fs::openat(
                 &h,
                 "web-artifacts",
@@ -235,8 +278,9 @@ impl WebArtifactStore {
             effect_possible: false,
         })
     }
-    pub fn publish(
-        &self,
+
+    pub(super) fn publish(
+        store_home: &Path,
         date: &str,
         fetch: &str,
         content: &str,
@@ -246,27 +290,8 @@ impl WebArtifactStore {
         let mut effect = false;
         let result = (|| {
             check(cancel)?;
-            if date.len() != 10
-                || !date.bytes().enumerate().all(|(i, b)| {
-                    if i == 4 || i == 7 {
-                        b == b'-'
-                    } else {
-                        b.is_ascii_digit()
-                    }
-                })
-                || uuid::Uuid::parse_str(fetch)
-                    .ok()
-                    .is_none_or(|id| id.hyphenated().to_string() != fetch)
-                || content.len() > 8 * 1024 * 1024
-            {
-                return Err("web_artifact_invalid");
-            }
-            let mut encoded = BoundedMetadata(Vec::new());
-            serde_json::to_writer_pretty(&mut encoded, metadata)
-                .map_err(|_| "web_artifact_limit")?;
-            encoded.write_all(b"\n").map_err(|_| "web_artifact_limit")?;
-            let encoded = encoded.0;
-            let h = home(&self.home)?;
+            let encoded = validate_publish_inputs(date, fetch, content, metadata)?;
+            let h = home(store_home)?;
             let root = match dir(&h, "web-artifacts") {
                 Ok(d) => d,
                 Err(_) => {
@@ -328,7 +353,7 @@ impl WebArtifactStore {
             let target = dir(&day, fetch)?;
             write_verified(&target, "content.txt", content.as_bytes(), cancel)?;
             #[cfg(feature = "test-fixtures")]
-            if self.home.join(".native-cli-fixture").is_file()
+            if store_home.join(".native-cli-fixture").is_file()
                 && std::env::var("PEER_NATIVE_WEB_PUBLICATION_FAULT").as_deref()
                     == Ok("after_content")
             {
@@ -341,7 +366,7 @@ impl WebArtifactStore {
             day.sync_all().map_err(|_| "web_artifact_commit_unknown")?;
             root.sync_all().map_err(|_| "web_artifact_commit_unknown")?;
             check(cancel)?;
-            if id(&home(&self.home)?)? != id(&h)?
+            if id(&home(store_home)?)? != id(&h)?
                 || id(&dir(&h, "web-artifacts")?)? != id(&root)?
                 || id(&dir(&root, date)?)? != id(&day)?
                 || id(&dir(&day, fetch)?)? != id(&target)?
@@ -360,5 +385,280 @@ impl WebArtifactStore {
             code,
             effect_possible: effect,
         })
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use super::*;
+    use crate::{
+        StoreError,
+        platform::{
+            DIR_LOCK_NAME, DirectoryGuard, FILE_FLAG_OPEN_REPARSE_POINT, directory_path_identity,
+            is_reparse_point, metadata_dev_ino, metadata_times_ns, open_readonly_nofollow,
+        },
+    };
+    use std::{fs::OpenOptions, io, os::windows::fs::OpenOptionsExt};
+
+    fn check_dir(path: &Path) -> Result<(u64, u64), &'static str> {
+        directory_path_identity(path).map_err(|_| "web_artifact_invalid")
+    }
+
+    fn scan(
+        dir_path: &Path,
+        depth: usize,
+        prefix: usize,
+        q: &mut Quota,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), &'static str> {
+        for entry in std::fs::read_dir(dir_path).map_err(|_| "web_artifact_unavailable")? {
+            check(cancel)?;
+            let entry = entry.map_err(|_| "web_artifact_unavailable")?;
+            let name = entry.file_name();
+            if depth == 0 && name == DIR_LOCK_NAME {
+                continue;
+            }
+            let name_len = name.to_string_lossy().len();
+            q.entries += 1;
+            q.paths = q.paths.saturating_add(prefix + name_len);
+            if q.entries > ENTRIES || q.paths > PATH_BYTES {
+                return Err("web_artifact_limit");
+            }
+            let child_path = entry.path();
+            let meta =
+                std::fs::symlink_metadata(&child_path).map_err(|_| "web_artifact_changed")?;
+            if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+                return Err("web_artifact_invalid");
+            }
+            if meta.is_file() {
+                q.bytes = q.bytes.saturating_add(meta.len());
+                if q.bytes > MAX_BYTES {
+                    return Err("web_artifact_limit");
+                }
+            } else if meta.is_dir() {
+                if depth >= 4 {
+                    return Err("web_artifact_limit");
+                }
+                scan(&child_path, depth + 1, prefix + name_len + 1, q, cancel)?;
+            } else {
+                return Err("web_artifact_invalid");
+            }
+        }
+        Ok(())
+    }
+
+    type FileVersion = (u64, u64, u64, i128, i128);
+
+    fn version(file: &File) -> Result<FileVersion, &'static str> {
+        let m = file.metadata().map_err(|_| "web_artifact_unavailable")?;
+        if !m.is_file() || is_reparse_point(&m) {
+            return Err("web_artifact_changed");
+        }
+        let (dev, ino) = metadata_dev_ino(&m);
+        let (modified_ns, changed_ns) = metadata_times_ns(&m);
+        Ok((dev, ino, m.len(), modified_ns, changed_ns))
+    }
+
+    fn write_verified(
+        dir_path: &Path,
+        name: &str,
+        bytes: &[u8],
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), &'static str> {
+        let path = dir_path.join(name);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&path)
+            .map_err(|_| "web_artifact_unavailable")?;
+        for part in bytes.chunks(65536) {
+            check(cancel)?;
+            file.write_all(part)
+                .map_err(|_| "web_artifact_unavailable")?;
+        }
+        file.sync_all().map_err(|_| "web_artifact_commit_unknown")?;
+        let before = version(&file)?;
+        if before.2 != bytes.len() as u64 {
+            return Err("web_artifact_changed");
+        }
+        file.seek(SeekFrom::Start(0))
+            .map_err(|_| "web_artifact_unavailable")?;
+        let mut hash = Sha256::new();
+        let mut buf = [0; 65536];
+        let mut read_bytes = 0usize;
+        loop {
+            check(cancel)?;
+            let n = file
+                .read(&mut buf)
+                .map_err(|_| "web_artifact_unavailable")?;
+            if n == 0 {
+                break;
+            }
+            read_bytes = read_bytes.saturating_add(n);
+            if read_bytes > bytes.len() {
+                return Err("web_artifact_changed");
+            }
+            hash.update(&buf[..n]);
+        }
+        let observed = hash.finalize();
+        if observed[..] != Sha256::digest(bytes)[..] || before != version(&file)? {
+            return Err("web_artifact_changed");
+        }
+        let named = open_readonly_nofollow(&path).map_err(|_| "web_artifact_changed")?;
+        if version(&named)? != before {
+            return Err("web_artifact_changed");
+        }
+        Ok(())
+    }
+
+    pub(super) fn check_capacity(
+        store_home: &Path,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<(), WebArtifactError> {
+        let result = (|| {
+            check(cancel)?;
+            directory_path_identity(store_home).map_err(|_| "web_artifact_unavailable")?;
+            let root = store_home.join("web-artifacts");
+            match std::fs::symlink_metadata(&root) {
+                Ok(meta) => {
+                    if !meta.is_dir() || meta.file_type().is_symlink() || is_reparse_point(&meta) {
+                        return Err("web_artifact_invalid");
+                    }
+                    scan(&root, 0, 0, &mut Quota::default(), cancel)
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(_) => Err("web_artifact_invalid"),
+            }
+        })();
+        result.map_err(|code| WebArtifactError {
+            code,
+            effect_possible: false,
+        })
+    }
+
+    pub(super) fn publish(
+        store_home: &Path,
+        date: &str,
+        fetch: &str,
+        content: &str,
+        metadata: &Value,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<WebArtifactPublication, WebArtifactError> {
+        let mut effect = false;
+        let result = (|| {
+            check(cancel)?;
+            let encoded = validate_publish_inputs(date, fetch, content, metadata)?;
+            let home_id =
+                directory_path_identity(store_home).map_err(|_| "web_artifact_unavailable")?;
+            let root_path = store_home.join("web-artifacts");
+            let root_id = match check_dir(&root_path) {
+                Ok(id) => id,
+                Err(_) => {
+                    if std::fs::symlink_metadata(&root_path).is_ok() {
+                        return Err("web_artifact_invalid");
+                    }
+                    effect = true;
+                    std::fs::create_dir(&root_path).map_err(|_| "web_artifact_unavailable")?;
+                    check_dir(&root_path)?
+                }
+            };
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let _guard = loop {
+                check(cancel)?;
+                match DirectoryGuard::lock_nonblocking(&root_path) {
+                    Ok(guard) => break guard,
+                    Err(StoreError::LockBusy) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => return Err("web_artifact_busy"),
+                }
+            };
+            let mut quota = Quota::default();
+            scan(&root_path, 0, 0, &mut quota, cancel)?;
+            if quota
+                .bytes
+                .saturating_add(content.len() as u64)
+                .saturating_add(encoded.len() as u64)
+                > MAX_BYTES
+                || quota.entries.saturating_add(5) > ENTRIES
+                || quota.paths.saturating_add(
+                    date.len()
+                        + (date.len() + 1 + fetch.len())
+                        + 2 * (date.len() + 1 + fetch.len() + 1)
+                        + "content.txt".len()
+                        + "metadata.json".len(),
+                ) > PATH_BYTES
+            {
+                return Err("web_artifact_limit");
+            }
+            let day_path = root_path.join(date);
+            let day_id = match check_dir(&day_path) {
+                Ok(id) => id,
+                Err(_) => {
+                    effect = true;
+                    std::fs::create_dir(&day_path).map_err(|_| "web_artifact_unavailable")?;
+                    check_dir(&day_path)?
+                }
+            };
+            effect = true;
+            let target_path = day_path.join(fetch);
+            std::fs::create_dir(&target_path).map_err(|_| "web_artifact_unavailable")?;
+            let target_id = check_dir(&target_path)?;
+            write_verified(&target_path, "content.txt", content.as_bytes(), cancel)?;
+            #[cfg(feature = "test-fixtures")]
+            if store_home.join(".native-cli-fixture").is_file()
+                && std::env::var("PEER_NATIVE_WEB_PUBLICATION_FAULT").as_deref()
+                    == Ok("after_content")
+            {
+                return Err("web_artifact_commit_unknown");
+            }
+            write_verified(&target_path, "metadata.json", &encoded, cancel)?;
+            check(cancel)?;
+            if directory_path_identity(store_home).map_err(|_| "web_artifact_unavailable")?
+                != home_id
+                || check_dir(&root_path)? != root_id
+                || check_dir(&day_path)? != day_id
+                || check_dir(&target_path)? != target_id
+            {
+                return Err("web_artifact_changed");
+            }
+            Ok(WebArtifactPublication {
+                reference: format!("local-web-artifact://{fetch}"),
+                artifact_refs: vec![
+                    format!("local-web-artifact://{fetch}/content"),
+                    format!("local-web-artifact://{fetch}/metadata"),
+                ],
+            })
+        })();
+        result.map_err(|code| WebArtifactError {
+            code,
+            effect_possible: effect,
+        })
+    }
+}
+
+impl WebArtifactStore {
+    pub fn new(home: impl AsRef<Path>) -> Self {
+        Self {
+            home: home.as_ref().into(),
+        }
+    }
+
+    /// A read-only early check; publication repeats this under the actual root lock.
+    pub fn check_capacity(&self, cancel: &impl Fn() -> bool) -> Result<(), WebArtifactError> {
+        imp::check_capacity(&self.home, cancel)
+    }
+
+    pub fn publish(
+        &self,
+        date: &str,
+        fetch: &str,
+        content: &str,
+        metadata: &Value,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<WebArtifactPublication, WebArtifactError> {
+        imp::publish(&self.home, date, fetch, content, metadata, cancel)
     }
 }

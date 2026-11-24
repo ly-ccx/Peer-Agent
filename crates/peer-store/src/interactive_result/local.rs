@@ -11,7 +11,6 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, Metadata},
     io::{self, Read as _},
-    os::unix::fs::MetadataExt,
     path::PathBuf,
 };
 
@@ -53,7 +52,9 @@ impl Snapshot {
         .enumerate()
         {
             let file = directory.join(name);
-            if let Some(meta) = stat(&file, |m| m.is_file() && m.nlink() == 1)? {
+            if let Some(meta) = stat(&file, |m| {
+                m.is_file() && crate::platform::metadata_nlink_is_one(m)
+            })? {
                 let current = files::identity(&file)
                     .map_err(|_| STORAGE)?
                     .ok_or(CHANGED)?;
@@ -173,7 +174,7 @@ impl Snapshot {
 }
 
 fn dir_id(meta: &Metadata) -> (u64, u64) {
-    (meta.dev(), meta.ino())
+    crate::platform::metadata_dev_ino(meta)
 }
 
 fn stat(path: &Path, valid: impl FnOnce(&Metadata) -> bool) -> Read<Option<Metadata>> {

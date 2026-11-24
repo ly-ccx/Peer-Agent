@@ -3,26 +3,32 @@ use super::destination::check_cancel;
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
-    os::fd::{AsFd, BorrowedFd},
     sync::atomic::AtomicBool,
 };
-struct Flags<'a> {
-    fd: BorrowedFd<'a>,
-    before: rustix::fs::OFlags,
-}
-impl Drop for Flags<'_> {
-    fn drop(&mut self) {
-        let _ = rustix::fs::fcntl_setfl(self.fd, self.before);
-    }
-}
+
 pub(super) fn copy(file: &mut File, cancel: &AtomicBool) -> io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     send(file, cancel)
 }
+
 pub(super) fn text(text: &str, cancel: &AtomicBool) -> io::Result<()> {
     send(text.as_bytes(), cancel)
 }
+
+#[cfg(unix)]
 fn send(mut reader: impl Read, cancel: &AtomicBool) -> io::Result<()> {
+    use std::os::fd::{AsFd, BorrowedFd};
+
+    struct Flags<'a> {
+        fd: BorrowedFd<'a>,
+        before: rustix::fs::OFlags,
+    }
+    impl Drop for Flags<'_> {
+        fn drop(&mut self) {
+            let _ = rustix::fs::fcntl_setfl(self.fd, self.before);
+        }
+    }
+
     let stdout = io::stdout().lock();
     let before = rustix::fs::fcntl_getfl(&stdout)?;
     rustix::fs::fcntl_setfl(&stdout, before | rustix::fs::OFlags::NONBLOCK)?;
@@ -68,5 +74,22 @@ fn send(mut reader: impl Read, cancel: &AtomicBool) -> io::Result<()> {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+}
+
+#[cfg(windows)]
+fn send(mut reader: impl Read, cancel: &AtomicBool) -> io::Result<()> {
+    use std::io::Write;
+    let mut stdout = io::stdout().lock();
+    let mut bytes = [0u8; 65536];
+    loop {
+        check_cancel(cancel)?;
+        let n = reader.read(&mut bytes)?;
+        if n == 0 {
+            stdout.flush()?;
+            return Ok(());
+        }
+        check_cancel(cancel)?;
+        stdout.write_all(&bytes[..n])?;
     }
 }

@@ -200,8 +200,6 @@ impl NativeSessionHost {
             .budget
             .read_process(self, command.call, command.dispatch)?;
         let lease = self.journal.lease().record();
-        let pid = rustix::process::Pid::from_raw(child.pid as i32)
-            .ok_or(HostError("native_process_invalid"))?;
         if previous.state != NativeProcessState::Starting || previous.owner != command.owner {
             return Err(HostError("native_process_transition_invalid"));
         }
@@ -212,17 +210,7 @@ impl NativeSessionHost {
         {
             return Err(HostError("native_process_recorder_invalid"));
         }
-        if !match rustix::process::getpgid(Some(pid)) {
-            Ok(group) => group == pid,
-            // Darwin returns ESRCH for an exited, unreaped child while ps
-            // still observes its start identity. Preserve this owned launch
-            // as running/unsettled; only the actual Child wait plus group
-            // absence may later prove completion. This is no death proof.
-            Err(rustix::io::Errno::SRCH) => true,
-            Err(_) => false,
-        } {
-            return Err(HostError("native_process_group_unproven"));
-        }
+        crate::recorder::verify_spawned_process_group(child.pid, "native_process_invalid")?;
         command
             .budget
             .change_process(self, &previous, &episode_time(), false, |p| {

@@ -320,8 +320,8 @@ impl FailedConnection {
         let mut ended = true;
         if let Some(child) = &mut self.child {
             let pid = child.id();
-            if let Some(pid) = pid.and_then(|n| rustix::process::Pid::from_raw(n as i32)) {
-                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            if let Some(pid) = pid {
+                crate::recorder::kill_process_tree(pid);
             }
             let _ = child.start_kill();
             ended = matches!(

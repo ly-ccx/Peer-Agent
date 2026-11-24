@@ -10,17 +10,31 @@ struct Version {
     dev: u64,
     ino: u64,
     size: u64,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
+    mtime_ns: i128,
+    ctime_ns: i128,
 }
 fn version(meta: &Metadata) -> Version {
-    use std::os::unix::fs::MetadataExt;
-    Version {
-        dev: meta.dev(),
-        ino: meta.ino(),
-        size: meta.len(),
-        mtime: (meta.mtime(), meta.mtime_nsec()),
-        ctime: (meta.ctime(), meta.ctime_nsec()),
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Version {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.len(),
+            mtime_ns: i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
+            ctime_ns: i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Version {
+            dev: u64::from(meta.file_attributes()),
+            ino: meta.creation_time(),
+            size: meta.len(),
+            mtime_ns: i128::from(meta.last_write_time()),
+            ctime_ns: i128::from(meta.creation_time()),
+        }
     }
 }
 fn error(e: std::io::Error) -> ModelError {
@@ -103,17 +117,36 @@ pub(super) fn read(
     if before.len() > limit as u64 {
         return Err(ModelError::new("qoder_auth_limit"));
     }
-    let fd = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::NONBLOCK
-            | rustix::fs::OFlags::NOCTTY,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|e| error(e.into()))?;
-    let mut file = File::from(fd);
+    #[cfg(unix)]
+    let mut file = {
+        let fd = rustix::fs::open(
+            path,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::NONBLOCK
+                | rustix::fs::OFlags::NOCTTY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|e| error(e.into()))?;
+        File::from(fd)
+    };
+    #[cfg(windows)]
+    let mut file = {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(error)?;
+        let opened_meta = file.metadata().map_err(error)?;
+        if (opened_meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            return Err(ModelError::new("qoder_auth_not_regular"));
+        }
+        file
+    };
     let identity = version(&before);
     if version(&file.metadata().map_err(error)?) != identity {
         return Err(ModelError::new("qoder_auth_changed"));

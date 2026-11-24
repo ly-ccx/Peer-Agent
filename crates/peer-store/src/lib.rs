@@ -14,6 +14,7 @@ pub use web_artifacts::{WebArtifactError, WebArtifactPublication, WebArtifactSto
 mod evidence;
 mod files;
 mod model_config;
+mod platform;
 pub use approvals::{ApprovalDecision, ApprovalState, ApprovalStore, HostApproval};
 pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
@@ -33,7 +34,8 @@ pub use interactive_result::{
 pub use resources::{
     ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostFileMaterialization,
     HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,
-    file_resource, provider_execution_scopes, provider_file_scopes, resource_conflicts,
+    file_metadata_identity, file_resource, provider_execution_scopes, provider_file_scopes,
+    resource_conflicts,
 };
 pub use shell_artifacts::ShellArtifacts;
 mod context_accounting;

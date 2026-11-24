@@ -61,20 +61,30 @@ impl RunGuard {
         if !self.port.confined_reads {
             return open_file(path);
         }
-        use rustix::fs::OFlags as O;
-        let Some(parent) = path.parent() else {
-            return target::directory(path);
-        };
-        let directory = target::directory(parent)?;
-        let leaf = path.file_name().ok_or(HostError("invalid_path"))?;
-        rustix::fs::openat(
-            &directory,
-            leaf,
-            O::RDONLY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK,
-            rustix::fs::Mode::empty(),
-        )
-        .map(std::fs::File::from)
-        .map_err(|_| HostError("file_unavailable"))
+        #[cfg(unix)]
+        {
+            use rustix::fs::OFlags as O;
+            let Some(parent) = path.parent() else {
+                return target::directory(path);
+            };
+            let directory = target::directory(parent)?;
+            let leaf = path.file_name().ok_or(HostError("invalid_path"))?;
+            rustix::fs::openat(
+                &directory,
+                leaf,
+                O::RDONLY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK,
+                rustix::fs::Mode::empty(),
+            )
+            .map(std::fs::File::from)
+            .map_err(|_| HostError("file_unavailable"))
+        }
+        #[cfg(windows)]
+        {
+            if let Some(parent) = path.parent() {
+                target::verify_directory(parent)?;
+            }
+            open_file(path)
+        }
     }
 
     fn cancel(&self) -> Result<(), HostError> {
@@ -90,13 +100,38 @@ impl RunGuard {
     }
 }
 fn open_file(path: &Path) -> Result<std::fs::File, HostError> {
-    let flags = rustix::fs::OFlags::RDONLY
-        | rustix::fs::OFlags::NOFOLLOW
-        | rustix::fs::OFlags::CLOEXEC
-        | rustix::fs::OFlags::NONBLOCK;
-    rustix::fs::open(path, flags, rustix::fs::Mode::from_raw_mode(0o666))
-        .map(std::fs::File::from)
-        .map_err(|_| HostError("file_unavailable"))
+    #[cfg(unix)]
+    {
+        let flags = rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK;
+        rustix::fs::open(path, flags, rustix::fs::Mode::from_raw_mode(0o666))
+            .map(std::fs::File::from)
+            .map_err(|_| HostError("file_unavailable"))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        let pre = std::fs::symlink_metadata(path).map_err(|_| HostError("file_unavailable"))?;
+        if pre.file_type().is_symlink()
+            || (pre.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+        {
+            return Err(HostError("file_unavailable"));
+        }
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .map_err(|_| HostError("file_unavailable"))?;
+        let meta = file.metadata().map_err(|_| HostError("file_unavailable"))?;
+        if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            return Err(HostError("file_unavailable"));
+        }
+        Ok(file)
+    }
 }
 fn read_handle_bytes(file: &mut std::fs::File, limit: usize) -> Result<Vec<u8>, HostError> {
     if !file

@@ -346,13 +346,7 @@ impl Host<'_> {
         {
             return Err(HostError("native_process_recorder_invalid"));
         }
-        let pid = rustix::process::Pid::from_raw(child.pid as i32)
-            .ok_or(HostError("native_process_invalid"))?;
-        if !matches!(rustix::process::getpgid(Some(pid)),Ok(group) if group==pid)
-            && rustix::process::getpgid(Some(pid)) != Err(rustix::io::Errno::SRCH)
-        {
-            return Err(HostError("native_process_group_unproven"));
-        }
+        crate::recorder::verify_spawned_process_group(child.pid, "native_process_invalid")?;
         p.child = Some(child);
         p.state = Process::Running;
         Ok(())

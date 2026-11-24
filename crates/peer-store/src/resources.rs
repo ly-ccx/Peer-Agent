@@ -11,8 +11,8 @@ mod materialization;
 mod scopes;
 mod settlement;
 pub use scopes::{
-    ResourceIdentity, directory_resource, file_resource, provider_execution_scopes,
-    provider_file_scopes, resource_conflicts,
+    ResourceIdentity, directory_resource, file_metadata_identity, file_resource,
+    provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -192,6 +192,38 @@ impl PreparedEffect for ShellEffect {
         }))
     }
 }
+#[cfg(windows)]
+pub(crate) fn windows_shell_command(script: &str) -> tokio::process::Command {
+    use std::os::windows::process::CommandExt;
+    static SHELL: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let binary = SHELL.get_or_init(|| {
+        if let Some(paths) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&paths) {
+                let candidate = dir.join("pwsh.exe");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+        std::path::PathBuf::from("powershell.exe")
+    });
+    let mut command = tokio::process::Command::new(binary);
+    let wrapped = format!(
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n{script}"
+    );
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+        ])
+        .arg(wrapped)
+        .creation_flags(crate::recorder::CREATE_NO_WINDOW);
+    command
+}
+
 impl ShellEffect {
     async fn spawn(
         &self,
@@ -199,17 +231,20 @@ impl ShellEffect {
         artifacts: &ShellArtifacts,
     ) -> Result<tokio::process::Child, HostError> {
         port.check().await?;
-        let mut command = tokio::process::Command::new("/bin/sh");
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.arg("-c").arg(&self.command).process_group(0);
+            command
+        };
+        #[cfg(windows)]
+        let mut command = windows_shell_command(&self.command);
         command
-            .arg("-c")
-            .arg(&self.command)
             .current_dir(&self.cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        #[cfg(unix)]
-        command.process_group(0);
         port.command_starting().await?;
         artifacts
             .check_current()

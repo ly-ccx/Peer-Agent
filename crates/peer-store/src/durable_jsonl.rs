@@ -4,7 +4,7 @@ use crate::{StoreError, files};
 use peer_protocol::{JsonDecodeError, JsonLimits, decode_json_bounded, javascript_json_string};
 use serde_json::Value;
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
@@ -109,9 +109,7 @@ pub(crate) fn encode(rows: &[Value]) -> Result<Vec<u8>, StoreError> {
     Ok(bytes)
 }
 pub(crate) fn sync_dir(path: &Path) -> Result<(), StoreError> {
-    File::open(path)
-        .and_then(|f| f.sync_all())
-        .map_err(|_| StoreError::ReadFailed)
+    crate::platform::sync_dir(path).map_err(|_| StoreError::ReadFailed)
 }
 pub(crate) fn replace(
     path: &Path,
@@ -165,17 +163,25 @@ pub(crate) fn append_to_limit(
             .mode(0o600)
             .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(crate::platform::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
     let mut file = options.open(path).map_err(|_| StoreError::ReadFailed)?;
     // files::identity also rejects non-regular paths; opened descriptor identity
     // must still match the path before any write.
     let opened = file.metadata().map_err(|_| StoreError::ReadFailed)?;
-    #[cfg(unix)]
+    #[cfg(windows)]
+    if crate::platform::is_reparse_point(&opened) {
+        return Err(StoreError::VersionChanged);
+    }
     {
-        use std::os::unix::fs::MetadataExt;
         let current = files::identity(path)?.ok_or(StoreError::VersionChanged)?;
+        let (opened_dev, opened_ino) = crate::platform::metadata_dev_ino(&opened);
         if !opened.is_file()
-            || current.dev != opened.dev()
-            || current.ino != opened.ino()
+            || current.dev != opened_dev
+            || current.ino != opened_ino
             || before.as_ref().is_some_and(|old| old != &current)
         {
             return Err(StoreError::VersionChanged);

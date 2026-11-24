@@ -28,40 +28,81 @@ impl PermissionInput for TerminalPermission {
                 peer_tui::terminal_text(prompt["tool"].as_str().unwrap_or("tool")),
                 peer_tui::terminal_text(&details.to_string())
             );
-            let input = io::stdin();
-            let mut bytes = Vec::new();
-            loop {
-                let mut b = [0u8; 1];
-                let wait = tokio::select! {biased;_=cancel.cancelled()=>return LocalPermissionDecision::Cancel,_=tokio::time::sleep(Duration::from_millis(20))=>true};
-                let mut poll = [rustix::event::PollFd::new(
-                    &input,
-                    rustix::event::PollFlags::IN,
-                )];
-                if !wait
-                    || rustix::event::poll(
-                        &mut poll,
-                        Some(&rustix::event::Timespec {
-                            tv_sec: 0,
-                            tv_nsec: 0,
-                        }),
-                    )
-                    .ok()
-                        != Some(1)
-                {
-                    continue;
+            #[cfg(unix)]
+            let bytes = {
+                let input = io::stdin();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut b = [0u8; 1];
+                    let wait = tokio::select! {biased;_=cancel.cancelled()=>return LocalPermissionDecision::Cancel,_=tokio::time::sleep(Duration::from_millis(20))=>true};
+                    let mut poll = [rustix::event::PollFd::new(
+                        &input,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    if !wait
+                        || rustix::event::poll(
+                            &mut poll,
+                            Some(&rustix::event::Timespec {
+                                tv_sec: 0,
+                                tv_nsec: 0,
+                            }),
+                        )
+                        .ok()
+                            != Some(1)
+                    {
+                        continue;
+                    }
+                    let r = rustix::io::read(&input, &mut b);
+                    if r.ok() != Some(1) {
+                        return LocalPermissionDecision::Unavailable;
+                    }
+                    if bytes.len() >= 1024 {
+                        return LocalPermissionDecision::Unavailable;
+                    }
+                    if b[0] == b'\n' {
+                        break;
+                    }
+                    bytes.push(b[0]);
                 }
-                let r = rustix::io::read(&input, &mut b);
-                if r.ok() != Some(1) {
-                    return LocalPermissionDecision::Unavailable;
+                bytes
+            };
+            #[cfg(windows)]
+            let bytes = {
+                use std::io::Read;
+                let (tx, rx) = tokio::sync::oneshot::channel::<Option<Vec<u8>>>();
+                std::thread::spawn(move || {
+                    let mut input = io::stdin().lock();
+                    let mut bytes = Vec::new();
+                    let mut b = [0u8; 1];
+                    loop {
+                        match input.read(&mut b) {
+                            Ok(1) => {
+                                if bytes.len() >= 1024 {
+                                    let _ = tx.send(None);
+                                    return;
+                                }
+                                if b[0] == b'\n' {
+                                    let _ = tx.send(Some(bytes));
+                                    return;
+                                }
+                                bytes.push(b[0]);
+                            }
+                            _ => {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                        }
+                    }
+                });
+                match tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return LocalPermissionDecision::Cancel,
+                    res = rx => res,
+                } {
+                    Ok(Some(bytes)) => bytes,
+                    _ => return LocalPermissionDecision::Unavailable,
                 }
-                if bytes.len() >= 1024 {
-                    return LocalPermissionDecision::Unavailable;
-                }
-                if b[0] == b'\n' {
-                    break;
-                }
-                bytes.push(b[0]);
-            }
+            };
             if matches!(
                 std::str::from_utf8(&bytes).unwrap_or("").trim(),
                 "y" | "yes"
