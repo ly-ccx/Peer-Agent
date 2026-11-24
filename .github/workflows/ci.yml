@@ -215,5 +215,8 @@ jobs:
           if (-not $ver.StartsWith("peer ")) { throw "unexpected version output: $ver" }
           & target\release\peer-native.exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "peer-native.exe --help failed with $LASTEXITCODE" }
-          & target\release\peer-credential-helper.exe --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "peer-credential-helper.exe --help failed with $LASTEXITCODE" }
+          $pingJson = '{"version":1,"action":"ping"}' | & target\release\peer-credential-helper.exe
+          if ($LASTEXITCODE -ne 0) { throw "peer-credential-helper.exe ping failed with $LASTEXITCODE" }
+          Write-Host "peer-credential-helper.exe ping -> $pingJson"
+          $ping = $pingJson | ConvertFrom-Json
+          if (-not $ping.ok -or $ping.data.status -ne "ready" -or $ping.data.platform -ne "windows") { throw "unexpected credential helper ping response: $pingJson" }
