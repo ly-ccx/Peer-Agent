@@ -54,6 +54,9 @@ export function deferPanel<T extends ComponentType<any>>(load: () => Promise<{ d
 
   return function DeferredPanel(props: P) {
     const [revision, setRevision] = useState(0);
+    // Keep the tree shape stable for the lifetime of a mounted panel so parent
+    // re-renders after lazy resolution never switch branches and remount it.
+    const [directAtMount, setDirectAtMount] = useState(() => resolved !== null);
     const locale = 'i18n' in props && props.i18n && typeof props.i18n === 'object' && 'locale' in props.i18n
       ? String(props.i18n.locale)
       : (typeof document !== 'undefined' ? document.documentElement.lang : 'zh-CN');
@@ -61,9 +64,11 @@ export function deferPanel<T extends ComponentType<any>>(load: () => Promise<{ d
     const retry = () => {
       resolved = null;
       sharedLazy = createLazy();
+      setDirectAtMount(false);
       setRevision((current) => current + 1);
     };
-    const Content = (resolved ?? sharedLazy) as ComponentType<P>;
+    const Direct = (directAtMount ? resolved : null) as ComponentType<P> | null;
+    const Lazy = sharedLazy as ComponentType<P>;
     return (
       <PanelBoundary
         key={revision}
@@ -71,11 +76,11 @@ export function deferPanel<T extends ComponentType<any>>(load: () => Promise<{ d
         retry={retry}
         renderError={options?.renderError ? () => options.renderError!(props, retry) : undefined}
       >
-        {resolved ? (
-          <Content {...props} />
+        {Direct ? (
+          <Direct {...props} />
         ) : (
           <Suspense fallback={<DeferredPanelFallback isZh={isZh} />}>
-            <Content {...props} />
+            <Lazy {...props} />
           </Suspense>
         )}
       </PanelBoundary>

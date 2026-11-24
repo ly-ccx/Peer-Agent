@@ -727,10 +727,15 @@ export function LlmSettingsPanel({
     }
   }, []);
 
-  const openCatalog = (id: string) => {
+  const resolveCatalogTarget = (targetKey: string | null) => {
+    if (!targetKey) return undefined;
+    return providers.find((provider) => (provider.groupId ?? provider.id) === targetKey || provider.id === targetKey);
+  };
+
+  const openCatalog = (headId: string, groupId?: string) => {
     setPendingProviderDraft(null);
-    setCatalogTargetId(id);
-    void loadCatalog(id);
+    setCatalogTargetId(groupId ?? headId);
+    void loadCatalog(headId);
   };
 
   const handleChannelChange = (channelId: string) => {
@@ -1188,7 +1193,7 @@ export function LlmSettingsPanel({
       return providersAfter;
     }
 
-    const target = providers.find((provider) => provider.id === catalogTargetId);
+    const target = resolveCatalogTarget(catalogTargetId);
     if (!target) return [];
     const groupId = target.groupId ?? target.id;
     const configuredModels = providers.filter(
@@ -1314,7 +1319,7 @@ export function LlmSettingsPanel({
       }
       clearTestResult(busyKey);
       if (shouldOpenOAuthModelCatalog(result.provider.model, result.models)) {
-        setCatalogTargetId(result.provider.id);
+        setCatalogTargetId(result.provider.groupId ?? result.provider.id);
         setCatalogResult({ success: true, models: result.models ?? [], source: 'builtin' });
       }
       setShowForm(false);
@@ -1570,7 +1575,7 @@ export function LlmSettingsPanel({
                   <div className="llm-group-section-head">
                     <span className="llm-group-section-title">{i18n.locale === 'zh-CN' ? '模型' : 'Models'}</span>
                     <div className="llm-group-section-actions">
-                      <button type="button" onClick={() => openCatalog(head.id)}>
+                      <button type="button" onClick={() => openCatalog(head.id, g.groupId)}>
                         {i18n.locale === 'zh-CN' ? '获取模型列表' : 'Get models'}
                       </button>
                       {!isOAuthMethod(head.authMethod) ? (
@@ -2057,7 +2062,7 @@ export function LlmSettingsPanel({
           }}
         />
       ) : catalogTargetId ? (() => {
-        const target = providers.find((provider) => provider.id === catalogTargetId);
+        const target = resolveCatalogTarget(catalogTargetId);
         if (!target) return null;
         const groupId = target.groupId ?? target.id;
         const configuredModels = providers.filter((provider) => (provider.groupId ?? provider.id) === groupId);
@@ -2075,6 +2080,7 @@ export function LlmSettingsPanel({
             onRefresh={() => void loadCatalog(target.id)}
             onImport={handleImportModels}
             onClose={() => setCatalogTargetId(null)}
+            onAppliedClose={() => setCatalogTargetId(null)}
           />
         );
       })() : null}

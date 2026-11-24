@@ -308,6 +308,49 @@ export function createLlmConfigStore({
     return readModelOAuthTokens(credentials(), modelOauthCredentialKey(key));
   }
 
+  // Best-effort post-commit hint sync: keeps llm-providers.json oauthStatus in sync
+  // with Vault tokens without ever failing or rolling back an already-committed refresh.
+  function syncOAuthMetadataHints(id, expectedBinding, tokens) {
+    if (!tokens?.access) return false;
+    try {
+      return withModelConfigLock(configFile, () => {
+        const items = readAllUnlocked();
+        const matches = items.filter((entry) => entry.id === id);
+        if (
+          matches.length !== 1
+          || matches[0].enabled === false
+          || modelConfigBinding(matches[0]) !== expectedBinding
+        ) {
+          return false;
+        }
+        const current = matches[0];
+        const groupId = groupKey(current);
+        const tokenExpires = typeof tokens.expires === 'number' ? tokens.expires : undefined;
+        const currentExpires = typeof current.oauthExpires === 'number' ? current.oauthExpires : undefined;
+        const nextExpires = tokenExpires !== undefined
+          ? (currentExpires !== undefined ? Math.max(tokenExpires, currentExpires) : tokenExpires)
+          : currentExpires;
+        const nextAccountId = tokens.accountId ? String(tokens.accountId) : current.oauthAccountId;
+        const groupItems = items.filter((entry) => groupKey(entry) === groupId);
+        const changed = groupItems.some((entry) => (
+          entry.oauthConfigured !== true
+          || entry.oauthExpires !== nextExpires
+          || entry.oauthAccountId !== nextAccountId
+        ));
+        if (!changed) return false;
+        syncGroupSecretMetadata(items, groupId, {
+          oauthConfigured: true,
+          oauthExpires: nextExpires,
+          oauthAccountId: nextAccountId,
+        });
+        writeAll(items);
+        return true;
+      });
+    } catch {
+      return false;
+    }
+  }
+
   // Automatic renewal owns only its Vault generation. Configuration hints may
   // lag; a metadata failure must never restore an already-consumed refresh token.
   async function refreshOAuthTokens(id, tokens, refresh, options = {}) {
@@ -320,11 +363,13 @@ export function createLlmConfigStore({
         throw new Error('credential_oauth_configuration_changed');
       }
     };
-    return refreshModelOAuthTokens({
+    const result = await refreshModelOAuthTokens({
       client: credentials(), key: modelOauthCredentialKey(groupKey(item)),
       authMethod: item.authMethod, tokens, refresh, validate, force: options.force === true,
       withConfiguration: action => withModelConfigLock(configFile, action),
     });
+    syncOAuthMetadataHints(id, original, result.tokens);
+    return result;
   }
 
   function writeVerifiedSecret(key, secret) {

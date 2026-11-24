@@ -220,6 +220,44 @@ describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
     assert.equal(resolveCalled, false);
   });
 
+  it('dedupes multi-model OAuth groups by groupId and does not broadcast when status remains expired', async () => {
+    const refreshCalls = [];
+    const expiredAt = Date.now() - 60_000;
+    let status = 'expired';
+    const llmConfigStore = {
+      listProviders: () => ([
+        { id: 'grok-m1', groupId: 'grok-group', authMethod: 'oauth_grok', oauthStatus: { status } },
+        { id: 'grok-m2', groupId: 'grok-group', authMethod: 'oauth_grok', oauthStatus: { status } },
+      ]),
+      getCredential: () => ({
+        tokens: { access: 'already-fresh-in-vault', refresh: 'r1', expires: Date.now() + 3_600_000, scope: 'api:access' },
+      }),
+      refreshOAuthTokens: async (id, tokens) => {
+        refreshCalls.push(id);
+        // Simulate metadata hint write failing or lagging so listProviders() still reports 'expired'.
+        return { tokens, refreshed: false };
+      },
+    };
+
+    const stuck = await refreshExpiredOAuthProviders({ llmConfigStore });
+    assert.deepEqual(refreshCalls, ['grok-m1']);
+    assert.deepEqual(stuck, { attempted: 1, refreshed: 0 });
+
+    // Once metadata hints catch up so listProviders() reports 'connected', notify once.
+    refreshCalls.length = 0;
+    const syncedStore = {
+      ...llmConfigStore,
+      refreshOAuthTokens: async (id, tokens) => {
+        refreshCalls.push(id);
+        status = 'connected';
+        return { tokens: { ...tokens, expires: Math.max(expiredAt, Date.now() + 3_600_000) }, refreshed: false };
+      },
+    };
+    const synced = await refreshExpiredOAuthProviders({ llmConfigStore: syncedStore });
+    assert.deepEqual(refreshCalls, ['grok-m1']);
+    assert.deepEqual(synced, { attempted: 1, refreshed: 1 });
+  });
+
   it('maps bare Node EPERM from Qoder local auth to a readable credential error', async () => {
     const native = Object.assign(new Error('EPERM: operation not permitted, open \'/tmp/.auth/user\''), {
       code: 'EPERM',
