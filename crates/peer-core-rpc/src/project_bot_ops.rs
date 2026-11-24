@@ -1253,12 +1253,16 @@ fn percent_decode(input: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-fn is_absolute_platform_path(p: &str) -> bool {
-    if p.starts_with('/') {
-        return true;
-    }
+fn is_windows_drive_path(p: &str) -> bool {
     let b = p.as_bytes();
     b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
+fn is_absolute_platform_path(p: &str) -> bool {
+    if p.starts_with('/') || is_windows_drive_path(p) {
+        return true;
+    }
+    p.strip_prefix(r"\\?\").is_some_and(is_windows_drive_path)
 }
 
 fn artifact_locator(artifact: &Value) -> Option<String> {
@@ -1273,16 +1277,35 @@ fn artifact_locator(artifact: &Value) -> Option<String> {
     let raw_ref = artifact.get("ref").and_then(Value::as_str)?;
     let rest = raw_ref.strip_prefix("file://")?;
     let path_part = if let Some(after_host) = rest.strip_prefix("localhost/") {
-        format!("/{after_host}")
-    } else if rest.starts_with('/') {
+        if is_windows_drive_path(after_host) {
+            after_host.to_owned()
+        } else {
+            format!("/{after_host}")
+        }
+    } else if let Some(after_slash) = rest.strip_prefix('/') {
+        if is_windows_drive_path(after_slash) {
+            after_slash.to_owned()
+        } else {
+            rest.to_owned()
+        }
+    } else if is_windows_drive_path(rest) {
         rest.to_owned()
+    } else if let Some(verbatim) = rest.strip_prefix(r"\\?\")
+        && is_windows_drive_path(verbatim)
+    {
+        verbatim.to_owned()
     } else {
         return None;
     };
     let clean_path = path_part.split(['?', '#']).next().unwrap_or(&path_part);
     let decoded = percent_decode(clean_path)?;
-    (decoded.encode_utf16().count() <= 8192 && !decoded.chars().any(|c| (c as u32) <= 0x1f))
-        .then_some(decoded)
+    let normalized = decoded
+        .strip_prefix('/')
+        .filter(|tail| is_windows_drive_path(tail))
+        .unwrap_or(&decoded)
+        .to_owned();
+    (normalized.encode_utf16().count() <= 8192 && !normalized.chars().any(|c| (c as u32) <= 0x1f))
+        .then_some(normalized)
 }
 
 fn looks_like_uuid_or_scheme(s: &str) -> bool {
@@ -1837,5 +1860,58 @@ pub fn handle_bot_read_evidence(ctx: &ServerContext, params_val: Value) -> Resul
             Some("unavailable"),
             None,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{artifact_locator, is_absolute_platform_path};
+    use serde_json::json;
+
+    #[test]
+    fn artifact_locator_supports_unix_and_windows_file_uris() {
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file:///tmp/repo/src/auth.rs" })).as_deref(),
+            Some("/tmp/repo/src/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file://localhost/tmp/repo/src/auth.rs" })).as_deref(),
+            Some("/tmp/repo/src/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file:///C:/Users/dev/repo/src/auth.rs" })).as_deref(),
+            Some("C:/Users/dev/repo/src/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file://localhost/C:/Users/dev/src/auth.rs" }))
+                .as_deref(),
+            Some("C:/Users/dev/src/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file:///C%3A/Users/my%20repo/auth.rs" })).as_deref(),
+            Some("C:/Users/my repo/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": r"file://C:\Users\dev\repo\src/auth.rs" })).as_deref(),
+            Some(r"C:\Users\dev\repo\src/auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": r"file://\\?\C:\Users\dev\repo\auth.rs" })).as_deref(),
+            Some(r"C:\Users\dev\repo\auth.rs")
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "path": r"\\?\C:\Users\dev\repo\auth.rs" })).as_deref(),
+            Some(r"\\?\C:\Users\dev\repo\auth.rs")
+        );
+        assert!(is_absolute_platform_path(r"\\?\C:\Users\dev\repo\auth.rs"));
+        // Reject remote hosts and relative paths.
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file://evil.example.com/share/secret.txt" })),
+            None
+        );
+        assert_eq!(
+            artifact_locator(&json!({ "ref": "file://relative/path.txt" })),
+            None
+        );
     }
 }
