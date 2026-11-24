@@ -2252,7 +2252,7 @@ fn execute_coordinate_work(
         "cancel" => {
             let sid = sid_opt.ok_or_else(|| ProjectError::code("invalid_input"))?;
             let updated =
-                supervisor.control_session(&state.workspace_id, sid, "cancel", reason, true)?;
+                supervisor.cancel_session_by_agent(&state.workspace_id, sid, reason, true)?;
             extra_session = json!(updated);
         }
         "resume" => {
@@ -2280,10 +2280,9 @@ fn execute_coordinate_work(
             if action == "replace"
                 && let Some(old_sid) = sid_opt
             {
-                let _ = supervisor.control_session(
+                let _ = supervisor.cancel_session_by_agent(
                     &state.workspace_id,
                     old_sid,
-                    "cancel",
                     reason,
                     true,
                 )?;
@@ -2432,7 +2431,7 @@ fn execute_project_capability(
             let updated = if autonomous_cleanup && state.current_input_anchors.is_empty() {
                 supervisor.cleanup_session(&state.workspace_id, sid, reason, true)?
             } else {
-                supervisor.control_session(&state.workspace_id, sid, "cancel", reason, true)?
+                supervisor.cancel_session_by_agent(&state.workspace_id, sid, reason, true)?
             };
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
@@ -2453,6 +2452,8 @@ fn execute_project_capability(
             }
             let updated = if autonomous_cleanup && state.current_input_anchors.is_empty() {
                 supervisor.cleanup_session(&state.workspace_id, sid, "bot_cleanup", true)?
+            } else if action == "cancel" {
+                supervisor.cancel_session_by_agent(&state.workspace_id, sid, "user_control", true)?
             } else {
                 supervisor.control_session(
                     &state.workspace_id,

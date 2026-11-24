@@ -16,6 +16,9 @@ test('empty provider content and incompatible continuation have distinct user-fa
   const card = { cardId: 'failure', kind: 'agent_unavailable', content: '代理暂时不可用：empty_model_response: no output' };
   assert.equal(agentFailurePresentation(card).messageKey, 'projectAgent.chat.recoveryEmptyResponse');
   assert.equal(agentFailurePresentation(card).retryAllowed, true);
+  const nativeEmpty = { cardId: 'failure-native', kind: 'agent_unavailable', content: '代理暂时不可用：model_empty_response' };
+  assert.equal(agentFailurePresentation(nativeEmpty).messageKey, 'projectAgent.chat.recoveryEmptyResponse');
+  assert.equal(agentFailurePresentation(nativeEmpty).retryAllowed, true);
   const changed = { ...card, content: '代理暂时不可用：continuity_model_changed' };
   assert.equal(agentFailurePresentation(changed).messageKey, 'projectAgent.chat.recoveryModelChanged');
   assert.equal(agentFailurePresentation(changed).retryAllowed, false);
