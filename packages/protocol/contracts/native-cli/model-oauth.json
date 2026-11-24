@@ -403,7 +403,7 @@
     {
       "effort": "off",
       "input": {
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "system": "shared system",
         "messages": [
           {
@@ -451,7 +451,7 @@
           "originator": "peer-agent"
         },
         "body": {
-          "model": "gpt-6-astra",
+          "model": "gpt-6.2-astra",
           "instructions": "shared system",
           "input": [
             {
@@ -493,7 +493,7 @@
     {
       "effort": "default",
       "input": {
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "system": "shared system",
         "messages": [
           {
@@ -541,7 +541,7 @@
           "originator": "peer-agent"
         },
         "body": {
-          "model": "gpt-6-astra",
+          "model": "gpt-6.2-astra",
           "instructions": "shared system",
           "input": [
             {
@@ -583,7 +583,7 @@
     {
       "effort": "high",
       "input": {
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "system": "shared system",
         "messages": [
           {
@@ -631,7 +631,7 @@
           "originator": "peer-agent"
         },
         "body": {
-          "model": "gpt-6-astra",
+          "model": "gpt-6.2-astra",
           "instructions": "shared system",
           "input": [
             {
@@ -676,7 +676,7 @@
     {
       "effort": "xhigh",
       "input": {
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "system": "shared system",
         "messages": [
           {
@@ -724,7 +724,7 @@
           "originator": "peer-agent"
         },
         "body": {
-          "model": "gpt-6-astra",
+          "model": "gpt-6.2-astra",
           "instructions": "shared system",
           "input": [
             {
@@ -769,7 +769,7 @@
     {
       "effort": "max",
       "input": {
-        "model": "gpt-6-astra",
+        "model": "gpt-6.2-astra",
         "system": "shared system",
         "messages": [
           {
@@ -817,7 +817,7 @@
           "originator": "peer-agent"
         },
         "body": {
-          "model": "gpt-6-astra",
+          "model": "gpt-6.2-astra",
           "instructions": "shared system",
           "input": [
             {
@@ -1327,6 +1327,104 @@
     }
   ],
   "contextCases": [
+    {
+      "model": "gpt-6.2-astra",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-astra",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.2-sol",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
     {
       "model": "gpt-6-astra",
       "values": {},
