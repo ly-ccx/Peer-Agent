@@ -1760,9 +1760,13 @@ impl ProjectAgentRunner {
         let objectives = ObjectiveStore::new(&self.data_home)
             .list(opts.workspace_id)
             .unwrap_or_default();
-        let instructions =
-            ProjectInstructions::observe_desktop_host(opts.workspace_path, &self.data_home, None, cancel)
-                .unwrap_or_default();
+        let instructions = ProjectInstructions::observe_desktop_host(
+            opts.workspace_path,
+            &self.data_home,
+            None,
+            cancel,
+        )
+        .unwrap_or_default();
         let retry_continuity = read_retry_continuity_in(
             Some(&self.data_home),
             Some(opts.workspace_id),
@@ -1880,7 +1884,9 @@ impl ProjectAgentRunner {
                         {
                             let title = plan["title"].as_str().unwrap_or(sid);
                             let status = plan["status"].as_str().unwrap_or("unknown");
-                            ref_lines.push(format!("- sessionId={sid} title=\"{title}\" status={status}"));
+                            ref_lines.push(format!(
+                                "- sessionId={sid} title=\"{title}\" status={status}"
+                            ));
                         }
                     }
                     if !ref_lines.is_empty() {
@@ -3151,19 +3157,33 @@ mod tests {
             })
             .unwrap();
         // Unset or "inherit" follows global default ("concise")
-        assert_eq!(profile.effective_communication_style(&global_style), "concise");
+        assert_eq!(
+            profile.effective_communication_style(&global_style),
+            "concise"
+        );
         profile.communication_style = Some("inherit".to_owned());
-        assert_eq!(profile.effective_communication_style(&global_style), "concise");
+        assert_eq!(
+            profile.effective_communication_style(&global_style),
+            "concise"
+        );
         // Explicit per-bot override wins over global default
         profile.communication_style = Some("technical".to_owned());
-        assert_eq!(profile.effective_communication_style(&global_style), "technical");
+        assert_eq!(
+            profile.effective_communication_style(&global_style),
+            "technical"
+        );
 
         // Desktop-only keys in settings.json must NOT prevent systemInstructions from loading
         let cancel = CancellationToken::new();
         let instructions =
             ProjectInstructions::observe_desktop_host(workspace.path(), dir.path(), None, &cancel)
                 .expect("observe_desktop_host succeeds with desktop keys");
-        let rendered = instructions.sections().into_iter().map(|s| s.to_string()).collect::<Vec<_>>().join("\n");
+        let rendered = instructions
+            .sections()
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
             rendered.contains("先给结论，少用内部术语。"),
             "systemInstructions must reach project bot instructions, got: {rendered}"

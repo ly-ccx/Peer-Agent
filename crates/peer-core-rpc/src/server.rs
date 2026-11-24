@@ -1350,7 +1350,8 @@ where
                         if let Err(err) = w.send_value(&response).await
                             && err.kind() == io::ErrorKind::InvalidData
                         {
-                            let fallback = RpcError::internal_error(err.to_string()).to_response(id);
+                            let fallback =
+                                RpcError::internal_error(err.to_string()).to_response(id);
                             let _ = w.send_value(&fallback).await;
                         }
                     });

@@ -820,7 +820,8 @@ impl InputDraftStore {
             .map(|q| serde_json::to_value(q).map_err(|_| ProjectError::code("DRAFT_SAVE_FAILED")))
             .transpose()?;
         let draft_refs = validate_refs(draft_obj.and_then(|o| o.get("attachmentIds")))?;
-        let draft_task_refs = normalize_task_refs_strict(draft_obj.and_then(|o| o.get("taskRefs")))?;
+        let draft_task_refs =
+            normalize_task_refs_strict(draft_obj.and_then(|o| o.get("taskRefs")))?;
         let draft = DraftBody {
             text: draft_text,
             quote: draft_quote,
@@ -1169,7 +1170,10 @@ mod tests {
         assert_eq!(snap.draft.task_refs.len(), 1);
         assert_eq!(snap.draft.task_refs[0].session_id, "sess-123");
         assert_eq!(snap.draft.task_refs[0].title, "验证 gitconfig 放行");
-        assert_eq!(snap.draft.task_refs[0].anchor_message_id.as_deref(), Some("m-42"));
+        assert_eq!(
+            snap.draft.task_refs[0].anchor_message_id.as_deref(),
+            Some("m-42")
+        );
         assert_eq!(snap.pending.len(), 1);
         assert_eq!(snap.pending[0].task_refs.len(), 1);
         assert_eq!(snap.pending[0].task_refs[0].session_id, "sess-123");

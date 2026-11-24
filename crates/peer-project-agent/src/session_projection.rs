@@ -1758,7 +1758,10 @@ fn matches_history_category(projected: &Value, category: &str) -> bool {
         "settled" => status == "accepted" || reason == "settled",
         "canceled" => {
             matches!(status, "cancelled" | "superseded" | "paused")
-                || matches!(reason, "stop_confirmed" | "user_withdrawn" | "superseded" | "paused")
+                || matches!(
+                    reason,
+                    "stop_confirmed" | "user_withdrawn" | "superseded" | "paused"
+                )
         }
         "failed" => status == "failed" || reason == "verification_failed",
         _ => true,

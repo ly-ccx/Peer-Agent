@@ -1340,12 +1340,36 @@ mod tests {
             resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
                 .unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut rw_default);
-        assert!(rw_default.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
-        assert!(rw_default.allowlist.contains(&"local.skill.local-skill".to_owned()));
-        assert!(!rw_default.allowlist.contains(&"local.skill.beta-skill".to_owned()));
-        assert!(rw_default.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
-        assert!(rw_default.allowlist.contains(&"local.mcp.docs-mcp.publish_doc".to_owned()));
-        assert!(!rw_default.allowlist.contains(&"local.mcp.ops-mcp.deploy_app".to_owned()));
+        assert!(
+            rw_default
+                .allowlist
+                .contains(&"local.skill.alpha-skill".to_owned())
+        );
+        assert!(
+            rw_default
+                .allowlist
+                .contains(&"local.skill.local-skill".to_owned())
+        );
+        assert!(
+            !rw_default
+                .allowlist
+                .contains(&"local.skill.beta-skill".to_owned())
+        );
+        assert!(
+            rw_default
+                .allowlist
+                .contains(&"local.mcp.docs-mcp.search_docs".to_owned())
+        );
+        assert!(
+            rw_default
+                .allowlist
+                .contains(&"local.mcp.docs-mcp.publish_doc".to_owned())
+        );
+        assert!(
+            !rw_default
+                .allowlist
+                .contains(&"local.mcp.ops-mcp.deploy_app".to_owned())
+        );
 
         // 2. Per-Bot overrides: disable alpha-skill & docs-mcp, enable beta-skill & ops-mcp.
         let policy = BotCapabilityPolicy {
@@ -1358,20 +1382,52 @@ mod tests {
             resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
                 .unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, Some(&policy), &mut rw_override);
-        assert!(!rw_override.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
-        assert!(rw_override.allowlist.contains(&"local.skill.beta-skill".to_owned()));
-        assert!(rw_override.allowlist.contains(&"local.skill.local-skill".to_owned()));
-        assert!(!rw_override.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
-        assert!(rw_override.allowlist.contains(&"local.mcp.ops-mcp.deploy_app".to_owned()));
+        assert!(
+            !rw_override
+                .allowlist
+                .contains(&"local.skill.alpha-skill".to_owned())
+        );
+        assert!(
+            rw_override
+                .allowlist
+                .contains(&"local.skill.beta-skill".to_owned())
+        );
+        assert!(
+            rw_override
+                .allowlist
+                .contains(&"local.skill.local-skill".to_owned())
+        );
+        assert!(
+            !rw_override
+                .allowlist
+                .contains(&"local.mcp.docs-mcp.search_docs".to_owned())
+        );
+        assert!(
+            rw_override
+                .allowlist
+                .contains(&"local.mcp.ops-mcp.deploy_app".to_owned())
+        );
 
         // 3. Read-only worker inherits mounted skills + read-only MCP only (no L3_external_write MCP).
         let mut ro_worker =
             resolve_work_session_profile(&ro_plan, "worker", LocalAccessLevel::SessionLocal)
                 .unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut ro_worker);
-        assert!(ro_worker.allowlist.contains(&"local.skill.alpha-skill".to_owned()));
-        assert!(ro_worker.allowlist.contains(&"local.mcp.docs-mcp.search_docs".to_owned()));
-        assert!(!ro_worker.allowlist.contains(&"local.mcp.docs-mcp.publish_doc".to_owned()));
+        assert!(
+            ro_worker
+                .allowlist
+                .contains(&"local.skill.alpha-skill".to_owned())
+        );
+        assert!(
+            ro_worker
+                .allowlist
+                .contains(&"local.mcp.docs-mcp.search_docs".to_owned())
+        );
+        assert!(
+            !ro_worker
+                .allowlist
+                .contains(&"local.mcp.docs-mcp.publish_doc".to_owned())
+        );
 
         // 4. Independent verifier NEVER gets skills or MCP.
         let mut verifier_profile =
@@ -1383,8 +1439,18 @@ mod tests {
             Some(&policy),
             &mut verifier_profile,
         );
-        assert!(!verifier_profile.allowlist.iter().any(|c| c.starts_with("local.skill.")));
-        assert!(!verifier_profile.allowlist.iter().any(|c| c.starts_with("local.mcp.")));
+        assert!(
+            !verifier_profile
+                .allowlist
+                .iter()
+                .any(|c| c.starts_with("local.skill."))
+        );
+        assert!(
+            !verifier_profile
+                .allowlist
+                .iter()
+                .any(|c| c.starts_with("local.mcp."))
+        );
 
         // 5. Summary reflects Bot overrides for L4_CAPABILITIES.
         let summary = render_bot_mounted_capabilities_summary(&home, &ws, Some(&policy))

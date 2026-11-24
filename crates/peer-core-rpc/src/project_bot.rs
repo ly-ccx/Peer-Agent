@@ -423,9 +423,7 @@ fn validate_capability_policy_shape(
                 return Err("INVALID_CAPABILITY_POLICY");
             };
             let trimmed = s.trim();
-            if trimmed.is_empty()
-                || trimmed.len() > 200
-                || trimmed.chars().any(|c| c.is_control())
+            if trimmed.is_empty() || trimmed.len() > 200 || trimmed.chars().any(|c| c.is_control())
             {
                 return Err("INVALID_CAPABILITY_POLICY");
             }

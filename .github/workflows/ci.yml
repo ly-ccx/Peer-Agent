@@ -199,7 +199,7 @@ jobs:
         run: cargo build --locked --release -p peer-credential-helper --bin peer-credential-helper -p peer-cli --bin peer-native
 
       - name: Run Windows Rust unit tests
-        run: cargo test --locked -p peer-protocol -p peer-store -p peer-runtime -p peer-project-agent -p peer-core-rpc -p peer-tui -p peer-cli --lib
+        run: cargo test --locked --no-fail-fast -p peer-protocol -p peer-store -p peer-runtime -p peer-project-agent -p peer-core-rpc -p peer-tui -p peer-cli --lib
 
       - name: Run Windows cross-platform integration tests
         run: cargo test --locked -p peer-core-rpc --test project_domains --test daemon_shared

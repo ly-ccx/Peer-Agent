@@ -1456,8 +1456,12 @@ async fn bot_turn_records_canonical_usage_ledger_and_durable_agent_turn_with_str
         .and_then(|arr| arr.iter().find(|m| m["id"] == turn_id))
         .expect("hydrated agent_turn from directory");
     assert!(hydrated["rounds"].as_array().is_some_and(|r| {
-        r.iter()
-            .any(|round| round["text"].as_str().unwrap_or("").contains("Preparing reply"))
+        r.iter().any(|round| {
+            round["text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Preparing reply")
+        })
     }));
     // Dual-channel isolation: companion scratchpad emitted alongside a tool call stays in
     // diagnostic `rounds` and must not leak into user-facing `publicUpdates`.

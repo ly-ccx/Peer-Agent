@@ -596,7 +596,9 @@ fn session_in_current_list(session: &BotListSession) -> Option<bool> {
         }
         return Some(follow_up.in_current_list);
     }
-    Some(!TERMINAL_SESSION_STATUSES.contains(&session.status.as_str()) && session.status != "paused")
+    Some(
+        !TERMINAL_SESSION_STATUSES.contains(&session.status.as_str()) && session.status != "paused",
+    )
 }
 
 fn active_session_rank(session: &BotListSession) -> u8 {
@@ -641,11 +643,13 @@ pub fn project_bot_list_item(
         }
     }
     active_sessions.sort_by(|a, b| {
-        active_session_rank(a).cmp(&active_session_rank(b)).then_with(|| {
-            let ta = a.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
-            let tb = b.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
-            tb.cmp(&ta)
-        })
+        active_session_rank(a)
+            .cmp(&active_session_rank(b))
+            .then_with(|| {
+                let ta = a.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
+                let tb = b.updated_at.as_deref().and_then(parse_iso_ms).unwrap_or(0);
+                tb.cmp(&ta)
+            })
     });
     let active_session_total = active_sessions.len();
     active_sessions.truncate(20);
@@ -2327,22 +2331,23 @@ mod tests {
                 avatar_salt: "",
             })
             .unwrap();
-        let make_sess = |id: &str, status: &str, title: &str, updated: &str, fu: FollowUpProjection| {
-            BotListSession {
-                session_id: id.into(),
-                title: title.into(),
-                status: status.into(),
-                updated_at: Some(updated.into()),
-                result_confirmation_required: None,
-                completion_review_required: false,
-                conversation_id: None,
-                queue_reason: None,
-                follow_up: Some(fu),
-                phase_label: None,
-                anchor_message_id: None,
-                plan_id: Some(format!("p-{id}")),
-            }
-        };
+        let make_sess =
+            |id: &str, status: &str, title: &str, updated: &str, fu: FollowUpProjection| {
+                BotListSession {
+                    session_id: id.into(),
+                    title: title.into(),
+                    status: status.into(),
+                    updated_at: Some(updated.into()),
+                    result_confirmation_required: None,
+                    completion_review_required: false,
+                    conversation_id: None,
+                    queue_reason: None,
+                    follow_up: Some(fu),
+                    phase_label: None,
+                    anchor_message_id: None,
+                    plan_id: Some(format!("p-{id}")),
+                }
+            };
         let sessions = vec![
             make_sess(
                 "s-run",

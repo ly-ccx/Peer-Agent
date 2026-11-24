@@ -173,16 +173,32 @@ fn strip_line_col_suffix(s: &str) -> &str {
 
 fn path_to_file_uri(path: &Path) -> Option<String> {
     let raw = path.to_str()?;
-    if !raw.starts_with('/') {
-        return None;
-    }
-    let mut uri = String::with_capacity(7 + raw.len() + 16);
+    let normalized = if raw.starts_with('/') {
+        std::borrow::Cow::Borrowed(raw)
+    } else {
+        let stripped = raw.strip_prefix(r"\\?\").unwrap_or(raw);
+        let bytes = stripped.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/')
+        {
+            std::borrow::Cow::Owned(format!("/{}", stripped.replace('\\', "/")))
+        } else {
+            return None;
+        }
+    };
+    let mut uri = String::with_capacity(7 + normalized.len() + 16);
     uri.push_str("file://");
-    for &b in raw.as_bytes() {
-        let keep = matches!(
-            b,
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/'
-        );
+    let bytes = normalized.as_bytes();
+    for (idx, &b) in bytes.iter().enumerate() {
+        let is_windows_drive_colon =
+            idx == 2 && b == b':' && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic();
+        let keep = is_windows_drive_colon
+            || matches!(
+                b,
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/'
+            );
         if keep {
             uri.push(char::from(b));
         } else {
@@ -783,21 +799,25 @@ mod tests {
         );
 
         // Home path expands `~/`
-        let expected_home = format!("file://{}/notes.md", home_dir.display());
+        let expected_home = path_to_file_uri(&home_dir.join("notes.md")).unwrap();
+        assert!(expected_home.starts_with("file:///") && expected_home.ends_with("/notes.md"));
         assert_eq!(
             resolve_osc8_uri("~/notes.md:10", &ws, Some(&home_dir)).as_deref(),
             Some(expected_home.as_str())
         );
 
         // Workspace-relative path + 1-level child repo path with `:line` suffix both resolve
-        let expected_rel = format!("file://{}/crates/peer-tui/src/table.rs", ws.display());
+        let expected_rel = path_to_file_uri(&ws.join("crates/peer-tui/src/table.rs")).unwrap();
+        assert!(expected_rel.ends_with("/crates/peer-tui/src/table.rs"));
         assert_eq!(
             resolve_osc8_uri("crates/peer-tui/src/table.rs:640", &ws, Some(&home_dir)).as_deref(),
             Some(expected_rel.as_str())
         );
-        let expected_child = format!(
-            "file://{}/Peer-Knowledge/knowledge/decisions/133-architecture.md",
-            ws.display()
+        let expected_child =
+            path_to_file_uri(&ws.join("Peer-Knowledge/knowledge/decisions/133-architecture.md"))
+                .unwrap();
+        assert!(
+            expected_child.ends_with("/Peer-Knowledge/knowledge/decisions/133-architecture.md")
         );
         assert_eq!(
             resolve_osc8_uri(

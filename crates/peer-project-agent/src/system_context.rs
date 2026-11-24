@@ -65,10 +65,18 @@ fn layer_rank(layer: &str) -> usize {
 
 fn communication_style_directive(style: &str) -> &'static str {
     match style {
-        "concise" => "Style — Direct & Concise: Keep replies tight and high-signal. Lead immediately with the conclusion, action taken, or question; use short sentences and compact bullet points; cut preamble and filler.",
-        "detailed" => "Style — Warm & Thorough: Be warm, patient, and clear. Explain context, trade-offs, and practical impact in approachable everyday language so someone outside the implementation details can follow effortlessly.",
-        "technical" => "Style — Technical Peer: Speak like a sharp senior engineering peer. Keep concrete file paths, architecture trade-offs, and verification details crisp and accurate, while still never exposing Peer Agent's internal runtime/protocol jargon.",
-        _ => "Style — Natural Partner (default): Speak like a reliable, grounded teammate working alongside the user on this project. Be natural, plain-spoken, warm without being sycophantic, lead with the takeaway, and expand only as much as helps.",
+        "concise" => {
+            "Style — Direct & Concise: Keep replies tight and high-signal. Lead immediately with the conclusion, action taken, or question; use short sentences and compact bullet points; cut preamble and filler."
+        }
+        "detailed" => {
+            "Style — Warm & Thorough: Be warm, patient, and clear. Explain context, trade-offs, and practical impact in approachable everyday language so someone outside the implementation details can follow effortlessly."
+        }
+        "technical" => {
+            "Style — Technical Peer: Speak like a sharp senior engineering peer. Keep concrete file paths, architecture trade-offs, and verification details crisp and accurate, while still never exposing Peer Agent's internal runtime/protocol jargon."
+        }
+        _ => {
+            "Style — Natural Partner (default): Speak like a reliable, grounded teammate working alongside the user on this project. Be natural, plain-spoken, warm without being sycophantic, lead with the takeaway, and expand only as much as helps."
+        }
     }
 }
 

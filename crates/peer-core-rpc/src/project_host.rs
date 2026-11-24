@@ -868,7 +868,10 @@ impl ProjectHostRuntime {
             "verifier",
             profile.as_ref().and_then(|p| p.model_policy.as_ref()),
         ) {
-            match self.load_model_for_role(workspace_id, "verifier", &cancel).await {
+            match self
+                .load_model_for_role(workspace_id, "verifier", &cancel)
+                .await
+            {
                 Ok((m, _)) => m,
                 Err(_) => self
                     .load_model_for_role(workspace_id, "project_agent", &cancel)

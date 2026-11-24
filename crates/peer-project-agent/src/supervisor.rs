@@ -2131,20 +2131,20 @@ impl SessionSupervisor {
                 .read_existing(workspace_id)
                 .map(|p| p.access_level)
                 .unwrap_or(LocalAccessLevel::SessionLocal);
-            let mut session_profile =
-                match resolve_work_session_profile(&plan, "worker", ws_access) {
-                    Some(p) => p,
-                    None => {
-                        let _ = self.fail_session(
-                            workspace_id,
-                            session_id,
-                            "INVALID_PLAN",
-                            "Invalid work session profile",
-                            holds_lease,
-                        );
-                        return Err(ProjectError::code("INVALID_PLAN"));
-                    }
-                };
+            let mut session_profile = match resolve_work_session_profile(&plan, "worker", ws_access)
+            {
+                Some(p) => p,
+                None => {
+                    let _ = self.fail_session(
+                        workspace_id,
+                        session_id,
+                        "INVALID_PLAN",
+                        "Invalid work session profile",
+                        holds_lease,
+                    );
+                    return Err(ProjectError::code("INVALID_PLAN"));
+                }
+            };
             let bot_cap_policy = self
                 .profiles
                 .read(workspace_id)

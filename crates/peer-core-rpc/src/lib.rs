@@ -459,9 +459,8 @@ mod tests {
             ..CoreServerConfig::new("0.1.0-test", tempfile::tempdir().expect("tempdir").keep())
         };
         let engine = CoreEngine::new(config, shutdown, None).expect("core engine");
-        let server_handle = tokio::spawn(async move {
-            serve_connection(engine, server_read, flaky_writer).await
-        });
+        let server_handle =
+            tokio::spawn(async move { serve_connection(engine, server_read, flaky_writer).await });
 
         let mut writer = client_write;
         // First request (core.initialize) succeeds on write #1.
