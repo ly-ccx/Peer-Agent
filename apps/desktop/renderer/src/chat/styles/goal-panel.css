@@ -132,6 +132,7 @@
 
 .goal-panel-toggle {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
   width: auto;
@@ -482,10 +483,16 @@
   border-top: none;
 }
 
-/* docked 场景：toggle 灯条下方保留顶部分隔线。
+/* docked 场景（例如嵌入资源会话、无右侧 Workbench 槽位时内联展开）：
+   toggle 灯条下方保留顶部分隔线，并为 body 限定视口内最大高度使其可独立纵向滚动，
+   避免长目标契约把对话列表和底部输入区撑出 overflow:hidden 容器且无法滚动。
    Workbench portal 的 body 不在 .goal-panel--docked 子树内，因此不会命中。 */
 .goal-panel--docked .goal-panel-body {
   border-top: 1px solid var(--ui-border-subtle, var(--za-line));
+  max-height: min(55vh, 520px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* 直接子项（主卡 / 历史清单 / 错误条）保持自然高度，禁止被 flex 压缩。

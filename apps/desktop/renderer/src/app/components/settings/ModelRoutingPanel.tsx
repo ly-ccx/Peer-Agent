@@ -14,6 +14,7 @@ import type {
   ModelRoutingProviderOption,
 } from '../../../preload/contracts/bootstrapPreloadApi';
 import { Switch } from '../../../ui/boolean-controls';
+import { PeerIcon, type PeerIconName } from '../../../ui/icons';
 import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
 import { ModelPicker } from '../../../ui/model-picker/ModelPicker';
 import { selectionGroupsFromMenuGroups } from '../../../ui/model-picker/modelSelection';
@@ -69,6 +70,13 @@ function rolePatch(role: ModelRoleName, setting: NonNullable<ModelRoutingPatch['
   return { roles };
 }
 
+
+const TIER_META: Record<ModelTierName, { readonly icon: PeerIconName; readonly zh: string; readonly en: string }> = {
+  strong: { icon: 'agentSpark', zh: '深度推理、复杂编码与关键决策', en: 'Deep reasoning, complex coding & key decisions' },
+  fast: { icon: 'bolt', zh: '低延迟交互与快速响应任务', en: 'Low-latency interaction & rapid tasks' },
+  economy: { icon: 'agentLeaf', zh: '轻量后台整理与高性价比调用', en: 'Lightweight background work & cost efficiency' },
+  vision: { icon: 'image', zh: '识图、界面审查与视觉核验', en: 'Image understanding & visual verification' },
+};
 
 export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [preview, setPreview] = useState<ModelRoutingPreview | null>(null);
@@ -135,86 +143,115 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
       {error ? <p className="settings-warning" role="alert">{error}</p> : null}
 
       <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.tiers')}>
-        <div className="model-routing-head model-routing-tier" aria-hidden="true">
-          <span />
-          <span>{i18n.t('modelRouting.primary')}</span>
-          <span>{i18n.t('modelRouting.fallbacks')}</span>
-        </div>
-        <div>
+        <div className="model-routing-tier-grid">
           {MODEL_TIERS.map((tier) => {
             const binding = view.routing.tiers[tier] || { primary: '', fallbacks: [] };
             const fallbacks = binding.fallbacks || [];
             const tierLabel = i18n.t(tierTranslationKey(tier));
+            const meta = TIER_META[tier];
+            const isZh = i18n.locale.startsWith('zh');
+            const missingPrimary = Boolean(binding.primary) && !options.some((option) => option.id === binding.primary);
             const addable = options.filter((option) => option.id !== binding.primary && !fallbacks.includes(option.id));
             return (
-              <div className="model-routing-row model-routing-tier" key={tier}>
-                <div className="model-routing-name">{tierLabel}</div>
-                <RoutingModelPicker
-                  value={binding.primary}
-                  options={options}
-                  target={{ kind: 'tier', tier }}
-                  disabled={readOnly}
-                  ariaLabel={tierLabel}
-                  i18n={i18n}
-                  onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id), binding))}
-                />
-                <div className="model-routing-fallbacks">
-                  {fallbacks.map((id, index) => {
-                    const label = options.find((option) => option.id === id)?.label || i18n.t('modelRouting.modelUnavailable');
-                    return (
-                      <span className="model-routing-chip" key={id}>
-                        <span className="model-routing-chip__label" title={label}>{label}</span>
-                        <span className="model-routing-chip__actions">
-                          <button
-                            type="button"
-                            disabled={readOnly || index === 0}
-                            aria-label={i18n.t('modelRouting.moveUp')}
-                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1), binding))}
-                          >
-                            <Chevron direction="up" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={readOnly || index === fallbacks.length - 1}
-                            aria-label={i18n.t('modelRouting.moveDown')}
-                            onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1), binding))}
-                          >
-                            <Chevron direction="down" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={readOnly}
-                            aria-label={i18n.t('modelRouting.remove')}
-                            onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id), binding))}
-                          >
-                            <RemoveIcon />
-                          </button>
+              <section className={`model-routing-tier-card${missingPrimary ? ' is-warning' : ''}`} key={tier} aria-label={tierLabel}>
+                <header className="model-routing-tier-head">
+                  <span className="model-routing-tier-badge" aria-hidden="true">
+                    <PeerIcon name={meta.icon} size={14} />
+                  </span>
+                  <div className="model-routing-tier-copy">
+                    <div className="model-routing-tier-title-row">
+                      <span className="model-routing-name">{tierLabel}</span>
+                      {missingPrimary ? (
+                        <span className="model-routing-status-tag is-warn">
+                          {isZh ? '需重选' : 'Unavailable'}
                         </span>
-                      </span>
-                    );
-                  })}
-                  <RoutingModelPicker
-                    value=""
-                    options={addable}
-                    target={{ kind: 'tier', tier }}
-                    disabled={readOnly || addable.length === 0}
-                    placeholder={i18n.t('modelRouting.addFallback')}
-                    ariaLabel={i18n.t('modelRouting.addFallback')}
-                    i18n={i18n}
-                    onChange={(id) => save(tierPatch(tier, binding.primary, [...fallbacks, id], binding))}
+                      ) : fallbacks.length > 0 ? (
+                        <span className="model-routing-status-tag">
+                          {i18n.t('modelRouting.fallbacks')} {fallbacks.length}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="model-routing-tier-desc">{isZh ? meta.zh : meta.en}</p>
+                  </div>
+                </header>
+
+                <div className="model-routing-tier-fields">
+                  <div className="model-routing-field">
+                    <span className="model-routing-field-label">{i18n.t('modelRouting.primary')}</span>
+                    <RoutingModelPicker
+                      value={binding.primary}
+                      options={options}
+                      target={{ kind: 'tier', tier }}
+                      disabled={readOnly}
+                      ariaLabel={tierLabel}
+                      i18n={i18n}
+                      onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id), binding))}
+                    />
+                  </div>
+
+                  <RoutingParameterFields
+                    value={binding}
+                    candidates={routingParameterCandidates({ mode: 'tier', tier }, view.routing.tiers, options, { kind: 'tier', tier })}
+                    disabled={readOnly} label={tierLabel} i18n={i18n}
+                    onEffort={effort => {
+                      const { reasoningEffort: _old, ...rest } = binding;
+                      void save({ tiers: { [tier]: { ...rest, ...(effort != null ? { reasoningEffort: effort } : {}) } } });
+                    }}
+                    onChannel={fastMode => { void save({ tiers: { [tier]: { ...binding, fastMode } } }); }}
                   />
+
+                  <div className="model-routing-field">
+                    <span className="model-routing-field-label">{i18n.t('modelRouting.fallbacks')}</span>
+                    <div className="model-routing-fallbacks">
+                      {fallbacks.map((id, index) => {
+                        const label = options.find((option) => option.id === id)?.label || i18n.t('modelRouting.modelUnavailable');
+                        return (
+                          <span className="model-routing-chip" key={id}>
+                            <span className="model-routing-chip__label" title={label}>{label}</span>
+                            <span className="model-routing-chip__actions">
+                              <button
+                                type="button"
+                                disabled={readOnly || index === 0}
+                                aria-label={i18n.t('modelRouting.moveUp')}
+                                onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1), binding))}
+                              >
+                                <PeerIcon name="chevronUp" size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={readOnly || index === fallbacks.length - 1}
+                                aria-label={i18n.t('modelRouting.moveDown')}
+                                onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1), binding))}
+                              >
+                                <PeerIcon name="chevronDown" size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={readOnly}
+                                aria-label={i18n.t('modelRouting.remove')}
+                                onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id), binding))}
+                              >
+                                <PeerIcon name="close" size={12} />
+                              </button>
+                            </span>
+                          </span>
+                        );
+                      })}
+                      <RoutingModelPicker
+                        className="is-fallback-add"
+                        value=""
+                        options={addable}
+                        target={{ kind: 'tier', tier }}
+                        disabled={readOnly || addable.length === 0}
+                        placeholder={`+ ${i18n.t('modelRouting.addFallback')}`}
+                        ariaLabel={i18n.t('modelRouting.addFallback')}
+                        i18n={i18n}
+                        onChange={(id) => save(tierPatch(tier, binding.primary, [...fallbacks, id], binding))}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <RoutingParameterFields
-                  value={binding}
-                  candidates={routingParameterCandidates({ mode: 'tier', tier }, view.routing.tiers, options, { kind: 'tier', tier })}
-                  disabled={readOnly} label={tierLabel} i18n={i18n}
-                  onEffort={effort => {
-                    const { reasoningEffort: _old, ...rest } = binding;
-                    void save({ tiers: { [tier]: { ...rest, ...(effort != null ? { reasoningEffort: effort } : {}) } } });
-                  }}
-                  onChannel={fastMode => { void save({ tiers: { [tier]: { ...binding, fastMode } } }); }}
-                />
-              </div>
+              </section>
             );
           })}
         </div>
@@ -222,7 +259,14 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
 
       <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.roles')}>
         <div className="model-routing-pref">
-          <span id={preferLabelId}>{i18n.t('modelRouting.preferDifferentFamily')}</span>
+          <div className="model-routing-pref-copy">
+            <span id={preferLabelId} className="model-routing-pref-title">{i18n.t('modelRouting.preferDifferentFamily')}</span>
+            <p className="model-routing-pref-desc">
+              {i18n.locale.startsWith('zh')
+                ? '执行与复核尽量使用不同模型家族，减少同源盲区。'
+                : 'Prefer a different model family for verification to reduce blind spots.'}
+            </p>
+          </div>
           <Switch
             checked={view.routing.verifierPreferDifferentFamily !== false}
             disabled={readOnly}
@@ -230,15 +274,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             onCheckedChange={(checked) => save({ verifierPreferDifferentFamily: checked })}
           />
         </div>
-        <div className="model-routing-head model-routing-role" aria-hidden="true">
-          <span>{i18n.t('modelRouting.roles')}</span>
-          <span>{i18n.t('modelRouting.modeLabel')}</span>
-          <span>{i18n.t('modelRouting.targetLabel')}</span>
-          <span>{i18n.t('modelRouting.parameters')}</span>
-          <span>{i18n.t('modelRouting.resolved')} · {i18n.t('forms.savedValue')}</span>
-          <span>{i18n.t('modelRouting.spendCap')}</span>
-        </div>
-        <div>
+        <div className="model-routing-role-list">
           {MODEL_ROLES.map((role) => {
             const setting: RoleSetting = view.routing.roles[role] || { mode: 'tier', tier: 'economy' };
             const resolved = resolutionFor(role);
@@ -247,112 +283,127 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             const savedRouting = preview?.routing ?? form.saved?.view.routing ?? view.routing;
             const savedSetting = savedRouting.roles[role] ?? { mode: 'tier' as const, tier: 'economy' as const };
             const resolvedLabel = resolutionText(resolved, role, i18n, savedSetting, previewError);
+            const resolvedCompact = resolvedLabel.replace(/\n+/g, ' · ');
+            const resolvedTone = !resolved ? 'pending' : resolved.ok && !resolved.spendExceeded ? 'ok' : 'warn';
             const parameters = { reasoningEffort: setting.reasoningEffort, fastMode: setting.fastMode };
             return (
-              <div className={`model-routing-row model-routing-role${setting.mode === 'auto' ? ' is-auto' : ''}`} key={role}>
-                <div className="model-routing-name">{roleLabel}</div>
-                <div className="model-routing-field" data-label={i18n.t('modelRouting.modeLabel')}>
-                  <Dropdown
-                    value={setting.mode}
-                    disabled={readOnly}
-                    ariaLabel={`${roleLabel} ${i18n.t('modelRouting.modeLabel')}`}
-                    options={[
-                      { value: 'tier', label: i18n.t('modelRouting.mode.tier') },
-                      { value: 'fixed', label: i18n.t('modelRouting.mode.fixed') },
-                      { value: 'auto', label: i18n.t('modelRouting.mode.auto') },
-                    ]}
-                    onChange={(mode) => {
-                      if (mode === 'tier') {
-                        void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', ...parameters }));
-                      } else if (mode === 'fixed') {
-                        const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
-                        if (!capable) {
-                          setError(i18n.t('modelRouting.poolInvalid'));
-                          return;
+              <div className={`model-routing-role-item${setting.mode === 'auto' ? ' is-auto' : ''}`} key={role}>
+                <div className="model-routing-role-head">
+                  <div className="model-routing-name">{roleLabel}</div>
+                  <div
+                    className={`model-routing-resolved-pill is-${resolvedTone}`}
+                    title={resolvedLabel}
+                  >
+                    <span className="model-routing-resolved-dot" aria-hidden="true" />
+                    <span className="model-routing-resolved-text">{resolvedCompact}</span>
+                  </div>
+                </div>
+                <div className="model-routing-role-controls">
+                  <div className="model-routing-field">
+                    <span className="model-routing-field-label">{i18n.t('modelRouting.modeLabel')}</span>
+                    <Dropdown
+                      value={setting.mode}
+                      disabled={readOnly}
+                      ariaLabel={`${roleLabel} ${i18n.t('modelRouting.modeLabel')}`}
+                      options={[
+                        { value: 'tier', label: i18n.t('modelRouting.mode.tier') },
+                        { value: 'fixed', label: i18n.t('modelRouting.mode.fixed') },
+                        { value: 'auto', label: i18n.t('modelRouting.mode.auto') },
+                      ]}
+                      onChange={(mode) => {
+                        if (mode === 'tier') {
+                          void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', ...parameters }));
+                        } else if (mode === 'fixed') {
+                          const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
+                          if (!capable) {
+                            setError(i18n.t('modelRouting.poolInvalid'));
+                            return;
+                          }
+                          void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, ...parameters }));
+                        } else {
+                          const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
+                          const pool = capable.slice(0, 1).map((option) => option.id);
+                          const check = validateAutoPool(pool, options, role);
+                          if (!check.ok) {
+                            setError(i18n.t('modelRouting.poolInvalid'));
+                            return;
+                          }
+                          void save(rolePatch(role, { mode: 'auto', pool, ...parameters }));
                         }
-                        void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, ...parameters }));
-                      } else {
-                        const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
-                        const pool = capable.slice(0, 1).map((option) => option.id);
-                        const check = validateAutoPool(pool, options, role);
-                        if (!check.ok) {
-                          setError(i18n.t('modelRouting.poolInvalid'));
-                          return;
-                        }
-                        void save(rolePatch(role, { mode: 'auto', pool, ...parameters }));
-                      }
+                      }}
+                    />
+                  </div>
+                  <div className="model-routing-field">
+                    <span className="model-routing-field-label">{i18n.t('modelRouting.targetLabel')}</span>
+                    {setting.mode === 'tier' ? (
+                      <Dropdown
+                        value={setting.tier}
+                        disabled={readOnly}
+                        ariaLabel={`${roleLabel} ${i18n.t('modelRouting.tiers')}`}
+                        options={MODEL_TIERS.map((tierName) => ({
+                          value: tierName,
+                          label: i18n.t(tierTranslationKey(tierName)),
+                        }))}
+                        onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
+                      />
+                    ) : null}
+                    {setting.mode === 'fixed' ? (
+                      <RoutingModelPicker
+                        value={setting.modelProviderId}
+                        options={options}
+                        target={{ kind: 'role', role }}
+                        disabled={readOnly}
+                        ariaLabel={roleLabel}
+                        i18n={i18n}
+                        onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
+                      />
+                    ) : null}
+                    {setting.mode === 'auto' ? (
+                      <ModelPicker className="model-routing-model-menu" variant="field" selectedModelIds={setting.pool || []}
+                        groups={selectionGroupsFromMenuGroups(routingMenuGroups(options, { kind: 'role', role },
+                          i18n.locale.startsWith('zh'), reason => i18n.t(reasonTranslationKey(reason))))}
+                        selectionDisabled={readOnly} busy={form.saving} isZh={i18n.locale.startsWith('zh')}
+                        label={(setting.pool || []).map(id => options.find(option => option.id === id)?.label
+                          ?? i18n.t('modelRouting.modelUnavailable')).join(' / ') || i18n.t('modelRouting.chooseModel')}
+                        ariaLabel={roleLabel}
+                        onSelectModel={id => {
+                          const pool = (setting.pool || []).includes(id) ? withoutId(setting.pool || [], id) : [...(setting.pool || []), id];
+                          const check = validateAutoPool(pool, options, role);
+                          if (!check.ok) { setError(i18n.t('modelRouting.poolInvalid')); return; }
+                          return save(rolePatch(role, { ...setting, pool }));
+                        }} />
+                    ) : null}
+                  </div>
+                  <RoutingParameterFields
+                    value={setting}
+                    candidates={routingParameterCandidates(setting, view.routing.tiers, options, { kind: 'role', role })}
+                    inherit={setting.mode === 'tier' ? routingParameters({ mode: 'tier', tier: setting.tier }, view.routing.tiers) : undefined}
+                    disabled={readOnly} label={roleLabel} i18n={i18n}
+                    onEffort={effort => { void save(rolePatch(role, setRoutingReasoning(setting, effort))); }}
+                    onChannel={fast => {
+                      const { fastMode: _old, ...rest } = setting;
+                      void save(rolePatch(role, { ...rest, ...(fast !== undefined ? { fastMode: fast } : {}) }));
                     }}
                   />
+                  <label className="model-routing-field model-routing-spend">
+                    <span className="model-routing-field-label">{i18n.t('modelRouting.spendCap')}</span>
+                    <span className="model-routing-spend-wrap">
+                      <span className="model-routing-spend-prefix" aria-hidden="true">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="—"
+                        disabled={readOnly}
+                        aria-label={i18n.t('modelRouting.spendCap')}
+                        value={form.draft?.caps[role] ?? ''}
+                        aria-invalid={form.saveError || Boolean(error) || undefined}
+                        onChange={event => { if (form.draft) form.edit({ ...form.draft, caps: { ...form.draft.caps, [role]: event.target.value } }); }}
+                        onBlur={() => { if (form.dirty && !form.saving) void form.save(); }}
+                      />
+                    </span>
+                  </label>
                 </div>
-                <div className="model-routing-field" data-label={i18n.t('modelRouting.targetLabel')}>
-                  {setting.mode === 'tier' ? (
-                    <Dropdown
-                      value={setting.tier}
-                      disabled={readOnly}
-                      ariaLabel={`${roleLabel} ${i18n.t('modelRouting.tiers')}`}
-                      options={MODEL_TIERS.map((tierName) => ({
-                        value: tierName,
-                        label: i18n.t(tierTranslationKey(tierName)),
-                      }))}
-                      onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
-                    />
-                  ) : null}
-                  {setting.mode === 'fixed' ? (
-                    <RoutingModelPicker
-                      value={setting.modelProviderId}
-                      options={options}
-                      target={{ kind: 'role', role }}
-                      disabled={readOnly}
-                      ariaLabel={roleLabel}
-                      i18n={i18n}
-                      onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
-                    />
-                  ) : null}
-                  {setting.mode === 'auto' ? (
-                    <ModelPicker variant="field" selectedModelIds={setting.pool || []}
-                      groups={selectionGroupsFromMenuGroups(routingMenuGroups(options, { kind: 'role', role },
-                        i18n.locale.startsWith('zh'), reason => i18n.t(reasonTranslationKey(reason))))}
-                      selectionDisabled={readOnly} busy={form.saving} isZh={i18n.locale.startsWith('zh')}
-                      label={(setting.pool || []).map(id => options.find(option => option.id === id)?.label
-                        ?? i18n.t('modelRouting.modelUnavailable')).join(' / ') || i18n.t('modelRouting.chooseModel')}
-                      ariaLabel={roleLabel}
-                      onSelectModel={id => {
-                        const pool = (setting.pool || []).includes(id) ? withoutId(setting.pool || [], id) : [...(setting.pool || []), id];
-                        const check = validateAutoPool(pool, options, role);
-                        if (!check.ok) { setError(i18n.t('modelRouting.poolInvalid')); return; }
-                        return save(rolePatch(role, { ...setting, pool }));
-                      }} />
-                  ) : null}
-                </div>
-                <RoutingParameterFields
-                  value={setting}
-                  candidates={routingParameterCandidates(setting, view.routing.tiers, options, { kind: 'role', role })}
-                  inherit={setting.mode === 'tier' ? routingParameters({ mode: 'tier', tier: setting.tier }, view.routing.tiers) : undefined}
-                  disabled={readOnly} label={roleLabel} i18n={i18n}
-                  onEffort={effort => { void save(rolePatch(role, setRoutingReasoning(setting, effort))); }}
-                  onChannel={fast => {
-                    const { fastMode: _old, ...rest } = setting;
-                    void save(rolePatch(role, { ...rest, ...(fast !== undefined ? { fastMode: fast } : {}) }));
-                  }}
-                />
-                <div className="model-routing-resolved" data-label={i18n.t('modelRouting.resolved')} title={resolvedLabel}>
-                  {resolvedLabel}
-                </div>
-                <label className="model-routing-spend" data-label={i18n.t('modelRouting.spendCap')}>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="—"
-                    disabled={readOnly}
-                    aria-label={i18n.t('modelRouting.spendCap')}
-                    value={form.draft?.caps[role] ?? ''}
-                    aria-invalid={form.saveError || Boolean(error) || undefined}
-                    onChange={event => { if (form.draft) form.edit({ ...form.draft, caps: { ...form.draft.caps, [role]: event.target.value } }); }}
-                    onBlur={() => { if (form.dirty && !form.saving) void form.save(); }}
-
-                  />
-                </label>
               </div>
             );
           })}
@@ -379,6 +430,7 @@ function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRole
 }
 
 function RoutingModelPicker({
+  className,
   value,
   options,
   target,
@@ -388,6 +440,7 @@ function RoutingModelPicker({
   i18n,
   onChange,
 }: {
+  readonly className?: string;
   readonly value: string;
   readonly options: readonly RoutingModelOption[];
   readonly target: { readonly kind: 'tier'; readonly tier: ModelTierName } | { readonly kind: 'role'; readonly role: ModelRoleName };
@@ -405,49 +458,14 @@ function RoutingModelPicker({
   );
   const missing = Boolean(value) && !options.some(option => option.id === value);
   return (
-    <ModelPicker className="model-routing-model-menu" variant="field"
+    <ModelPicker
+      className={['model-routing-model-menu', missing ? 'is-missing' : '', className ?? ''].filter(Boolean).join(' ')}
+      variant="field"
       selectedModelId={value} groups={selectionGroupsFromMenuGroups(groups)}
       selectionDisabled={disabled} isZh={i18n.locale.startsWith('zh')}
       label={missing ? i18n.t('modelRouting.modelUnavailable') : options.find(option => option.id === value)?.label
         ?? placeholder ?? i18n.t('modelRouting.chooseModel')}
       ariaLabel={missing ? `${ariaLabel}: ${i18n.t('modelRouting.modelUnavailable')}` : ariaLabel}
       onSelectModel={onChange} />
-  );
-}
-
-function Chevron({ direction }: { readonly direction: 'up' | 'down' }) {
-  return (
-    <svg
-      className={direction === 'up' ? 'model-routing-icon model-routing-icon--up' : 'model-routing-icon'}
-      aria-hidden
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
-function RemoveIcon() {
-  return (
-    <svg
-      className="model-routing-icon"
-      aria-hidden
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-    >
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
   );
 }

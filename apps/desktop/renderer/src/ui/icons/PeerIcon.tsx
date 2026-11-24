@@ -49,7 +49,9 @@ export type PeerIconName =
   | 'maximize'
   | 'restore'
   | 'arrowRightOff'
-  | 'bolt';
+  | 'bolt'
+  | 'sun'
+  | 'moon';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18Z" /></>,
@@ -104,6 +106,13 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   restore: <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />,
   arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
   bolt: <path d="M13 2 4 14h7l-1 8 10-12h-7l0-8Z" />,
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </>
+  ),
+  moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
   chevronDown: <path d="m6 9 6 6 6-6" />,
   chevronUp: <path d="m6 15 6-6 6 6" />,

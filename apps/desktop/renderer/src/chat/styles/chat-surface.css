@@ -1448,8 +1448,8 @@
   /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,
      避免实心底 + 半透明层 + 错位描边叠成"双层框"。 */
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control);
-  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
+  border-radius: calc(var(--ui-radius-row) + var(--space-1));
+  background: color-mix(in srgb, var(--paper-raised) 92%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow-popover);
 }

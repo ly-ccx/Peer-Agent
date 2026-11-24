@@ -44,7 +44,7 @@
 }
 .settings-nav-header button:hover {
   color: var(--graphite-base);
-  background: var(--chrome-hairline);
+  background: var(--chrome-glass-hover);
 }
 .settings-nav-header strong {
   font-family: var(--font-sans);
@@ -53,44 +53,45 @@
   color: var(--graphite-base);
 }
 
-/* 设置搜索框（借鉴 Codex 外观页顶部搜索）：仅过滤左侧分区导航项。 */
+/* 设置搜索框：A × G 玻璃凹槽输入，与浮起键帽选中态明确区分。 */
 .settings-nav-search {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin: 0 var(--space-2) var(--space-2);
-  padding: 6px 10px;
-  border: 1px solid var(--pa-border-subtle);
-  border-radius: var(--ui-radius-row);
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-secondary);
+  height: 32px;
+  margin: 0 var(--space-1) var(--space-2);
+  padding: 0 10px;
+  border: 1px solid var(--chrome-glass-input-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--chrome-glass-input);
+  color: var(--graphite-soft);
   transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
 }
 .settings-nav-search:focus-within {
-  border-color: var(--za-accent);
-  background: var(--pa-surface-hover);
+  border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--chrome-glass-input-border));
+  background: var(--chrome-glass-hover);
 }
 .settings-nav-search svg {
   flex: 0 0 auto;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-fade);
 }
 .settings-nav-search input {
   flex: 1 1 auto;
   min-width: 0;
   border: none;
   background: transparent;
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
   font-size: 13px;
   outline: none;
 }
 .settings-nav-search input::placeholder {
-  color: var(--pa-text-secondary);
+  color: var(--graphite-fade);
 }
 
 .settings-nav-empty {
   margin: 0;
   padding: 8px 12px;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   font-size: 12px;
 }
 
@@ -109,16 +110,16 @@
 .settings-nav-group-low-priority {
   margin-top: auto;
   padding-top: var(--space-4);
-  border-top: 1px solid var(--pa-border-subtle);
+  border-top: 1px solid var(--chrome-hairline);
 }
 
 .settings-nav-group h2 {
   margin: 0;
   padding: 0 var(--space-3) var(--space-1);
-  color: var(--graphite-mute);
+  color: var(--graphite-fade);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   line-height: 1.5;
   text-transform: uppercase;
 }
@@ -127,22 +128,32 @@
   position: relative;
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border: none;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--pa-text-secondary);
+  color: var(--graphite-soft);
   border-radius: var(--ui-radius-row);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--ui-font-control);
   text-align: left;
   width: 100%;
-  transition: background var(--za-motion-fast), color var(--za-motion-fast);
+  transition:
+    background var(--za-motion-fast),
+    border-color var(--za-motion-fast),
+    color var(--za-motion-fast),
+    box-shadow var(--za-motion-fast);
 }
-.settings-nav-item:hover:not(.active) { background: var(--pa-surface-hover); }
+.settings-nav-item:hover:not(.active) {
+  background: var(--chrome-glass-hover);
+  color: var(--graphite-base);
+}
 .settings-nav-item.active {
-  background: var(--pa-surface-muted);
-  color: var(--pa-text-primary);
+  background: var(--chrome-keycap-bg);
+  border-color: var(--chrome-keycap-border);
+  color: var(--chrome-keycap-fg);
   font-weight: 600;
+  box-shadow: var(--chrome-keycap-shadow);
 }
 
 .settings-nav-item:focus-visible,

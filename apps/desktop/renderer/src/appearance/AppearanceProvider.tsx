@@ -192,6 +192,10 @@ export function AppearanceProvider({
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
 }
 
+export function useOptionalAppearance() {
+  return useContext(AppearanceContext);
+}
+
 export function useAppearance() {
   const value = useContext(AppearanceContext);
   if (!value) {

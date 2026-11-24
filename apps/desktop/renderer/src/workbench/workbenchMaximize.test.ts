@@ -91,6 +91,12 @@ describe('workbench maximize behavior', () => {
       unlayeredWorkbench,
       /\.workbench-view--goal\[data-active='false'\]\s*\{\s*display:\s*none;/,
     );
+
+    const goalPanelStyles = readFileSync(new URL('../chat/styles/goal-panel.css', import.meta.url), 'utf8');
+    assert.match(
+      goalPanelStyles,
+      /\.goal-panel--docked \.goal-panel-body\s*\{[\s\S]*?max-height:\s*min\(55vh,\s*520px\);[\s\S]*?min-height:\s*0;[\s\S]*?overflow-y:\s*auto;/,
+    );
   });
 
   it('keeps the maximize grid unlayered so sidebar collapse and expand cannot pin the workbench width', () => {

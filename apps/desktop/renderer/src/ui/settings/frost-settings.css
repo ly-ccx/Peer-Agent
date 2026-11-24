@@ -1,13 +1,14 @@
-/* Frost settings: paper groups and a shared type/control hierarchy. */
+/* Frost settings: paper groups and A × G sidebar/control hierarchy. */
 .settings-page { --settings-panel-max-width: 920px; --settings-group-inset: 18px; --settings-row-padding: 10px var(--settings-group-inset); --settings-heading-padding: 12px var(--settings-group-inset); grid-template-columns: 226px minmax(0, 1fr); }
 .settings-nav { background: var(--glass-chrome); backdrop-filter: blur(var(--blur-chrome)); padding-inline: 16px; }
 .settings-nav-list { gap: 14px; }
-.settings-nav-group h2 { color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; text-transform: none; padding-bottom: 8px; }
-.settings-nav-item { min-height: 34px; padding-block: 6px; border-radius: var(--ui-radius-row); font-size: var(--ui-font-control); }
-.settings-nav-item.active { background: var(--chrome-active); }
-.settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--ui-radius-control); border-color: transparent; background: var(--chrome-sunken); box-shadow: none; }
-.settings-nav-search:focus-within { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
-.settings-content { --settings-help-size: .75rem; --settings-help-color: color-mix(in srgb, var(--graphite-soft) 84%, var(--paper-sheet)); container: settings / inline-size; background: var(--chrome-canvas); }
+.settings-nav-group h2 { color: var(--graphite-fade); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding-bottom: 6px; }
+.settings-nav-item { min-height: 32px; padding-block: 6px; border: 1px solid transparent; border-radius: var(--ui-radius-row); font-size: var(--ui-font-control); color: var(--graphite-soft); }
+.settings-nav-item:hover:not(.active) { background: var(--chrome-glass-hover); color: var(--graphite-base); }
+.settings-nav-item.active { background: var(--chrome-keycap-bg); border-color: var(--chrome-keycap-border); color: var(--chrome-keycap-fg); font-weight: 600; box-shadow: var(--chrome-keycap-shadow); }
+.settings-nav-search { height: 32px; margin-inline: 4px; border-radius: var(--ui-radius-control); border: 1px solid var(--chrome-glass-input-border); background: var(--chrome-glass-input); box-shadow: none; }
+.settings-nav-search:focus-within { border-color: color-mix(in srgb, var(--graphite-base) 28%, var(--chrome-glass-input-border)); background: var(--chrome-glass-hover); }
+.settings-content { --settings-help-size: .75rem; --settings-help-color: color-mix(in srgb, var(--graphite-soft) 84%, var(--paper-sheet)); container: settings / inline-size; background: var(--paper-sheet); }
 .settings-content > :is(.general-panel, .appearance-panel, .system-instructions-panel, .llm-settings-panel, .settings-panel, .remote-access-panel, .settings-provider-page) {
   width: 100%; max-width: var(--settings-panel-max-width); margin: 0 auto;
   box-sizing: border-box; padding: 32px 32px 28px; gap: 18px;
@@ -26,11 +27,11 @@
 }
 .frost-settings-group {
   display: flex; flex-direction: column; min-width: 0; margin: 0;
-  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); box-shadow: none;
+  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-raised); box-shadow: none;
 }
 .frost-settings-group > .frost-group-heading {
   display: block; padding: var(--settings-heading-padding, 18px 23px 16px); margin: 0; border-bottom: 1px solid var(--chrome-hairline);
-  border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; background: var(--paper-base);
+  border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; background: color-mix(in srgb, var(--paper-raised) 82%, var(--paper-sheet));
 }
 .frost-settings-group > .frost-group-heading h2 {
   margin: 0; color: var(--graphite-base); font-family: var(--font-sans);
@@ -83,9 +84,9 @@
 :is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] { background: var(--graphite-base); border-color: var(--graphite-base); }
 :is(.settings-content, .bot-drawer-body) .peer-switch[data-state='checked'] .peer-switch-thumb { background: var(--paper-sheet); transform: translateX(17px); }
 /* Existing complex forms keep their controls, while using the same group surfaces. */
-.settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--ui-radius-panel); border: 1px solid var(--chrome-hairline); background: var(--paper-sheet); box-shadow: none; }
+.settings-content :is(.settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group) { border-radius: var(--ui-radius-panel); border: 1px solid var(--chrome-hairline); background: var(--paper-raised); box-shadow: none; }
 .settings-content :is(.shortcut-group, .llm-instructions-card) { padding: 0; gap: 0; }
-.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: var(--settings-heading-padding); background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
+.settings-content :is(.shortcut-group-heading, .llm-instructions-header, .llm-group-header) { padding: var(--settings-heading-padding); background: color-mix(in srgb, var(--paper-raised) 82%, var(--paper-sheet)); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content :is(.shortcut-group-heading h3, .llm-instructions-header strong, .llm-group-header strong) { font-size: .9375rem; font-weight: 400; color: var(--graphite-base); }
 .settings-content :is(.shortcut-group-heading p, .shortcut-description, .llm-instructions-hint) { font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 .settings-content .shortcut-row { padding: var(--settings-row-padding); }
@@ -105,10 +106,7 @@
 .settings-content .appearance-settings-row:first-child { padding-top: 0; }
 .settings-content .appearance-settings-row:last-child { padding-bottom: 0; }
 .settings-content .appearance-settings-row-title { font-size: .875rem; font-weight: 600; }
-.settings-content .model-routing-card .frost-group-content { padding: var(--settings-row-padding); }
-.settings-content .model-routing-head { font-size: .75rem; font-weight: 400; padding-block: 10px; }
-.settings-content .model-routing-name { font-size: .875rem; }
-.settings-content .model-routing-row { padding-block: 10px; }
+.settings-content .model-routing-card .frost-group-content { padding: 0; }
 .settings-content .remote-access-card { padding: 0 var(--settings-group-inset) 10px; }
 .settings-content .remote-access-enable, .settings-content .remote-access-section-title, .settings-content .remote-access-activity > h3 { padding: var(--settings-heading-padding); margin: 0 calc(-1 * var(--settings-group-inset)) 12px; background: var(--paper-base); border-bottom: 1px solid var(--chrome-hairline); border-radius: calc(var(--ui-radius-panel) - 1px) calc(var(--ui-radius-panel) - 1px) 0 0; }
 .settings-content .remote-access-card h3 { font-size: .9375rem; font-weight: 400; }
@@ -123,9 +121,6 @@
   .settings-content .general-language-select { max-width: 320px; }
   .settings-content .general-quiet-controls { justify-content: flex-start; }
   .settings-content .general-bot-time { justify-self: start; }
-  .settings-content .model-routing-tier { grid-template-columns: 78px minmax(0, 1fr); }
-  .settings-content .model-routing-tier > :last-child { grid-column: 2; }
-  .settings-content .model-routing-head.model-routing-tier { display: none; }
 }
 @media (prefers-reduced-transparency: reduce) { .settings-nav { background: var(--chrome-raised); backdrop-filter: none; } }
 
@@ -137,7 +132,7 @@
 .settings-content .appearance-mode-card:hover { background: var(--control-fill-hover); }
 .settings-content .appearance-mode-card-label { font-size: .75rem; font-weight: 400; padding-top: 5px; }
 
-:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--ui-radius-modal); box-shadow: var(--shadow-popover); }
+:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--ui-radius-popover); box-shadow: var(--shadow-popover); }
 @supports (corner-shape: superellipse(1.4)) {
   :is(.frost-settings-group, .frost-group-heading, .settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group, .shortcut-group-heading, .llm-instructions-header, .llm-group-header, .settings-nav-item, .settings-nav-search, .appearance-mode-card, .general-bot-time, .shortcut-recorder, .pa-dropdown-trigger, .pa-cascading-trigger, .pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { corner-shape: var(--control-corner); }
 }

@@ -66,7 +66,7 @@
   backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control);
+  border-radius: var(--ui-radius-popover);
   box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   isolation: isolate;
   z-index: var(--z-dropdown-portal, 10000);
@@ -98,7 +98,7 @@
   min-height: 34px;
   padding: var(--space-2) var(--space-2);
   border: none;
-  border-radius: var(--ui-radius-control-compact);
+  border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--graphite-base);
   text-align: left;
@@ -107,7 +107,7 @@
 }
 .pa-dropdown-item:hover,
 .pa-dropdown-item.active {
-  background: var(--chrome-sunken);
+  background: var(--paper-hover);
 }
 .pa-dropdown-item.selected {
   font-weight: 600;
