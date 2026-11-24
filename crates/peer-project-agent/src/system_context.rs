@@ -189,8 +189,9 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         let has_delivery_event = input.wake_events.iter().any(|ev| {
             matches!(
                 ev["kind"].as_str(),
-                Some("report_available" | "session_ended" | "session_completed" | "session_failed")
-            )
+                Some("report_available" | "session_completed" | "session_failed")
+            ) || (ev["kind"].as_str() == Some("session_ended")
+                && ev["payload"]["status"].as_str() != Some("cancelled"))
         });
         if has_delivery_event {
             reminder.push_str(
@@ -401,5 +402,28 @@ mod tests {
 
         let technical = assemble_project_agent_context(&sample_input("technical"));
         assert!(technical.contains("Technical Peer"));
+    }
+
+    #[test]
+    fn wake_delivery_reminder_skips_cancelled_session_ended_events() {
+        let mut input = sample_input("natural");
+        input.turn_kind = "wake";
+        let cancelled = vec![json!({
+            "kind": "session_ended",
+            "sessionId": "s-1",
+            "payload": { "status": "cancelled" }
+        })];
+        input.wake_events = &cancelled;
+        let prompt = assemble_project_agent_context(&input);
+        assert!(prompt.contains("keep the wake quiet"));
+        assert!(!prompt.contains("Task Delivery Reminder"));
+
+        let failed = vec![json!({
+            "kind": "session_ended",
+            "sessionId": "s-1",
+            "payload": { "status": "failed" }
+        })];
+        input.wake_events = &failed;
+        assert!(assemble_project_agent_context(&input).contains("Task Delivery Reminder"));
     }
 }

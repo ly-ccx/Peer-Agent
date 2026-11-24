@@ -421,6 +421,27 @@ struct TurnFailureCtx<'a> {
     now_ms: i64,
 }
 
+fn should_settle_quiet_wake_empty_response(
+    turn_kind: &str,
+    error_code: &str,
+    cancelled: bool,
+    total_tool_calls: usize,
+    wake_events: &[Value],
+) -> bool {
+    if turn_kind != "wake" || error_code != "model_empty_response" || cancelled {
+        return false;
+    }
+    if total_tool_calls > 0 {
+        return true;
+    }
+    !wake_events.iter().any(|ev| {
+        matches!(
+            ev["kind"].as_str(),
+            Some("report_available" | "session_completed")
+        )
+    })
+}
+
 fn activity_tool_summary(name: &str, args: &Value) -> Option<String> {
     if name == "post_reply" {
         return None;
@@ -2169,6 +2190,22 @@ impl ProjectAgentRunner {
                         }
                     }
                 }
+                Err(err)
+                    if should_settle_quiet_wake_empty_response(
+                        opts.kind,
+                        err.code,
+                        cancel.is_cancelled(),
+                        total_tool_calls,
+                        opts.wake_events,
+                    ) =>
+                {
+                    // Background wake prompts instruct the model to keep quiet when nothing
+                    // actionable changed. Settle cleanly as Yielded (allowing
+                    // `needs_wake_failure_fallback` below to still report genuinely failed
+                    // sessions) so inbox cursors advance instead of tripping the breaker.
+                    final_end = TurnEndKind::Yielded;
+                    break;
+                }
                 Err(err) => {
                     trial_in_flight = false;
                     final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
@@ -3624,5 +3661,47 @@ mod tests {
         let tools = continuity["completedTools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "list_files");
+    }
+
+    #[test]
+    fn quiet_wake_empty_response_settles_except_uninspected_completions_and_user_turns() {
+        let cancelled = [json!({"kind": "session_ended", "payload": {"status": "cancelled"}})];
+        let completed = [json!({"kind": "report_available", "payload": {"status": "completed"}})];
+
+        assert!(!should_settle_quiet_wake_empty_response(
+            "user",
+            "model_empty_response",
+            false,
+            1,
+            &cancelled
+        ));
+        assert!(!should_settle_quiet_wake_empty_response(
+            "wake",
+            "model_provider_error",
+            false,
+            1,
+            &cancelled
+        ));
+        assert!(should_settle_quiet_wake_empty_response(
+            "wake",
+            "model_empty_response",
+            false,
+            0,
+            &cancelled
+        ));
+        assert!(should_settle_quiet_wake_empty_response(
+            "wake",
+            "model_empty_response",
+            false,
+            1,
+            &completed
+        ));
+        assert!(!should_settle_quiet_wake_empty_response(
+            "wake",
+            "model_empty_response",
+            false,
+            0,
+            &completed
+        ));
     }
 }

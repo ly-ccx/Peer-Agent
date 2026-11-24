@@ -2528,7 +2528,8 @@ impl Drop for NativeProjectHost {
 
 /// Host-side routine lifecycle absorption (`wake-wait.mjs#hostWakeWait`): suppress redundant
 /// wake turns when every event in the batch is a routine lifecycle update for an actively
-/// advancing delegated session and no session currently requires user or parent attention.
+/// advancing delegated session, or a cancellation event already initiated by the project agent
+/// itself, and no session currently requires user or parent attention.
 fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSummary]) -> bool {
     if events.is_empty() {
         return false;
@@ -2541,10 +2542,14 @@ fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSum
     }) {
         return false;
     }
-    let mut referenced = Vec::new();
+    let mut active_referenced = Vec::new();
+    let mut cancelled_referenced = Vec::new();
     for ev in events {
         let kind = ev["kind"].as_str().unwrap_or("");
-        if !matches!(
+        let Some(sid) = ev["sessionId"].as_str().filter(|s| !s.is_empty()) else {
+            return false;
+        };
+        if matches!(
             kind,
             "session_started"
                 | "session_spawned"
@@ -2553,16 +2558,22 @@ fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSum
                 | "progress"
                 | "session_progress"
         ) {
+            if !active_referenced.contains(&sid) {
+                active_referenced.push(sid);
+            }
+        } else if (kind == "session_ended"
+            && ev["payload"]["status"].as_str() == Some("cancelled")
+            && ev["payload"]["initiatedBy"].as_str() == Some("project_agent"))
+            || (kind == "cancelled" && ev["payload"]["status"].as_str() == Some("cancelled"))
+        {
+            if !cancelled_referenced.contains(&sid) {
+                cancelled_referenced.push(sid);
+            }
+        } else {
             return false;
-        }
-        let Some(sid) = ev["sessionId"].as_str().filter(|s| !s.is_empty()) else {
-            return false;
-        };
-        if !referenced.contains(&sid) {
-            referenced.push(sid);
         }
     }
-    referenced.iter().all(|sid| {
+    active_referenced.iter().all(|sid| {
         sessions.iter().any(|row| {
             row.session_id == *sid
                 && matches!(
@@ -2570,6 +2581,10 @@ fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSum
                     "queued" | "starting" | "running" | "verifying"
                 )
         })
+    }) && cancelled_referenced.iter().all(|sid| {
+        sessions
+            .iter()
+            .any(|row| row.session_id == *sid && row.status == "cancelled")
     })
 }
 
@@ -2956,5 +2971,66 @@ mod tests {
             .resume_session_with_anchor(ws, &summary.session_id, "req-123")
             .unwrap();
         assert_eq!(resumed_idem["sessionId"], summary.session_id);
+    }
+
+    #[test]
+    fn routine_host_wake_wait_absorbs_agent_cancelled_events_but_keeps_failures() {
+        let cancelled_session = crate::WorkSessionSummary {
+            session_id: "sess-1".to_owned(),
+            workspace_id: "ws-1".to_owned(),
+            conversation_id: "sess-1".to_owned(),
+            plan_id: "plan-1".to_owned(),
+            title: "熟悉项目".to_owned(),
+            status: "cancelled".to_owned(),
+            phase: "cancelled".to_owned(),
+            read_only: true,
+            priority: "normal".to_owned(),
+            updated_at: "2026-11-24T12:13:16.000Z".to_owned(),
+            accepted: false,
+            accepted_by: None,
+            worktree_path: None,
+            approval_id: None,
+            handoff_status: None,
+            anchor_message_ids: vec![],
+        };
+        let agent_cancel = vec![json!({
+            "kind": "session_ended",
+            "sessionId": "sess-1",
+            "payload": { "status": "cancelled", "initiatedBy": "project_agent" }
+        })];
+        assert!(is_routine_host_wake_wait(
+            &agent_cancel,
+            std::slice::from_ref(&cancelled_session)
+        ));
+
+        let duplicate_cancelled = vec![json!({
+            "kind": "cancelled",
+            "sessionId": "sess-1",
+            "payload": { "status": "cancelled" }
+        })];
+        assert!(is_routine_host_wake_wait(
+            &duplicate_cancelled,
+            std::slice::from_ref(&cancelled_session)
+        ));
+
+        let failed_event = vec![json!({
+            "kind": "session_ended",
+            "sessionId": "sess-1",
+            "payload": { "status": "failed" }
+        })];
+        assert!(!is_routine_host_wake_wait(
+            &failed_event,
+            std::slice::from_ref(&cancelled_session)
+        ));
+
+        let external_cancel = vec![json!({
+            "kind": "session_ended",
+            "sessionId": "sess-1",
+            "payload": { "status": "cancelled" }
+        })];
+        assert!(!is_routine_host_wake_wait(
+            &external_cancel,
+            std::slice::from_ref(&cancelled_session)
+        ));
     }
 }

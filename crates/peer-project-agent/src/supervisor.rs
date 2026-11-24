@@ -3202,6 +3202,25 @@ impl SessionSupervisor {
             reason,
             holds_lease,
             false,
+            false,
+        )
+    }
+
+    pub(crate) fn cancel_session_by_agent(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        reason: &str,
+        holds_lease: bool,
+    ) -> Result<WorkSessionSummary, ProjectError> {
+        self.control_session_with_origin(
+            workspace_id,
+            session_id,
+            "cancel",
+            reason,
+            holds_lease,
+            false,
+            true,
         )
     }
 
@@ -3219,9 +3238,11 @@ impl SessionSupervisor {
             reason,
             holds_lease,
             true,
+            true,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn control_session_with_origin(
         &self,
         workspace_id: &str,
@@ -3230,6 +3251,7 @@ impl SessionSupervisor {
         reason: &str,
         holds_lease: bool,
         bot_cleanup: bool,
+        initiated_by_agent: bool,
     ) -> Result<WorkSessionSummary, ProjectError> {
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
@@ -3300,12 +3322,11 @@ impl SessionSupervisor {
         }
         self.write_plan(&plan)?;
         if action == "cancel" {
-            self.emit_event(
-                workspace_id,
-                "session_ended",
-                session_id,
-                json!({"status": "cancelled", "reason": reason}),
-            );
+            let mut payload = json!({"status": "cancelled", "reason": reason});
+            if initiated_by_agent {
+                payload["initiatedBy"] = json!("project_agent");
+            }
+            self.emit_event(workspace_id, "session_ended", session_id, payload);
         }
         Ok(self.summarize(&plan))
     }
