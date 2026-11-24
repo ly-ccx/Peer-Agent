@@ -57,6 +57,7 @@ pub struct TurnExecutionState {
     pub work_id: String,
     pub waiting_session_ids: Vec<String>,
     pub spawned_session_ids: Vec<String>,
+    pub published_interactive_refs: Vec<String>,
     pub activated_packs: Vec<String>,
     pub memory_learned: Vec<String>,
     pub memory_used: Vec<String>,
@@ -861,7 +862,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             && !capability.starts_with("local.memory.")
             && !capability.starts_with("local.objective.")
             && !capability.starts_with("local.continuity.")
-            && !capability.starts_with("local.interactive.")
+            && capability != INTERACTIVE_INSPECT_CAPABILITY
         {
             return Err(HostError("tool_not_projected"));
         }
@@ -1269,6 +1270,15 @@ fn execute_post_reply(
     let mut interactive_refs = Vec::new();
     let mut other_refs = Vec::new();
     let mut seen_ev = HashSet::new();
+    // ADR 118 (2026-11-25 amendment): attach verified interactive results published directly by
+    // Main Bot during this turn (newest revision first), ahead of delegated worker evidence.
+    for r in state.published_interactive_refs.iter().rev() {
+        if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX)
+            && seen_ev.insert(r.clone())
+        {
+            interactive_refs.push(r.clone());
+        }
+    }
     for sid in &sources {
         if let Ok(rep) = supervisor.read_report(&state.workspace_id, sid) {
             for r in rep.evidence_refs {

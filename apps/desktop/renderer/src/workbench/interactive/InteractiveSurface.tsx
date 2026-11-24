@@ -21,8 +21,8 @@ function calculationMessage(code: string, isZh: boolean) {
   return isZh ? '当前条件无法计算。请调整条件或恢复初始条件。' : 'These conditions cannot be calculated. Adjust or reset the inputs.';
 }
 /** Public SDK Renderer with Peer components, governed state requests and static error recovery. */
-export function InteractiveSurface({ session, provenance, sourceIssues, isZh, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[];
-  readonly sourceIssues?: readonly InteractiveSourceIssue[]; readonly isZh: boolean; readonly onReady?: () => void }) {
+export function InteractiveSurface({ session, provenance, sourceIssues, isZh, inline = false, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[];
+  readonly sourceIssues?: readonly InteractiveSourceIssue[]; readonly isZh: boolean; readonly inline?: boolean; readonly onReady?: () => void }) {
   const descriptionId = useId();
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const [seenValues, setSeen] = useState<Record<string, unknown>>({}), [sdkErrors, setSdkErrors] = useState<readonly OpenUIError[]>([]);
@@ -48,7 +48,7 @@ export function InteractiveSurface({ session, provenance, sourceIssues, isZh, on
   useLayoutEffect(() => { if (sdkReady && !announced.current) { announced.current = true; onReady?.(); } }, [sdkReady, onReady]);
   const error = state.calculationError ?? (mirrorError || sdkReady && sdkErrors.some(error => error.severity !== 'warning') ? 'evaluation_unavailable' : null);
   const readonly = !state.writer || ['writer_lost', 'closing', 'closed'].includes(state.phase);
-  return <section className="interactive-surface" aria-label={session.content.title} aria-describedby={descriptionId}>
+  return <section className={`interactive-surface${inline ? ' is-inline' : ''}`} aria-label={session.content.title} aria-describedby={descriptionId}>
     <div className="interactive-toolbar"><p role="status">{state.phase === 'saving' ? (isZh ? '正在保存条件…' : 'Saving conditions…') : state.dirty ? (isZh ? '条件尚未保存' : 'Unsaved conditions') : state.confirmed.stateRevision ? (isZh ? '条件已保存' : 'Conditions saved') : (isZh ? '初始条件' : 'Initial conditions')}</p>
       <div>{readonly ? <button type="button" className="ui-button" disabled={state.phase === 'closed' || state.phase === 'closing'} onClick={() => { void session.acquire(state.saveError === 'interactive_writer_busy' || state.phase === 'writer_lost'); }}>{state.saveError === 'interactive_writer_busy' || state.phase === 'writer_lost' ? (isZh ? '在此接管试算' : 'Continue calculation here') : (isZh ? '开始试算' : 'Start calculation')}</button> : <button type="button" className="ui-button" disabled={state.composing} onClick={() => session.reset()}>{isZh ? '恢复初始条件' : 'Reset conditions'}</button>}
       {state.saveError || state.dirty ? <button type="button" className="ui-button" disabled={readonly || state.composing || state.phase === 'saving'} onClick={() => { void session.flush(); }}>{isZh ? '保存条件' : 'Save conditions'}</button> : null}</div></div>

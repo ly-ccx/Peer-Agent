@@ -150,11 +150,15 @@ pub const SKILL_PACKS: [SkillPackSpec; 7] = [
     },
     SkillPackSpec {
         id: "interactive",
-        summary: "inspect metadata or fallback text of admitted interactive results",
-        capabilities: &[crate::INTERACTIVE_INSPECT_CAPABILITY],
-        guide: "# Interactive Results Inspection Guide\n\
+        summary: "publish interactive OpenUI reply cards directly (Desktop) or inspect admitted interactive results",
+        capabilities: &[
+            peer_protocol::interactive_result::INTERACTIVE_PUBLISH_CAPABILITY,
+            crate::INTERACTIVE_INSPECT_CAPABILITY,
+        ],
+        guide: "# Interactive Results Guide\n\
+                - On Desktop with Interactive Results enabled, call `publish_interactive_result` directly to attach an interactive OpenUI card (filterable table, chart, comparison, or calculator) that renders inline inside your reply bubble, then summarize via `post_reply`.\n\
                 - Use `inspect_interactive_result` with `view: \"metadata\"` or `\"text\"` to inspect admitted interactive results belonging to this project.\n\
-                - Program/data execution views remain restricted by role ceiling.",
+                - Interactive controls stay local and never grant file write, shell, or approval authority.",
     },
 ];
 

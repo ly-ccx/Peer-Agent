@@ -12,6 +12,7 @@ import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyTaskReferences } from './ReplyTaskReferences';
+import { InlineInteractiveReplies } from './InlineInteractiveReplies';
 import type { BotWorkIndex } from '../state/botWorkState';
 
 export function ReplyBubble({
@@ -63,6 +64,7 @@ export function ReplyBubble({
           <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={displayContent} /></ReplyResourceContext>
         </div>
       </div>
+      <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={message.meta.evidenceRefs ?? []} isZh={i18n.locale.startsWith('zh')} />
       <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />

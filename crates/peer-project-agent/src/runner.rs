@@ -15,6 +15,7 @@ use crate::{
     TurnProjectionSignals, UserAnchorCandidate, atomic_write,
     circuit_breaker::{CircuitAdmit, CircuitBreakerStore},
     coordination_work_id, is_effective_memory, is_valid_workspace_id, memory_secret_reason,
+    interactive_provider::{WorkSessionInteractiveContext, WorkSessionInteractiveProvider},
     now_iso, parse_iso_ms,
     provider::{ProjectCapabilityProvider, TurnExecutionState},
     skill_packs::{
@@ -23,7 +24,9 @@ use crate::{
     },
     system_context::{ProjectAgentContextInput, assemble_project_agent_context},
 };
-use peer_protocol::{UsageAmounts, UsagePurpose, build_compaction_marker};
+use peer_protocol::{
+    UsageAmounts, UsagePurpose, build_compaction_marker, interactive_result::InteractiveOwner,
+};
 use peer_runtime::{
     CancellationToken, build_compaction_summary_input, build_structural_compaction_summary,
     compaction_summary_prompts,
@@ -1160,8 +1163,36 @@ fn persist_fallback_reply(
     current_input_anchors: &[String],
     text: &str,
 ) -> Result<String, peer_store::StoreError> {
+    persist_fallback_reply_with_evidence(
+        conv_store,
+        conversation_id,
+        turn_id,
+        current_input_anchors,
+        text,
+        &[],
+    )
+}
+
+fn persist_fallback_reply_with_evidence(
+    conv_store: &ConversationStore,
+    conversation_id: &str,
+    turn_id: &str,
+    current_input_anchors: &[String],
+    text: &str,
+    evidence_refs: &[String],
+) -> Result<String, peer_store::StoreError> {
     let msg_id = format!("reply-{turn_id}");
     let at = now_iso();
+    let mut meta = json!({
+        "replyTo": current_input_anchors,
+        "sources": [],
+        "memoryUsed": [],
+        "memoryLearned": [],
+        "surfacing": "message",
+    });
+    if !evidence_refs.is_empty() {
+        meta["evidenceRefs"] = json!(evidence_refs);
+    }
     conv_store.append_message_idempotent(
         conversation_id,
         &json!({
@@ -1174,19 +1205,31 @@ fn persist_fallback_reply(
             "fallback": true,
             "turnId": turn_id,
             "createdAt": at,
-            "meta": {
-                "replyTo": current_input_anchors,
-                "sources": [],
-                "memoryUsed": [],
-                "memoryLearned": [],
-                "surfacing": "message",
-            },
+            "meta": meta,
             "marks": [],
         }),
         &at,
         None,
     )?;
     Ok(msg_id)
+}
+
+fn collect_turn_interactive_refs(state: &Arc<Mutex<TurnExecutionState>>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    if let Ok(st) = state.lock() {
+        for r in st.published_interactive_refs.iter().rev() {
+            if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX)
+                && seen.insert(r.clone())
+            {
+                out.push(r.clone());
+                if out.len() >= 20 {
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 fn push_public_update(updates: &mut Vec<Value>, total_chars: &mut usize, text: &str) {
@@ -1957,6 +2000,14 @@ impl ProjectAgentRunner {
         let host_surface = self.supervisor.surface_str();
         let interactive_publishing_available =
             self.supervisor.is_interactive_publishing_available();
+        let interactive_bridge = if interactive_publishing_available {
+            self.supervisor.interactive_bridge()
+        } else {
+            None
+        };
+        let interactive_catalog_prompt = interactive_bridge
+            .as_ref()
+            .and_then(|bridge| bridge.catalog_prompt());
         let build_system_prompt = |continuity: Option<&str>| {
             assemble_project_agent_context(&ProjectAgentContextInput {
                 workspace_id: opts.workspace_id,
@@ -1980,6 +2031,7 @@ impl ProjectAgentRunner {
                 mounted_capabilities_summary: mounted_capabilities_summary.as_deref(),
                 host_surface,
                 interactive_publishing_available,
+                interactive_catalog_prompt: interactive_catalog_prompt.as_deref(),
             })
         };
         let mut system_prompt = build_system_prompt(continuity_summary.as_deref());
@@ -2004,6 +2056,7 @@ impl ProjectAgentRunner {
             work_id: work_id.clone(),
             waiting_session_ids: vec![],
             spawned_session_ids: vec![],
+            published_interactive_refs: vec![],
             activated_packs: initial_packs.clone(),
             memory_learned: vec![],
             memory_used: vec![],
@@ -2020,6 +2073,31 @@ impl ProjectAgentRunner {
             )
             .with_verifier_model(verifier_model.unwrap_or(model).clone()),
         ));
+        if let Some(bridge) = interactive_bridge {
+            let direct_plan_id = format!("bot-reply:{turn_id}");
+            let published_state = Arc::clone(&turn_state);
+            registry.register(Box::new(WorkSessionInteractiveProvider::new(
+                WorkSessionInteractiveContext {
+                    data_home: self.data_home.clone(),
+                    owner: InteractiveOwner {
+                        workspace_id: opts.workspace_id.to_owned(),
+                        conversation_id: opts.conversation_id.to_owned(),
+                    },
+                    plan_id: direct_plan_id.clone(),
+                    session_id: direct_plan_id,
+                    plan_conversation_id: opts.conversation_id.to_owned(),
+                    execution_epoch: format!("bot-turn:{turn_id}"),
+                    role: "project_agent".to_owned(),
+                    can_publish: true,
+                    bridge,
+                    on_published: Some(Arc::new(move |artifact_ref| {
+                        if let Ok(mut st) = published_state.lock() {
+                            st.published_interactive_refs.push(artifact_ref);
+                        }
+                    })),
+                },
+            )));
+        }
         let (mut projection, mut tools_json) = if projection_mode == ToolProjectionMode::Progressive
         {
             let allowlist = build_allowlist(&initial_packs, &[]);
@@ -2261,12 +2339,14 @@ impl ProjectAgentRunner {
                     let clean = strip_literal_tool_call_blocks(&model_turn.content);
                     if opts.kind == "user" && !clean.is_empty() {
                         push_public_update(&mut public_updates, &mut public_update_chars, &clean);
-                        match persist_fallback_reply(
+                        let fallback_ev = collect_turn_interactive_refs(&turn_state);
+                        match persist_fallback_reply_with_evidence(
                             &conv_store,
                             opts.conversation_id,
                             &turn_id,
                             &current_input_anchors,
                             &clean,
+                            &fallback_ev,
                         ) {
                             Ok(msg_id) => {
                                 final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
@@ -2321,12 +2401,14 @@ impl ProjectAgentRunner {
                     continue;
                 }
                 if opts.kind == "user" && !model_turn.content.trim().is_empty() {
-                    match persist_fallback_reply(
+                    let fallback_ev = collect_turn_interactive_refs(&turn_state);
+                    match persist_fallback_reply_with_evidence(
                         &conv_store,
                         opts.conversation_id,
                         &turn_id,
                         &current_input_anchors,
                         model_turn.content.trim(),
+                        &fallback_ev,
                     ) {
                         Ok(msg_id) => {
                             final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
