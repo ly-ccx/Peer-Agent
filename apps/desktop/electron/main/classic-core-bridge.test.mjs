@@ -3927,3 +3927,239 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
     cleanup();
   }
 });
+
+test('Rust Desktop host lets Main Bot directly publish an interactive reply card without spawning a worker (ADR 118 amendment)', { timeout: 60_000 }, async () => {
+  const { dataHome, workspace, cleanup } = makeTempDirs();
+  const binaryPath = resolveTestBinary();
+  const runtimeRoot = path.join(dataHome, 'project-runtime');
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+
+  const openUiProgram = [
+    '$status="全部"',
+    'allRows=@Data("items")',
+    'shown=$status=="全部"?allRows:@RowsWhere(allRows,"status","eq",$status)',
+    'statusPicker=Select("status","按状态筛选",$status,[{value:"全部",label:"全部"},{value:"进行中",label:"进行中"},{value:"已完成",label:"已完成"},{value:"风险",label:"风险"}])',
+    'tbl=Table("交付清单",[{key:"module",label:"模块"},{key:"owner",label:"负责人"},{key:"status",label:"状态"},{key:"progress",label:"进度%"}],shown,"module")',
+    'root=Col([Title("主 Bot 交互回复演示"),statusPicker,tbl])',
+  ].join('\n');
+
+  const sseTool = (callId, name, args) => [
+    `data: ${JSON.stringify({
+      id: `chunk-${callId}-1`,
+      choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: callId, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }],
+    })}`,
+    `data: ${JSON.stringify({
+      id: `chunk-${callId}-2`,
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+    })}`,
+    'data: [DONE]',
+    '',
+  ].join('\n\n');
+
+  const demoRows = [
+    { module: '对话与交互回复', owner: '林岚', status: '进行中', progress: 80 },
+    { module: '离线状态保存', owner: '周衡', status: '风险', progress: 45 },
+    { module: '打包与验证', owner: '陈明', status: '已完成', progress: 100 },
+  ];
+
+  let mainBotSawPublishTool = false;
+  let mainBotSawCatalogPrompt = false;
+  let spawnSessionCalled = false;
+  let publishedArtifactRef = null;
+
+  const mockServer = await startMockSseServer(({ body, res }) => {
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const sysText = messages.filter((m) => m.role === 'system').map((m) => String(m.content || '')).join('\n');
+    const toolNames = (body?.tools || []).map((t) => t?.function?.name).filter(Boolean);
+    const lastRole = messages.at(-1)?.role;
+
+    if (toolNames.includes('publish_interactive_result')) mainBotSawPublishTool = true;
+    if (sysText.includes('peer-basic-1')) mainBotSawCatalogPrompt = true;
+
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+
+    if (lastRole === 'tool') {
+      const toolMsg = [...messages].reverse().find((m) => m.role === 'tool');
+      const refHit = typeof toolMsg?.content === 'string'
+        ? toolMsg.content.match(/interactive-result:\/\/[^"\\\s}]+/)
+        : null;
+      if (refHit) publishedArtifactRef = refHit[0];
+      if (toolMsg?.name === 'post_reply') {
+        res.end(sseText('bot-direct-done', ''));
+        return;
+      }
+      res.end(sseTool('bot-direct-reply', 'post_reply', {
+        text: '已经直接在回复里为你生成了「主 Bot 交互回复演示」卡片，可以直接切换状态筛选。',
+        sources: [],
+      }));
+      return;
+    }
+
+    if (toolNames.includes('spawn_session') && !toolNames.includes('publish_interactive_result')) {
+      spawnSessionCalled = true;
+    }
+
+    res.end(sseTool('bot-direct-pub', 'publish_interactive_result', {
+      publication: { kind: 'create' },
+      title: '主 Bot 交互回复演示',
+      textFallback: '虚构演示数据：对话与交互回复（进行中 80%）、离线状态保存（风险 45%）、打包与验证（已完成 100%）。',
+      program: openUiProgram,
+      inputs: [{ bindingId: 'items', source: { kind: 'model-data', value: demoRows } }],
+    }));
+  });
+
+  let client = null;
+  const bridge = createClassicCoreBridge({
+    getClient: () => client,
+    broadcast: () => {},
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    env: {
+      PEER_MODEL_API_KEY: 'test-key-openui-direct',
+      PEER_MODEL_ID: 'e2e-mock-openui-direct',
+      PEER_MODEL_BASE_URL: mockServer.baseUrl,
+    },
+    clientInfo: { name: 'peer-desktop-openui-direct-e2e', version: '0.1.0-test' },
+    onNotification: bridge.handleNotification,
+    hostHandlers: bridge.createHostHandlers(),
+    onUnexpectedExit: bridge.handleUnexpectedExit,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  try {
+    await client.start();
+    const cfg = await bridge.configureProjectBotHost({
+      enabled: true,
+      interactiveResults: true,
+      interactiveContext: INTERACTIVE_CONTEXT.content,
+    });
+    assert.equal(cfg.ok, true);
+    assert.equal(cfg.interactiveResultsEnabled, true);
+
+    const created = await bridge.projectBotCreate({ workspacePath: workspace, displayName: 'Direct OpenUI Bot' });
+    assert.equal(created.ok, true);
+    const workspaceId = created.workspaceId;
+
+    const submitted = await bridge.projectBotSubmitInput({
+      workspaceId,
+      text: '直接给我一个交互式状态筛选卡片',
+      inputId: 'in-openui-direct-1',
+    });
+    assert.equal(submitted.ok, true);
+
+    let replyWithInteractive = null;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const conv = await bridge.projectBotReadConversation({ workspaceId, limit: 20 });
+      const hit = (conv.messages || []).find((m) => (
+        m.kind === 'agent_reply'
+        && Array.isArray(m.meta?.evidenceRefs)
+        && m.meta.evidenceRefs.some((ref) => typeof ref === 'string' && ref.startsWith('interactive-result://'))
+      ));
+      if (hit) {
+        replyWithInteractive = hit;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    assert.equal(mainBotSawPublishTool, true, 'Main Bot must receive publish_interactive_result directly');
+    assert.equal(mainBotSawCatalogPrompt, true, 'Main Bot must receive peer-basic-1 catalog prompt');
+    assert.equal(spawnSessionCalled, false, 'Main Bot must NOT need to spawn a worker session');
+    assert.ok(publishedArtifactRef && publishedArtifactRef.startsWith('interactive-result://'), 'Main Bot must publish interactive-result:// ref');
+    assert.ok(replyWithInteractive, 'Main Bot reply must carry interactive-result:// in meta.evidenceRefs');
+    assert.equal(replyWithInteractive.meta.evidenceRefs[0], publishedArtifactRef);
+
+    const sessionsList = await bridge.projectBotListSessions({ workspaceId });
+    assert.equal((sessionsList.sessions || []).length, 0, 'Zero delegated worker sessions should exist');
+
+    const supervisor = createSessionSupervisor({
+      conversationStore,
+      goalPlanStore,
+      canManageWorkspace: () => false,
+      deferRecovery: true,
+    });
+    const interactive = createInteractiveRuntime({
+      rootDir: runtimeRoot,
+      goalPlanStore,
+      conversationStore,
+      getBotConversationId: (id) => profileStore.read(id)?.agentConversationId,
+      holdsLease: () => false,
+      enabled: () => false,
+      classifyContext: () => 'D3_private',
+      getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }),
+    });
+    const readEvidenceBody = createEvidenceReader({
+      resolveScopedRecord: (ref, context) => interactive.publications.resolveEvidence(ref, context),
+      projectDeliveries: createEvidenceDeliveryProjection({
+        getConversationId: (id) => profileStore.read(id)?.agentConversationId,
+        getPlan: (id) => goalPlanStore.getPlan(id),
+        getSession: (id) => supervisor.get({ sessionId: id, detail: 'report' }),
+      }),
+      findRecords: (refs) => goalPlanStore.findEvidenceIndexRecords?.(refs),
+      readMessages: (id) => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
+      readArtifact: () => null,
+    });
+
+    // Desktop local evidence reader authenticates Main Bot direct publication without requiring a GoalPlan!
+    const evidence = readEvidenceBody(publishedArtifactRef, { context: { workspaceId } });
+    assert.equal(evidence.availability, 'available', `direct bot evidence unavailable: ${JSON.stringify(evidence)}`);
+    assert.equal(evidence.deliveryStatus, 'available');
+    assert.equal(evidence.deliveries.length, 1);
+    assert.equal(evidence.deliveries[0].kind, 'interactive');
+    assert.equal(evidence.deliveries[0].label, '主 Bot 交互回复演示');
+    assert.equal(evidence.deliveries[0].specHash, INTERACTIVE_CONTEXT.specHash);
+
+    // Wrong workspace is strictly denied!
+    const crossWorkspace = readEvidenceBody(publishedArtifactRef, { context: { workspaceId: 'ws-other' } });
+    assert.notEqual(crossWorkspace.deliveryStatus, 'available');
+
+    // InteractiveViewService opens & saves filter state for the Main Bot card!
+    const fakeSender = { isDestroyed: () => false, once() {}, removeListener() {} };
+    const botConvId = profileStore.read(workspaceId).agentConversationId;
+    const views = createInteractiveViewService({
+      resultStore: interactive.resultStore,
+      stateStore: interactive.stateStore,
+      resolveSource: (_sender, reference) => ({
+        owner: { workspaceId, conversationId: botConvId },
+        assertIdentity: () => true,
+        assertCurrent: () => reference.owner.workspaceId === workspaceId && reference.owner.conversationId === botConvId,
+        hasReplacement: () => false,
+      }),
+    });
+    try {
+      const opened = await views.open(fakeSender, {
+        reference: evidence.deliveries[0].interactiveReference,
+        requestId: 'open-direct-1',
+      });
+      assert.equal(opened.ok, true, `views.open failed: ${JSON.stringify(opened)}`);
+      assert.deepEqual(opened.result.content.initialValues, { $status: '全部' });
+      const acquired = views.acquire(fakeSender, {
+        handle: opened.handle,
+        expectedRevision: opened.state.stateRevision,
+      });
+      assert.equal(acquired.ok, true);
+      const saved = views.save(fakeSender, {
+        handle: opened.handle,
+        writer: acquired.writer,
+        expectedRevision: opened.state.stateRevision,
+        requestId: 'save-direct-1',
+        values: { $status: '风险' },
+        inputDrafts: {},
+      });
+      assert.equal(saved.ok, true);
+    } finally {
+      views.dispose();
+    }
+  } finally {
+    await client.dispose();
+    await mockServer.close();
+    cleanup();
+  }
+});

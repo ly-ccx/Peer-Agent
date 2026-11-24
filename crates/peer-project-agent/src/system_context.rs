@@ -31,6 +31,7 @@ pub struct ProjectAgentContextInput<'a> {
     pub mounted_capabilities_summary: Option<&'a str>,
     pub host_surface: &'a str,
     pub interactive_publishing_available: bool,
+    pub interactive_catalog_prompt: Option<&'a str>,
 }
 
 fn hash(s: &str) -> String {
@@ -179,12 +180,14 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
     }
 
     let interactive_status = if input.interactive_publishing_available {
-        "Interactive Results (OpenUI): ENABLED on this Desktop host.\n\
-         - When the user asks for an interactive card, chart, filterable table, or calculator, delegate a worker via `spawn_session` with `requiredCapabilities: [\"local.interactive.publish\", \"local.interactive.inspect\"]` (`readOnly: true` is permitted for internal result publishing).\n\
-         - After the worker finishes and publishes, report the outcome via `post_reply` citing the sessionId in `sources` so the host attaches the verified interactive card to your reply and task record."
+        "Interactive Results (OpenUI): ENABLED on this Desktop host — you can reply interactively DIRECTLY.\n\
+         - When the user asks for an interactive card, filterable table, chart, comparison matrix, calculator, or interactive reply, call `publish_interactive_result` directly (following the `Peer Interactive Results Catalog & Rules` section below, `peer-basic-1` DSL) and then deliver a brief human summary via `post_reply`.\n\
+         - You do NOT need to spawn a worker session just to produce an interactive reply! Only delegate via `spawn_session` if the request also requires heavy file edits, shell commands, or multi-step repo work.\n\
+         - The Desktop host automatically attaches cards you publish in this turn (as well as cards from cited worker `sources`) and renders them INLINE right inside your reply bubble — users can click/filter immediately, put their selected conditions back into the chat draft, or expand the card into the right panel.\n\
+         - Never tell the user to hunt through reply details or mention internal tool names; refer naturally to the interactive card below."
     } else if input.host_surface == "desktop" {
         "Interactive Results (OpenUI): DISABLED in settings (`projectAgent.interactiveResults` is off).\n\
-         - Do not request `local.interactive.publish` until the user turns on \"交互结果预览（OpenUI）\" / \"Interactive results preview (OpenUI)\" in Settings -> General."
+         - Do not attempt to publish interactive cards until the user turns on \"交互结果预览（OpenUI）\" / \"Interactive results preview (OpenUI)\" in Settings -> General."
     } else {
         "Interactive Results (OpenUI): Unavailable on terminal/CLI host (text fallback reading only; publishing interactive cards requires the Desktop client with Interactive Results enabled)."
     };
@@ -195,6 +198,20 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         interactive_status.to_owned(),
         "runtime",
     ));
+    if input.interactive_publishing_available
+        && let Some(catalog) = input
+            .interactive_catalog_prompt
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    {
+        sections.push(section(
+            "project-agent.interactive-catalog",
+            "L5_TOOL_RULES",
+            38,
+            catalog.to_owned(),
+            "runtime",
+        ));
+    }
 
     if input.turn_kind == "wake" {
         let mut reminder = String::from(
@@ -404,6 +421,7 @@ mod tests {
             mounted_capabilities_summary: None,
             host_surface: "desktop",
             interactive_publishing_available: false,
+            interactive_catalog_prompt: None,
         }
     }
 

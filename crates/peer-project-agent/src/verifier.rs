@@ -1026,6 +1026,7 @@ pub(crate) async fn run_independent_verifier_with_interactive(
                     role: "verifier".to_owned(),
                     can_publish: false,
                     bridge: Arc::clone(bridge),
+                    on_published: None,
                 },
             )));
             context_extensions.push(interactive_context_extension(Some(bridge.as_ref()), false));

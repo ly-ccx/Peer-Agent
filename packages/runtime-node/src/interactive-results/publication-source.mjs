@@ -5,6 +5,16 @@ import { encode, problem } from './storage.mjs';
 import { sessionReportEvidenceRefs } from '../project-agent/session-report.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
+const BOT_DIRECT_PLAN_PREFIX = 'bot-reply:';
+
+function isDirectBotSource(owner, source) {
+  return !!source
+    && source.conversationId === owner.conversationId
+    && typeof source.planId === 'string'
+    && source.planId.startsWith(BOT_DIRECT_PLAN_PREFIX)
+    && interactiveToken(source.planId)
+    && source.sessionId === source.planId;
+}
 
 /** Published identity projection. Model program/data reads still require the inspect Provider. */
 export function createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession, readPortableSummary }) {
@@ -31,9 +41,15 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
   function publicationProof(target, owner, requestPlan, operation, alias) {
     if (!target || !same(target.owner, owner)) throw problem('interactive_scope_denied');
     const descriptor = resultStore.getVersionMetadata(target, { allowCleaned: true }), source = descriptor.source;
-    const sourcePlan = planFor(owner, { planId: source.planId, sessionId: source.sessionId });
-    if (sourcePlan.conversationId !== source.conversationId || !interactiveToken(source.toolCallId)
-      || requestPlan && (requestPlan.planId !== source.planId || alias && source.toolCallId !== alias) && !operation?.unchanged) throw problem('interactive_scope_denied');
+    const directBot = !requestPlan && !alias && isDirectBotSource(owner, source);
+    let sourcePlan = null;
+    if (directBot) {
+      if (!interactiveToken(source.toolCallId)) throw problem('interactive_scope_denied');
+    } else {
+      sourcePlan = planFor(owner, { planId: source.planId, sessionId: source.sessionId });
+      if (sourcePlan.conversationId !== source.conversationId || !interactiveToken(source.toolCallId)
+        || requestPlan && (requestPlan.planId !== source.planId || alias && source.toolCallId !== alias) && !operation?.unchanged) throw problem('interactive_scope_denied');
+    }
     const original = resultStore.getOperation({ owner, conversationId: source.conversationId, toolCallId: source.toolCallId });
     const { publicationStatus, ...metadata } = descriptor;
     if (original?.publicationStatus !== 'published' || original.unchanged || !same(original.reference, target)
@@ -45,7 +61,7 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
       || record.planId !== source.planId || record.conversationId !== source.conversationId || record.toolCallId !== source.toolCallId
       || record.capabilityId !== INTERACTIVE_PUBLISH_CAPABILITY || record.toolName !== INTERACTIVE_PUBLISH_TOOL
       || record.evidenceRef !== descriptor.artifactRef || record.createdAt !== descriptor.createdAt) throw problem('interactive_publication_unavailable');
-    return { descriptor, sourcePlan, record, artifact };
+    return { descriptor, sourcePlan, directBot, record, artifact };
   }
   function referenceFor(plan, owner, ref) {
     let target = parseInteractiveArtifactRef(ref), operation, alias;
@@ -125,23 +141,25 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
         if ((requestPlan && requestPlan.planId !== record.planId) || !same(ownerFor(context.workspaceId), owner)) throw problem('interactive_scope_denied');
         return { record, body: { kind: 'observation', interactiveAvailability: 'origin_only', text: summary.textFallback, truncated: summary.truncated } };
       }
-      const { descriptor, sourcePlan, record, artifact } = proof;
-      requireSession(owner, sourcePlan);
-      const task = { planId: sourcePlan.planId, sessionId: sourcePlan.delegationOrigin.sessionId };
+      const { descriptor, sourcePlan, directBot, record, artifact } = proof;
+      if (!directBot) requireSession(owner, sourcePlan);
+      const resolvedContext = directBot
+        ? { workspaceId: owner.workspaceId }
+        : { workspaceId: owner.workspaceId, task: { planId: sourcePlan.planId, sessionId: sourcePlan.delegationOrigin.sessionId } };
       let fixed;
       try { fixed = resultStore.getVersion(target); }
       catch (error) {
         if (error.code !== 'interactive_content_cleaned') throw error;
         const saved = createInteractiveTextReader({ resultStore, assertOwner: candidate => same(ownerFor(candidate.workspaceId), candidate) })(target);
         if (saved.availability !== 'cleaned') throw problem('interactive_cleanup_corrupt');
-        return { record, context: { workspaceId: owner.workspaceId, task },
+        return { record, context: resolvedContext,
           body: { text: `Result content cleaned. Saved model summary, unverified
 ${saved.textFallback}`, truncated: saved.truncated } };
       }
       const { content: _content, provenance: _provenance, ...actualDescriptor } = fixed;
       if (!same(descriptor, actualDescriptor) || artifact.specHash !== fixed.content.specHash || artifact.label !== fixed.content.title) throw problem('interactive_publication_unavailable');
       if (!same(ownerFor(context.workspaceId), owner)) throw problem('interactive_scope_denied');
-      return { record, context: { workspaceId: owner.workspaceId, task },
+      return { record, context: resolvedContext,
         body: { text: `Saved model summary, unverified\n${fixed.content.textFallback}`, truncated: false } };
     },
   };

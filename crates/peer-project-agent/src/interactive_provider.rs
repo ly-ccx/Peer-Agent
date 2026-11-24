@@ -1,6 +1,9 @@
-//! Governed worker & verifier CapabilityProvider for OpenUI interactive results
+//! Governed Main Bot, worker & verifier CapabilityProvider for OpenUI interactive results
 //! (`local.interactive.publish` and `local.interactive.inspect`, ADR 118).
 //!
+//! - `project_agent` (when enabled on Desktop host): projects ONLY `publish_interactive_result`
+//!   (`inspect_interactive_result` is already registered on `ProjectCapabilityProvider`), writing
+//!   only to the Bot's internal result space with canonical `bot-reply:<turnId>` source identity.
 //! - `session_worker` (when enabled on Desktop host): projects both `publish_interactive_result`
 //!   and `inspect_interactive_result`, even on `readOnly: true` tasks (internal publication
 //!   exception per ADR 118 §9.1).
@@ -274,6 +277,7 @@ pub struct WorkSessionInteractiveContext {
     pub role: String,
     pub can_publish: bool,
     pub bridge: Arc<dyn InteractiveContentBridge>,
+    pub on_published: Option<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
 pub struct WorkSessionInteractiveProvider {
@@ -288,41 +292,50 @@ impl WorkSessionInteractiveProvider {
             repair_failures: Arc::new(AtomicUsize::new(0)),
         }
     }
+
+    fn allows_publish(&self) -> bool {
+        self.ctx.can_publish
+            && matches!(self.ctx.role.as_str(), "session_worker" | "project_agent")
+    }
 }
 
 impl CapabilityProvider for WorkSessionInteractiveProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
         let mut out = Vec::new();
-        if self.ctx.can_publish && self.ctx.role == "session_worker" {
+        if self.allows_publish() {
             out.push((
                 INTERACTIVE_PUBLISH_TOOL.to_owned(),
                 json!({
                     "capabilityId": INTERACTIVE_PUBLISH_CAPABILITY,
                     "name": INTERACTIVE_PUBLISH_TOOL,
-                    "description": "Publish a bounded Peer interactive result as an internal user artifact of this admitted worker. Use only the current admitted catalog, fixed materials, and an explicit create or revise base. This does not write project files, refresh data, approve actions or complete a task. ReadOnly workers may publish internally with the same scoped authorization. Model data stays labelled as assumptions.",
+                    "description": "Publish a bounded Peer interactive result (OpenUI card, filterable table, chart, or calculator) as an internal user artifact of this project Bot. Use only the current admitted catalog, fixed materials or model-data, and an explicit create or revise base. In Desktop, published cards render inline inside your reply bubble and can expand into the side panel. This does not write project files, run commands, refresh external data, approve actions, or complete a task. Model data stays labelled as assumptions.",
                     "source": "native",
                     "riskLevel": "L2_local_write",
                     "dataLevel": "D2_sensitive",
                     "health": "available",
-                    "modeScopes": ["chat", "goal"],
+                    "modeScopes": ["chat", "goal", "project_agent"],
                     "inputSchema": publish_schema(),
                 }),
             ));
         }
-        out.push((
-            INTERACTIVE_INSPECT_TOOL.to_owned(),
-            json!({
-                "capabilityId": INTERACTIVE_INSPECT_CAPABILITY,
-                "name": INTERACTIVE_INSPECT_TOOL,
-                "description": "Read an admitted fixed result or original publication receipt. Workers and Verifiers can inspect metadata, fallback text, actual program, selected data bindings, and bounded pure evaluation.",
-                "source": "native",
-                "riskLevel": "L1_local_read",
-                "dataLevel": "D2_sensitive",
-                "health": "available",
-                "modeScopes": ["chat", "goal"],
-                "inputSchema": inspect_schema(),
-            }),
-        ));
+        // Main Bot (`project_agent`) already registers `inspect_interactive_result` on
+        // `ProjectCapabilityProvider`; avoid duplicate tool registration in the same registry.
+        if self.ctx.role != "project_agent" {
+            out.push((
+                INTERACTIVE_INSPECT_TOOL.to_owned(),
+                json!({
+                    "capabilityId": INTERACTIVE_INSPECT_CAPABILITY,
+                    "name": INTERACTIVE_INSPECT_TOOL,
+                    "description": "Read an admitted fixed result or original publication receipt. Workers and Verifiers can inspect metadata, fallback text, actual program, selected data bindings, and bounded pure evaluation.",
+                    "source": "native",
+                    "riskLevel": "L1_local_read",
+                    "dataLevel": "D2_sensitive",
+                    "health": "available",
+                    "modeScopes": ["chat", "goal"],
+                    "inputSchema": inspect_schema(),
+                }),
+            ));
+        }
         out
     }
 
@@ -343,7 +356,7 @@ impl CapabilityProvider for WorkSessionInteractiveProvider {
         }
         match capability {
             cap if cap == INTERACTIVE_PUBLISH_CAPABILITY => {
-                if !self.ctx.can_publish || self.ctx.role != "session_worker" {
+                if !self.allows_publish() {
                     return Err(HostError("tool_not_projected"));
                 }
                 Ok(Box::new(InteractiveEffect {
@@ -355,14 +368,16 @@ impl CapabilityProvider for WorkSessionInteractiveProvider {
                     projection_id: None,
                 }))
             }
-            cap if cap == INTERACTIVE_INSPECT_CAPABILITY => Ok(Box::new(InteractiveEffect {
-                capability: INTERACTIVE_INSPECT_CAPABILITY,
-                args,
-                ctx: self.ctx.clone(),
-                repair_failures: Arc::clone(&self.repair_failures),
-                port: None,
-                projection_id: None,
-            })),
+            cap if cap == INTERACTIVE_INSPECT_CAPABILITY && self.ctx.role != "project_agent" => {
+                Ok(Box::new(InteractiveEffect {
+                    capability: INTERACTIVE_INSPECT_CAPABILITY,
+                    args,
+                    ctx: self.ctx.clone(),
+                    repair_failures: Arc::clone(&self.repair_failures),
+                    port: None,
+                    projection_id: None,
+                }))
+            }
             _ => Err(HostError("tool_not_projected")),
         }
     }
@@ -705,7 +720,7 @@ async fn run_publish(
             store.get_operation(&ctx.owner, &ctx.plan_conversation_id, tool_call_id)
             && refreshed["publicationStatus"].as_str() == Some("published")
         {
-            return build_published_outcome(&store, &refreshed);
+            return build_published_outcome(ctx, &store, &refreshed);
         }
         return failed_publish_outcome(
             "publication_index_pending",
@@ -953,7 +968,7 @@ async fn run_publish(
     };
 
     if receipt["publicationStatus"].as_str() == Some("published") {
-        return build_published_outcome(&store, &receipt);
+        return build_published_outcome(ctx, &store, &receipt);
     }
 
     // Durably reconcile pending publication into `goal-plans/evidence-index.jsonl`
@@ -963,7 +978,7 @@ async fn run_publish(
                 store.get_operation(&ctx.owner, &ctx.plan_conversation_id, tool_call_id)
                 && final_receipt["publicationStatus"].as_str() == Some("published")
             {
-                return build_published_outcome(&store, &final_receipt);
+                return build_published_outcome(ctx, &store, &final_receipt);
             }
             EffectOutcome {
                 status: "failed",
@@ -1003,7 +1018,11 @@ async fn run_publish(
     }
 }
 
-fn build_published_outcome(store: &InteractiveResultStore, receipt: &Value) -> EffectOutcome {
+fn build_published_outcome(
+    ctx: &WorkSessionInteractiveContext,
+    store: &InteractiveResultStore,
+    receipt: &Value,
+) -> EffectOutcome {
     let ref_obj: Option<InteractiveResultReference> =
         serde_json::from_value(receipt["reference"].clone()).ok();
     let version = ref_obj
@@ -1016,6 +1035,11 @@ fn build_published_outcome(store: &InteractiveResultStore, receipt: &Value) -> E
         .or_else(|| receipt["artifactRef"].as_str())
         .unwrap_or("")
         .to_owned();
+    if !artifact_ref.is_empty()
+        && let Some(cb) = &ctx.on_published
+    {
+        cb(artifact_ref.clone());
+    }
     let title = version
         .as_ref()
         .and_then(|v| v["content"]["title"].as_str())
@@ -1416,6 +1440,7 @@ mod tests {
             role: "session_worker".to_owned(),
             can_publish: true,
             bridge: Arc::clone(&bridge),
+            on_published: None,
         };
         let repair_counter = AtomicUsize::new(0);
 
@@ -1510,5 +1535,77 @@ mod tests {
                 .unwrap()
                 .contains("Evaluated 项目交付概览")
         );
+    }
+
+    #[tokio::test]
+    async fn main_bot_direct_publish_projects_publish_only_and_notifies_callback() {
+        let dir = tempdir().unwrap();
+        let ws = tempdir().unwrap();
+        let bridge: Arc<dyn InteractiveContentBridge> = Arc::new(FakeOpenUiBridge {
+            fail_first: AtomicUsize::new(0),
+        });
+        let owner = InteractiveOwner {
+            workspace_id: "ws-bot-direct".to_owned(),
+            conversation_id: "conv-bot-direct".to_owned(),
+        };
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let recorded_cb = Arc::clone(&recorded);
+        let ctx = WorkSessionInteractiveContext {
+            data_home: dir.path().to_path_buf(),
+            owner: owner.clone(),
+            plan_id: "bot-reply:turn-1".to_owned(),
+            session_id: "bot-reply:turn-1".to_owned(),
+            plan_conversation_id: "conv-bot-direct".to_owned(),
+            execution_epoch: "bot-turn:turn-1".to_owned(),
+            role: "project_agent".to_owned(),
+            can_publish: true,
+            bridge,
+            on_published: Some(Arc::new(move |artifact_ref| {
+                recorded_cb.lock().unwrap().push(artifact_ref);
+            })),
+        };
+        let mut provider = WorkSessionInteractiveProvider::new(ctx.clone());
+        let manifests = provider.manifests();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].0, INTERACTIVE_PUBLISH_TOOL);
+        assert!(
+            manifests[0].1["modeScopes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v.as_str() == Some("project_agent"))
+        );
+        assert!(
+            provider
+                .prepare(INTERACTIVE_INSPECT_CAPABILITY, json!({}), ws.path(), dir.path())
+                .is_err()
+        );
+        let repair_counter = AtomicUsize::new(0);
+        let ok = run_publish(
+            &ctx,
+            &json!({
+                "publication": { "kind": "create" },
+                "title": "主 Bot 交互卡片",
+                "textFallback": "主 Bot 直接生成的交互卡片摘要。",
+                "program": "$status=\"all\"\nroot=Col([Title(\"主 Bot 交互卡片\")])",
+                "inputs": [{ "bindingId": "rows", "source": { "kind": "model-data", "value": [{"id": "a"}] } }]
+            }),
+            "tc-bot-direct-1",
+            "turn-1",
+            "conv-bot-direct",
+            &repair_counter,
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(ok.status, "success");
+        assert_eq!(ok.output["publicationStatus"], "published");
+        let artifact_ref = ok.output["artifactRef"].as_str().unwrap().to_owned();
+        assert_eq!(recorded.lock().unwrap().as_slice(), &[artifact_ref.clone()]);
+        let rows = EvidenceIndexStore::new(dir.path())
+            .find(&[artifact_ref], None)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["planId"], "bot-reply:turn-1");
+        assert_eq!(rows[0]["conversationId"], "conv-bot-direct");
     }
 }

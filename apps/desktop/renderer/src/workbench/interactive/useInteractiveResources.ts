@@ -83,8 +83,14 @@ export function useInteractiveResources(ports: {
   const closeInteractive = useCallback(async (id: string) => {
     const tab = session?.snapshot().layout.interactive.tabs.find(tab => tab.id === id); if (!tab) return true;
     const registry = interactiveSessionRegistry(window.peerAgent?.interactiveResults);
-    if (registry && !await registry.close(tab.reference)) { setNotice({ key, code: 'interactive_save_unconfirmed' }); return false; }
-    if (!session!.close(tab.reference)) { void registry?.open(tab.reference); setNotice({ key, code: session!.snapshot().error ?? 'resource_layout_limit' }); return false; }
+    const shared = (registry?.get(tab.reference)?.uses ?? 0) > 1;
+    if (registry) {
+      const ok = shared
+        ? await (registry.get(tab.reference)?.session?.flush() ?? Promise.resolve(true))
+        : await registry.close(tab.reference);
+      if (!ok) { setNotice({ key, code: 'interactive_save_unconfirmed' }); return false; }
+    }
+    if (!session!.close(tab.reference)) { if (!shared) void registry?.open(tab.reference); setNotice({ key, code: session!.snapshot().error ?? 'resource_layout_limit' }); return false; }
     setNotice(null); return true;
   }, [session, key]);
   const rememberInteractive = useCallback((reference: InteractiveResultReference, point: Pick<ResourceWindowNavigation, 'top' | 'left'>, generation: number) => {

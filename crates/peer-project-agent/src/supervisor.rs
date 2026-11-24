@@ -2519,6 +2519,7 @@ impl SessionSupervisor {
                         role: "session_worker".to_owned(),
                         can_publish: can_publish_interactive,
                         bridge: Arc::clone(&bridge),
+                        on_published: None,
                     },
                 )));
                 context_extensions.push(interactive_context_extension(
