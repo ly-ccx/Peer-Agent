@@ -148,32 +148,40 @@ impl CoordinationReducer for NativeCoordinationReducer {
     fn reduce(&self, state: &Value, entry: &Value) -> Result<Value, &'static str> {
         javascript_json_string(state).map_err(|_| "coordination_state_limit")?;
         javascript_json_string(entry).map_err(|_| "coordination_record_too_large")?;
-        let next = reduce_inner(state, entry)?;
+        let next = reduce_owned(state.clone(), entry)?;
         javascript_json_string(&next).map_err(|_| "coordination_state_limit")?;
         Ok(next)
     }
+
+    fn reduce_in_place(&self, state: &mut Value, entry: &Value) -> Result<(), &'static str> {
+        javascript_json_string(entry).map_err(|_| "coordination_record_too_large")?;
+        let current = std::mem::take(state);
+        *state = reduce_owned(current, entry)?;
+        Ok(())
+    }
+
+    fn validate_state(&self, state: &Value) -> Result<(), &'static str> {
+        javascript_json_string(state).map_err(|_| "coordination_state_limit")?;
+        Ok(())
+    }
 }
-fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
-    // Bound before cloning, including source object keys and future fields.
-    javascript_json_string(state).map_err(|_| "coordination_state_limit")?;
-    javascript_json_string(entry).map_err(|_| "coordination_record_too_large")?;
+fn reduce_owned(mut next: Value, entry: &Value) -> Result<Value, &'static str> {
     if entry.get("schemaVersion").is_some_and(|v| *v != 1) {
         return Err("coordination_schema_unsupported");
     }
-    let revision = state["revision"].as_u64().ok_or_else(error)?;
+    let revision = next["revision"].as_u64().ok_or_else(error)?;
     if revision >= 9_007_199_254_740_991 || entry["revision"].as_u64() != Some(revision + 1) {
         return Err("coordination_revision_gap");
     }
     let kind = id(&entry["kind"])?;
     if kind.starts_with("history_") {
-        return history::reduce(state, entry);
+        return history::reduce(&next, entry);
     }
-    let mut next = state.clone();
     next["revision"] = json!(revision + 1);
     for name in ["events", "works", "deliveries"] {
         bucket(&mut next, name)?;
     }
-    match id(&entry["kind"])? {
+    match kind {
         "session_control" => {
             return crate::session_control::reduce_session_control(&next, entry)
                 .map_err(|e| e.code());
@@ -399,7 +407,6 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
         }
         _ => return Err("unknown_coordination_event"),
     }
-    javascript_json_string(&next).map_err(|_| "coordination_state_limit")?;
     Ok(next)
 }
 
@@ -469,5 +476,43 @@ mod tests {
             Err("coordination_revision_gap")
         );
         assert!(state["works"].get("kept").is_some());
+    }
+
+    #[test]
+    fn reduce_in_place_matches_reduce_and_validate_state_enforces_limit() {
+        let initial = json!({"revision":0,"events":{},"works":{},"deliveries":{}});
+        let events = [
+            json!({"schemaVersion":1,"revision":1,"kind":"work","work":{"workId":"w1","workspaceId":"ws","parentConversationId":"conv","anchorInputIds":["i1"],"sessionIds":["s1"],"state":"running","budget":{"tokens":10,"costUsd":0.5}}}),
+            json!({"schemaVersion":1,"revision":2,"kind":"work_updated","workId":"w1","work":{"state":"completed"}}),
+            json!({"schemaVersion":1,"revision":3,"kind":"usage_observed","workId":"w1","observationId":"obs1","tokens":25,"costUsd":0.25}),
+            json!({"schemaVersion":1,"revision":4,"kind":"reply_prepared","message":{"id":"m1","content":"done"}}),
+            json!({"schemaVersion":1,"revision":5,"kind":"reply_delivered","messageId":"m1"}),
+        ];
+
+        let mut step_state = initial.clone();
+        for ev in &events {
+            step_state = NativeCoordinationReducer.reduce(&step_state, ev).unwrap();
+        }
+
+        let mut replay_state = initial;
+        for ev in &events {
+            NativeCoordinationReducer
+                .reduce_in_place(&mut replay_state, ev)
+                .unwrap();
+        }
+        NativeCoordinationReducer
+            .validate_state(&replay_state)
+            .unwrap();
+
+        assert_eq!(
+            javascript_json_string(&replay_state).unwrap(),
+            javascript_json_string(&step_state).unwrap()
+        );
+
+        let oversized = json!({"revision":0,"events":{},"works":{"big":{"opaque":"x".repeat(1_100_000)}},"deliveries":{}});
+        assert_eq!(
+            NativeCoordinationReducer.validate_state(&oversized),
+            Err("coordination_state_limit")
+        );
     }
 }

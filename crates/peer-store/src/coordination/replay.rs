@@ -175,9 +175,8 @@ impl<R: CoordinationReducer> Replay<'_, R> {
             return Err(Error::Revision);
         }
         storage.guard()?;
-        self.state = self
-            .reducer
-            .reduce(&self.state, &entry)
+        self.reducer
+            .reduce_in_place(&mut self.state, &entry)
             .map_err(Error::Reducer)?;
         if self.state["revision"].as_u64() != Some(envelope_revision) {
             return Err(Error::Revision);

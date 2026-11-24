@@ -238,6 +238,30 @@ fn read_settings_model_routing(home: &Path) -> Option<Value> {
     doc.get("modelRouting").filter(|v| v.is_object()).cloned()
 }
 
+/// Whether routing explicitly selects this role rather than using the default model.
+pub fn has_role_model_config(home: &Path, role: &str, project_policy: Option<&Value>) -> bool {
+    let settings = read_settings_model_routing(home);
+    role_model_setting(role, project_policy, settings.as_ref())
+        .is_some_and(|setting| matches!(text(setting, "mode"), Some("fixed" | "tier" | "auto")))
+}
+
+fn role_model_setting<'a>(
+    role: &str,
+    policy: Option<&'a Value>,
+    routing: Option<&'a Value>,
+) -> Option<&'a Value> {
+    policy
+        .and_then(|p| p.get("overrides"))
+        .and_then(|o| o.get(role))
+        .filter(|v| v.is_object())
+        .or_else(|| {
+            routing
+                .and_then(|r| r.get("roles"))
+                .and_then(|roles| roles.get(role))
+                .filter(|v| v.is_object())
+        })
+}
+
 /// Resolve a role model using `profile.modelPolicy` and `<home>/settings.json` `modelRouting`,
 /// while honoring explicit provider/model overrides first.
 pub fn resolve_role_model(
@@ -307,17 +331,7 @@ pub fn resolve_role_model(
         true
     };
 
-    let role_setting = project_policy
-        .and_then(|p| p.get("overrides"))
-        .and_then(|o| o.get(role))
-        .filter(|v| v.is_object())
-        .or_else(|| {
-            model_routing
-                .as_ref()
-                .and_then(|r| r.get("roles"))
-                .and_then(|roles| roles.get(role))
-                .filter(|v| v.is_object())
-        });
+    let role_setting = role_model_setting(role, project_policy, model_routing.as_ref());
 
     let mut candidate_ids: Vec<&str> = Vec::new();
     let mut role_effort: Option<&str> = None;

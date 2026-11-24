@@ -1035,6 +1035,32 @@ impl ConversationStore {
         Ok(Some(updated))
     }
 
+    pub fn update_workspace_path(
+        &self,
+        id: &str,
+        workspace_path: &str,
+    ) -> Result<Option<Value>, StoreError> {
+        if !valid_id(id, false) {
+            return Err(StoreError::InvalidInput);
+        }
+        let trimmed = peer_protocol::javascript_trim(workspace_path);
+        if trimmed.is_empty() || trimmed.len() > 16_384 {
+            return Err(StoreError::InvalidInput);
+        }
+        let directory = self.write_directory()?;
+        let _held = crate::conversation_write::locks(&directory, None, None)?;
+        let file = directory.join("index.jsonl");
+        let mut index = log::read(&file, None)?;
+        let Some(pos) = find_position(&index, id) else {
+            return Ok(None);
+        };
+        index[pos]["workspacePath"] = json!(trimmed);
+        let updated = with_message_count(normalize_meta(index[pos].clone()));
+        log::replace(&file, &log::encode(&index)?, None)?;
+        self.write_change_event(&updated, "metadata-updated");
+        Ok(Some(updated))
+    }
+
     pub fn update_model_effort_classic(
         &self,
         id: &str,

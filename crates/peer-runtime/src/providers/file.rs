@@ -207,19 +207,24 @@ impl CapabilityProvider for FileProvider {
                 Operation::Write => &["path", "content", "allow_overwrite"],
             },
         )?;
-        let resolve = if operation == Operation::Write {
-            target::resolve_write
+        let canonical_workspace =
+            std::fs::canonicalize(workspace).map_err(|_| HostError("file_unavailable"))?;
+        let raw_path = if operation == Operation::Search && args.get("path").is_none() {
+            "."
         } else {
-            resolve
+            string(&args, "path")?
         };
-        let path = resolve(
-            workspace,
-            if operation == Operation::Search && args.get("path").is_none() {
-                "."
-            } else {
-                string(&args, "path")?
-            },
-        )?;
+        let path = if operation == Operation::Write {
+            target::resolve_write(&canonical_workspace, raw_path)?
+        } else {
+            match resolve(&canonical_workspace, raw_path) {
+                Ok(path) => path,
+                Err(HostError("file_parent_unavailable")) => {
+                    target::resolve_write(&canonical_workspace, raw_path)?
+                }
+                Err(error) => return Err(error),
+            }
+        };
         match operation {
             Operation::Write => {
                 if string(&args, "content")?.len() > WRITE_BYTES {
@@ -272,8 +277,7 @@ impl CapabilityProvider for FileProvider {
             path,
             // Match the canonicalized target's namespace as well (macOS /var
             // is an alias of /private/var); presentation remains workspace-relative.
-            workspace: std::fs::canonicalize(workspace)
-                .map_err(|_| HostError("file_unavailable"))?,
+            workspace: canonical_workspace,
             operation,
             snapshots: self.snapshots.clone(),
             target,

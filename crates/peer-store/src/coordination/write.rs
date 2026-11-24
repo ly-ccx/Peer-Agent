@@ -195,7 +195,11 @@ impl CoordinationStore {
             storage.publish("coordination-v2/manifest.json", &raised, &[Some(&manifest)])?;
         }
         let before = self.read(reducer, cancel)?;
-        crate::protect_coordination_writer(&self.lease, cancel)?;
+        if crate::protect_coordination_writer(&self.lease, cancel)?
+            == crate::FenceOutcome::AlreadyProtected
+        {
+            return Ok(before);
+        }
         let after = self.read(reducer, cancel)?;
         if before.state != after.state || before.hash != after.hash {
             return Err(Error::Changed);

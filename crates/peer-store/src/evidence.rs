@@ -10,9 +10,41 @@ use std::{
     collections::{HashMap, HashSet},
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
+    sync::{Mutex, OnceLock, atomic::AtomicBool},
     time::Duration,
 };
+
+#[derive(Clone)]
+struct CachedEvidenceRefs {
+    identity: files::FileIdentity,
+    by_plan: HashMap<String, HashSet<String>>,
+    by_conv: HashMap<String, HashSet<String>>,
+}
+
+static EVIDENCE_REFS_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedEvidenceRefs>>> = OnceLock::new();
+
+fn evidence_refs_cache() -> &'static Mutex<HashMap<PathBuf, CachedEvidenceRefs>> {
+    EVIDENCE_REFS_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn collect_matching_refs(
+    cached: &CachedEvidenceRefs,
+    plan_id: Option<&str>,
+    conversation_ids: &[&str],
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if let Some(pid) = plan_id
+        && let Some(refs) = cached.by_plan.get(pid)
+    {
+        out.extend(refs.iter().cloned());
+    }
+    for &cid in conversation_ids {
+        if let Some(refs) = cached.by_conv.get(cid) {
+            out.extend(refs.iter().cloned());
+        }
+    }
+    out
+}
 
 const MAX_RECORD_BYTES: usize = log::MAX_BYTES;
 /// Host-owned execution report, never accepted from a renderer/model endpoint.
@@ -224,6 +256,80 @@ impl EvidenceIndexStore {
         Self {
             file: data_home.as_ref().join("goal-plans/evidence-index.jsonl"),
         }
+    }
+    /// Bounded read of indexed Evidence refs for `plan_id` and `conversation_ids` in one cached scan.
+    pub fn refs_for_plan_and_conversations(
+        &self,
+        plan_id: Option<&str>,
+        conversation_ids: &[&str],
+        cancel: Option<&AtomicBool>,
+    ) -> Result<HashSet<String>, StoreError> {
+        log::check_cancel(cancel)?;
+        if let Some(pid) = plan_id
+            && !text(pid, 200)
+        {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        for &cid in conversation_ids {
+            if !text(cid, 200) {
+                return Err(StoreError::EvidenceInvalid);
+            }
+        }
+        if plan_id.is_none() && conversation_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let Some(current_id) = files::identity(&self.file)? else {
+            if let Ok(mut guard) = evidence_refs_cache().lock() {
+                guard.remove(&self.file);
+            }
+            return Ok(HashSet::new());
+        };
+        if let Ok(guard) = evidence_refs_cache().lock()
+            && let Some(cached) = guard.get(&self.file)
+            && cached.identity == current_id
+        {
+            return Ok(collect_matching_refs(cached, plan_id, conversation_ids));
+        }
+
+        let mut by_plan: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut by_conv: HashMap<String, HashSet<String>> = HashMap::new();
+        scan_records(&self.file, cancel, &[], |row| {
+            let Some(ev_ref) = row["evidenceRef"].as_str() else {
+                return Ok(());
+            };
+            if let Some(pid) = row["planId"].as_str() {
+                by_plan
+                    .entry(pid.to_owned())
+                    .or_default()
+                    .insert(ev_ref.to_owned());
+            }
+            if let Some(cid) = row["conversationId"].as_str() {
+                by_conv
+                    .entry(cid.to_owned())
+                    .or_default()
+                    .insert(ev_ref.to_owned());
+            }
+            Ok(())
+        })?;
+
+        let cached = CachedEvidenceRefs {
+            identity: current_id.clone(),
+            by_plan,
+            by_conv,
+        };
+        let result = collect_matching_refs(&cached, plan_id, conversation_ids);
+        if files::identity(&self.file)?.as_ref() == Some(&current_id)
+            && let Ok(mut guard) = evidence_refs_cache().lock()
+        {
+            if guard.len() >= 8
+                && !guard.contains_key(&self.file)
+                && let Some(evict_key) = guard.keys().next().cloned()
+            {
+                guard.remove(&evict_key);
+            }
+            guard.insert(self.file.clone(), cached);
+        }
+        Ok(result)
     }
     /// Bounded read of all indexed Evidence rows belonging to `plan_id`.
     pub fn list_for_plan(

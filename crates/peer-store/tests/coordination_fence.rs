@@ -1,9 +1,12 @@
 #![cfg(feature = "test-fixtures")]
+use peer_protocol::CoordinationReducer;
 use peer_store::{
-    AcquireLease, FenceError, FenceOutcome, FenceStep, HostIdentity, HostLeaseStore, HostSurface,
-    LeaseToken, StoreError, protect_coordination_writer, protect_coordination_writer_fixture,
+    AcquireLease, CoordinationError, CoordinationStore, FenceError, FenceOutcome, FenceStep,
+    HostIdentity, HostLeaseStore, HostSurface, LeaseToken, StoreError, protect_coordination_writer,
+    protect_coordination_writer_fixture,
 };
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -315,4 +318,171 @@ fn ownership_loss_after_intent_does_not_move_the_old_journal() {
         "prepared"
     );
     assert_eq!(json_file(dir.join("host.lease"))["hostId"], "new-owner");
+}
+
+struct StubReducer;
+
+impl CoordinationReducer for StubReducer {
+    fn reduce(&self, state: &Value, entry: &Value) -> Result<Value, &'static str> {
+        let mut next = state.clone();
+        next["revision"] = entry["revision"].clone();
+        Ok(next)
+    }
+}
+
+fn relocated_v2_fixture(
+    legacy_bytes: Option<&[u8]>,
+    recorded_version: &str,
+    seal: Option<Value>,
+) -> (TempDir, LeaseToken) {
+    let root = TempDir::new().unwrap();
+    let owner =
+        HostIdentity::new("native", HostSurface::Tui, std::process::id(), "fixture").unwrap();
+    let AcquireLease::Acquired { token: lease, .. } = HostLeaseStore::new(root.path())
+        .acquire("w", &owner, 1000)
+        .unwrap()
+    else {
+        panic!("fixture lease")
+    };
+    let dir = directory(&root);
+    fs::create_dir(dir.join("coordination-v2")).unwrap();
+    if let Some(bytes) = legacy_bytes {
+        fs::write(dir.join("coordination.jsonl"), bytes).unwrap();
+    }
+    fs::write(
+        dir.join("coordination-v2/manifest.json"),
+        json!({
+            "schemaVersion": 2,
+            "minimumReaderVersion": 2,
+            "minimumWriterVersion": 2,
+            "generation": "g",
+            "legacyFile": "coordination.jsonl",
+            "legacyVersion": recorded_version,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let revision = if legacy_bytes.is_some() { 1 } else { 0 };
+    fs::write(
+        dir.join("coordination-v2/head.json"),
+        json!({
+            "generation": "g",
+            "legacyVersion": recorded_version,
+            "revision": revision,
+            "hash": "",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    if let Some(seal_json) = seal {
+        fs::write(
+            dir.join("coordination-v2/legacy-seal.json"),
+            seal_json.to_string(),
+        )
+        .unwrap();
+    }
+    (root, lease)
+}
+
+#[test]
+fn sealed_relocated_legacy_baseline_promotes_and_reads_while_unsealed_or_tampered_fails_closed() {
+    let legacy_bytes = b"{\"schemaVersion\":1,\"revision\":1,\"kind\":\"noop\"}\n";
+    let expected_sha = format!("{:x}", Sha256::digest(legacy_bytes));
+    let stale_version = "99999999:12345:49:1000:1000";
+    let valid_seal = json!({
+        "schemaVersion": 1,
+        "generation": "g",
+        "legacyVersion": stale_version,
+        "bytes": legacy_bytes.len() as u64,
+        "sha256": expected_sha,
+    });
+
+    // 1. Sealed relocated unfenced v2 passes both CoordinationStore::prepare (read + promotion) and protect_coordination_writer.
+    {
+        let (root, lease) =
+            relocated_v2_fixture(Some(legacy_bytes), stale_version, Some(valid_seal.clone()));
+        let dir = directory(&root);
+        let snap = CoordinationStore::new(lease)
+            .prepare(&StubReducer, None)
+            .expect("sealed relocated baseline must prepare and promote");
+        assert!(snap.physically_fenced);
+        assert_eq!(snap.state["revision"], 1);
+        assert_eq!(
+            json_file(dir.join("coordination-v2/manifest.json"))["minimumReaderVersion"],
+            3
+        );
+        assert!(dir.join("coordination.jsonl").is_dir());
+    }
+    {
+        let (root, lease) =
+            relocated_v2_fixture(Some(legacy_bytes), stale_version, Some(valid_seal.clone()));
+        assert_eq!(
+            protect_coordination_writer(&lease, None).unwrap(),
+            FenceOutcome::Promoted
+        );
+        assert_eq!(
+            fs::read(directory(&root).join("coordination-v2/baseline.jsonl")).unwrap(),
+            legacy_bytes
+        );
+    }
+
+    // 2. Same relocated workspace with modified coordination.jsonl bytes fails closed (Hash / LegacyChanged).
+    {
+        let tampered_bytes = b"{\"schemaVersion\":1,\"revision\":1,\"kind\":\"tampered\"}\n";
+        let (_root, lease) = relocated_v2_fixture(
+            Some(tampered_bytes),
+            stale_version,
+            Some(valid_seal.clone()),
+        );
+        assert_eq!(
+            protect_coordination_writer(&lease, None),
+            Err(FenceError::LegacyChanged)
+        );
+        let (_root, lease2) = relocated_v2_fixture(
+            Some(tampered_bytes),
+            stale_version,
+            Some(valid_seal.clone()),
+        );
+        assert!(matches!(
+            CoordinationStore::new(lease2).read(&StubReducer, None),
+            Err(CoordinationError::Hash)
+        ));
+    }
+
+    // 3. Relocated workspace without legacy-seal.json fails closed (Changed / LegacyChanged).
+    {
+        let (_root, lease) = relocated_v2_fixture(Some(legacy_bytes), stale_version, None);
+        assert_eq!(
+            protect_coordination_writer(&lease, None),
+            Err(FenceError::LegacyChanged)
+        );
+        let (_root, lease2) = relocated_v2_fixture(Some(legacy_bytes), stale_version, None);
+        assert!(matches!(
+            CoordinationStore::new(lease2).read(&StubReducer, None),
+            Err(CoordinationError::Changed)
+        ));
+    }
+
+    // 4. legacyVersion == "missing" with unexpected coordination.jsonl fails closed even if sealed.
+    {
+        let unexpected_seal = json!({
+            "schemaVersion": 1,
+            "generation": "g",
+            "legacyVersion": "missing",
+            "bytes": legacy_bytes.len() as u64,
+            "sha256": expected_sha,
+        });
+        let (_root, lease) =
+            relocated_v2_fixture(Some(legacy_bytes), "missing", Some(unexpected_seal.clone()));
+        assert_eq!(
+            protect_coordination_writer(&lease, None),
+            Err(FenceError::LegacyChanged)
+        );
+        let (_root, lease2) =
+            relocated_v2_fixture(Some(legacy_bytes), "missing", Some(unexpected_seal));
+        assert!(matches!(
+            CoordinationStore::new(lease2).read(&StubReducer, None),
+            Err(CoordinationError::Changed)
+        ));
+    }
 }

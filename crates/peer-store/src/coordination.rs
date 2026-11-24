@@ -192,18 +192,28 @@ impl CoordinationStore {
         if fenced {
             coordination_fence::already_protected(&storage, &manifest)?;
         }
+        let legacy_version = manifest["legacyVersion"]
+            .as_str()
+            .ok_or(CoordinationError::Corrupt)?;
+        let seal = storage.json("coordination-v2/legacy-seal.json")?;
         let legacy = if fenced {
             "coordination-v2/baseline.jsonl"
         } else {
             "coordination.jsonl"
         };
-        if !fenced
-            && storage.token(legacy)?
-                != manifest["legacyVersion"]
-                    .as_str()
-                    .ok_or(CoordinationError::Corrupt)?
-        {
-            return Err(CoordinationError::Changed);
+        if !fenced {
+            let live_legacy = storage.token(legacy)?;
+            if legacy_version == "missing" {
+                if live_legacy != "missing" {
+                    return Err(CoordinationError::Changed);
+                }
+            } else if seal.is_some() {
+                if live_legacy == "missing" {
+                    return Err(CoordinationError::Changed);
+                }
+            } else if live_legacy != legacy_version {
+                return Err(CoordinationError::Changed);
+            }
         }
         let mut paths = vec![
             "coordination-v2/manifest.json".to_owned(),
@@ -232,21 +242,20 @@ impl CoordinationStore {
             minimum_format: 2,
         };
         let (bytes, sha256) = replay.source(&storage, legacy, false)?;
-        if let Some(seal) = storage.json("coordination-v2/legacy-seal.json")? {
+        if let Some(seal) = seal {
             coordination_fence::check_seal(&storage, &manifest, None)?;
             if seal["bytes"].as_u64() != Some(bytes) || seal["sha256"] != sha256 {
                 return Err(CoordinationError::Hash);
             }
-        } else if storage.token(legacy)?
-            != manifest["legacyVersion"]
-                .as_str()
-                .ok_or(CoordinationError::Corrupt)?
-        {
+        } else if storage.token(legacy)? != legacy_version {
             return Err(CoordinationError::Changed);
         }
         for source in &sources {
             replay.source(&storage, source, true)?;
         }
+        reducer
+            .validate_state(&replay.state)
+            .map_err(CoordinationError::Reducer)?;
         if replay.minimum_format > floor {
             return Err(CoordinationError::Schema);
         }

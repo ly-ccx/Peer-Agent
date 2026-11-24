@@ -6,7 +6,6 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::Duration,
@@ -109,17 +108,23 @@ pub(super) fn position(index: &[Value], id: &str) -> Result<usize, StoreError> {
     found.ok_or(StoreError::NotFound)
 }
 pub(super) fn validate_messages(rows: &[Value]) -> Result<(), StoreError> {
-    let mut seen = HashSet::new();
     for row in rows {
-        let id = row["id"]
+        row["id"]
             .as_str()
             .filter(|s| !s.is_empty() && s.len() <= 200)
             .ok_or(StoreError::HistoryCorrupt)?;
-        if !seen.insert(id) {
-            return Err(StoreError::HistoryCorrupt);
-        }
     }
     Ok(())
+}
+fn check_existing_message(rows: &[Value], message: &Value) -> Result<bool, StoreError> {
+    let mut matches = rows.iter().filter(|row| row["id"] == message["id"]);
+    let Some(existing) = matches.next() else {
+        return Ok(false);
+    };
+    if matches.next().is_some() || existing != message {
+        return Err(StoreError::VersionChanged);
+    }
+    Ok(true)
 }
 impl ConversationStore {
     pub(crate) fn write_directory(&self) -> Result<PathBuf, StoreError> {
@@ -243,15 +248,7 @@ impl ConversationStore {
         cancel: Option<&AtomicBool>,
     ) -> Result<MessageCommit, StoreError> {
         let current = self.read_committed(conversation_id, None, log::MAX_BYTES)?;
-        if let Some(existing) = current
-            .history
-            .messages
-            .iter()
-            .find(|m| m["id"] == message["id"])
-        {
-            if existing != message {
-                return Err(StoreError::VersionChanged);
-            }
+        if check_existing_message(&current.history.messages, message)? {
             return Ok(MessageCommit {
                 snapshot: current,
                 already_committed: true,
@@ -437,10 +434,7 @@ impl ConversationStore {
         if index[pos]["messageCount"].as_u64() != Some(rows.len() as u64) {
             return Err(StoreError::CommitUncertain);
         }
-        if let Some(old) = rows.iter().find(|v| v["id"] == message["id"]) {
-            if old != message {
-                return Err(StoreError::VersionChanged);
-            }
+        if check_existing_message(&rows, message)? {
             return Ok(MessageCommit {
                 snapshot: current,
                 already_committed: true,

@@ -69,6 +69,9 @@ impl CoordinationStore {
             minimum_format: 2,
         };
         replay.source(&storage, "coordination.jsonl", false)?;
+        reducer
+            .validate_state(&replay.state)
+            .map_err(Error::Reducer)?;
         if replay.minimum_format > 2 {
             return Err(Error::Schema);
         }

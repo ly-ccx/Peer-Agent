@@ -7,6 +7,10 @@ use crate::{
 };
 
 pub(crate) trait TurnHost {
+    fn is_delegated_verification(&self) -> bool {
+        false
+    }
+
     /// Prepare/send through the actual model/Context seam and capture usage,
     /// including errors. Revalidate the live principal before returning calls.
     async fn request(&mut self) -> Result<ModelTurn, CapabilityError>;
@@ -26,6 +30,7 @@ pub(crate) enum ToolStep {
     Continue(String),
     UserInputUnavailable,
     RequestedUserInput,
+    RequestedParentInput { call_id: String, question: String },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -33,6 +38,7 @@ pub(crate) enum LoopStop {
     Replied,
     UserInputUnavailable,
     RequestedUserInput,
+    RequestedParentInput { call_id: String, question: String },
     MaxTurns,
 }
 impl LoopStop {
@@ -41,6 +47,7 @@ impl LoopStop {
             Self::Replied => "replied",
             Self::UserInputUnavailable => crate::providers::interaction::UNAVAILABLE,
             Self::RequestedUserInput => "requested_user_input",
+            Self::RequestedParentInput { .. } => "requested_parent_input",
             Self::MaxTurns => "max_turns",
         }
     }
@@ -87,6 +94,12 @@ pub(crate) async fn run(
                 tool_calls,
             });
         }
+        // ADR 88: reject the whole oversized batch before dispatching any part of it.
+        if host.is_delegated_verification()
+            && (turn.calls.len() > 16 || tool_calls.saturating_add(turn.calls.len()) > 128)
+        {
+            return Err(CapabilityError("verifier_tool_budget_exhausted"));
+        }
         let mut ids = Vec::with_capacity(turn.calls.len());
         for call in std::mem::take(&mut turn.calls) {
             current(owned, external)?;
@@ -99,6 +112,13 @@ pub(crate) async fn run(
                 ToolStep::UserInputUnavailable => {
                     return Ok(LoopOutcome {
                         stop: LoopStop::UserInputUnavailable,
+                        content,
+                        tool_calls,
+                    });
+                }
+                ToolStep::RequestedParentInput { call_id, question } => {
+                    return Ok(LoopOutcome {
+                        stop: LoopStop::RequestedParentInput { call_id, question },
                         content,
                         tool_calls,
                     });

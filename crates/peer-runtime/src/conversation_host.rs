@@ -171,6 +171,12 @@ pub struct ConversationOutcome {
     pub goal: Option<Value>,
     pub context_accounting: Option<Value>,
     pub stop_reason: Option<&'static str>,
+    pub parent_question: Option<ParentAgentQuestion>,
+}
+
+pub struct ParentAgentQuestion {
+    pub call_id: String,
+    pub question: String,
 }
 pub struct CompactOutcome {
     pub method: String,
@@ -309,6 +315,8 @@ pub struct NativeConversationRuntime {
 #[derive(Clone, Copy)]
 enum ExecutionSurface {
     Headless,
+    DelegatedWork,
+    DelegatedVerification,
     Observed,
     Interactive,
 }
@@ -580,6 +588,7 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: false,
+            delegated_verification: false,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -648,6 +657,44 @@ impl NativeConversationRuntime {
         )
         .await
     }
+    /// A delegated worker may hand an in-scope technical question to its parent.
+    pub async fn execute_delegated(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &NativeModel,
+        permission: &mut dyn PermissionInput,
+        external: &CancellationToken,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            None,
+            external,
+            ExecutionSurface::DelegatedWork,
+        )
+        .await
+    }
+
+    /// Run a delegated verifier with hard tool budgets and terminal permission denial.
+    pub async fn execute_verification(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &NativeModel,
+        permission: &mut dyn PermissionInput,
+        external: &CancellationToken,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            None,
+            external,
+            ExecutionSurface::DelegatedVerification,
+        )
+        .await
+    }
+
     pub async fn execute_observed<'a>(
         &self,
         options: &ConversationOptions<'_>,
@@ -694,6 +741,11 @@ impl NativeConversationRuntime {
         surface: ExecutionSurface,
     ) -> Result<ConversationOutcome, HostError> {
         let headless = matches!(surface, ExecutionSurface::Headless);
+        let delegated = matches!(surface, ExecutionSurface::DelegatedWork);
+        let delegated_verification = matches!(surface, ExecutionSurface::DelegatedVerification);
+        if delegated_verification && options.allowlist.is_none() {
+            return Err(HostError("verifier_allowlist_required"));
+        }
         let interactive_user_input = matches!(surface, ExecutionSurface::Interactive);
         if external.is_cancelled() {
             return Err(HostError("CANCELLED"));
@@ -742,8 +794,14 @@ impl NativeConversationRuntime {
         }
         let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
-        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
-            .map_err(HostError)?;
+        // Delegated hosts only consume prompt settings and enforce their own
+        // capability allowlist. Desktop metadata such as managedRoot is inert here.
+        let instructions = if delegated || delegated_verification {
+            ProjectInstructions::observe_desktop_host(&workspace, &self.home, None, external)
+        } else {
+            ProjectInstructions::observe_host(&workspace, &self.home, external)
+        }
+        .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let owner = crate::recorder::local_recorder(
@@ -835,7 +893,23 @@ impl NativeConversationRuntime {
             crate::providers::ShellHostMode::Conversation,
         )?;
         providers.add_ordinary_tools(options.mode, interactive_user_input);
-        let projection = providers.project_for_mode(options.mode, options.allowlist)?;
+        let mut delegated_allowlist = None;
+        if delegated {
+            let mut allowlist = options
+                .allowlist
+                .ok_or(HostError("delegated_allowlist_required"))?
+                .to_vec();
+            if !allowlist.is_empty() {
+                providers.register(Box::new(crate::providers::interaction::ParentInputProvider));
+                allowlist
+                    .push(crate::providers::interaction::PARENT_QUESTION_CAPABILITY.to_owned());
+            }
+            delegated_allowlist = Some(allowlist);
+        }
+        let projection = providers.project_for_mode(
+            options.mode,
+            delegated_allowlist.as_deref().or(options.allowlist),
+        )?;
         let pipeline = if selected.is_some() {
             ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?
         } else {
@@ -883,6 +957,7 @@ impl NativeConversationRuntime {
                         goal: None,
                         context_accounting: None,
                         stop_reason: None,
+                        parent_question: None,
                     });
                 }
                 return Err(original.into());
@@ -934,6 +1009,7 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input,
+            delegated_verification,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -1002,6 +1078,14 @@ impl NativeConversationRuntime {
             .map(|r| r.content.clone())
             .unwrap_or_default();
         let stop_reason = result.as_ref().ok().map(|r| r.stop.as_str());
+        let parent_question = result.ok().and_then(|out| match out.stop {
+            crate::turn_loop::LoopStop::RequestedParentInput { call_id, question }
+                if error.is_none() =>
+            {
+                Some(ParentAgentQuestion { call_id, question })
+            }
+            _ => None,
+        });
         Ok(ConversationOutcome {
             session_id: conversation,
             content,
@@ -1012,6 +1096,7 @@ impl NativeConversationRuntime {
             goal: goal.ok().flatten().filter(|_| error.is_none()),
             context_accounting: None,
             stop_reason,
+            parent_question,
         })
     }
 
@@ -1201,6 +1286,7 @@ impl NativeConversationRuntime {
                         goal: None,
                         context_accounting: None,
                         stop_reason: None,
+                        parent_question: None,
                     });
                 }
                 return Err(original.into());
@@ -1334,6 +1420,7 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: true,
+            delegated_verification: false,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -1414,6 +1501,7 @@ impl NativeConversationRuntime {
             goal: None,
             context_accounting,
             stop_reason,
+            parent_question: None,
         })
     }
 
@@ -1614,6 +1702,7 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: true,
+            delegated_verification: false,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -1792,6 +1881,7 @@ struct Host<'a> {
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
     interactive_user_input: bool,
+    delegated_verification: bool,
     worker: Option<readonly_worker::Worker>,
     explorer_requests: BTreeSet<String>,
     runner: Option<runner::Runner>,
@@ -2300,6 +2390,10 @@ impl CognitionHost for Host<'_> {
     }
 }
 impl crate::turn_loop::TurnHost for Host<'_> {
+    fn is_delegated_verification(&self) -> bool {
+        self.delegated_verification
+    }
+
     async fn request(&mut self) -> Result<ModelTurn, HostError> {
         self.source_current()?;
         self.prepare_runner_frame()?;

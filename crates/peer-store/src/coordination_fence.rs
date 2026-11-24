@@ -265,11 +265,20 @@ fn protect(
             .json("coordination-v2/head.json")?
             .ok_or(FenceError::Changed)?;
         check_head(&manifest, &head)?;
-        if storage.token("coordination.jsonl")?
-            != manifest["legacyVersion"]
-                .as_str()
-                .ok_or(FenceError::Invalid)?
-        {
+        let legacy_version = manifest["legacyVersion"]
+            .as_str()
+            .ok_or(FenceError::Invalid)?;
+        let live_legacy = storage.token("coordination.jsonl")?;
+        let has_seal = storage.json("coordination-v2/legacy-seal.json")?.is_some();
+        if legacy_version == "missing" {
+            if live_legacy != "missing" {
+                return Err(FenceError::LegacyChanged);
+            }
+        } else if has_seal {
+            if live_legacy == "missing" {
+                return Err(FenceError::LegacyChanged);
+            }
+        } else if live_legacy != legacy_version {
             return Err(FenceError::LegacyChanged);
         }
         let original = storage.hash_or_missing("coordination.jsonl")?;

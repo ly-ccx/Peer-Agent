@@ -142,3 +142,85 @@ impl PreparedEffect for UserInput {
         }))
     }
 }
+
+pub(crate) const PARENT_QUESTION_CAPABILITY: &str = "local.interaction.request_parent_input";
+
+pub(crate) struct ParentInputProvider;
+
+impl CapabilityProvider for ParentInputProvider {
+    fn manifests(&self) -> Vec<(String, Value)> {
+        vec![(
+            "request_parent_input".into(),
+            json!({
+                "capabilityId": PARENT_QUESTION_CAPABILITY,
+                "displayName": "Ask parent Agent",
+                "description": "Ask the parent project Agent a technical question about the existing scope. Stops this episode until the parent answers. Use the existing approval flow for permission or user decisions.",
+                "riskLevel": "L0_inert",
+                "modeScopes": ["chat"],
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["question"],
+                    "properties": { "question": {"type": "string", "maxLength": 1000} },
+                    "additionalProperties": false
+                }
+            }),
+        )]
+    }
+
+    fn prepare(
+        &mut self,
+        capability: &str,
+        args: Value,
+        _: &Path,
+        _: &Path,
+    ) -> Result<Box<dyn PreparedEffect>, HostError> {
+        if capability != PARENT_QUESTION_CAPABILITY {
+            return Err(HostError("tool_not_projected"));
+        }
+        validate_shape(&args, &["question"])?;
+        if !args["question"]
+            .as_str()
+            .map(str::trim)
+            .is_some_and(|question| !question.is_empty() && question.chars().count() <= 1000)
+        {
+            return Err(HostError("tool_arguments_invalid"));
+        }
+        Ok(Box::new(ParentInput { args }))
+    }
+}
+
+struct ParentInput {
+    args: Value,
+}
+
+impl PreparedEffect for ParentInput {
+    fn args(&self) -> &Value {
+        &self.args
+    }
+
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::Read
+    }
+
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        Ok(vec![])
+    }
+
+    fn start(
+        self: Box<Self>,
+        _: ProviderCall,
+        _: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        Ok(Box::pin(async move {
+            EffectOutcome {
+                status: "success",
+                output: json!({"ok": true, "question": self.args["question"]}),
+                error: None,
+                artifacts: vec![],
+                ended: true,
+                materialization: None,
+                not_dispatched: false,
+            }
+        }))
+    }
+}

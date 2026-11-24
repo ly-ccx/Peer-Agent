@@ -242,3 +242,92 @@ fn large_append_only_evidence_index_over_8mib_and_4096_rows_works_without_histor
     );
     assert_eq!(fs::metadata(&file).unwrap().len(), corrupt_len);
 }
+
+#[test]
+fn refs_for_plan_and_conversations_matches_list_queries_and_refreshes_on_append() {
+    let root = tempfile::tempdir().unwrap();
+    let s = EvidenceIndexStore::new(root.path());
+    assert!(
+        s.refs_for_plan_and_conversations(Some("plan-1"), &["conv-1"], None)
+            .unwrap()
+            .is_empty()
+    );
+
+    let (mut g1, mut r1) = facts();
+    g1["toolCallId"] = json!("call-1");
+    r1["toolCallId"] = json!("call-1");
+    r1["evidence"]["toolCallId"] = json!("call-1");
+    let rep1 = HostToolEvidence {
+        conversation_id: "conv-1",
+        plan_id: Some("plan-1"),
+        stream_id: Some("stream-1"),
+        tool_name: "write_file",
+        capability_id: "local.file.write",
+        tool_call_id: "call-1",
+        grant: &g1,
+        result: &r1,
+    };
+    s.register(&rep1, None).unwrap();
+
+    let (mut g2, mut r2) = facts();
+    g2["toolCallId"] = json!("call-2");
+    r2["toolCallId"] = json!("call-2");
+    r2["evidence"]["toolCallId"] = json!("call-2");
+    r2["evidence"]["artifactRefs"] = json!(["local-file://b"]);
+    r2["evidence"]["refs"] = json!(["evidence://two"]);
+    let rep2 = HostToolEvidence {
+        conversation_id: "conv-2",
+        plan_id: Some("plan-2"),
+        stream_id: Some("stream-2"),
+        tool_name: "write_file",
+        capability_id: "local.file.write",
+        tool_call_id: "call-2",
+        grant: &g2,
+        result: &r2,
+    };
+    s.register(&rep2, None).unwrap();
+
+    let expected_p1: std::collections::HashSet<String> = s
+        .list_for_plan("plan-1", None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|row| row["evidenceRef"].as_str().map(str::to_owned))
+        .collect();
+    let actual_p1 = s
+        .refs_for_plan_and_conversations(Some("plan-1"), &["conv-1"], None)
+        .unwrap();
+    assert_eq!(actual_p1, expected_p1);
+
+    let combined = s
+        .refs_for_plan_and_conversations(Some("plan-1"), &["conv-2"], None)
+        .unwrap();
+    assert!(combined.contains("tool-result://call-1"));
+    assert!(combined.contains("tool-result://call-2"));
+    assert!(combined.contains("evidence://one"));
+    assert!(combined.contains("evidence://two"));
+
+    // Registering a new record mutates the file identity and invalidates the cache immediately.
+    let (mut g3, mut r3) = facts();
+    g3["toolCallId"] = json!("call-3");
+    r3["toolCallId"] = json!("call-3");
+    r3["evidence"]["toolCallId"] = json!("call-3");
+    r3["evidence"]["artifactRefs"] = json!([]);
+    r3["evidence"]["refs"] = json!(["evidence://three"]);
+    let rep3 = HostToolEvidence {
+        conversation_id: "conv-1",
+        plan_id: Some("plan-1"),
+        stream_id: Some("stream-3"),
+        tool_name: "write_file",
+        capability_id: "local.file.write",
+        tool_call_id: "call-3",
+        grant: &g3,
+        result: &r3,
+    };
+    s.register(&rep3, None).unwrap();
+
+    let refreshed = s
+        .refs_for_plan_and_conversations(Some("plan-1"), &[], None)
+        .unwrap();
+    assert!(refreshed.contains("tool-result://call-3"));
+    assert!(refreshed.contains("evidence://three"));
+}

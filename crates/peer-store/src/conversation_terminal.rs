@@ -58,10 +58,14 @@ impl Update {
         }
         let rows = log::read(&directory.join(format!("{id}.jsonl")), cancel)?;
         validate_messages(&rows)?;
-        let target = rows
+        let mut matches = rows
             .iter()
-            .position(|row| row["id"] == message)
-            .ok_or(StoreError::StreamTargetMissing)?;
+            .enumerate()
+            .filter_map(|(idx, row)| (row["id"] == message).then_some(idx));
+        let target = matches.next().ok_or(StoreError::StreamTargetMissing)?;
+        if matches.next().is_some() {
+            return Err(StoreError::HistoryCorrupt);
+        }
         // A patch cannot silently rename the stable message or its author.
         if patch.get("id").is_some_and(|v| v != &rows[target]["id"])
             || patch

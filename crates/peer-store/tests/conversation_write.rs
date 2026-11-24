@@ -269,3 +269,166 @@ fn missing_previously_counted_rows_cannot_be_reconciled_as_empty_success() {
     assert_eq!(fs::read(index).unwrap(), before);
     assert!(fs::read(body).unwrap().is_empty());
 }
+
+#[test]
+fn legacy_duplicate_historical_ids_allow_new_appends_reconcile_and_terminal_updates_while_blocking_new_duplicates()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let store = ConversationStore::new(root.path());
+    let id = create(&store);
+    let dir = root.path().join("conversations");
+    let body_path = dir.join(format!("{id}.jsonl"));
+    let index_path = dir.join("index.jsonl");
+
+    let dup_failed = json!({
+        "id": "card:verdict:s-1",
+        "role": "assistant",
+        "kind": "system_card",
+        "content": "failed",
+    });
+    let dup_passed = json!({
+        "id": "card:verdict:s-1",
+        "role": "assistant",
+        "kind": "system_card",
+        "content": "passed",
+    });
+    let unique_answer = json!({
+        "id": "answer",
+        "role": "assistant",
+        "content": "draft",
+    });
+    fs::write(
+        &body_path,
+        format!("{dup_failed}\n{dup_passed}\n{unique_answer}\n"),
+    )
+    .unwrap();
+
+    let mut index_row: serde_json::Value =
+        serde_json::from_slice(&fs::read(&index_path).unwrap()).unwrap();
+    index_row["messageCount"] = json!(3);
+    index_row["contentRevision"] = json!(3);
+    fs::write(&index_path, format!("{index_row}\n")).unwrap();
+
+    let reply = json!({"id": "reply-1", "role": "assistant", "content": "new reply"});
+    let first = store
+        .append_message_idempotent(&id, &reply, AT, None)
+        .unwrap();
+    assert!(!first.already_committed);
+    assert_eq!(first.snapshot.history.messages.len(), 4);
+    assert_eq!(first.snapshot.history.content_revision, 4);
+
+    let repeated = store
+        .append_message_idempotent(&id, &reply, AT, None)
+        .unwrap();
+    assert!(repeated.already_committed);
+    assert_eq!(repeated.snapshot.history.messages.len(), 4);
+
+    assert_eq!(
+        store
+            .append_message_idempotent(&id, &dup_failed, AT, None)
+            .unwrap_err(),
+        StoreError::VersionChanged
+    );
+    assert_eq!(
+        store
+            .commit_message(&first.snapshot, &dup_failed, AT, None)
+            .unwrap_err(),
+        StoreError::VersionChanged
+    );
+    assert_eq!(snapshot(&store, &id).history.messages.len(), 4);
+
+    let extra = json!({"id": "extra-1", "role": "user", "content": "lagging index row"});
+    let mut existing_body = fs::read_to_string(&body_path).unwrap();
+    existing_body.push_str(&format!("{extra}\n"));
+    fs::write(&body_path, existing_body).unwrap();
+
+    let reconciled = store.reconcile_index(&id, AT, None).unwrap();
+    assert_eq!(reconciled.history.messages.len(), 5);
+
+    let streamed = store
+        .patch_stream_message(
+            &reconciled,
+            "answer",
+            &json!({"content": "partial"}),
+            AT,
+            None,
+        )
+        .unwrap();
+    let done = store
+        .commit_terminal_message(&streamed, "answer", &json!({"content": "final"}), AT, None)
+        .unwrap();
+    assert_eq!(done.snapshot.history.messages[2]["content"], "final");
+
+    assert_eq!(
+        store
+            .patch_stream_message(
+                &done.snapshot,
+                "card:verdict:s-1",
+                &json!({"content": "ambiguous"}),
+                AT,
+                None,
+            )
+            .unwrap_err(),
+        StoreError::HistoryCorrupt
+    );
+    assert_eq!(
+        store
+            .commit_terminal_message(
+                &done.snapshot,
+                "card:verdict:s-1",
+                &json!({"content": "ambiguous"}),
+                AT,
+                None,
+            )
+            .unwrap_err(),
+        StoreError::HistoryCorrupt
+    );
+}
+
+#[test]
+fn update_workspace_path_updates_index_without_bumping_updated_at_or_losing_history() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ConversationStore::new(root.path());
+    let created = store
+        .create_classic_conversation(&json!({
+            "title": "Bot Conv",
+            "workspacePath": "/tmp/old-folder",
+            "role": "project_agent",
+            "workspaceId": "ws-rebind-1",
+        }))
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_owned();
+    let original_updated_at = created["updatedAt"].as_str().unwrap().to_owned();
+    let reply = json!({ "id": "msg-1", "role": "user", "content": "hello" });
+    store
+        .append_message_idempotent(&id, &reply, AT, None)
+        .unwrap();
+    let before = store.read_metadata(&id).unwrap().metadata.unwrap();
+    let before_updated_at = before["updatedAt"].as_str().unwrap().to_owned();
+    assert!(!original_updated_at.is_empty());
+
+    let updated = store
+        .update_workspace_path(&id, "  /tmp/new-folder/ ")
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated["workspacePath"], "/tmp/new-folder/");
+    assert_eq!(updated["updatedAt"], before_updated_at);
+
+    let after_meta = store.read_metadata(&id).unwrap().metadata.unwrap();
+    assert_eq!(after_meta["workspacePath"], "/tmp/new-folder/");
+    assert_eq!(after_meta["updatedAt"], before_updated_at);
+    let after = store.read_committed(&id, None, 1024 * 1024).unwrap();
+    assert_eq!(after.history.messages.len(), 1);
+    assert_eq!(after.history.messages[0]["id"], "msg-1");
+
+    assert_eq!(
+        store
+            .update_workspace_path("missing-id", "/tmp/new-folder")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        store.update_workspace_path(&id, "   ").unwrap_err(),
+        StoreError::InvalidInput
+    );
+}

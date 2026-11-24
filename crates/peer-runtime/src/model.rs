@@ -3,7 +3,7 @@ use crate::{CancellationToken, credentials::Secret};
 use peer_protocol::{JsonLimits, decode_json_bounded};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 mod authentication;
 mod observation;
 pub(crate) use observation::ModelObservation;
@@ -27,19 +27,20 @@ mod usage;
 pub use error::{ModelError, ModelRequestObservation};
 pub mod wire;
 pub(crate) use wire::REQUEST_BYTES;
+#[derive(Clone)]
 pub struct NativeModel {
-    network: crate::network::Network,
+    network: Arc<crate::network::Network>,
     endpoint: reqwest::Url,
     model: String,
     provider: String,
-    authentication: authentication::Access,
+    authentication: Arc<authentication::Access>,
     deadline: Duration,
     wire: wire::Wire,
     generation: wire::GenerationOptions,
     binding: String,
     context_window: Option<u64>,
     headers: reqwest::header::HeaderMap,
-    compatibility: Option<grok::Compatibility>,
+    compatibility: Option<Arc<grok::Compatibility>>,
 }
 /// An encoded request bound to the exact provider instance that built it.
 /// Counting can borrow it; sending consumes its original immutable wire bytes.
@@ -141,13 +142,13 @@ impl NativeModel {
     }
     pub(crate) fn with_oauth(mut self, oauth: Option<crate::model_oauth::ModelOAuth>) -> Self {
         if let Some(oauth) = oauth {
-            self.authentication = authentication::Access::OAuth(Box::new(oauth));
+            self.authentication = Arc::new(authentication::Access::OAuth(Box::new(oauth)));
         }
         self
     }
     pub(crate) fn with_qoder(mut self, account: Option<crate::qoder::account::Account>) -> Self {
         if let Some(account) = account {
-            self.authentication = authentication::Access::Qoder(Box::new(account));
+            self.authentication = Arc::new(authentication::Access::Qoder(Box::new(account)));
         }
         self
     }
@@ -157,7 +158,7 @@ impl NativeModel {
         auth: &str,
     ) -> Result<Self, ModelError> {
         if auth == "oauth_grok" {
-            self.compatibility = Some(grok::Compatibility::new(home)?);
+            self.compatibility = Some(Arc::new(grok::Compatibility::new(home)?));
         }
         Ok(self)
     }
@@ -201,11 +202,11 @@ impl NativeModel {
         // share the same endpoint and model name with different credentials.
         let binding = uuid::Uuid::new_v4().to_string();
         Ok(Self {
-            network,
+            network: Arc::new(network),
             endpoint,
             model: config.model,
             provider: config.provider,
-            authentication: authentication::Access::from_key(secret),
+            authentication: Arc::new(authentication::Access::from_key(secret)),
             deadline,
             wire: config.wire,
             generation: config.generation,

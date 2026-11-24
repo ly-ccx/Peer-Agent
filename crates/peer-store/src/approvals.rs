@@ -193,6 +193,18 @@ impl ApprovalStore {
         at: &str,
         cancel: Option<&AtomicBool>,
     ) -> Result<Vec<Value>, StoreError> {
+        self.recover_owned_preserving(workspace, at, cancel, |_| false)
+    }
+
+    /// Preserve an unexpired open request only when the current owner can
+    /// still serve it. The caller supplies the durable request binding.
+    pub fn recover_owned_preserving(
+        &self,
+        workspace: Option<&str>,
+        at: &str,
+        cancel: Option<&AtomicBool>,
+        preserve: impl Fn(&Value) -> bool,
+    ) -> Result<Vec<Value>, StoreError> {
         if !timestamp(at) {
             return Err(StoreError::InvalidInput);
         }
@@ -206,6 +218,9 @@ impl ApprovalStore {
                 .as_str()
                 .and_then(parse_time)
                 .is_some_and(|v| v <= now);
+            if !expired && preserve(&row) {
+                continue;
+            }
             changed.push(self.decide(
                 &row,
                 if expired {

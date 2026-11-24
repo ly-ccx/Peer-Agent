@@ -3,38 +3,7 @@ use super::{Value, json, section};
 use peer_protocol::{javascript_json_string, javascript_trim};
 
 pub(super) fn neutralize(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(i) = rest.find('<') {
-        out.push_str(&rest[..i]);
-        rest = &rest[i + 1..];
-        let tag = rest.strip_prefix('/').unwrap_or(rest);
-        let namespaced = tag
-            .get(..6)
-            .is_some_and(|s| s.eq_ignore_ascii_case("antml:"));
-        let tag = if namespaced { &tag[6..] } else { tag };
-        let lower = tag.to_ascii_lowercase();
-        let named = ["tool_call", "function_calls", "invoke", "parameter"]
-            .iter()
-            .any(|name| {
-                lower.starts_with(name)
-                    && lower
-                        .as_bytes()
-                        .get(name.len())
-                        .is_none_or(|b| !b.is_ascii_alphanumeric() && *b != b'_')
-            });
-        let function = !namespaced
-            && lower.strip_prefix("functions.").is_some_and(|s| {
-                s.bytes()
-                    .take_while(|b| {
-                        b.is_ascii_alphanumeric() || *b == b'_' || *b == b'.' || *b == b'-'
-                    })
-                    .any(|b| b.is_ascii_alphanumeric() || b == b'_')
-            });
-        out.push_str(if named || function { "&lt;" } else { "<" });
-    }
-    out.push_str(rest);
-    out
+    crate::tool_markup::neutralize_tool_call_syntax(text)
 }
 pub(super) fn render(raw: &[Value]) -> Option<Value> {
     let mut items = Vec::new();

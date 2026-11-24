@@ -123,6 +123,13 @@ impl EffectAdmission {
             handle,
         )
     }
+
+    /// Attach a verified host process recorder to enable owned read-only subprocess
+    /// commands (such as `git_query`) inside this `EffectAdmission` handle.
+    pub fn with_owner(mut self, owner: Recorder) -> Self {
+        self.owner = Some(owner);
+        self
+    }
     pub(crate) fn blocking_guard(&self) -> BlockingAdmission {
         BlockingAdmission {
             port: self.clone(),
@@ -358,5 +365,19 @@ mod tests {
         let (worker, count) = tokio::join!(worker, serve);
         worker.unwrap();
         assert_eq!(count, 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawn_read_only_host_with_owner_records_owned_git_commands() {
+        let cancel = CancellationToken::new();
+        let owner = crate::recorder::local_recorder("test-host", "2026-11-23T00:00:00.000Z")
+            .await
+            .expect("local recorder available on host");
+        let (admission, handle) = EffectAdmission::spawn_read_only_host(cancel.clone(), || true);
+        let admission = admission.with_owner(owner);
+        admission.command_starting().await.unwrap();
+        admission.command_started(std::process::id()).await.unwrap();
+        drop(admission);
+        let _ = handle.await;
     }
 }

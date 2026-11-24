@@ -23,6 +23,9 @@ impl Host<'_> {
             .worker
             .as_ref()
             .map_or(&self.projection, |worker| &worker.projection);
+        let delegated_args = projection
+            .has_capability(interaction::PARENT_QUESTION_CAPABILITY)
+            .then(|| call.arguments.clone());
         let effect = match self.providers.prepare(
             projection,
             &call.name,
@@ -36,10 +39,27 @@ impl Host<'_> {
                     && self.projection.capability(&call.name) == Some("local.shell.exec") =>
             {
                 return self
-                    .deny_automation_high_risk_shell(
+                    .deny_unprepared_tool(
                         &call.name,
+                        "local.shell.exec",
                         raw_args_for_automation.expect("checked raw_args_for_automation"),
-                        risk_error,
+                        "automation_high_risk_blocked",
+                        Some(risk_error),
+                    )
+                    .await;
+            }
+            Err(HostError("tool_arguments_invalid"))
+                if let Some(args) = delegated_args
+                    && let Some(capability) = projection.capability(&call.name) =>
+            {
+                let capability = capability.to_owned();
+                return self
+                    .deny_unprepared_tool(
+                        &call.name,
+                        &capability,
+                        args,
+                        "tool_arguments_invalid",
+                        None,
                     )
                     .await;
             }
@@ -386,7 +406,19 @@ impl Host<'_> {
         if is_user_input {
             return Ok(ToolStep::RequestedUserInput);
         }
-        if outcome.status == "denied" && self.repairing_goal() {
+        if capability == crate::providers::interaction::PARENT_QUESTION_CAPABILITY
+            && result["status"] == "success"
+        {
+            return Ok(ToolStep::RequestedParentInput {
+                call_id,
+                question: args["question"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+            });
+        }
+        if outcome.status == "denied" && (self.delegated_verification || self.repairing_goal()) {
             return Err(HostError("permission_denied"));
         }
         Ok(ToolStep::Continue(call_id))
@@ -584,32 +616,35 @@ impl Host<'_> {
         Ok((call_id, dispatch, message_id))
     }
 
-    async fn deny_automation_high_risk_shell(
+    async fn deny_unprepared_tool(
         &mut self,
         tool_name: &str,
+        capability: &str,
         args: Value,
-        risk_error: &'static str,
+        reason: &'static str,
+        risk_error: Option<&'static str>,
     ) -> Result<ToolStep, HostError> {
-        let capability = "local.shell.exec";
         let _args_digest = peer_protocol::approval_args_digest(&args)
             .map_err(|_| HostError("permission_arguments_invalid"))?;
         let (call_id, _dispatch, message_id) = self
             .prepare_tool_intent(tool_name, capability, &args, vec![])
             .await?;
         let revision = self.access.snapshot()?.1;
-        let grant_facts = json!({
+        let mut grant_facts = json!({
             "grantId": format!("grant-{}", uuid::Uuid::new_v4()),
             "toolCallId": call_id,
             "granted": false,
             "scope": capability,
             "duration": "denied",
             "decidedAt": now(),
-            "reason": "automation_high_risk_blocked",
+            "reason": reason,
             "metadata": {
                 "policyRevision": format!("ordinary:{}:{revision}", self.identity.stream_id),
-                "shellRiskError": risk_error,
             },
         });
+        if let Some(risk_error) = risk_error {
+            grant_facts["metadata"]["shellRiskError"] = json!(risk_error);
+        }
         let result = json!({
             "toolCallId": call_id,
             "capabilityId": capability,
@@ -618,8 +653,8 @@ impl Host<'_> {
             "outputPreview": { "kind": "json" },
             "completedAt": now(),
             "error": {
-                "code": "automation_high_risk_blocked",
-                "message": "automation_high_risk_blocked",
+                "code": reason,
+                "message": reason,
                 "recoverable": true,
             },
             "evidence": {
