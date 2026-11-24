@@ -1,11 +1,43 @@
 .deferred-panel {
-  display: grid;
-  align-content: center;
-  justify-items: start;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: var(--space-3);
-  min-block-size: 6rem;
-  padding: var(--space-4);
-  color: var(--graphite-base);
+  min-block-size: 10rem;
+  padding: var(--space-6);
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-control);
+}
+
+.deferred-panel p {
+  margin: 0;
+  color: var(--graphite-soft);
   font-size: var(--ui-font-body);
 }
-.deferred-panel p { margin: 0; }
+
+.deferred-panel-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--graphite-soft);
+}
+
+.deferred-panel-spinner {
+  flex: none;
+  color: var(--graphite-fade);
+  animation: deferred-panel-spin 900ms linear infinite;
+}
+
+@keyframes deferred-panel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deferred-panel-spinner {
+    animation: none;
+  }
+}

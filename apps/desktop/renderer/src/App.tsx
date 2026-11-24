@@ -162,6 +162,9 @@ function MainApp() {
   const showMainShell = Boolean(session);
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
+  useEffect(() => {
+    document.documentElement.lang = i18n.locale;
+  }, [i18n.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [activePage, setActivePage] = useSettingsAwarePage<AppPage>('chat');
   /** 工作台数据范围：顶部入口=全部；下方工作区入口=当前区。 */
