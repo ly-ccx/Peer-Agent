@@ -823,10 +823,17 @@ fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> boo
         if result_ok {
             continue;
         }
-        if matches!(kind, "command" | "test")
-            && crate::acceptance::criterion_verified_by_independent_report(plan, cid, known_refs)
-        {
-            continue;
+        if matches!(kind, "command" | "test") {
+            let explicitly_failed = results
+                .iter()
+                .any(|r| r["criterionId"].as_str() == Some(cid) && r["passed"] == false);
+            if (advisory_review && !explicitly_failed)
+                || crate::acceptance::criterion_verified_by_independent_report(
+                    plan, cid, known_refs,
+                )
+            {
+                continue;
+            }
         }
         return false;
     }

@@ -148,7 +148,6 @@ export function BotListShell({
   const [citeRequest, setCiteRequest] = useState<(CiteTaskRequest & { readonly workspaceId: string }) | null>(null);
   const [nav, setNav] = useState<NavigationState>(() => initialNavigationState(list.openedId));
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [reportedTaskEvidenceCount, setReportedTaskEvidenceCount] = useState(0);
   const [openedWorkspacePath, setOpenedWorkspacePath] = useState('');
   const [replyFlash, setReplyFlash] = useState<string | null>(null);
   const [replyPresence, setReplyPresence] = useState<{ workspaceId: string; mood: BotAvatarMood | null } | null>(null);
@@ -263,20 +262,17 @@ export function BotListShell({
     if (fromSidebar && fromSidebar !== activeTaskSessionId) return fromSidebar;
     return i18n.t('projectAgent.chat.work.related');
   }, [activeTaskSessionId, activeTaskSession?.title, openedActive.items, i18n]);
-  const activeTaskEvidenceCount = useMemo(() => {
-    const base = activeTaskSession
-      ? new Set([
-        ...activeTaskSession.evidenceRefs,
-        ...(activeTaskSession.verification?.checks.flatMap((c) => c.evidenceRefs) ?? []),
-        ...(activeTaskSession.verification?.outputs.map((o) => o.evidenceRef) ?? []),
-      ]).size
-      : 0;
-    return Math.max(base, reportedTaskEvidenceCount);
-  }, [activeTaskSession, reportedTaskEvidenceCount]);
+  const toggleInspector = useCallback(() => {
+    setInspectorOpen((current) => {
+      const next = !current;
+      if (next && resources?.open) resources.close();
+      return next;
+    });
+  }, [resources]);
 
   useEffect(() => {
-    setReportedTaskEvidenceCount(0);
-  }, [activeTaskSessionId]);
+    if (resources?.open) setInspectorOpen(false);
+  }, [resources?.open]);
 
   useEffect(() => {
     setInspect(null);
@@ -790,14 +786,10 @@ export function BotListShell({
                     type="button"
                     className={`bot-profile bot-inspector-toggle${inspectorOpen ? ' is-active' : ''}`}
                     aria-expanded={inspectorOpen}
-                    onClick={() => setInspectorOpen((value) => !value)}
+                    onClick={toggleInspector}
                   >
                     <PeerIcon name="panelRight" size={15} />
-                    <span>
-                      {isZh
-                        ? (activeTaskEvidenceCount > 0 ? `证据 · ${activeTaskEvidenceCount}` : '证据')
-                        : (activeTaskEvidenceCount > 0 ? `Evidence · ${activeTaskEvidenceCount}` : 'Evidence')}
-                    </span>
+                    <span>{isZh ? '任务详情' : 'Details'}</span>
                   </button>
                   <BotResourceButton isZh={isZh} />
                 </>
@@ -893,13 +885,12 @@ export function BotListShell({
                   inspectorTriggerRef={inspectorButtonRef}
                   i18n={i18n}
                   isZh={isZh}
-                  onToggleInspector={() => setInspectorOpen((value) => !value)}
+                  onToggleInspector={toggleInspector}
                   onCloseInspector={() => setInspectorOpen(false)}
                   onBackToBot={handleBackToBotFromTask}
                   onOpenTask={(nextSessionId) => openTaskView(opened.workspaceId, nextSessionId)}
                   onCiteToBot={handleCiteToBot}
                   onRefreshSessions={work.reload}
-                  onEvidenceCountChange={setReportedTaskEvidenceCount}
                 />
               ) : null}
             </BotDocumentPreview>

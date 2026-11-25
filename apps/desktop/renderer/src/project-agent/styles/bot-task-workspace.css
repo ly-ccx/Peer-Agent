@@ -329,6 +329,7 @@
 }
 
 .bot-inspector-head {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -343,6 +344,7 @@
 }
 
 .bot-inspector-tabs {
+  flex: none;
   display: flex;
   gap: 4px;
   padding: 8px 12px;

@@ -3,11 +3,10 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import type { DrawerSession } from '../state/drawerState';
-import { EvidencePreview } from '../drawer/EvidencePreview';
 import { TaskVerification } from '../drawer/TaskVerification';
 import { CoordinationDetails } from '../drawer/CoordinationDetails';
 
-export type InspectorTab = 'brief' | 'evidence' | 'verdict' | 'coordination';
+export type InspectorTab = 'brief' | 'verdict' | 'coordination';
 
 export interface TaskEvidenceInspectorProps {
   readonly open: boolean;
@@ -26,19 +25,28 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
   overlay,
   workspaceId,
   session,
-  initialTab = 'evidence',
+  initialTab = 'brief',
   i18n,
   triggerRef,
   onClose,
   onSelectSession,
 }: TaskEvidenceInspectorProps) {
   const isZh = i18n.locale.startsWith('zh');
-  const [tab, setTab] = useState<InspectorTab>(initialTab);
+  const hasVerification = Boolean(
+    session.verification && (
+      session.verification.reviewAttempts.length > 0
+      || session.verification.checks.some(
+        (check) => check.name === 'independent_verifier' && check.reason !== 'not_required',
+      )
+    ),
+  );
+  const resolvedInitialTab: InspectorTab = initialTab === 'verdict' && !hasVerification ? 'brief' : initialTab;
+  const [tab, setTab] = useState<InspectorTab>(resolvedInitialTab);
   const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (open) setTab(initialTab);
-  }, [initialTab, open]);
+    if (open) setTab(resolvedInitialTab);
+  }, [resolvedInitialTab, open]);
 
   useInteractionLayer(open && overlay, {
     roots: [panelRef],
@@ -50,46 +58,46 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
 
   if (!open) return null;
 
-  const allEvidenceRefs = [
-    ...new Set([
-      ...session.evidenceRefs,
-      ...(session.verification?.checks.flatMap((c) => c.evidenceRefs) ?? []),
-      ...(session.verification?.outputs.map((o) => o.evidenceRef) ?? []),
-    ]),
-  ];
+  const tabs: ReadonlyArray<readonly [InspectorTab, string]> = hasVerification
+    ? [
+        ['brief', isZh ? '说明' : 'Brief'],
+        ['verdict', isZh ? '核验' : 'Verdict'],
+        ['coordination', isZh ? '边界与信息' : 'Scope'],
+      ]
+    : [
+        ['brief', isZh ? '说明' : 'Brief'],
+        ['coordination', isZh ? '边界与信息' : 'Scope'],
+      ];
+
+  const activeTab: InspectorTab = tab === 'verdict' && !hasVerification ? 'brief' : tab;
 
   return (
     <aside
       ref={panelRef}
       className={`bot-task-inspector${overlay ? ' is-overlay' : ''}`}
-      aria-label={isZh ? '任务详情与证据' : 'Task details & evidence'}
+      aria-label={isZh ? '任务详情' : 'Task details'}
     >
       <header className="bot-inspector-head">
         <span className="bot-inspector-title">
-          {isZh ? '任务详情与证据' : 'Task Details & Evidence'}
+          {isZh ? '任务详情' : 'Task Details'}
         </span>
         <button
           type="button"
           className="bot-tray-close"
-          aria-label={isZh ? '关闭详情抽屉' : 'Close task inspector'}
+          aria-label={isZh ? '关闭详情抽屉' : 'Close task details'}
           onClick={onClose}
         >
           <PeerIcon name="close" size={14} />
         </button>
       </header>
       <div className="bot-inspector-tabs" role="tablist">
-        {([
-          ['brief', isZh ? '说明' : 'Brief'],
-          ['evidence', isZh ? `证据 (${allEvidenceRefs.length})` : `Evidence (${allEvidenceRefs.length})`],
-          ['verdict', isZh ? '核验' : 'Verdict'],
-          ['coordination', isZh ? '边界' : 'Scope'],
-        ] as const).map(([key, label]) => (
+        {tabs.map(([key, label]) => (
           <button
             key={key}
             type="button"
             role="tab"
-            aria-selected={tab === key}
-            className={`bot-inspector-tab${tab === key ? ' is-active' : ''}`}
+            aria-selected={activeTab === key}
+            className={`bot-inspector-tab${activeTab === key ? ' is-active' : ''}`}
             onClick={() => setTab(key)}
           >
             {label}
@@ -97,7 +105,7 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
         ))}
       </div>
       <div className="bot-inspector-body">
-        {tab === 'brief' ? (
+        {activeTab === 'brief' ? (
           <div className="bot-inspector-brief">
             {session.failure ? (
               <section className="bot-inspector-section">
@@ -127,21 +135,7 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
               </section>
             ) : null}
           </div>
-        ) : tab === 'evidence' ? (
-          allEvidenceRefs.length > 0 ? (
-            <EvidencePreview
-              refs={allEvidenceRefs}
-              i18n={i18n}
-              inline
-              workspaceId={workspaceId}
-              task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
-            />
-          ) : (
-            <p className="bot-inspector-empty">
-              {isZh ? '该任务尚未登记可查证的证据索引。' : 'No indexed evidence recorded for this task yet.'}
-            </p>
-          )
-        ) : tab === 'verdict' ? (
+        ) : activeTab === 'verdict' ? (
           session.verification ? (
             <TaskVerification detail={session.verification} i18n={i18n} />
           ) : (

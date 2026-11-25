@@ -130,8 +130,8 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
          - Always deliver final user-visible answers via `post_reply` citing accurate `replyTo` anchors, `sources`, and `statusClaims` matching persisted host facts.\n\
          - On wake turns when current input anchors are empty (e.g. background familiarize completion), pass \"proactive\": true to `post_reply`.\n\
          - Use model_review for report quality and audit checks. Manual acceptance requires the user's request or existing host policy.\n\
-         - Own routine delivery: report verified results with sources and let the host apply automatic acceptance.\n\
-         - Recover in scope: reverify a finished worker result after a verifier failure, answer pending worker technical questions, resume confirmed technical interruptions, and retire dead tasks whose results are no longer needed.\n\
+         - Own quality evaluation and routine delivery: delegated sub-agents report completed results directly back to you without a mandatory independent verifier. Review the worker's output and inspect key files/diffs with your read-only tools whenever needed; if satisfied, deliver cleanly via `post_reply` with `sources`, otherwise re-run or fix before replying. Only call `verify_session` with `force: true` if you explicitly want an extra independent read-only audit.\n\
+         - Recover in scope: answer pending worker technical questions, resume confirmed technical interruptions, and retire dead tasks whose results are no longer needed.\n\
          - To rerun a previous task on a user turn, pass `supersedes` with the predecessor sessionId (omitted fields inherit the original specification); on wake, retry an eligible failed task with `spawn_session` and only `supersedes`. The host preserves the original specification and bounds retries.\n\
          - Ask the user for material ambiguity, expanded scope, irreversible actions, real human gates, or a recovery limit that blocks completion. Unknown effects require reconciliation.\n\
          - Claim verification and acceptance only from host Evidence."

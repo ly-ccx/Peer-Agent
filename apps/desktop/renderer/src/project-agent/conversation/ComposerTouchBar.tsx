@@ -94,7 +94,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
     );
   }
 
-  const { session, evidenceCount, inspectorOpen, hasPendingApproval, i18n } = props;
+  const { session, inspectorOpen, hasPendingApproval, i18n } = props;
   const followUp = session.followUp;
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused', 'failed'].includes(session.status);
   const verifyFailed = session.status === 'result_ready' && followUp?.reason === 'verification_failed';
@@ -148,10 +148,6 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
           </>
         ) : canReverify && props.onVerify ? (
           <>
-            <button type="button" className={`bot-tb-chip${inspectorOpen ? ' is-toggle-active' : ''}`} onClick={props.onToggleInspector}>
-              <PeerIcon name="panelRight" size={13} />
-              <span>{isZh ? `证据${evidenceCount ? ` ${evidenceCount}` : ''}` : `Evidence${evidenceCount ? ` ${evidenceCount}` : ''}`}</span>
-            </button>
             {cancelable && props.onCancel ? (
               <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="close" size={12} />
@@ -169,10 +165,6 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
           </>
         ) : reverifyExhausted ? (
           <>
-            <button type="button" className={`bot-tb-chip${inspectorOpen ? ' is-toggle-active' : ''}`} onClick={props.onToggleInspector}>
-              <PeerIcon name="panelRight" size={13} />
-              <span>{isZh ? `证据${evidenceCount ? ` ${evidenceCount}` : ''}` : `Evidence${evidenceCount ? ` ${evidenceCount}` : ''}`}</span>
-            </button>
             {cancelable && props.onCancel ? (
               <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="close" size={12} />
@@ -188,12 +180,6 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
           </>
         ) : ended ? (
           <>
-            {evidenceCount > 0 ? (
-              <button type="button" className={`bot-tb-chip${inspectorOpen ? ' is-toggle-active' : ''}`} onClick={props.onToggleInspector}>
-                <PeerIcon name="panelRight" size={13} />
-                <span>{isZh ? `证据 ${evidenceCount}` : `Evidence ${evidenceCount}`}</span>
-              </button>
-            ) : null}
             {props.onCiteToBot ? (
               <button type="button" className="bot-tb-chip" onClick={props.onCiteToBot}>
                 <span>@ {isZh ? '引用回对话' : 'Cite in chat'}</span>
@@ -208,10 +194,6 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
           </>
         ) : (
           <>
-            <button type="button" className={`bot-tb-chip${inspectorOpen ? ' is-toggle-active' : ''}`} onClick={props.onToggleInspector}>
-              <PeerIcon name="panelRight" size={13} />
-              <span>{isZh ? `证据${evidenceCount ? ` ${evidenceCount}` : ''}` : `Evidence${evidenceCount ? ` ${evidenceCount}` : ''}`}</span>
-            </button>
             {cancelable && props.onCancel ? (
               <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="stop" size={12} />

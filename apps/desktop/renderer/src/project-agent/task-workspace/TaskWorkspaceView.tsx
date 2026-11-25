@@ -459,7 +459,7 @@ export function TaskWorkspaceView({
             ) : null}
           </div>
           <div className="bot-task-strip-actions">
-            {verdict ? (
+            {verdict && verdict.tone ? (
               <button
                 type="button"
                 className="bot-task-strip-btn"
@@ -469,14 +469,9 @@ export function TaskWorkspaceView({
                 {verdict.label}
               </button>
             ) : null}
-            {session.summary ? (
+            {session.summary && !inspectorOpen ? (
               <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('brief')}>
                 {isZh ? '任务说明' : 'Brief'}
-              </button>
-            ) : null}
-            {evidenceCount > 0 ? (
-              <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('evidence')}>
-                {isZh ? `证据 (${evidenceCount})` : `Evidence (${evidenceCount})`}
               </button>
             ) : null}
           </div>

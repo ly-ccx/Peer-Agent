@@ -1050,6 +1050,9 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 }
 
 .bot-process { gap: 16px; }
+.bot-inline-evidence { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bot-inline-evidence > section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bot-inline-evidence > section > .ui-button { align-self: flex-start; }
 .bot-evidence-view { gap: 12px; min-width: 0; }
 .bot-evidence-heading { display: flex; align-items: center; gap: 9px; }
 .bot-evidence-heading svg { color: var(--graphite-soft); flex-shrink: 0; }

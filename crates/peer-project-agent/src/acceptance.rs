@@ -12,8 +12,6 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
-use peer_protocol::interactive_result::INTERACTIVE_PUBLISH_CAPABILITY;
-
 pub const CHANGED_FILE_CONFIRM_LIMIT: usize = 20;
 
 const CONFIRM_REASON_ORDER: [&str; 8] = [
@@ -146,31 +144,13 @@ pub fn handoff_question_id(
     format!("{prefix}-{}", &hash[..16])
 }
 
-/// A read-only session whose evidence lives on the web: the worker asked for the
-/// built-in read-only web capabilities and did not ask to publish an interactive
-/// result. The independent verifier never receives web capabilities, so it
-/// cannot read that evidence and the session's floor is the verification gate
-/// (ADR 137 D1). Decided only from persisted delegation facts.
+/// Delegated worker sessions deliver directly to the owning Bot without running a
+/// mandatory independent verifier unless explicitly opted in via
+/// `delegationOrigin.requireIndependentVerifier: true`. Mechanical disk criteria
+/// (`file-exists`, `file-contains`) still run immediately, and the Bot or user can
+/// still invoke an independent read-only check on demand.
 pub fn independent_verifier_not_required(plan: &Value) -> bool {
-    let origin = &plan["delegationOrigin"];
-    if origin["readOnly"] != true {
-        return false;
-    }
-    let mut web = false;
-    for capability in origin["requiredCapabilities"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .flat_map(|raw| crate::verifier::expand_requested_capabilities(raw))
-    {
-        match capability {
-            "local.web.search" | "local.web.fetch" => web = true,
-            INTERACTIVE_PUBLISH_CAPABILITY => return false,
-            _ => {}
-        }
-    }
-    web
+    plan["delegationOrigin"]["requireIndependentVerifier"] != true
 }
 
 /// A not-required session for which no verifier run has returned a verdict
@@ -317,6 +297,9 @@ fn evaluate_close_gate_inner(
     let mut unmet = Vec::new();
     // ADR 137 D1: quality criteria the verifier cannot read are stated, not gated.
     let advisory_review = independent_review_not_required(plan);
+    let has_worker_output = plan["delegationOrigin"]["lastWorkerOutput"]
+        .as_str()
+        .is_some_and(|s| !s.trim().is_empty());
     for leaf in &leaves {
         let status = leaf["status"].as_str().unwrap_or("");
         let tid = leaf["taskId"].as_str().unwrap_or("unknown");
@@ -330,7 +313,7 @@ fn evaluate_close_gate_inner(
             .flatten()
             .filter_map(Value::as_str)
             .any(|r| known_refs.contains(r.trim()));
-        if !has_indexed_evidence {
+        if !has_indexed_evidence && !(advisory_review && has_worker_output) {
             unmet.push(format!("task:{tid}:missing_indexed_evidence"));
         }
     }
@@ -370,13 +353,16 @@ fn evaluate_close_gate_inner(
                     }
                 }
                 "command" | "test" => {
+                    let explicitly_failed = results
+                        .iter()
+                        .any(|r| r["criterionId"].as_str() == Some(cid) && r["passed"] == false);
                     let passed =
                         results.iter().any(|r| {
                             r["criterionId"].as_str() == Some(cid)
                                 && r["passed"] == true
                                 && criterion_result_has_indexed_evidence(r, known_refs)
                         }) || criterion_verified_by_independent_report(plan, cid, known_refs);
-                    if !passed {
+                    if !passed && (!advisory_review || explicitly_failed) {
                         unmet.push(format!("criterion:{cid}:check_unmet"));
                     }
                 }
@@ -713,28 +699,45 @@ mod tests {
     }
 
     #[test]
-    fn independent_verifier_is_not_required_only_for_read_only_web_evidence() {
+    fn independent_verifier_is_not_required_unless_explicitly_opted_in() {
         let web = ["local.file.read", "local.web.fetch"];
         assert!(independent_verifier_not_required(&web_research_plan(true, &web)));
-        assert!(
-            independent_verifier_not_required(&web_research_plan(true, &["web_research"])),
-            "the preset alias normalizes to the web capabilities"
+        assert!(independent_verifier_not_required(&web_research_plan(false, &web)));
+        assert!(independent_verifier_not_required(&web_research_plan(
+            true,
+            &["local.file.read"]
+        )));
+        let mut opted_in = web_research_plan(false, &["local.file.write"]);
+        opted_in["delegationOrigin"]["requireIndependentVerifier"] = json!(true);
+        assert!(!independent_verifier_not_required(&opted_in));
+
+        // Default write-capable delegated sessions with model_review + command criteria
+        // deliver directly to the Main Bot without blocking on an automatic verifier,
+        // while an explicit failed criterion still blocks acceptance.
+        let mut write_plan = web_research_plan(false, &["local.file.write", "local.shell.exec"]);
+        write_plan["delegationOrigin"]["lastWorkerOutput"] = json!("Drafted ADR 137.");
+        write_plan["successCriteria"] = json!([
+            { "id": "c-cmd", "kind": "command", "description": "cargo test" },
+            { "id": "c-review", "kind": "model_review", "description": "review prose" }
+        ]);
+        let empty_indexed: HashSet<String> = HashSet::new();
+        let delivered = decide_session_acceptance(
+            &research_facts(&write_plan, &empty_indexed, "not_required"),
+            false,
         );
-        assert!(
-            !independent_verifier_not_required(&web_research_plan(false, &web)),
-            "a session that can write keeps its verifier"
+        assert_eq!(delivered.verdict.outcome, "passed");
+        assert!(delivered.close_gate_passed);
+        assert_eq!(delivered.accepted_by.as_deref(), Some("policy"));
+
+        write_plan["criterionResults"] = json!([
+            { "criterionId": "c-cmd", "passed": false, "evidenceRefs": [] }
+        ]);
+        let failed_cmd = decide_session_acceptance(
+            &research_facts(&write_plan, &empty_indexed, "not_required"),
+            false,
         );
-        assert!(
-            !independent_verifier_not_required(&web_research_plan(true, &["local.file.read"])),
-            "local evidence is readable by the verifier"
-        );
-        assert!(
-            !independent_verifier_not_required(&web_research_plan(
-                true,
-                &["local.web.search", "publish_interactive_result"]
-            )),
-            "an interactive result stays inspectable"
-        );
+        assert!(!failed_cmd.close_gate_passed);
+        assert_eq!(failed_cmd.accepted_by, None);
     }
 
     #[test]
@@ -763,9 +766,10 @@ mod tests {
     }
 
     #[test]
-    fn local_read_only_research_keeps_its_model_review_gate() {
+    fn opt_in_independent_verifier_keeps_its_model_review_gate() {
         let indexed: HashSet<String> = ["ev-1".to_owned()].into_iter().collect();
-        let plan = web_research_plan(true, &["local.file.read"]);
+        let mut plan = web_research_plan(true, &["local.file.read"]);
+        plan["delegationOrigin"]["requireIndependentVerifier"] = json!(true);
 
         let automatic = decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), false);
         assert!(!automatic.close_gate_passed);
