@@ -105,6 +105,8 @@ pub struct RunTurnOptions<'a> {
     pub wake_events: &'a [Value],
     pub worker_model_selection: Value,
     pub holds_lease: bool,
+    /// True only when explicitly triggered by a freshly delivered user message (never heartbeat re-polls).
+    pub manual_trial: bool,
 }
 
 type ActivityListener = Arc<dyn Fn(ProjectAgentActivity, String) + Send + Sync>;
@@ -350,16 +352,46 @@ impl ProjectAgentRunner {
         code: &'static str,
         cancel: &CancellationToken,
     ) -> TurnEndKind {
+        self.record_turn_failure_with_detail(ctx, code, None, None, None, cancel)
+    }
+
+    fn record_model_turn_failure(
+        &self,
+        ctx: &TurnFailureCtx<'_>,
+        err: &ModelError,
+        cancel: &CancellationToken,
+    ) -> TurnEndKind {
+        let formatted = err.format_http_rejection();
+        self.record_turn_failure_with_detail(
+            ctx,
+            err.code,
+            formatted.as_deref(),
+            err.http_status,
+            err.http_detail.as_deref(),
+            cancel,
+        )
+    }
+
+    fn record_turn_failure_with_detail(
+        &self,
+        ctx: &TurnFailureCtx<'_>,
+        code: &'static str,
+        display_reason: Option<&str>,
+        http_status: Option<u16>,
+        http_detail: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> TurnEndKind {
         if cancel.is_cancelled() || code == "CANCELLED" {
             let _ = self
                 .breaker_store
                 .abandon_trial(ctx.workspace_id, Some(ctx.provider_scope));
             return TurnEndKind::UserStopped;
         }
+        let reason_for_breaker = display_reason.unwrap_or(code);
         let outcome = self.breaker_store.record_failure(
             ctx.workspace_id,
             ctx.turn_id,
-            code,
+            reason_for_breaker,
             Some(ctx.provider_scope),
             None,
             ctx.now_ms,
@@ -369,15 +401,30 @@ impl ProjectAgentRunner {
             Err(_) => (false, None),
         };
         let (content, meta) = if tripped {
+            let mut m = json!({
+                "circuitOpenUntil": open_until,
+                "errorCode": code,
+            });
+            if let Some(status) = http_status {
+                m["httpStatus"] = json!(status);
+            }
+            if let Some(detail) = http_detail.filter(|s| !s.is_empty()) {
+                m["httpDetail"] = json!(detail);
+            }
             (
                 "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。".to_owned(),
-                json!({ "circuitOpenUntil": open_until }),
+                m,
             )
         } else {
-            (
-                format!("代理暂时不可用：{code}"),
-                json!({ "errorCode": code }),
-            )
+            let reason = display_reason.unwrap_or(code);
+            let mut m = json!({ "errorCode": code });
+            if let Some(status) = http_status {
+                m["httpStatus"] = json!(status);
+            }
+            if let Some(detail) = http_detail.filter(|s| !s.is_empty()) {
+                m["httpDetail"] = json!(detail);
+            }
+            (format!("代理暂时不可用：{reason}"), m)
         };
         let at = now_iso();
         let _ = ctx.conv_store.append_message_idempotent(
@@ -1548,7 +1595,7 @@ impl ProjectAgentRunner {
         let now_str = now_iso();
         let now_ms = parse_iso_ms(&now_str).unwrap_or(0);
         let provider_scope = format!("provider:{}", model.provider());
-        let manual_trial = opts.kind == "user";
+        let manual_trial = opts.manual_trial;
 
         let mut trial_in_flight = match self.breaker_store.admit(
             opts.workspace_id,
@@ -2254,9 +2301,9 @@ impl ProjectAgentRunner {
                                 Ok(t) => t,
                                 Err(retry_err) => {
                                     trial_in_flight = false;
-                                    final_end = self.record_turn_failure(
+                                    final_end = self.record_model_turn_failure(
                                         &failure_ctx,
-                                        retry_err.code,
+                                        &retry_err,
                                         cancel,
                                     );
                                     break;
@@ -2265,13 +2312,17 @@ impl ProjectAgentRunner {
                         }
                         Ok(None) => {
                             trial_in_flight = false;
-                            final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
+                            final_end =
+                                self.record_model_turn_failure(&failure_ctx, &err, cancel);
                             break;
                         }
                         Err(compact_err) => {
                             trial_in_flight = false;
-                            final_end =
-                                self.record_turn_failure(&failure_ctx, compact_err.code, cancel);
+                            final_end = self.record_model_turn_failure(
+                                &failure_ctx,
+                                &compact_err,
+                                cancel,
+                            );
                             break;
                         }
                     }
@@ -2294,7 +2345,7 @@ impl ProjectAgentRunner {
                 }
                 Err(err) => {
                     trial_in_flight = false;
-                    final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
+                    final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                     break;
                 }
             };
@@ -2755,13 +2806,14 @@ impl ProjectAgentRunner {
                         }
                         Err(err) => {
                             trial_in_flight = false;
-                            final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
+                            final_end =
+                                self.record_model_turn_failure(&failure_ctx, &err, cancel);
                         }
                     }
                 }
                 Err(err) => {
                     trial_in_flight = false;
-                    final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
+                    final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                 }
             }
         }

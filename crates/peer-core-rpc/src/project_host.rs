@@ -183,6 +183,7 @@ pub struct ProjectHostRuntime {
     workspace_locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pending_wakes: Mutex<HashSet<String>>,
     active_wakes: Mutex<HashSet<String>>,
+    heartbeat_paused_inputs: Mutex<HashMap<String, Option<String>>>,
     yielded_until: Mutex<HashMap<String, tokio::time::Instant>>,
     loop_cancel: Mutex<Option<CancellationToken>>,
     interactive_catalog: Arc<RwLock<Option<String>>>,
@@ -223,6 +224,7 @@ impl ProjectHostRuntime {
             workspace_locks: Mutex::new(HashMap::new()),
             pending_wakes: Mutex::new(HashSet::new()),
             active_wakes: Mutex::new(HashSet::new()),
+            heartbeat_paused_inputs: Mutex::new(HashMap::new()),
             yielded_until: Mutex::new(HashMap::new()),
             loop_cancel: Mutex::new(None),
             interactive_catalog,
@@ -678,7 +680,7 @@ impl ProjectHostRuntime {
                 match self.host.ensure_lease(&ws_id) {
                     Ok(LeaseStatus::Acquired { .. }) => {
                         if self.host.has_pending_work(&ws_id) {
-                            self.wake_workspace(&ws_id);
+                            self.wake_workspace_from_heartbeat(&ws_id);
                         }
                     }
                     Ok(LeaseStatus::HeldByOther(_)) => {
@@ -692,7 +694,7 @@ impl ProjectHostRuntime {
             } else if self.ensure_workspace_ready(&ws_id, &cancel).await {
                 self.emit_changed(vec![ws_id.clone()]);
                 if self.host.has_pending_work(&ws_id) {
-                    self.wake_workspace(&ws_id);
+                    self.wake_workspace_from_heartbeat(&ws_id);
                 }
             }
         }
@@ -729,9 +731,42 @@ impl ProjectHostRuntime {
         }
     }
 
+    fn wake_workspace_from_heartbeat(self: &Arc<Self>, workspace_id: &str) {
+        if self
+            .active_wakes
+            .lock()
+            .is_ok_and(|active| active.contains(workspace_id))
+        {
+            return;
+        }
+        if let Ok(paused) = self.heartbeat_paused_inputs.lock()
+            && let Some(paused_cursor) = paused.get(workspace_id)
+        {
+            let has_new_unread = self
+                .host
+                .inputs()
+                .diagnostic_snapshot(workspace_id)
+                .map(|snap| snap.depth > 0 || &snap.cursor != paused_cursor)
+                .unwrap_or(false);
+            let has_queued_sessions = self
+                .host
+                .supervisor()
+                .list_sessions(workspace_id)
+                .iter()
+                .any(|s| s.status == "queued");
+            if !has_new_unread && !has_queued_sessions {
+                return;
+            }
+        }
+        self.wake_workspace(workspace_id);
+    }
+
     pub fn wake_workspace(self: &Arc<Self>, workspace_id: &str) {
         if !self.is_enabled() || !is_valid_workspace_id(workspace_id) {
             return;
+        }
+        if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+            paused.remove(workspace_id);
         }
         {
             let mut pending = self.pending_wakes.lock().unwrap_or_else(|e| e.into_inner());
@@ -885,6 +920,21 @@ impl ProjectHostRuntime {
 
         match tick_res {
             Ok(report) => {
+                let ended_in_failure = matches!(
+                    report.last_turn.as_ref().map(|t| &t.end),
+                    Some(
+                        peer_project_agent::TurnEndKind::Failed { .. }
+                            | peer_project_agent::TurnEndKind::CircuitOpen
+                    )
+                );
+                if ended_in_failure {
+                    let cursor = self.host.inputs().read_cursor(workspace_id).ok().flatten();
+                    if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+                        paused.insert(workspace_id.to_owned(), cursor);
+                    }
+                } else if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+                    paused.remove(workspace_id);
+                }
                 if !report.promoted_session_ids.is_empty() {
                     for sid in &report.promoted_session_ids {
                         self.spawn_worker_session(workspace_id, sid);
