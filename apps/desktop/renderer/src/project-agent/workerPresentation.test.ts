@@ -11,7 +11,7 @@ import { createI18n } from '@peer-agent/i18n';
 import { indexBotWork, replyTaskReferences } from './state/botWorkState.ts';
 import { sidebarActiveSessionsOf } from './state/botNavigationState.ts';
 import type { BotListItem } from '@peer-agent/protocol';
-import type { BotChatMessage } from './state/botConversationState.ts';
+import { normalizeBotMessage } from './state/botConversationState.ts';
 import { readDrawerSession } from './state/drawerState.ts';
 import * as status from './state/workerStatus.ts';
 import type { ExecutorIcon as Executor } from './ExecutorIcon';
@@ -70,7 +70,7 @@ test('sidebar presents four current host tasks plus overflow and retains the sel
     title: `任务 ${index}`,
     followUp: index === 1
       ? { owner: 'bot', inCurrentList: true, reason: 'verification_failed' }
-      : index === 5 ? { owner: 'none', inCurrentList: false, reason: 'terminal' }
+      : index === 5 ? { owner: 'none', inCurrentList: false, reason: 'settled' }
         : index === 6 ? { owner: 'none', inCurrentList: false, reason: 'obligation_indexed' }
           : { owner: 'bot', inCurrentList: true, reason: 'live_execution' },
   })!);
@@ -93,11 +93,15 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
   const live = readDrawerSession({ sessionId: 'review', status: 'result_ready', title: '复核变更',
     followUp: { owner: 'bot', inCurrentList: true, reason: 'verification_failed' } })!;
   const messages = [
-    { kind: 'agent_reply', sources: ['review', 'finished'], meta: { sessionStates: [
+    { id: 'reply', kind: 'agent_reply', role: 'assistant', sources: ['review', 'finished'], meta: { sessionStates: [
       { sessionId: 'review', status: 'running' }, { sessionId: 'finished', status: 'accepted' },
     ] } },
-    { kind: 'agent_reply', sources: ['legacy'] },
-  ] as BotChatMessage[];
+    { id: 'legacy-reply', kind: 'agent_reply', role: 'assistant', sources: ['legacy'] },
+  ].map(message => {
+    const parsed = normalizeBotMessage(message);
+    assert.ok(parsed);
+    return parsed;
+  });
   const markup = renderToStaticMarkup(createElement(ReplyTaskReferences, { messages, i18n,
     workIndex: indexBotWork([live], true), onOpen() {} }));
   assert.match(markup, /data-session-id="review" data-tone="danger" title="复核变更 · 核验未通过"/);
