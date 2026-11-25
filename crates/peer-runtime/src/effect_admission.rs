@@ -14,6 +14,13 @@ pub(crate) enum AdmissionRequest {
         path: std::path::PathBuf,
         reply: oneshot::Sender<Result<(), HostError>>,
     },
+    /// A configuration source of the repository that one `git_query` observes.
+    /// The Host decides whether the query's existing read decision covers it.
+    GitConfigSource {
+        path: std::path::PathBuf,
+        repository: std::path::PathBuf,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
     CommandStarting(oneshot::Sender<Result<(), HostError>>),
     CommandStarted {
         recorder: Recorder,
@@ -95,6 +102,7 @@ impl EffectAdmission {
                 match req {
                     AdmissionRequest::Check(reply)
                     | AdmissionRequest::ReadScope { reply, .. }
+                    | AdmissionRequest::GitConfigSource { reply, .. }
                     | AdmissionRequest::CommandStarting(reply)
                     | AdmissionRequest::CommandStarted { reply, .. } => {
                         let _ = reply.send(ok);
@@ -187,6 +195,24 @@ impl EffectAdmission {
         }
         self.request(|reply| AdmissionRequest::ReadScope { path, reply })
             .await
+    }
+    pub(crate) async fn git_config_source(
+        &self,
+        path: std::path::PathBuf,
+        repository: std::path::PathBuf,
+    ) -> Result<(), HostError> {
+        if [path.as_os_str(), repository.as_os_str()]
+            .into_iter()
+            .any(|part| !std::path::Path::new(part).is_absolute() || part.len() > 8192)
+        {
+            return Err(HostError("read_scope_invalid"));
+        }
+        self.request(|reply| AdmissionRequest::GitConfigSource {
+            path,
+            repository,
+            reply,
+        })
+        .await
     }
     pub(crate) async fn command_starting(&self) -> Result<(), HostError> {
         self.request(AdmissionRequest::CommandStarting).await

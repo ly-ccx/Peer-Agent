@@ -15,13 +15,12 @@ use crate::{
     now_iso,
     scheduler::{ExecutionScheduler, SelectionOutcome},
     sha256_json,
-    verifier::resolve_work_session_profile,
+    verifier::{delegated_access, resolve_work_session_profile},
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
-use peer_protocol::LocalAccessLevel;
 use peer_runtime::{
     CancellationToken,
-    conversation_host::{ConversationAccess, ConversationOptions, NativeConversationRuntime},
+    conversation_host::{ConversationOptions, NativeConversationRuntime},
     model::NativeModel,
     native_exec::{execute_plan, recover_plan},
     providers::RuntimeMode,
@@ -29,7 +28,7 @@ use peer_runtime::{
 };
 use peer_store::{
     ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, DirectoryLock,
-    EvidenceIndexStore, HostApproval, HostToolEvidence, NewProjectConversation, PolicyStore,
+    EvidenceIndexStore, HostApproval, HostToolEvidence, NewProjectConversation,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -2127,12 +2126,23 @@ impl SessionSupervisor {
                 );
                 return Err(ProjectError::new("WORKSPACE_NOT_FOUND", detail));
             }
-            let ws_access = PolicyStore::new(&self.data_home)
-                .read_existing(workspace_id)
-                .map(|p| p.access_level)
-                .unwrap_or(LocalAccessLevel::SessionLocal);
-            let mut session_profile = match resolve_work_session_profile(&plan, "worker", ws_access)
-            {
+            // The session follows the Bot's current policy on every call. A
+            // policy that cannot be read fails the session rather than falling
+            // back to another level (ADR101 §2.3, §6.1, §6.3).
+            let access = match delegated_access(&self.data_home, workspace_id) {
+                Ok(access) => access,
+                Err(error) => {
+                    let _ = self.fail_session(
+                        workspace_id,
+                        session_id,
+                        error.code,
+                        &error.detail,
+                        holds_lease,
+                    );
+                    return Err(error);
+                }
+            };
+            let mut session_profile = match resolve_work_session_profile(&plan, "worker") {
                 Some(p) => p,
                 None => {
                     let _ = self.fail_session(
@@ -2237,11 +2247,8 @@ impl SessionSupervisor {
             } else {
                 None
             };
-            let runtime = NativeConversationRuntime::new(
-                &self.data_home,
-                ConversationAccess::new(session_profile.access_level),
-            )
-            .with_capability_overrides(worker_cap_overrides);
+            let runtime = NativeConversationRuntime::new(&self.data_home, access)
+                .with_capability_overrides(worker_cap_overrides);
             let conv_res = Box::pin(
                 runtime.execute_delegated(
                     &ConversationOptions {

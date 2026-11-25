@@ -59,6 +59,15 @@ pub type AuthorityFuture<'a> = Pin<Box<dyn Future<Output = Result<(), GitReadErr
 pub trait GitReadAuthority: Sync {
     fn check(&self) -> AuthorityFuture<'_>;
     fn authorize<'a>(&'a self, path: &'a Path) -> AuthorityFuture<'a>;
+    /// A configuration source of the repository being observed. The Host may
+    /// let the read decision already made for this query cover it.
+    fn authorize_config_source<'a>(
+        &'a self,
+        path: &'a Path,
+        _repository: &'a Path,
+    ) -> AuthorityFuture<'a> {
+        self.authorize(path)
+    }
     /// The public capability Adapter journals every real command through its
     /// Host port. Private recovery probes retain their existing narrower owner.
     fn starting(&self) -> AuthorityFuture<'_> {
@@ -154,11 +163,29 @@ impl Query<'_> {
         self.authority.check().await
     }
     async fn authorize(&self, path: &Path) -> Result<(), GitReadError> {
+        self.admit(path, |authority, path| authority.authorize(path))
+            .await
+    }
+    async fn authorize_config_source(
+        &self,
+        path: &Path,
+        repository: &Path,
+    ) -> Result<(), GitReadError> {
+        self.admit(path, |authority, path| {
+            authority.authorize_config_source(path, repository)
+        })
+        .await
+    }
+    async fn admit<'a>(
+        &'a self,
+        path: &'a Path,
+        request: impl FnOnce(&'a dyn GitReadAuthority, &'a Path) -> AuthorityFuture<'a>,
+    ) -> Result<(), GitReadError> {
         if path.as_os_str().len() > limits().path_bytes {
             return Err(GitReadError::new("git_query_path_limit"));
         }
         self.guard().await?;
-        self.authority.authorize(path).await?;
+        request(self.authority, path).await?;
         self.guard().await
     }
     async fn run(&mut self, args: &[&str], codes: &[i32]) -> Result<Output, GitReadError> {
@@ -310,7 +337,7 @@ impl GitRead {
                     if sources.len() >= limits().config_sources {
                         return Err(GitReadError::new("git_query_config_limit"));
                     }
-                    q.authorize(&source).await?;
+                    q.authorize_config_source(&source, &repository).await?;
                     sources.push(source);
                 }
             }

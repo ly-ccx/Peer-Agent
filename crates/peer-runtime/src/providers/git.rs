@@ -36,6 +36,18 @@ impl GitReadAuthority for Authority {
     fn authorize<'a>(&'a self, path: &'a Path) -> AuthorityFuture<'a> {
         Box::pin(async move { self.port.read_scope(path.into()).await.map_err(error) })
     }
+    fn authorize_config_source<'a>(
+        &'a self,
+        path: &'a Path,
+        repository: &'a Path,
+    ) -> AuthorityFuture<'a> {
+        Box::pin(async move {
+            self.port
+                .git_config_source(path.into(), repository.into())
+                .await
+                .map_err(error)
+        })
+    }
     fn starting(&self) -> AuthorityFuture<'_> {
         Box::pin(async { self.port.command_starting().await.map_err(error) })
     }

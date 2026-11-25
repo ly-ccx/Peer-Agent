@@ -427,12 +427,18 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         fs::write(workspace.path().join("README.md"), "current evidence").unwrap();
-        let sup = SessionSupervisor::new(home.path(), None);
+        // The verifier reads the delegating Bot's real policy, so the plan is
+        // owned by the Bot profile that a delegated plan always has.
+        let host = crate::NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+        let (entry, _profile) = host
+            .bind_workspace(workspace.path(), Some("FenceBot"))
+            .unwrap();
+        let sup = host.supervisor();
         let plan = json!({
             "planId":"plan-reverify-fence", "conversationId":"reverify-fence",
             "targetWorkspacePath": workspace.path(), "status":"completed",
             "delegationOrigin":{
-                "sessionId":"reverify-fence", "workspaceId":"ws-fence",
+                "sessionId":"reverify-fence", "workspaceId": entry.workspace_id,
                 "readOnly":true, "phase":"completed", "independentVerifier":"failed"
             },
             "successCriteria":[{"id":"file", "kind":"file-exists", "path":"README.md"}],

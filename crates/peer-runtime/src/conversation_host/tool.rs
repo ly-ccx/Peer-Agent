@@ -639,7 +639,7 @@ impl Host<'_> {
             "decidedAt": now(),
             "reason": reason,
             "metadata": {
-                "policyRevision": format!("ordinary:{}:{revision}", self.identity.stream_id),
+                "policyRevision": self.access.policy_revision(&self.identity.stream_id, revision)?,
             },
         });
         if let Some(risk_error) = risk_error {
