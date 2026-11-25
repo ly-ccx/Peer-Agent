@@ -45,8 +45,18 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
       title: [tab.comparison ? tab.comparison.comparison ? documentComparisonLabel(tab.comparison, isZh)
         : `${tab.comparison.fromRef} → ${tab.comparison.toRef ?? (isZh ? '工作树' : 'Working tree')}` : null,
         tab.reference?.revision?.commit, tab.reference?.relativeTo, tab.absPath].filter(Boolean).join('; ') })),
-    ...browserSession.tabs.filter(tab => tab.url !== 'about:blank' || !!tab.title || (activeTab === 'browser' && tab.id === browserSession.activeTabId)).map(tab => ({ key: resourceKey('browser', tab.id),
-      kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
+    ...browserSession.tabs.filter(tab => {
+      const rawTitle = tab.title?.trim() ?? '';
+      const hasRealTitle = Boolean(rawTitle) && rawTitle !== 'about:blank';
+      return tab.url !== 'about:blank' || hasRealTitle || (activeTab === 'browser' && tab.id === browserSession.activeTabId);
+    }).map(tab => {
+      const blankLabel = isZh ? '新网页' : 'Web';
+      const rawTitle = tab.title?.trim() ?? '';
+      const isBlank = tab.url === 'about:blank' && (!rawTitle || rawTitle === 'about:blank');
+      const displayLabel = isBlank ? blankLabel : rawTitle || tab.url;
+      return { key: resourceKey('browser', tab.id), kind: 'browser' as const, id: tab.id,
+        label: displayLabel, title: isBlank ? blankLabel : tab.url };
+    }),
     ...directoryTabs.tabs.map(tab => ({ key: resourceKey('directory', tab.id), kind: 'directory' as const, id: tab.id,
       label: directoryTabLabel(tab.reference, isZh), title: [tab.reference.path, tab.reference.relativeTo,
         tab.reference.task ? `${tab.reference.task.sessionId}/${tab.reference.task.planId}` : null].filter(Boolean).join('; ') })),
