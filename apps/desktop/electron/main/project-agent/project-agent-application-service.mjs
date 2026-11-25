@@ -353,6 +353,7 @@ export function createProjectAgentApplicationService({
         ...(typeof payload.displayName === 'string' ? { displayName: payload.displayName } : {}),
         ...(payload.regenerateAvatar === true ? { regenerateAvatar: true } : {}),
         ...(payload.avatarColor !== undefined ? { avatarColor: payload.avatarColor } : {}),
+        ...(payload.avatarParts !== undefined ? { avatarParts: payload.avatarParts } : {}),
         ...(typeof payload.proactivity === 'string' ? { proactivity: payload.proactivity } : {}),
         ...(typeof payload.communicationStyle === 'string' ? { communicationStyle: payload.communicationStyle } : {}),
         ...(avatarSourcePath ? { avatarSourcePath } : {}),
@@ -379,6 +380,10 @@ export function createProjectAgentApplicationService({
     if (payload.avatarColor !== undefined) {
       const recolored = lifecycle.setAvatarColor(workspaceId, payload.avatarColor);
       if (!recolored?.ok) return recolored;
+    }
+    if (payload.avatarParts !== undefined) {
+      const customized = lifecycle.setAvatarParts(workspaceId, payload.avatarParts);
+      if (!customized?.ok) return customized;
     }
     if (typeof payload.proactivity === 'string') {
       if (!BOT_LEVELS.includes(payload.proactivity)) return { ok: false, code: 'INVALID_PROACTIVITY' };

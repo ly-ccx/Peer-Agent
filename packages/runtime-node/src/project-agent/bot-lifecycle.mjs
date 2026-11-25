@@ -376,6 +376,7 @@ export function createBotLifecycle({
     readProfile: (workspaceId) => profiles.read(workspaceId),
     regenerateAvatar: (workspaceId) => profiles.regenerateAvatar(workspaceId),
     setAvatarColor: (workspaceId, color) => profiles.setAvatarColor(workspaceId, color),
+    setAvatarParts: (workspaceId, parts) => profiles.setAvatarParts(workspaceId, parts),
     uploadAvatar: (workspaceId, sourcePath) => profiles.installAvatar(workspaceId, sourcePath),
     startFamiliarize,
     recordVerifiedFindings,

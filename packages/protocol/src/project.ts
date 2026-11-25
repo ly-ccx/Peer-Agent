@@ -54,8 +54,48 @@ export type ProjectHostTakeoverResult =
   | { readonly ok: true; readonly requested: boolean; readonly alreadyHost?: boolean }
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_UNAVAILABLE' | 'INVALID_INPUT' };
 
+export const BOT_AVATAR_HEADS = [
+  'none',
+  'beret',
+  'glasses',
+  'beanie',
+  'vermeer',
+  'straw',
+  'headphones',
+  'crown',
+] as const;
+
+export type BotAvatarHead = (typeof BOT_AVATAR_HEADS)[number];
+
+export const BOT_AVATAR_NECKS = [
+  'bowtie',
+  'scarf',
+  'sweater',
+  'moon',
+  'sailor',
+  'cape',
+] as const;
+
+export type BotAvatarNeck = (typeof BOT_AVATAR_NECKS)[number];
+
+export interface BotAvatarPartsPatch {
+  readonly shape?: string;
+  readonly color?: string;
+  readonly head?: BotAvatarHead;
+  readonly neck?: BotAvatarNeck;
+  readonly backdrop?: boolean;
+}
+
 export type BotAvatar =
-  | { readonly kind: 'generated'; readonly shape: string; readonly color: string; readonly variant?: number }
+  | {
+      readonly kind: 'generated';
+      readonly shape: string;
+      readonly color: string;
+      readonly variant?: number;
+      readonly head?: BotAvatarHead;
+      readonly neck?: BotAvatarNeck;
+      readonly backdrop?: boolean;
+    }
   | { readonly kind: 'image'; readonly ref: string };
 
 export type BotAvatarReadResult =

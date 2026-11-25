@@ -656,7 +656,27 @@
   overflow: visible;
 }
 
-[data-theme="light"] :is([data-avatar-breed="calico"], [data-avatar-breed="tuxedo"], [data-avatar-breed="pearl-cat"]) .bot-avatar-portrait {
+.bot-avatar-backdrop {
+  fill: var(--cat-bg-light, #eef1f7);
+  stroke: var(--cat-ring-light, #d8dfec);
+}
+
+[data-theme="dark"] .bot-avatar-backdrop {
+  fill: var(--cat-bg-dark, #2a2f42);
+  stroke: var(--cat-ring-dark, #3c435d);
+}
+
+.bot-avatar-light-rim {
+  fill: none;
+  stroke: rgba(40, 32, 26, 0.11);
+  stroke-width: 0.9;
+}
+
+[data-theme="dark"] .bot-avatar-light-rim {
+  stroke: transparent;
+}
+
+[data-theme="light"] [data-avatar-backdrop="false"]:is([data-avatar-breed="calico"], [data-avatar-breed="tuxedo"], [data-avatar-breed="cream"]) .bot-avatar-portrait {
   filter: drop-shadow(0 1px 1.5px color-mix(in srgb, var(--graphite-base) 8%, transparent));
 }
 

@@ -142,6 +142,53 @@ test('旧版无表情编号的头像选色后保留屏幕上的轮廓', () => {
   }
 });
 
+test('模块化小猫工坊部件更新校验合法性、保留未改动部件并持久化', () => {
+  const root = tempRoot();
+  try {
+    const workspaceId = 'modular-cat-bot';
+    const store = createBotProfileStore({ rootDir: root });
+    store.create({ workspaceId, displayName: '混搭猫', agentConversationId: 'conv-cat' });
+
+    const customized = store.setAvatarParts(workspaceId, {
+      shape: 'diamond',
+      color: '#55bac7',
+      head: 'glasses',
+      neck: 'bowtie',
+      backdrop: false,
+    });
+    assert.equal(customized.ok, true);
+    assert.equal(customized.profile.avatar.shape, 'diamond');
+    assert.equal(customized.profile.avatar.color, '#55bac7');
+    assert.equal(customized.profile.avatar.head, 'glasses');
+    assert.equal(customized.profile.avatar.neck, 'bowtie');
+    assert.equal(customized.profile.avatar.backdrop, false);
+
+    // Partial color patch preserves coat, headwear, neckwear, and backdrop.
+    const recolored = store.setAvatarParts(workspaceId, { color: '#f36d63' });
+    assert.equal(recolored.ok, true);
+    assert.equal(recolored.profile.avatar.shape, 'diamond');
+    assert.equal(recolored.profile.avatar.color, '#f36d63');
+    assert.equal(recolored.profile.avatar.head, 'glasses');
+    assert.equal(recolored.profile.avatar.neck, 'bowtie');
+    assert.equal(recolored.profile.avatar.backdrop, false);
+
+    // Legacy setAvatarColor also preserves custom parts.
+    const colorOnly = store.setAvatarColor(workspaceId, '#61b68c');
+    assert.equal(colorOnly.ok, true);
+    assert.equal(colorOnly.profile.avatar.color, '#61b68c');
+    assert.equal(colorOnly.profile.avatar.head, 'glasses');
+    assert.equal(colorOnly.profile.avatar.neck, 'bowtie');
+    assert.equal(colorOnly.profile.avatar.backdrop, false);
+
+    assert.equal(store.setAvatarParts(workspaceId, { head: 'wizard' }).code, 'INVALID_AVATAR_PARTS');
+    assert.equal(store.setAvatarParts(workspaceId, { neck: 'chain' }).code, 'INVALID_AVATAR_PARTS');
+    assert.equal(store.setAvatarParts(workspaceId, { color: '#111111' }).code, 'INVALID_AVATAR_COLOR');
+    assert.equal(store.setAvatarParts(workspaceId, { backdrop: 'yes' }).code, 'INVALID_AVATAR_PARTS');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('上传只接受 png、jpg、webp，并且不超过 1 MB', () => {
   const root = tempRoot();
   try {

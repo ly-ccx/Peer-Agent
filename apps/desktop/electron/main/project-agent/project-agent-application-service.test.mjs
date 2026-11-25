@@ -201,6 +201,30 @@ test('头像选色通过宿主保存并返回最新档案', async () => {
   assert.deepEqual(calls, [['ws-1', '#61b68c']]);
 });
 
+test('头像模块化部件通过宿主保存并返回最新档案', async () => {
+  const calls = [];
+  let profile = { workspaceId: 'ws-1', status: 'active', avatar: { kind: 'generated', shape: 'circle', color: '#6474e5', variant: 0 } };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: { read: () => profile },
+    lifecycle: {
+      setAvatarParts(workspaceId, parts) {
+        calls.push([workspaceId, parts]);
+        profile = { ...profile, avatar: { ...profile.avatar, ...parts } };
+        return { ok: true, profile };
+      },
+    },
+  });
+  const result = await service.updateProfile({
+    workspaceId: 'ws-1',
+    avatarParts: { shape: 'diamond', color: '#55bac7', head: 'beret', neck: 'scarf', backdrop: true },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.avatar.head, 'beret');
+  assert.equal(result.profile.avatar.neck, 'scarf');
+  assert.deepEqual(calls, [['ws-1', { shape: 'diamond', color: '#55bac7', head: 'beret', neck: 'scarf', backdrop: true }]]);
+});
+
 test('automatic merge is explicit, saved through host policy, and invalid patches are atomic', async () => {
   let profile = { workspaceId: 'ws-1', status: 'active', displayName: 'Bot' };
   let saves = 0;

@@ -802,6 +802,33 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
   | 'projectAgent.drawer.settings.avatarColor'
+  | 'projectAgent.drawer.settings.avatarColorSyncHint'
+  | 'projectAgent.drawer.settings.avatarBackdrop'
+  | 'projectAgent.drawer.settings.avatarTab.coat'
+  | 'projectAgent.drawer.settings.avatarTab.head'
+  | 'projectAgent.drawer.settings.avatarTab.neck'
+  | 'projectAgent.drawer.settings.avatarCoat.circle'
+  | 'projectAgent.drawer.settings.avatarCoat.square'
+  | 'projectAgent.drawer.settings.avatarCoat.pill'
+  | 'projectAgent.drawer.settings.avatarCoat.arch'
+  | 'projectAgent.drawer.settings.avatarCoat.hex'
+  | 'projectAgent.drawer.settings.avatarCoat.diamond'
+  | 'projectAgent.drawer.settings.avatarCoat.triangle'
+  | 'projectAgent.drawer.settings.avatarCoat.star'
+  | 'projectAgent.drawer.settings.avatarHead.none'
+  | 'projectAgent.drawer.settings.avatarHead.beret'
+  | 'projectAgent.drawer.settings.avatarHead.glasses'
+  | 'projectAgent.drawer.settings.avatarHead.beanie'
+  | 'projectAgent.drawer.settings.avatarHead.vermeer'
+  | 'projectAgent.drawer.settings.avatarHead.straw'
+  | 'projectAgent.drawer.settings.avatarHead.headphones'
+  | 'projectAgent.drawer.settings.avatarHead.crown'
+  | 'projectAgent.drawer.settings.avatarNeck.bowtie'
+  | 'projectAgent.drawer.settings.avatarNeck.scarf'
+  | 'projectAgent.drawer.settings.avatarNeck.sweater'
+  | 'projectAgent.drawer.settings.avatarNeck.moon'
+  | 'projectAgent.drawer.settings.avatarNeck.sailor'
+  | 'projectAgent.drawer.settings.avatarNeck.cape'
   | 'projectAgent.drawer.settings.avatarColorImageHint'
   | 'projectAgent.drawer.settings.avatarColor.0'
   | 'projectAgent.drawer.settings.avatarColor.1'
@@ -2595,17 +2622,44 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.advancedModels': '更多角色与模型限制',
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
-    'projectAgent.drawer.settings.avatarNew': '重新生成',
-    'projectAgent.drawer.settings.avatarColor': '对话点缀色',
-    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
-    'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
-    'projectAgent.drawer.settings.avatarColor.1': '珊瑚红',
-    'projectAgent.drawer.settings.avatarColor.2': '琥珀橙',
-    'projectAgent.drawer.settings.avatarColor.3': '薄荷绿',
-    'projectAgent.drawer.settings.avatarColor.4': '丁香紫',
-    'projectAgent.drawer.settings.avatarColor.5': '玫瑰粉',
-    'projectAgent.drawer.settings.avatarColor.6': '湖水蓝',
-    'projectAgent.drawer.settings.avatarColor.7': '暖灰色',
+    'projectAgent.drawer.settings.avatarNew': '随机混搭',
+    'projectAgent.drawer.settings.avatarColor': '主题色',
+    'projectAgent.drawer.settings.avatarColorSyncHint': '同步穿搭、底盘与气泡',
+    'projectAgent.drawer.settings.avatarBackdrop': '柔彩底盘',
+    'projectAgent.drawer.settings.avatarTab.coat': '毛色花纹',
+    'projectAgent.drawer.settings.avatarTab.head': '头饰 / 眼镜',
+    'projectAgent.drawer.settings.avatarTab.neck': '领饰穿搭',
+    'projectAgent.drawer.settings.avatarCoat.circle': '黑猫',
+    'projectAgent.drawer.settings.avatarCoat.square': '三花猫',
+    'projectAgent.drawer.settings.avatarCoat.pill': '暖橘猫',
+    'projectAgent.drawer.settings.avatarCoat.arch': '拿铁暹罗',
+    'projectAgent.drawer.settings.avatarCoat.hex': '英短蓝猫',
+    'projectAgent.drawer.settings.avatarCoat.diamond': '奶牛猫',
+    'projectAgent.drawer.settings.avatarCoat.triangle': '奶油白猫',
+    'projectAgent.drawer.settings.avatarCoat.star': '暖棕狸花',
+    'projectAgent.drawer.settings.avatarHead.none': '无头饰',
+    'projectAgent.drawer.settings.avatarHead.beret': '贝雷帽',
+    'projectAgent.drawer.settings.avatarHead.glasses': '圆眼镜',
+    'projectAgent.drawer.settings.avatarHead.beanie': '针织帽',
+    'projectAgent.drawer.settings.avatarHead.vermeer': '珍珠巾',
+    'projectAgent.drawer.settings.avatarHead.straw': '麦田草帽',
+    'projectAgent.drawer.settings.avatarHead.headphones': '复古耳机',
+    'projectAgent.drawer.settings.avatarHead.crown': '星月小冠',
+    'projectAgent.drawer.settings.avatarNeck.bowtie': '绅士领结',
+    'projectAgent.drawer.settings.avatarNeck.scarf': '暖织围巾',
+    'projectAgent.drawer.settings.avatarNeck.sweater': '圆领毛衣',
+    'projectAgent.drawer.settings.avatarNeck.moon': '新月项圈',
+    'projectAgent.drawer.settings.avatarNeck.sailor': '水手领巾',
+    'projectAgent.drawer.settings.avatarNeck.cape': '极简披肩',
+    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色或配件会切换回生成头像。',
+    'projectAgent.drawer.settings.avatarColor.0': '鸢尾蓝',
+    'projectAgent.drawer.settings.avatarColor.1': '暖赤陶',
+    'projectAgent.drawer.settings.avatarColor.2': '杏子金',
+    'projectAgent.drawer.settings.avatarColor.3': '鼠尾草',
+    'projectAgent.drawer.settings.avatarColor.4': '雾薰衣草',
+    'projectAgent.drawer.settings.avatarColor.5': '干枯玫瑰',
+    'projectAgent.drawer.settings.avatarColor.6': '松石青',
+    'projectAgent.drawer.settings.avatarColor.7': '暖燕麦',
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
@@ -4128,17 +4182,44 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.advancedModels': 'More roles and model limits',
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
-    'projectAgent.drawer.settings.avatarNew': 'Generate another',
-    'projectAgent.drawer.settings.avatarColor': 'Chat accent color',
-    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
+    'projectAgent.drawer.settings.avatarNew': 'Shuffle look',
+    'projectAgent.drawer.settings.avatarColor': 'Theme color',
+    'projectAgent.drawer.settings.avatarColorSyncHint': 'Syncs outfit, backdrop & chat tint',
+    'projectAgent.drawer.settings.avatarBackdrop': 'Soft backdrop',
+    'projectAgent.drawer.settings.avatarTab.coat': 'Coat',
+    'projectAgent.drawer.settings.avatarTab.head': 'Headwear',
+    'projectAgent.drawer.settings.avatarTab.neck': 'Neckwear',
+    'projectAgent.drawer.settings.avatarCoat.circle': 'Midnight',
+    'projectAgent.drawer.settings.avatarCoat.square': 'Calico',
+    'projectAgent.drawer.settings.avatarCoat.pill': 'Ginger',
+    'projectAgent.drawer.settings.avatarCoat.arch': 'Siamese',
+    'projectAgent.drawer.settings.avatarCoat.hex': 'British Blue',
+    'projectAgent.drawer.settings.avatarCoat.diamond': 'Tuxedo',
+    'projectAgent.drawer.settings.avatarCoat.triangle': 'Cream',
+    'projectAgent.drawer.settings.avatarCoat.star': 'Tabby',
+    'projectAgent.drawer.settings.avatarHead.none': 'None',
+    'projectAgent.drawer.settings.avatarHead.beret': 'Beret',
+    'projectAgent.drawer.settings.avatarHead.glasses': 'Glasses',
+    'projectAgent.drawer.settings.avatarHead.beanie': 'Beanie',
+    'projectAgent.drawer.settings.avatarHead.vermeer': 'Pearl scarf',
+    'projectAgent.drawer.settings.avatarHead.straw': 'Straw hat',
+    'projectAgent.drawer.settings.avatarHead.headphones': 'Headphones',
+    'projectAgent.drawer.settings.avatarHead.crown': 'Crown',
+    'projectAgent.drawer.settings.avatarNeck.bowtie': 'Bow tie',
+    'projectAgent.drawer.settings.avatarNeck.scarf': 'Scarf',
+    'projectAgent.drawer.settings.avatarNeck.sweater': 'Sweater',
+    'projectAgent.drawer.settings.avatarNeck.moon': 'Moon collar',
+    'projectAgent.drawer.settings.avatarNeck.sailor': 'Sailor',
+    'projectAgent.drawer.settings.avatarNeck.cape': 'Cape',
+    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color or accessory switches back to a generated avatar.',
     'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
-    'projectAgent.drawer.settings.avatarColor.1': 'Coral',
-    'projectAgent.drawer.settings.avatarColor.2': 'Amber',
-    'projectAgent.drawer.settings.avatarColor.3': 'Mint',
-    'projectAgent.drawer.settings.avatarColor.4': 'Lilac',
-    'projectAgent.drawer.settings.avatarColor.5': 'Rose',
+    'projectAgent.drawer.settings.avatarColor.1': 'Terracotta',
+    'projectAgent.drawer.settings.avatarColor.2': 'Apricot',
+    'projectAgent.drawer.settings.avatarColor.3': 'Sage',
+    'projectAgent.drawer.settings.avatarColor.4': 'Lavender',
+    'projectAgent.drawer.settings.avatarColor.5': 'Dusty rose',
     'projectAgent.drawer.settings.avatarColor.6': 'Lagoon',
-    'projectAgent.drawer.settings.avatarColor.7': 'Warm gray',
+    'projectAgent.drawer.settings.avatarColor.7': 'Warm oat',
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',

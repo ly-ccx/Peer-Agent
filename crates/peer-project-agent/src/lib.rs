@@ -134,9 +134,9 @@ pub use obligation::{
     read_persisted_obligation_grants, reconcile_unknown_outcome, select_pending_grants,
 };
 pub use profile::{
-    BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BOT_COMMUNICATION_STYLES,
-    BOT_PROFILE_COMMUNICATION_STYLES, BotAvatar, BotCapabilityPolicy, BotProfile, BotProfileStore,
-    CreateBotProfile, clean_display_name, generate_avatar,
+    AvatarPartsPatch, BOT_AVATAR_COLORS, BOT_AVATAR_HEADS, BOT_AVATAR_NECKS, BOT_AVATAR_SHAPES,
+    BOT_COMMUNICATION_STYLES, BOT_PROFILE_COMMUNICATION_STYLES, BotAvatar, BotCapabilityPolicy,
+    BotProfile, BotProfileStore, CreateBotProfile, clean_display_name, generate_avatar,
 };
 pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
 pub use recovery::{

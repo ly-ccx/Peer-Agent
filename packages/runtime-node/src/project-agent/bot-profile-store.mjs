@@ -18,7 +18,13 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, generateAvatar } from '@peer-agent/protocol';
+import {
+  BOT_AVATAR_COLORS,
+  BOT_AVATAR_HEADS,
+  BOT_AVATAR_NECKS,
+  BOT_AVATAR_SHAPES,
+  generateAvatar,
+} from '@peer-agent/protocol';
 
 import { pathOf } from '../data-store.mjs';
 
@@ -238,15 +244,51 @@ export function createBotProfileStore({
     const visualShape = Number.isInteger(base.variant)
       ? base.shape
       : BOT_AVATAR_SHAPES[(Math.max(0, BOT_AVATAR_SHAPES.indexOf(base.shape)) + initialVariant) % BOT_AVATAR_SHAPES.length];
+    const extras = {
+      ...(base.head !== undefined ? { head: base.head } : {}),
+      ...(base.neck !== undefined ? { neck: base.neck } : {}),
+      ...(base.backdrop !== undefined ? { backdrop: base.backdrop } : {}),
+    };
     for (const shape of [visualShape, ...BOT_AVATAR_SHAPES.filter((item) => item !== visualShape)]) {
       for (let offset = 0; offset < 32; offset += 1) {
-        const avatar = { kind: 'generated', shape, color, variant: (initialVariant + offset) % 32 };
+        const avatar = { kind: 'generated', shape, color, variant: (initialVariant + offset) % 32, ...extras };
         if (!occupied.has(generatedSignature(avatar, workspaceId))) {
           return save({ ...current, avatar });
         }
       }
     }
     return fail('AVATAR_EXHAUSTED');
+  }
+
+  function setAvatarParts(workspaceId, parts) {
+    if (!parts || typeof parts !== 'object' || Array.isArray(parts)) return fail('INVALID_AVATAR_PARTS');
+    if (parts.shape !== undefined && !BOT_AVATAR_SHAPES.includes(parts.shape)) return fail('INVALID_AVATAR_PARTS');
+    if (parts.color !== undefined && !BOT_AVATAR_COLORS.includes(parts.color)) return fail('INVALID_AVATAR_COLOR');
+    if (parts.head !== undefined && !BOT_AVATAR_HEADS.includes(parts.head)) return fail('INVALID_AVATAR_PARTS');
+    if (parts.neck !== undefined && !BOT_AVATAR_NECKS.includes(parts.neck)) return fail('INVALID_AVATAR_PARTS');
+    if (parts.backdrop !== undefined && typeof parts.backdrop !== 'boolean') return fail('INVALID_AVATAR_PARTS');
+    const current = read(workspaceId);
+    if (!current) return fail('NOT_FOUND');
+    const base = current.avatar?.kind === 'generated'
+      ? current.avatar
+      : generatedAvatar(workspaceId, current.avatarSalt || '');
+    const initialVariant = Number.isInteger(base.variant) ? base.variant : generateAvatar(workspaceId).variant;
+    const baseShape = Number.isInteger(base.variant)
+      ? base.shape
+      : BOT_AVATAR_SHAPES[(Math.max(0, BOT_AVATAR_SHAPES.indexOf(base.shape)) + initialVariant) % BOT_AVATAR_SHAPES.length];
+    const nextHead = parts.head !== undefined ? parts.head : base.head;
+    const nextNeck = parts.neck !== undefined ? parts.neck : base.neck;
+    const nextBackdrop = parts.backdrop !== undefined ? parts.backdrop : base.backdrop;
+    const avatar = {
+      kind: 'generated',
+      shape: parts.shape ?? baseShape,
+      color: parts.color ?? base.color,
+      variant: initialVariant,
+      ...(nextHead !== undefined ? { head: nextHead } : {}),
+      ...(nextNeck !== undefined ? { neck: nextNeck } : {}),
+      ...(nextBackdrop !== undefined ? { backdrop: nextBackdrop } : {}),
+    };
+    return save({ ...current, avatar });
   }
 
   function installAvatar(workspaceId, sourcePath) {
@@ -334,6 +376,7 @@ export function createBotProfileStore({
     save,
     regenerateAvatar,
     setAvatarColor,
+    setAvatarParts,
     installAvatar,
     readAvatar,
     generatedAvatar,

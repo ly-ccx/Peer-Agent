@@ -5,10 +5,10 @@
 
 use crate::{protocol::RpcError, server::ServerContext};
 use peer_project_agent::{
-    BOT_AVATAR_COLORS, BotDirectory, BotProfileStore, ConversationSearchIndex, MemoryFilter,
-    MemoryStore, ProjectRegistry, SessionSupervisor, clean_display_name,
-    collect_conversation_search_documents, is_effective_memory, is_valid_workspace_id, now_iso,
-    parse_iso_ms,
+    AvatarPartsPatch, BOT_AVATAR_COLORS, BOT_AVATAR_HEADS, BOT_AVATAR_NECKS, BOT_AVATAR_SHAPES,
+    BotDirectory, BotProfileStore, ConversationSearchIndex, MemoryFilter, MemoryStore,
+    ProjectRegistry, SessionSupervisor, clean_display_name, collect_conversation_search_documents,
+    is_effective_memory, is_valid_workspace_id, now_iso, parse_iso_ms,
 };
 use peer_protocol::LocalAccessLevel;
 use peer_store::{
@@ -284,6 +284,64 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
             _ => return Ok(ok_fail("INVALID_AVATAR_COLOR")),
         },
     };
+    let avatar_parts = match obj.get("avatarParts") {
+        None => None,
+        Some(v) => {
+            let Some(parts_obj) = v.as_object() else {
+                return Ok(ok_fail("INVALID_AVATAR_PARTS"));
+            };
+            if parts_obj.keys().any(|k| {
+                !matches!(
+                    k.as_str(),
+                    "shape" | "color" | "head" | "neck" | "backdrop"
+                )
+            }) {
+                return Ok(ok_fail("INVALID_AVATAR_PARTS"));
+            }
+            let shape = match parts_obj.get("shape") {
+                None => None,
+                Some(s) => match s.as_str() {
+                    Some(v) if BOT_AVATAR_SHAPES.contains(&v) => Some(v),
+                    _ => return Ok(ok_fail("INVALID_AVATAR_PARTS")),
+                },
+            };
+            let color = match parts_obj.get("color") {
+                None => None,
+                Some(c) => match c.as_str() {
+                    Some(v) if BOT_AVATAR_COLORS.contains(&v) => Some(v),
+                    _ => return Ok(ok_fail("INVALID_AVATAR_COLOR")),
+                },
+            };
+            let head = match parts_obj.get("head") {
+                None => None,
+                Some(h) => match h.as_str() {
+                    Some(v) if BOT_AVATAR_HEADS.contains(&v) => Some(v),
+                    _ => return Ok(ok_fail("INVALID_AVATAR_PARTS")),
+                },
+            };
+            let neck = match parts_obj.get("neck") {
+                None => None,
+                Some(n) => match n.as_str() {
+                    Some(v) if BOT_AVATAR_NECKS.contains(&v) => Some(v),
+                    _ => return Ok(ok_fail("INVALID_AVATAR_PARTS")),
+                },
+            };
+            let backdrop = match parts_obj.get("backdrop") {
+                None => None,
+                Some(b) => match b.as_bool() {
+                    Some(v) => Some(v),
+                    None => return Ok(ok_fail("INVALID_AVATAR_PARTS")),
+                },
+            };
+            Some(AvatarPartsPatch {
+                shape,
+                color,
+                head,
+                neck,
+                backdrop,
+            })
+        }
+    };
     let proactivity = match obj.get("proactivity").and_then(Value::as_str) {
         None => None,
         Some(level) => {
@@ -331,6 +389,11 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
     }
     if let Some(color) = avatar_color
         && let Err(err) = store.set_avatar_color(ws, color)
+    {
+        return Ok(ok_fail(err.code));
+    }
+    if let Some(parts) = avatar_parts
+        && let Err(err) = store.set_avatar_parts(ws, parts)
     {
         return Ok(ok_fail(err.code));
     }

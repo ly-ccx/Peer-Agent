@@ -749,6 +749,60 @@ async fn project_bot_profile_access_read_approvals_history_and_search_roundtrip(
     assert_eq!(updated_prof["profile"]["planApproval"], "writes");
     assert_eq!(updated_prof["profile"]["acceptancePolicy"], "confirm");
 
+    // Modular cat avatar parts update, partial merge preservation, and validation
+    let bad_parts = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "avatarParts": { "head": "top_hat" },
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(bad_parts["ok"], false);
+    assert_eq!(bad_parts["code"], "INVALID_AVATAR_PARTS");
+
+    let custom_parts = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "avatarParts": {
+                    "shape": "diamond",
+                    "color": "#55bac7",
+                    "head": "glasses",
+                    "neck": "bowtie",
+                    "backdrop": false,
+                },
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(custom_parts["ok"], true);
+    assert_eq!(custom_parts["profile"]["avatar"]["shape"], "diamond");
+    assert_eq!(custom_parts["profile"]["avatar"]["color"], "#55bac7");
+    assert_eq!(custom_parts["profile"]["avatar"]["head"], "glasses");
+    assert_eq!(custom_parts["profile"]["avatar"]["neck"], "bowtie");
+    assert_eq!(custom_parts["profile"]["avatar"]["backdrop"], false);
+
+    let recolored_parts = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "avatarParts": { "color": "#f36d63" },
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(recolored_parts["ok"], true);
+    assert_eq!(recolored_parts["profile"]["avatar"]["shape"], "diamond");
+    assert_eq!(recolored_parts["profile"]["avatar"]["color"], "#f36d63");
+    assert_eq!(recolored_parts["profile"]["avatar"]["head"], "glasses");
+    assert_eq!(recolored_parts["profile"]["avatar"]["neck"], "bowtie");
+    assert_eq!(recolored_parts["profile"]["avatar"]["backdrop"], false);
+
     // Installing raster avatar + reading dataUrl + clearing modelPolicy to null
     let with_img = client
         .call(

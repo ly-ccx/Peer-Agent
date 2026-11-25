@@ -25,9 +25,33 @@ pub const BOT_AVATAR_COLORS: [&str; 8] = [
     "#6474e5", "#f36d63", "#f4ad45", "#61b68c", "#a884e5", "#e774ad", "#55bac7", "#a8a59f",
 ];
 
+pub const BOT_AVATAR_HEADS: [&str; 8] = [
+    "none",
+    "beret",
+    "glasses",
+    "beanie",
+    "vermeer",
+    "straw",
+    "headphones",
+    "crown",
+];
+
+pub const BOT_AVATAR_NECKS: [&str; 6] = [
+    "bowtie", "scarf", "sweater", "moon", "sailor", "cape",
+];
+
 pub const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
 pub const BOT_PROFILE_COMMUNICATION_STYLES: [&str; 5] =
     ["inherit", "natural", "concise", "detailed", "technical"];
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AvatarPartsPatch<'a> {
+    pub shape: Option<&'a str>,
+    pub color: Option<&'a str>,
+    pub head: Option<&'a str>,
+    pub neck: Option<&'a str>,
+    pub backdrop: Option<bool>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -37,6 +61,12 @@ pub enum BotAvatar {
         color: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         variant: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        neck: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        backdrop: Option<bool>,
     },
     Image {
         #[serde(rename = "ref")]
@@ -54,6 +84,9 @@ pub fn generate_avatar(key: &str) -> BotAvatar {
         shape,
         color,
         variant: Some(variant),
+        head: None,
+        neck: None,
+        backdrop: None,
     }
 }
 
@@ -259,6 +292,7 @@ fn generated_signature(avatar: &BotAvatar, workspace_id: &str) -> Option<String>
         shape,
         color,
         variant,
+        ..
     } = avatar
     else {
         return None;
@@ -562,9 +596,22 @@ impl BotProfileStore {
             BotAvatar::Generated { variant, .. } => variant.unwrap_or(0),
             BotAvatar::Image { .. } => 0,
         };
-        let (base_shape, base_variant_opt) = match &base {
-            BotAvatar::Generated { shape, variant, .. } => (shape.as_str(), *variant),
-            BotAvatar::Image { .. } => ("circle", Some(default_variant)),
+        let (base_shape, base_variant_opt, base_head, base_neck, base_backdrop) = match &base {
+            BotAvatar::Generated {
+                shape,
+                variant,
+                head,
+                neck,
+                backdrop,
+                ..
+            } => (
+                shape.as_str(),
+                *variant,
+                head.clone(),
+                neck.clone(),
+                *backdrop,
+            ),
+            BotAvatar::Image { .. } => ("circle", Some(default_variant), None, None, None),
         };
         let initial_variant = base_variant_opt.unwrap_or(default_variant);
         let visual_shape = if base_variant_opt.is_some() {
@@ -589,6 +636,9 @@ impl BotProfileStore {
                     shape: shape.to_owned(),
                     color: color.to_owned(),
                     variant: Some((initial_variant + offset) % 32),
+                    head: base_head.clone(),
+                    neck: base_neck.clone(),
+                    backdrop: base_backdrop,
                 };
                 if let Some(sig) = generated_signature(&candidate, workspace_id)
                     && !occupied.contains(&sig)
@@ -599,6 +649,97 @@ impl BotProfileStore {
             }
         }
         Err(ProjectError::code("AVATAR_EXHAUSTED"))
+    }
+
+    pub fn set_avatar_parts(
+        &self,
+        workspace_id: &str,
+        patch: AvatarPartsPatch<'_>,
+    ) -> Result<BotProfile, ProjectError> {
+        if let Some(shape) = patch.shape
+            && !BOT_AVATAR_SHAPES.contains(&shape)
+        {
+            return Err(ProjectError::code("INVALID_AVATAR_PARTS"));
+        }
+        if let Some(color) = patch.color
+            && !BOT_AVATAR_COLORS.contains(&color)
+        {
+            return Err(ProjectError::code("INVALID_AVATAR_COLOR"));
+        }
+        if let Some(head) = patch.head
+            && !BOT_AVATAR_HEADS.contains(&head)
+        {
+            return Err(ProjectError::code("INVALID_AVATAR_PARTS"));
+        }
+        if let Some(neck) = patch.neck
+            && !BOT_AVATAR_NECKS.contains(&neck)
+        {
+            return Err(ProjectError::code("INVALID_AVATAR_PARTS"));
+        }
+        let mut current = self
+            .read(workspace_id)
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let base = match &current.avatar {
+            BotAvatar::Generated { .. } => current.avatar.clone(),
+            BotAvatar::Image { .. } => {
+                let salt = current.avatar_salt.as_deref().unwrap_or("");
+                let key = if salt.is_empty() {
+                    workspace_id.to_owned()
+                } else {
+                    format!("{workspace_id}:{salt}")
+                };
+                generate_avatar(&key)
+            }
+        };
+        let default_variant = match generate_avatar(workspace_id) {
+            BotAvatar::Generated { variant, .. } => variant.unwrap_or(0),
+            BotAvatar::Image { .. } => 0,
+        };
+        let (base_shape, base_color, base_variant_opt, base_head, base_neck, base_backdrop) =
+            match &base {
+                BotAvatar::Generated {
+                    shape,
+                    color,
+                    variant,
+                    head,
+                    neck,
+                    backdrop,
+                } => (
+                    shape.as_str(),
+                    color.as_str(),
+                    *variant,
+                    head.clone(),
+                    neck.clone(),
+                    *backdrop,
+                ),
+                BotAvatar::Image { .. } => (
+                    "circle",
+                    BOT_AVATAR_COLORS[0],
+                    Some(default_variant),
+                    None,
+                    None,
+                    None,
+                ),
+            };
+        let initial_variant = base_variant_opt.unwrap_or(default_variant);
+        let resolved_base_shape = if base_variant_opt.is_some() {
+            base_shape
+        } else {
+            let idx = BOT_AVATAR_SHAPES
+                .iter()
+                .position(|&s| s == base_shape)
+                .unwrap_or(0);
+            BOT_AVATAR_SHAPES[(idx + initial_variant as usize) % BOT_AVATAR_SHAPES.len()]
+        };
+        current.avatar = BotAvatar::Generated {
+            shape: patch.shape.unwrap_or(resolved_base_shape).to_owned(),
+            color: patch.color.unwrap_or(base_color).to_owned(),
+            variant: Some(initial_variant),
+            head: patch.head.map(str::to_owned).or(base_head),
+            neck: patch.neck.map(str::to_owned).or(base_neck),
+            backdrop: patch.backdrop.or(base_backdrop),
+        };
+        self.save(current)
     }
 
     pub fn install_avatar(
@@ -989,6 +1130,121 @@ mod tests {
         assert_eq!(
             store.read_avatar("ws-av").unwrap_err().code,
             "INVALID_IMAGE"
+        );
+    }
+
+    #[test]
+    fn avatar_parts_patch_validates_preserves_and_roundtrips() {
+        let dir = tempdir().unwrap();
+        let store = BotProfileStore::new(dir.path());
+        store
+            .create(&CreateBotProfile {
+                workspace_id: "ws-parts",
+                display_name: "Studio Cat",
+                managed: false,
+                agent_conversation_id: "conv-parts",
+                avatar_salt: "",
+            })
+            .unwrap();
+
+        let customized = store
+            .set_avatar_parts(
+                "ws-parts",
+                AvatarPartsPatch {
+                    shape: Some("diamond"),
+                    color: Some("#55bac7"),
+                    head: Some("glasses"),
+                    neck: Some("bowtie"),
+                    backdrop: Some(false),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            &customized.avatar,
+            BotAvatar::Generated {
+                shape,
+                color,
+                head: Some(head),
+                neck: Some(neck),
+                backdrop: Some(false),
+                ..
+            } if shape == "diamond" && color == "#55bac7" && head == "glasses" && neck == "bowtie"
+        ));
+
+        // Partial color patch preserves custom shape/head/neck/backdrop.
+        let recolored = store
+            .set_avatar_parts(
+                "ws-parts",
+                AvatarPartsPatch {
+                    color: Some("#f36d63"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            &recolored.avatar,
+            BotAvatar::Generated {
+                shape,
+                color,
+                head: Some(head),
+                neck: Some(neck),
+                backdrop: Some(false),
+                ..
+            } if shape == "diamond" && color == "#f36d63" && head == "glasses" && neck == "bowtie"
+        ));
+
+        // Legacy set_avatar_color also preserves custom parts.
+        let legacy_color = store.set_avatar_color("ws-parts", "#61b68c").unwrap();
+        assert!(matches!(
+            &legacy_color.avatar,
+            BotAvatar::Generated {
+                color,
+                head: Some(head),
+                neck: Some(neck),
+                backdrop: Some(false),
+                ..
+            } if color == "#61b68c" && head == "glasses" && neck == "bowtie"
+        ));
+
+        // Invalid values are rejected cleanly.
+        assert_eq!(
+            store
+                .set_avatar_parts(
+                    "ws-parts",
+                    AvatarPartsPatch {
+                        head: Some("wizard"),
+                        ..Default::default()
+                    }
+                )
+                .unwrap_err()
+                .code,
+            "INVALID_AVATAR_PARTS"
+        );
+        assert_eq!(
+            store
+                .set_avatar_parts(
+                    "ws-parts",
+                    AvatarPartsPatch {
+                        neck: Some("chain"),
+                        ..Default::default()
+                    }
+                )
+                .unwrap_err()
+                .code,
+            "INVALID_AVATAR_PARTS"
+        );
+        assert_eq!(
+            store
+                .set_avatar_parts(
+                    "ws-parts",
+                    AvatarPartsPatch {
+                        color: Some("#000000"),
+                        ..Default::default()
+                    }
+                )
+                .unwrap_err()
+                .code,
+            "INVALID_AVATAR_COLOR"
         );
     }
 }
