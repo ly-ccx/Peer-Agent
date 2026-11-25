@@ -1491,7 +1491,7 @@ mod tests {
 
         // EvidenceIndex contains the canonical interactive userArtifact record bound to plan-pub-1.
         let rows = EvidenceIndexStore::new(dir.path())
-            .find(&[artifact_ref.clone()], None)
+            .find(std::slice::from_ref(&artifact_ref), None)
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["planId"], "plan-pub-1");
@@ -1600,7 +1600,10 @@ mod tests {
         assert_eq!(ok.status, "success");
         assert_eq!(ok.output["publicationStatus"], "published");
         let artifact_ref = ok.output["artifactRef"].as_str().unwrap().to_owned();
-        assert_eq!(recorded.lock().unwrap().as_slice(), &[artifact_ref.clone()]);
+        assert_eq!(
+            recorded.lock().unwrap().as_slice(),
+            std::slice::from_ref(&artifact_ref)
+        );
         let rows = EvidenceIndexStore::new(dir.path())
             .find(&[artifact_ref], None)
             .unwrap();
