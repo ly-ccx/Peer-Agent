@@ -48,8 +48,8 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     && cleanParagraphs.at(-1)?.text.trim() === card.content.trim() ? { ...card, content: '' } : card) ?? [];
   const inlineEvidenceRefs = !running && isAgentReply
     ? [...new Set([
-      ...(message?.meta.evidenceRefs ?? []),
-      ...reply.messages.flatMap(entry => entry.meta.evidenceRefs ?? []),
+      ...(message?.meta?.evidenceRefs ?? []),
+      ...reply.messages.flatMap(entry => entry.meta?.evidenceRefs ?? []),
     ])]
     : [];
   return <article className={`bot-reply bot-continuous-reply${reply.activity ? ' bot-live-reply' : ''}${highlighted ? ' is-anchored' : ''}`}
@@ -66,7 +66,7 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
       </div>
     </div>)}
     </div>
-    <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={inlineEvidenceRefs} isZh={i18n.locale.startsWith('zh')} />
+    <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={inlineEvidenceRefs} isZh={Boolean(i18n.locale?.startsWith('zh'))} />
     <ReplyTaskReferences messages={reply.messages} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
     <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
     {isAgentReply && cleanMessageContent.trim() ? <BotSelectionQuote root={body} label={i18n.t('projectAgent.chat.quote')} onQuote={excerpt => onQuote(message.id, excerpt)} /> : null}

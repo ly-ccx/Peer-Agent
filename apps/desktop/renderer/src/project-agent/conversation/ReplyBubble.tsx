@@ -64,7 +64,7 @@ export function ReplyBubble({
           <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={displayContent} /></ReplyResourceContext>
         </div>
       </div>
-      <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={message.meta.evidenceRefs ?? []} isZh={i18n.locale.startsWith('zh')} />
+      <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={message.meta?.evidenceRefs ?? []} isZh={Boolean(i18n.locale?.startsWith('zh'))} />
       <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
