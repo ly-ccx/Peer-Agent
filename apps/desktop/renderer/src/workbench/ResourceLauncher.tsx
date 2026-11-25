@@ -32,7 +32,7 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
   if (descriptor.kind === 'interactive') {
     if (!owner || descriptor.reference.owner.workspaceId !== owner.workspaceId || descriptor.reference.owner.conversationId !== owner.conversationId) return null;
     return <button className="resource-recent" type="button" onClick={() => workspace.openInteractive(descriptor.reference, descriptor.title)}>
-      <PeerIcon name="fileText" size={18} /><span>{descriptor.title || (isZh ? '交互结果' : 'Interactive result')}</span></button>;
+      <PeerIcon name="blocks" size={18} /><span>{descriptor.title || (isZh ? '交互结果' : 'Interactive result')}</span></button>;
   }
   // 目录最近项是事实描述符：标签身份就是引用本身，来源核对由标签内容完成（ADR 125）。
   if (descriptor.kind === 'directory') {
