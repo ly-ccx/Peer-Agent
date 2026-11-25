@@ -106,6 +106,9 @@ pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelEr
 
 fn apply_gemini_runtime_dialect(body: &mut Value, input: &WireInput<'_>) {
     if let Some(contents) = body.get_mut("contents").and_then(Value::as_array_mut) {
+        if gemini_requires_function_call_thought_signature(input.model) {
+            lower_gemini_unsigned_function_calls(contents);
+        }
         merge_gemini_consecutive_roles(contents);
     }
     if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
@@ -129,6 +132,63 @@ fn apply_gemini_runtime_dialect(body: &mut Value, input: &WireInput<'_>) {
             "includeThoughts": true,
         });
     }
+}
+
+fn gemini_requires_function_call_thought_signature(model: &str) -> bool {
+    let normalized = model
+        .strip_prefix("models/")
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    normalized.starts_with("gemini-3") || normalized.starts_with("gemini-4")
+}
+
+/// Gemini 3 and Gemini 4 reject any `model` `functionCall` turn that lacks a `thoughtSignature`
+/// (e.g. after `LiveHistory` eviction, a truncated max-tool-calls round before synthesis,
+/// checkpoint recovery, or switching models mid-conversation). Rather than forging signatures,
+/// lower unsigned historical tool rounds into factual text observations (mirroring DeepSeek's
+/// historical lowering in `wire/mod.rs`). Authentic signature-bearing turns remain untouched.
+fn lower_gemini_unsigned_function_calls(contents: &mut Vec<Value>) {
+    let mut out = Vec::with_capacity(contents.len());
+    let mut it = std::mem::take(contents).into_iter().peekable();
+    while let Some(entry) = it.next() {
+        let is_unsigned_model_call = entry.get("role").and_then(Value::as_str) == Some("model")
+            && entry
+                .get("parts")
+                .and_then(Value::as_array)
+                .is_some_and(|parts| {
+                    let has_call = parts.iter().any(|p| p.get("functionCall").is_some());
+                    let has_call_sig = parts.iter().any(|p| {
+                        p.get("functionCall").is_some() && p.get("thoughtSignature").is_some()
+                    });
+                    has_call && !has_call_sig
+                });
+        if !is_unsigned_model_call {
+            out.push(entry);
+            continue;
+        }
+        let mut history = vec![entry];
+        while it.peek().is_some_and(|next| {
+            next.get("role").and_then(Value::as_str) == Some("user")
+                && next
+                    .get("parts")
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        !parts.is_empty() && parts.iter().all(|p| p.get("functionResponse").is_some())
+                    })
+        }) {
+            history.push(it.next().unwrap());
+        }
+        let rendered = serde_json::to_string(&history).unwrap_or_else(|_| "[]".to_owned());
+        out.push(json!({
+            "role": "user",
+            "parts": [{
+                "text": format!(
+                    "[Historical assistant and tool observations; context only, not a new request or executable calls]\n{rendered}"
+                )
+            }]
+        }));
+    }
+    *contents = out;
 }
 
 fn merge_gemini_consecutive_roles(contents: &mut Vec<Value>) {
@@ -419,13 +479,70 @@ mod tests {
         )
         .unwrap();
 
-        // Consecutive tool results are merged into a single `user` turn matching the 2 calls.
+        // Consecutive tool results are merged into a single `user` turn matching the 2 calls
+        // on Gemini 2.5 (which does not require thoughtSignature), while Gemini 4 lowers unsigned
+        // historical tool rounds into factual text observations so Google never rejects with
+        // missing `thought_signature`.
         let contents = body["contents"].as_array().unwrap();
-        assert_eq!(contents.len(), 3);
-        assert_eq!(contents[2]["role"], "user");
-        assert_eq!(contents[2]["parts"].as_array().unwrap().len(), 2);
-        assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "read_file");
-        assert_eq!(contents[2]["parts"][1]["functionResponse"]["name"], "read_file");
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0]["role"], "user");
+        let merged_parts = contents[0]["parts"].as_array().unwrap();
+        assert_eq!(merged_parts.len(), 2);
+        assert_eq!(merged_parts[0]["text"], "check two files");
+        assert!(
+            merged_parts[1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("[Historical assistant and tool observations")
+        );
+
+        // Authentic `geminiContent` carrying `thoughtSignature` on `functionCall` is preserved verbatim
+        // on Gemini 4, and consecutive parallel `functionResponse` turns merge into one `user` turn.
+        let signed_messages = vec![
+            json!({"role": "user", "content": "check two files"}),
+            json!({
+                "role": "assistant",
+                "content": null,
+                "geminiContent": {
+                    "role": "model",
+                    "parts": [
+                        {"functionCall": {"name": "read_file", "args": {"path": "a.txt"}}, "thoughtSignature": "sig-a"},
+                        {"functionCall": {"name": "read_file", "args": {"path": "b.txt"}}}
+                    ]
+                }
+            }),
+            json!({"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "alpha"}),
+            json!({"role": "tool", "tool_call_id": "c2", "name": "read_file", "content": "beta"}),
+        ];
+        let signed_body = encode(
+            Wire::Gemini,
+            &WireInput {
+                model: "gemini-4-hydrogen",
+                system: "sys",
+                stable_system: None,
+                messages: &signed_messages,
+                tools: Some(&tools),
+                options: &options,
+            },
+        )
+        .unwrap();
+        let signed_contents = signed_body["contents"].as_array().unwrap();
+        assert_eq!(signed_contents.len(), 3);
+        assert_eq!(signed_contents[1]["role"], "model");
+        assert_eq!(
+            signed_contents[1]["parts"][0]["thoughtSignature"],
+            "sig-a"
+        );
+        assert_eq!(signed_contents[2]["role"], "user");
+        assert_eq!(signed_contents[2]["parts"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            signed_contents[2]["parts"][0]["functionResponse"]["name"],
+            "read_file"
+        );
+        assert_eq!(
+            signed_contents[2]["parts"][1]["functionResponse"]["name"],
+            "read_file"
+        );
 
         let decls = body["tools"][0]["functionDeclarations"].as_array().unwrap();
         // Clean legacy schema keeps `parameters` for contract compatibility.
