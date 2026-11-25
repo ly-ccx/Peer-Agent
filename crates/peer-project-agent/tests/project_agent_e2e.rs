@@ -9377,4 +9377,47 @@ async fn open_circuit_blocks_stale_user_input_repolls_and_surfaces_http_400_deta
         .filter(|m| m["card"] == "agent_unavailable")
         .count();
     assert_eq!(cards_after, 5, "blocked tick must not append duplicate error cards");
+
+    // Submitting a brand-new user message while an older failed input is still pending must
+    // admit a manual half-open trial instead of silently stopping on CircuitOpen.
+    host.submit_user_input(&entry.workspace_id, "in-400-2", "?", None)
+        .unwrap();
+    let anchor_1 = input_message_id("in-400-1").unwrap();
+    let anchor_2 = input_message_id("in-400-2").unwrap();
+    let recovery_server = start_mock_server(vec![
+        Box::new(move |_req| {
+            sse_tool_call(
+                "rec-call-1",
+                "post_reply",
+                &json!({"replyTo": [anchor_1], "text": "Recovered first pending input."}),
+            )
+        }),
+        Box::new(move |_req| {
+            sse_tool_call(
+                "rec-call-2",
+                "post_reply",
+                &json!({"replyTo": [anchor_2], "text": "Answered follow-up question."}),
+            )
+        }),
+    ]);
+    let recovery_model = mock_model(&recovery_server.endpoint);
+    let recovery_tick = host
+        .tick(
+            &entry.workspace_id,
+            &recovery_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            recovery_tick.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::ReplyCommitted { .. })
+        ),
+        "fresh user input must trigger manual half-open trial and recover, got {:?}",
+        recovery_tick.last_turn.as_ref().map(|t| &t.end)
+    );
+    assert_eq!(recovery_tick.bot_turns_run, 2);
 }

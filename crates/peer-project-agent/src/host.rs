@@ -552,7 +552,8 @@ impl NativeProjectHost {
         }
 
         // Step 2: Run main Bot turn for each pending user input (user input priority).
-        for input in &consumed.pending_execution {
+        let has_newly_consumed = !consumed.consumed.is_empty();
+        for (idx, input) in consumed.pending_execution.iter().enumerate() {
             if cancel.is_cancelled() {
                 break;
             }
@@ -570,7 +571,7 @@ impl NativeProjectHost {
                     wake_events: &[],
                     worker_model_selection: worker_model_selection.clone(),
                     holds_lease: true,
-                    manual_trial: is_newly_consumed,
+                    manual_trial: is_newly_consumed || (has_newly_consumed && idx == 0),
                 },
                 model,
                 verifier_model,

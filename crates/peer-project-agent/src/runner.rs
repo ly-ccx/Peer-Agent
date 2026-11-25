@@ -411,10 +411,15 @@ impl ProjectAgentRunner {
             if let Some(detail) = http_detail.filter(|s| !s.is_empty()) {
                 m["httpDetail"] = json!(detail);
             }
-            (
-                "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。".to_owned(),
-                m,
-            )
+            let msg = match display_reason.filter(|s| !s.is_empty()) {
+                Some(reason) => format!(
+                    "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。（{reason}）"
+                ),
+                None => {
+                    "代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。".to_owned()
+                }
+            };
+            (msg, m)
         } else {
             let reason = display_reason.unwrap_or(code);
             let mut m = json!({ "errorCode": code });
