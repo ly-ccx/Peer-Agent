@@ -75,7 +75,8 @@ impl Gemini {
                 .filter(|r| *r != "FINISH_REASON_UNSPECIFIED")
             {
                 if reason != "STOP" {
-                    return Err(ModelError::new("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete")
+                        .with_detail(format!("finishReason={reason}")));
                 }
                 self.done = true;
             }
@@ -84,7 +85,8 @@ impl Gemini {
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(ModelError::new("model_stream_incomplete"));
+            return Err(ModelError::new("model_stream_incomplete")
+                .with_detail("eof_before_finish_reason"));
         }
         let mut turn = finish(
             self.text,

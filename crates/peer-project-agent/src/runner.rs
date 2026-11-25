@@ -358,7 +358,7 @@ impl ProjectAgentRunner {
         err: &ModelError,
         cancel: &CancellationToken,
     ) -> TurnEndKind {
-        let formatted = err.format_http_rejection();
+        let formatted = err.format_diagnostic();
         self.record_turn_failure_with_detail(
             ctx,
             err.code,
@@ -3111,7 +3111,8 @@ impl ProjectAgentRunner {
                     if name.is_empty() {
                         continue;
                     }
-                    let ok = tc["result"]["ok"] == true;
+                    let ok = tc["result"]["ok"] != false
+                        && tc["result"].get("error").is_none_or(Value::is_null);
                     let raw_summary = tc["result"]["error"]
                         .as_str()
                         .or_else(|| tc["result"]["status"].as_str())

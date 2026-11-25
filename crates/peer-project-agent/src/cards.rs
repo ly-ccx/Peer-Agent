@@ -1500,7 +1500,10 @@ fn reply_failure_status<'a>(
             return false;
         };
         later.iter().any(|r| {
-            r["kind"].as_str() == Some("agent_turn") && r["meta"]["workId"].as_str() == Some(wid)
+            r["kind"].as_str() == Some("agent_turn")
+                && r["turnId"].as_str() != msg_turn_id
+                && r["id"].as_str() != msg_turn_id
+                && r["meta"]["workId"].as_str() == Some(wid)
         })
     });
     let active_sessions: Vec<Value> = work
@@ -2672,17 +2675,20 @@ mod tests {
 
         let parent_msgs = vec![
             json!({
-                "id": "t-ok",
-                "kind": "agent_turn",
-                "turnKind": "wake",
-                "meta": { "workId": "work-ok" },
-            }),
-            json!({
                 "id": "u-ok",
                 "kind": "system_card",
                 "card": "agent_unavailable",
                 "turnId": "turn-ok",
                 "content": "代理暂时不可用：上游超时",
+                "meta": { "workId": "work-ok" },
+            }),
+            // Runner appends the failed turn's own `agent_turn` right after its `agent_unavailable`
+            // card; that same-turn record must NOT self-supersede the failure card into retired history.
+            json!({
+                "id": "turn-ok",
+                "turnId": "turn-ok",
+                "kind": "agent_turn",
+                "turnKind": "wake",
                 "meta": { "workId": "work-ok" },
             }),
             json!({
