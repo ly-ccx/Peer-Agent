@@ -238,11 +238,35 @@ fn read_settings_model_routing(home: &Path) -> Option<Value> {
     doc.get("modelRouting").filter(|v| v.is_object()).cloned()
 }
 
-/// Whether routing explicitly selects this role rather than using the default model.
+fn default_role_tier(role: &str) -> Option<&'static str> {
+    match role {
+        "project_agent" => Some("fast"),
+        "session_worker" => Some("strong"),
+        "explorer" => Some("economy"),
+        "verifier" => Some("strong"),
+        "visual_verifier" => Some("vision"),
+        "memory_curator" => Some("economy"),
+        "objective_probe" => Some("economy"),
+        "compactor" => Some("economy"),
+        _ => None,
+    }
+}
+
+fn default_tier_binding<'a>(role: &str, routing: Option<&'a Value>) -> Option<&'a Value> {
+    let tier_name = default_role_tier(role)?;
+    routing?
+        .get("tiers")?
+        .get(tier_name)
+        .filter(|v| v.is_object() && text(v, "primary").is_some())
+}
+
+/// Whether routing selects this role (explicitly or via its default tier binding)
+/// rather than falling back to the catalog's default model.
 pub fn has_role_model_config(home: &Path, role: &str, project_policy: Option<&Value>) -> bool {
     let settings = read_settings_model_routing(home);
     role_model_setting(role, project_policy, settings.as_ref())
         .is_some_and(|setting| matches!(text(setting, "mode"), Some("fixed" | "tier" | "auto")))
+        || default_tier_binding(role, settings.as_ref()).is_some()
 }
 
 fn role_model_setting<'a>(
@@ -400,6 +424,21 @@ pub fn resolve_role_model(
             .as_bool()
             .or_else(|| tier.and_then(|t| t["fastMode"].as_bool()))
             .unwrap_or(fast);
+    } else if let Some(tier_obj) = default_tier_binding(role, model_routing.as_ref()) {
+        if let Some(primary) = text(tier_obj, "primary") {
+            candidate_ids.push(primary);
+        }
+        if let Some(fallbacks) = tier_obj["fallbacks"].as_array() {
+            for fb in fallbacks {
+                if let Some(id) = fb.as_str().map(trim).filter(|s| !s.is_empty())
+                    && !candidate_ids.contains(&id)
+                {
+                    candidate_ids.push(id);
+                }
+            }
+        }
+        role_effort = text(tier_obj, "reasoningEffort");
+        role_fast = tier_obj["fastMode"].as_bool().unwrap_or(fast);
     }
 
     let matched_entry = candidate_ids.iter().find_map(|cand_id| {
@@ -787,5 +826,58 @@ mod tests {
         .unwrap();
         assert_eq!(explicit.selection["modelProviderId"], "anthropic-strong");
         assert_eq!(explicit.selection["reasoningEffort"], "low");
+
+        // 4. Unlisted roles inherit canonical ROLE_TIERS defaults (matching runtime-node):
+        //    session_worker & verifier -> strong, explorer -> economy (never falling back to
+        //    isDefault when global tiers are configured).
+        let tier_only_settings = json!({
+            "modelRouting": {
+                "tiers": {
+                    "strong": {
+                        "primary": "anthropic-strong",
+                        "fallbacks": [],
+                        "reasoningEffort": "high"
+                    },
+                    "economy": {
+                        "primary": "openai-default",
+                        "fallbacks": []
+                    }
+                },
+                "roles": {
+                    "project_agent": {
+                        "mode": "tier",
+                        "tier": "strong"
+                    }
+                }
+            }
+        });
+        std::fs::write(
+            dir.path().join("settings.json"),
+            serde_json::to_string(&tier_only_settings).unwrap(),
+        )
+        .unwrap();
+        let default_worker =
+            resolve_role_model(dir.path(), "session_worker", None, None, None, None, false)
+                .unwrap();
+        assert_eq!(
+            default_worker.selection["modelProviderId"],
+            "anthropic-strong"
+        );
+        assert_eq!(default_worker.selection["reasoningEffort"], "high");
+
+        let default_verifier =
+            resolve_role_model(dir.path(), "verifier", None, None, None, None, false).unwrap();
+        assert_eq!(
+            default_verifier.selection["modelProviderId"],
+            "anthropic-strong"
+        );
+        assert!(has_role_model_config(dir.path(), "verifier", None));
+
+        let default_explorer =
+            resolve_role_model(dir.path(), "explorer", None, None, None, None, false).unwrap();
+        assert_eq!(
+            default_explorer.selection["modelProviderId"],
+            "openai-default"
+        );
     }
 }
