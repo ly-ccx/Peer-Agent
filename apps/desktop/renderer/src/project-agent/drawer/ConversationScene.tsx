@@ -14,6 +14,7 @@ export function ConversationSceneDrawer({
   workspacePath,
   conversationId,
   conversationRevision,
+  isLive = false,
   title,
   i18n,
   isZh,
@@ -27,6 +28,7 @@ export function ConversationSceneDrawer({
   readonly embedded?: boolean;
   readonly seamless?: boolean;
   readonly active?: boolean;
+  readonly isLive?: boolean;
   readonly task?: { readonly sessionId: string; readonly planId: string };
   readonly workspaceId: string;
   readonly workspacePath: string;
@@ -63,7 +65,7 @@ export function ConversationSceneDrawer({
     isPageActive={active} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
-        <ChatSurface showComposer={false} showHeader={!seamless} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
+        <ChatSurface showComposer={false} showHeader={!seamless} externalStreaming={isLive} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
           conversationId={conversationId} conversationRevision={conversationRevision} conversationTitle={title} systemInstructions={systemInstructions}
           replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
           onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}

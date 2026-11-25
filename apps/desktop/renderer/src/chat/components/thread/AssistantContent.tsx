@@ -500,10 +500,20 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
         ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `edit ${toolArgString(tc.args, 'path')}` : '')
         : tc.tool === 'write_file'
           ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `write ${toolArgString(tc.args, 'path')}` : '')
-          // displayName 是后端 Runtime Projection 注入的展示文案（MCP 工具为
-          // 「服务名: 工具名」）。其它工具优先用它做标题，缺省时才回退到裸 capability 名，
-          // 避免出现 mcp__server__tool 这类裸名（即「标题不见了」的现象）。
-          : fallbackToolCallLabel(tc, tc.displayName ?? tc.tool ?? '');
+          : tc.tool === 'web_search'
+            ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'query') ? `web_search · ${toolArgString(tc.args, 'query')}` : '')
+            : tc.tool === 'web_fetch'
+              ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'url') ? `web_fetch · ${toolArgString(tc.args, 'url')}` : '')
+              : tc.tool === 'list_files'
+                ? fallbackToolCallLabel(tc, toolArgString(tc.args, 'path') ? `list ${toolArgString(tc.args, 'path')}` : '')
+                : tc.tool === 'search_files'
+                  ? fallbackToolCallLabel(tc, (toolArgString(tc.args, 'pattern') ?? toolArgString(tc.args, 'query')) ? `search ${toolArgString(tc.args, 'pattern') ?? toolArgString(tc.args, 'query')}` : '')
+                  : tc.tool === 'git_query'
+                    ? fallbackToolCallLabel(tc, (toolArgString(tc.args, 'action') ?? toolArgString(tc.args, 'path')) ? `git ${toolArgString(tc.args, 'action') ?? toolArgString(tc.args, 'path')}` : '')
+                    // displayName 是后端 Runtime Projection 注入的展示文案（MCP 工具为
+                    // 「服务名: 工具名」）。其它工具优先用它做标题，缺省时才回退到裸 capability 名，
+                    // 避免出现 mcp__server__tool 这类裸名（即「标题不见了」的现象）。
+                    : fallbackToolCallLabel(tc, tc.displayName ?? tc.tool ?? '');
   const isSynthetic = tc.synthetic === true;
   const isDone = tc.result !== undefined && !isSynthetic;
   const labelPreview = previewInlineText(label).content;
@@ -538,8 +548,10 @@ function ToolCallCard({ tc, isZh }: { readonly tc: ToolCallLegacy; readonly isZh
       {isSynthetic && expanded ? (
         <pre className="tool-call-output">这不是一次真实工具调用记录，而是历史 assistant 文本中出现的伪 Tool Call 标记；没有收到对应的工具结果。</pre>
       ) : null}
-      {expanded && tc.result ? (
-        <pre className="tool-call-output">{tc.result}</pre>
+      {expanded && tc.result !== undefined && tc.result !== null ? (
+        <pre className="tool-call-output">
+          {typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2)}
+        </pre>
       ) : null}
     </div>
   );
