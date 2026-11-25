@@ -4,10 +4,9 @@ import type { BotProfile, InputDraftTaskRef } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
-import { BotAvatar } from '../BotAvatar';
 import { BotAccessControl } from '../BotAccessControl';
 import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
-import { mergeTaskDetail, taskProgressPreview } from '../state/taskDetailState';
+import { mergeTaskDetail } from '../state/taskDetailState';
 import { useTaskReport } from '../state/useTaskReport';
 import { useTaskCancellation } from '../state/TaskCancellation';
 import type { TaskConversationContext } from '../state/taskConversationState';
@@ -60,6 +59,8 @@ function formatFailureReason(
     model_timeout: '模型响应超时',
     model_transport_failed: '模型网络连接中断',
     model_stream_interrupted: '模型输出流意外中断',
+    model_http_rejected: '模型服务拒绝了本次请求',
+    BACKGROUND_VERSION_CHANGED: '执行期间会话状态发生变更（如应用重启或并发写入）',
     permission_denied: '操作被权限边界拒绝',
     verifier_timeout: '独立核验超时（5 分钟）',
     verifier_permission_denied: '核验会话触发了只读边界限制',
@@ -73,6 +74,8 @@ function formatFailureReason(
     model_timeout: 'Model request timed out',
     model_transport_failed: 'Model network connection failed',
     model_stream_interrupted: 'Model response stream was interrupted',
+    model_http_rejected: 'Model provider rejected the request',
+    BACKGROUND_VERSION_CHANGED: 'Conversation state changed mid-run (e.g. app restart or concurrent write)',
     permission_denied: 'Action denied by permission boundary',
     verifier_timeout: 'Independent verification timed out',
     verifier_permission_denied: 'Verifier attempted an action outside its read-only boundary',
@@ -107,8 +110,7 @@ export function TaskWorkspaceView({
 }: TaskWorkspaceViewProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [overlayInspector, setOverlayInspector] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('evidence');
-  const [sceneOpen, setSceneOpen] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('brief');
   const [pendingApproval, setPendingApproval] = useState<PendingTaskApproval | null>(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
@@ -116,6 +118,7 @@ export function TaskWorkspaceView({
   const [followUpText, setFollowUpText] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [permissionSaving, setPermissionSaving] = useState(false);
+  const [liveTick, setLiveTick] = useState(0);
   const composition = useCompositionGuard();
   const cancellation = useTaskCancellation();
 
@@ -132,6 +135,20 @@ export function TaskWorkspaceView({
     [liveSession, reportRead.detail],
   );
 
+  const isLiveSession = Boolean(
+    session?.conversationId
+    && ['queued', 'starting', 'running', 'verifying', 'waiting_agent'].includes(session.status),
+  );
+
+  useEffect(() => {
+    setLiveTick(0);
+    if (!isLiveSession) return;
+    const timer = window.setInterval(() => {
+      setLiveTick((tick) => tick + 1);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [isLiveSession, session?.conversationId]);
+
   const evidenceCount = useMemo(() => {
     if (!session) return 0;
     return new Set([
@@ -145,7 +162,6 @@ export function TaskWorkspaceView({
     onEvidenceCountChange?.(evidenceCount);
   }, [evidenceCount, onEvidenceCountChange]);
 
-  // Measure container width so Inspector degrades smoothly to frosted overlay on narrow windows
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -160,15 +176,12 @@ export function TaskWorkspaceView({
     };
   }, []);
 
-  // Reset transient per-task state on session change
   useEffect(() => {
-    setSceneOpen(false);
     setFeedback(null);
     setVerifyBusy(false);
     setApprovalBusy(false);
   }, [sessionId]);
 
-  // Load any open pending approval scoped to this task
   const loadApprovals = useCallback(async () => {
     try {
       const res = await clientApi.projectAgentListApprovals({ workspaceId });
@@ -277,7 +290,7 @@ export function TaskWorkspaceView({
       } else {
         setFollowUpText('');
         setFeedback({
-          text: isZh ? `已投递给 ${profile.displayName} 并绑定当前任务上下文。` : `Sent to ${profile.displayName} with task context.`,
+          text: isZh ? `已发送给 ${profile.displayName}` : `Sent to ${profile.displayName}`,
         });
       }
     } finally {
@@ -289,19 +302,17 @@ export function TaskWorkspaceView({
     return (
       <div className="bot-task-workspace" ref={rootRef}>
         <div className="bot-task-stage">
-          <div className="bot-task-scroll">
-            <div className="bot-task-column">
-              <p className="bot-inspector-empty">
-                {reportRead.state === 'loading'
-                  ? (isZh ? '正在读取任务现场…' : 'Loading task workspace…')
-                  : (isZh ? '暂时无法读取该任务详情。' : 'Task details are unavailable.')}
-              </p>
-              {reportRead.state === 'unavailable' ? (
-                <button type="button" className="bot-task-btn" style={{ alignSelf: 'center' }} onClick={reportRead.refresh}>
-                  {i18n.t('projectAgent.background.retry')}
-                </button>
-              ) : null}
-            </div>
+          <div className="bot-task-empty-stage">
+            <p className="bot-inspector-empty">
+              {reportRead.state === 'loading'
+                ? (isZh ? '正在读取子任务会话…' : 'Loading task session…')
+                : (isZh ? '暂时无法读取该子任务。' : 'Task details are unavailable.')}
+            </p>
+            {reportRead.state === 'unavailable' ? (
+              <button type="button" className="bot-task-btn" onClick={reportRead.refresh}>
+                {i18n.t('projectAgent.background.retry')}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -312,7 +323,6 @@ export function TaskWorkspaceView({
     ? session.title
     : i18n.t('projectAgent.chat.work.related');
   const statusLabel = formatDrawerSessionStatus(session, i18n);
-  const progress = taskProgressPreview(session, context, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
   const followUp = session.followUp;
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused'].includes(session.status);
@@ -324,9 +334,6 @@ export function TaskWorkspaceView({
         ? (session.status === 'accepted' ? 'good' : 'muted')
         : 'azure';
   const originMessageId = context?.messageId || session.anchorMessageId || undefined;
-  const originQuote = context?.content
-    ? context.content.replace(/\s+/g, ' ').trim().slice(0, 120)
-    : '';
   const cancelState = cancellation?.states[`${workspaceId}:${sessionId}`];
 
   const taskRefPayload: InputDraftTaskRef = {
@@ -336,211 +343,148 @@ export function TaskWorkspaceView({
     anchorMessageId: originMessageId,
   };
 
+  const verificationNotice = session.verification?.outcome === 'failed'
+    ? (session.verification.summary || (isZh ? '独立核验未通过，可展开核验查看详情或基于此重跑。' : 'Independent verification failed.'))
+    : '';
+
   return (
     <div className="bot-task-workspace" ref={rootRef}>
       <div className="bot-task-stage">
-        <div className="bot-task-scroll">
-          <div className="bot-task-column">
-            {/* Origin Link Strip */}
-            <button
-              type="button"
-              className="bot-task-origin"
-              onClick={() => onBackToBot(originMessageId)}
-            >
-              <span className="bot-task-origin-left">
-                <BotAvatar
-                  avatar={profile.avatar}
-                  label={profile.displayName}
-                  workspaceId={workspaceId}
-                />
-                <span className="bot-task-origin-copy">
-                  <span className="bot-task-origin-who">
-                    {profile.displayName}{stamp ? ` · ${isZh ? `派发于 ${stamp}` : `Spawned ${stamp}`}` : ''}
-                  </span>
-                  <span className="bot-task-origin-quote">
-                    {originQuote
-                      ? `「${originQuote}」`
-                      : (isZh ? '返回主对话查看上下文（输入草稿保留）' : 'Return to main conversation (draft preserved)')}
-                  </span>
-                </span>
-              </span>
-              <span className="bot-task-origin-back">
-                <span>{isZh ? '回到主对话' : 'Back to chat'}</span>
-                <PeerIcon name="chevronRight" size={13} />
-              </span>
-            </button>
-
-            {/* Task Hero */}
-            <section className="bot-task-hero">
-              <div className="bot-task-hero-meta">
-                <span className="bot-task-status-pill" data-tone={tone}>
-                  <PeerIcon
-                    name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : tone === 'azure' ? 'loader' : 'circle'}
-                    size={12}
-                    className={tone === 'azure' && !ended ? 'motion-spin' : undefined}
-                  />
-                  <span>{statusLabel}</span>
-                </span>
-                {session.modelLabel ? (
-                  <>
-                    <span className="bot-task-meta-sep" aria-hidden="true">·</span>
-                    <span className="bot-task-meta-text">{session.modelLabel}</span>
-                  </>
-                ) : null}
-                {stamp ? (
-                  <>
-                    <span className="bot-task-meta-sep" aria-hidden="true">·</span>
-                    <span className="bot-task-meta-text">{stamp}</span>
-                  </>
-                ) : null}
-              </div>
-              <h1>{title}</h1>
-              {progress && progress !== session.status ? (
-                <p className="bot-task-hero-progress">{progress}</p>
-              ) : null}
-            </section>
-
-            {/* Feedback Banner */}
-            {feedback ? (
-              <p className={`bot-task-feedback${feedback.error ? ' is-error' : ''}`} role={feedback.error ? 'alert' : 'status'}>
-                {feedback.text}
-              </p>
+        {/* Compact Single-Line Status Strip (keeps full height for the worker conversation) */}
+        <header className="bot-task-strip">
+          <div className="bot-task-strip-leading">
+            <span className="bot-task-status-pill" data-tone={tone}>
+              <PeerIcon
+                name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : tone === 'azure' ? 'loader' : 'circle'}
+                size={12}
+                className={tone === 'azure' && !ended ? 'motion-spin' : undefined}
+              />
+              <span>{statusLabel}</span>
+            </span>
+            <h1 className="bot-task-strip-title" title={title}>{title}</h1>
+            {session.modelLabel ? (
+              <span className="bot-task-meta-text">{session.modelLabel}</span>
             ) : null}
-
-            {/* Pending Approval Scope Summary (single primary CTA lives on Touch Bar below) */}
-            {pendingApproval ? (
-              <section className="bot-task-verdict-banner" aria-label={isZh ? '待批准计划范围' : 'Pending plan approval'}>
-                <div className="bot-task-verdict-copy">
-                  <strong>{isZh ? '需要你决定：确认是否批准执行该计划' : 'Decision required: approve this plan?'}</strong>
-                  <span>
-                    {pendingApproval.summary || (isZh ? '请在下方 Touch Bar 选择「拒绝」或「批准计划」，也可先展开右侧边界详情。' : 'Approve or reject on the Touch Bar below, or inspect scope details.')}
-                  </span>
-                </div>
-                <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('coordination')}>
-                  {isZh ? '核查边界' : 'Inspect scope'}
-                </button>
-              </section>
-            ) : null}
-
-            {/* Open Worker/Bot Question Context */}
-            {context?.question ? (
-              <section className="bot-task-card">
-                <div className="bot-task-card-head">
-                  <h2>{isZh ? `${profile.displayName} 正在等你答复` : `${profile.displayName} is waiting for your reply`}</h2>
-                </div>
-                <p className="bot-task-summary">{context.question.content}</p>
-                <p className="bot-task-card-note">
-                  {isZh ? '你可以直接在下方输入框答复，或点击顶部回到主对话操作快捷选项。' : 'Reply in the composer below or return to the main thread for quick options.'}
-                </p>
-              </section>
-            ) : null}
-
-            {/* Report & Verification Card */}
-            <section className="bot-task-card">
-              <div className="bot-task-card-head">
-                <h2>{isZh ? '执行汇报与核验状态' : 'Execution report & verification'}</h2>
-                <div className="bot-task-card-actions">
-                  {evidenceCount > 0 ? (
-                    <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('evidence')}>
-                      <PeerIcon name="panelRight" size={13} />
-                      <span>{isZh ? `在右侧查看证据 (${evidenceCount})` : `Inspect evidence (${evidenceCount})`}</span>
-                    </button>
-                  ) : null}
-                  {session.conversationId ? (
-                    <button type="button" className="bot-task-btn" onClick={() => setSceneOpen((v) => !v)}>
-                      <PeerIcon name="terminal" size={13} />
-                      <span>{sceneOpen ? (isZh ? '收起完整执行过程' : 'Hide worker trace') : (isZh ? '查看完整执行过程' : 'View worker trace')}</span>
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-              {session.status === 'failed' && session.failure ? (
-                <div className="bot-task-failure-banner" role="status">
-                  <div className="bot-task-failure-head">
-                    <PeerIcon name="warning" size={14} />
-                    <strong>{formatFailureReason(session.failure, isZh)}</strong>
-                    <code>{session.failure.code}</code>
-                  </div>
-                  <p className="bot-task-failure-note">
-                    {isZh
-                      ? '该任务在执行阶段中止，未进入结果核验。可查看执行过程定位细节，或点击下方「基于此重跑」。'
-                      : 'This task stopped during execution before verification. Inspect the worker trace or use Re-run draft below.'}
-                  </p>
-                </div>
-              ) : null}
-              {session.workerOutput ? (
-                <p className="bot-task-summary">{session.workerOutput}</p>
-              ) : session.status !== 'failed' && !session.verification ? (
-                <p className="bot-task-card-note">
-                  {reportRead.state === 'loading'
-                    ? i18n.t('projectAgent.drawer.task.readingReport')
-                    : (isZh ? '任务正在推进或尚未产出执行汇报，可展开执行过程查看实时进展。' : 'No execution report yet. Open the worker trace for live steps.')}
-                </p>
-              ) : null}
-              {session.verification ? (() => {
-                const attempts = session.verification.reviewAttempts;
-                const latestAttempt = attempts.at(-1);
-                const attemptCount = attempts.length;
-                const verdictDetail = session.verification.summary
-                  || (latestAttempt?.failureReason ? formatFailureReason({ code: latestAttempt.failureReason }, isZh) : '')
-                  || (session.verification.error ? formatFailureReason({ code: session.verification.error }, isZh) : '');
-                return (
-                  <div className="bot-task-verdict-banner">
-                    <div className="bot-task-verdict-copy">
-                      <strong>
-                        {session.verification.outcome === 'passed'
-                          ? (isZh ? '独立只读核验通过' : 'Independent verification passed')
-                          : session.verification.outcome === 'failed'
-                            ? (isZh
-                              ? `独立核验未通过${attemptCount > 0 ? `（已完成 ${Math.min(attemptCount, 3)}/3 次）` : ''}`
-                              : `Verification failed${attemptCount > 0 ? ` (${Math.min(attemptCount, 3)}/3)` : ''}`)
-                            : (isZh ? '独立核验进行中或部分完成' : 'Verification in progress')}
-                      </strong>
-                      {verdictDetail ? (
-                        <p className="bot-task-verdict-summary">{verdictDetail}</p>
-                      ) : null}
-                      <span>
-                        {isZh
-                          ? `共 ${session.verification.checks.length} 项检查 · ${session.verification.outputs.length} 份已登记产物`
-                          : `${session.verification.checks.length} checks · ${session.verification.outputs.length} indexed outputs`}
-                      </span>
-                    </div>
-                    <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('verdict')}>
-                      {isZh ? '查看核验裁决' : 'View verdict'}
-                    </button>
-                  </div>
-                );
-              })() : null}
-            </section>
-
-            {/* Task Brief / Delegated Instructions (kept distinct from execution report) */}
-            {session.summary && session.summary !== session.workerOutput ? (
-              <section className="bot-task-card bot-task-brief-card">
-                <div className="bot-task-card-head">
-                  <h2>{isZh ? '任务说明' : 'Task brief'}</h2>
-                </div>
-                <p className="bot-task-brief-text">{session.summary}</p>
-              </section>
-            ) : null}
-
-            {/* Optional Expandable Worker Execution Trace */}
-            {sceneOpen && session.conversationId ? (
-              <div className="bot-task-scene-wrap">
-                <ConversationSceneDrawer
-                  embedded
-                  task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
-                  workspaceId={workspaceId}
-                  workspacePath={workspacePath}
-                  conversationId={session.conversationId}
-                  title={title}
-                  i18n={i18n}
-                  isZh={isZh}
-                  onClose={() => setSceneOpen(false)}
-                  onOpenBot={() => onBackToBot(originMessageId)}
-                />
-              </div>
+            {stamp ? (
+              <span className="bot-task-meta-text">{stamp}</span>
             ) : null}
           </div>
+          <div className="bot-task-strip-actions">
+            {session.verification ? (
+              <button
+                type="button"
+                className="bot-task-strip-btn"
+                data-tone={session.verification.outcome === 'passed' ? 'good' : session.verification.outcome === 'failed' ? 'danger' : undefined}
+                onClick={() => openInspectorTab('verdict')}
+              >
+                {session.verification.outcome === 'passed'
+                  ? (isZh ? '核验通过' : 'Verified')
+                  : session.verification.outcome === 'failed'
+                    ? (isZh ? '核验未通过' : 'Verdict failed')
+                    : (isZh ? '核验中' : 'Verifying')}
+              </button>
+            ) : null}
+            {session.summary ? (
+              <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('brief')}>
+                {isZh ? '任务说明' : 'Brief'}
+              </button>
+            ) : null}
+            {evidenceCount > 0 ? (
+              <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('evidence')}>
+                {isZh ? `证据 (${evidenceCount})` : `Evidence (${evidenceCount})`}
+              </button>
+            ) : null}
+          </div>
+        </header>
+
+        {/* Contextual 1-line notices (only shown for actionable states: approval / question / failure / feedback) */}
+        {pendingApproval ? (
+          <div className="bot-task-notice" data-tone="warn" role="status">
+            <PeerIcon name="warning" size={14} />
+            <span className="bot-task-notice-text">
+              {pendingApproval.summary || (isZh ? '需要你确认是否批准执行该计划（操作按钮在下方）。' : 'Plan approval required (actions below).')}
+            </span>
+            <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('coordination')}>
+              {isZh ? '核查边界' : 'Inspect scope'}
+            </button>
+          </div>
+        ) : null}
+
+        {context?.question ? (
+          <div className="bot-task-notice" data-tone="warn" role="status">
+            <PeerIcon name="info" size={14} />
+            <span className="bot-task-notice-text">
+              {isZh ? `${profile.displayName} 正在等你答复：${context.question.content}` : `${profile.displayName} is asking: ${context.question.content}`}
+            </span>
+          </div>
+        ) : null}
+
+        {session.status === 'failed' && session.failure ? (
+          <div className="bot-task-notice" data-tone="danger" role="status">
+            <PeerIcon name="warning" size={14} />
+            <span className="bot-task-notice-text">
+              {formatFailureReason(session.failure, isZh)}
+            </span>
+            <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('brief')}>
+              {isZh ? '详情' : 'Details'}
+            </button>
+          </div>
+        ) : verificationNotice ? (
+          <div className="bot-task-notice" data-tone="danger" role="status">
+            <PeerIcon name="warning" size={14} />
+            <span className="bot-task-notice-text">{verificationNotice}</span>
+            <button type="button" className="bot-task-strip-btn" onClick={() => openInspectorTab('verdict')}>
+              {isZh ? '查看核验' : 'View verdict'}
+            </button>
+          </div>
+        ) : null}
+
+        {feedback ? (
+          <div className="bot-task-notice" data-tone={feedback.error ? 'danger' : 'info'} role={feedback.error ? 'alert' : 'status'}>
+            <span className="bot-task-notice-text">{feedback.text}</span>
+          </div>
+        ) : null}
+
+        {/* Primary Stage: Direct Native Worker Conversation Stream (full height, zero card chrome) */}
+        <div className="bot-task-conversation-stage">
+          {session.conversationId ? (
+            <ConversationSceneDrawer
+              embedded
+              seamless
+              task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
+              workspaceId={workspaceId}
+              workspacePath={workspacePath}
+              conversationId={session.conversationId}
+              conversationRevision={`${session.status}:${session.sourceRevision ?? ''}:${session.observationRevision ?? ''}:${liveTick}`}
+              title={title}
+              i18n={i18n}
+              isZh={isZh}
+              onClose={() => onBackToBot(originMessageId)}
+              onOpenBot={() => onBackToBot(originMessageId)}
+            />
+          ) : (
+            <div className="bot-task-empty-stage">
+              <PeerIcon
+                name={tone === 'azure' ? 'loader' : tone === 'danger' ? 'warning' : 'circle'}
+                size={22}
+                className={tone === 'azure' && !ended ? 'motion-spin' : undefined}
+              />
+              <p className="bot-task-empty-copy">
+                {session.workerOutput
+                  ? session.workerOutput
+                  : session.status === 'queued'
+                    ? (isZh ? '子任务已排队，等待启动执行会话…' : 'Task queued, waiting to start execution session…')
+                    : session.status === 'failed'
+                      ? (isZh ? '任务在创建执行会话前已中止，可点击下方「基于此重跑」。' : 'Stopped before the execution session started. Use Re-run below.')
+                      : (isZh ? '正在启动执行会话…' : 'Starting execution session…')}
+              </p>
+              {session.summary ? (
+                <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('brief')}>
+                  {isZh ? '查看任务说明' : 'View task brief'}
+                </button>
+              ) : null}
+            </div>
+          )}
         </div>
 
         {/* Bottom Docked Task Touch Bar + Follow-up Composer */}

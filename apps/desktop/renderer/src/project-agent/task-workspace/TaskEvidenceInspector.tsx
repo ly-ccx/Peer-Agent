@@ -7,7 +7,7 @@ import { EvidencePreview } from '../drawer/EvidencePreview';
 import { TaskVerification } from '../drawer/TaskVerification';
 import { CoordinationDetails } from '../drawer/CoordinationDetails';
 
-export type InspectorTab = 'evidence' | 'verdict' | 'coordination';
+export type InspectorTab = 'brief' | 'evidence' | 'verdict' | 'coordination';
 
 export interface TaskEvidenceInspectorProps {
   readonly open: boolean;
@@ -62,16 +62,16 @@ export function TaskEvidenceInspector({
     <aside
       ref={panelRef}
       className={`bot-task-inspector${overlay ? ' is-overlay' : ''}`}
-      aria-label={isZh ? '证据与核验依据' : 'Evidence and verification'}
+      aria-label={isZh ? '任务详情与证据' : 'Task details & evidence'}
     >
       <header className="bot-inspector-head">
         <span className="bot-inspector-title">
-          {isZh ? '证据与核验依据' : 'Evidence & Verdict'}
+          {isZh ? '任务详情与证据' : 'Task Details & Evidence'}
         </span>
         <button
           type="button"
           className="bot-tray-close"
-          aria-label={isZh ? '关闭证据抽屉' : 'Close evidence inspector'}
+          aria-label={isZh ? '关闭详情抽屉' : 'Close task inspector'}
           onClick={onClose}
         >
           <PeerIcon name="close" size={14} />
@@ -79,9 +79,10 @@ export function TaskEvidenceInspector({
       </header>
       <div className="bot-inspector-tabs" role="tablist">
         {([
+          ['brief', isZh ? '说明' : 'Brief'],
           ['evidence', isZh ? `证据 (${allEvidenceRefs.length})` : `Evidence (${allEvidenceRefs.length})`],
-          ['verdict', isZh ? '核验裁决' : 'Verdict'],
-          ['coordination', isZh ? '边界与追踪' : 'Scope'],
+          ['verdict', isZh ? '核验' : 'Verdict'],
+          ['coordination', isZh ? '边界' : 'Scope'],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -96,7 +97,37 @@ export function TaskEvidenceInspector({
         ))}
       </div>
       <div className="bot-inspector-body">
-        {tab === 'evidence' ? (
+        {tab === 'brief' ? (
+          <div className="bot-inspector-brief">
+            {session.failure ? (
+              <section className="bot-inspector-section">
+                <h3>{isZh ? '中止原因' : 'Failure detail'}</h3>
+                <p className="bot-inspector-brief-text">
+                  {session.failure.message && session.failure.message !== session.failure.code
+                    ? session.failure.message
+                    : session.failure.code}
+                </p>
+                <code className="bot-inspector-code">{session.failure.code}</code>
+              </section>
+            ) : null}
+            {session.summary ? (
+              <section className="bot-inspector-section">
+                <h3>{isZh ? '委派说明' : 'Delegated brief'}</h3>
+                <p className="bot-inspector-brief-text">{session.summary}</p>
+              </section>
+            ) : (
+              <p className="bot-inspector-empty">
+                {isZh ? '暂无额外任务说明。' : 'No task brief recorded.'}
+              </p>
+            )}
+            {session.workerOutput && session.workerOutput !== session.summary ? (
+              <section className="bot-inspector-section">
+                <h3>{isZh ? '执行汇报摘要' : 'Execution summary'}</h3>
+                <p className="bot-inspector-brief-text">{session.workerOutput}</p>
+              </section>
+            ) : null}
+          </div>
+        ) : tab === 'evidence' ? (
           allEvidenceRefs.length > 0 ? (
             <EvidencePreview
               refs={allEvidenceRefs}

@@ -13,21 +13,25 @@ export function ConversationSceneDrawer({
   workspaceId,
   workspacePath,
   conversationId,
+  conversationRevision,
   title,
   i18n,
   isZh,
   onClose,
   onOpenBot,
   embedded = false,
+  seamless = false,
   active = true,
   task,
 }: {
   readonly embedded?: boolean;
+  readonly seamless?: boolean;
   readonly active?: boolean;
   readonly task?: { readonly sessionId: string; readonly planId: string };
   readonly workspaceId: string;
   readonly workspacePath: string;
   readonly conversationId: string;
+  readonly conversationRevision?: string | null;
   readonly title: string;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
@@ -59,8 +63,8 @@ export function ConversationSceneDrawer({
     isPageActive={active} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
-        <ChatSurface showComposer={false} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
-          conversationId={conversationId} conversationTitle={title} systemInstructions={systemInstructions}
+        <ChatSurface showComposer={false} showHeader={!seamless} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
+          conversationId={conversationId} conversationRevision={conversationRevision} conversationTitle={title} systemInstructions={systemInstructions}
           replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
           onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}
           workspacePath={workspacePath} workspaces={workspacePath ? [{ path: workspacePath, name: title }] : []}
@@ -69,6 +73,13 @@ export function ConversationSceneDrawer({
       {!embedded ? <WorkbenchPanel isZh={isZh} workspacePath={workspacePath} /> : null}
     </div>
   </WorkbenchProvider>;
+  if (embedded && seamless) {
+    return (
+      <section className="bot-inline-scene bot-inline-scene--seamless" aria-label={i18n.t('projectAgent.drawer.scene')}>
+        <BotDocumentPreview workspaceId={workspaceId} i18n={i18n} task={task}>{content(onClose)}</BotDocumentPreview>
+      </section>
+    );
+  }
   if (embedded) return <section className="bot-inline-scene" aria-label={i18n.t('projectAgent.drawer.scene')}>
     <header className="bot-inline-scene-heading"><button type="button" className="ui-button" onClick={onClose}>
       <PeerIcon name="close" size={14} />{i18n.t('projectAgent.drawer.close')}</button><span>{title}</span></header>

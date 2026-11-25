@@ -38,7 +38,8 @@ use peer_runtime::{
 };
 use peer_store::{
     ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, DirectoryLock,
-    EvidenceIndexStore, HostApproval, HostToolEvidence, NewProjectConversation, PolicyStore,
+    EvidenceIndexStore, HostApproval, HostToolEvidence, NewConversation, NewProjectConversation,
+    PolicyStore,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -87,6 +88,7 @@ struct PhaseSummary {
 struct DelegationOriginSummary {
     workspace_id: Option<String>,
     session_id: Option<String>,
+    worker_conversation_id: Option<String>,
     phase: Option<String>,
     read_only: Option<bool>,
     priority: Option<String>,
@@ -331,11 +333,18 @@ fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
         .as_deref()
         .filter(|s| !s.is_empty())?
         .to_owned();
-    let conversation_id = doc.conversation_id.clone().unwrap_or_default();
+    let plan_conversation_id = doc.conversation_id.clone().unwrap_or_default();
     let session_id = origin
         .session_id
         .clone()
-        .unwrap_or_else(|| conversation_id.clone());
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| plan_conversation_id.clone());
+    let conversation_id = origin
+        .worker_conversation_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or(plan_conversation_id);
     let acceptance = doc.result_acceptance.as_ref();
     let anchor_message_ids = origin
         .anchor_message_ids
@@ -1710,14 +1719,21 @@ impl SessionSupervisor {
             });
         let status = derive_session_status(plan);
         let phase = normalize_summary_phase(&status, origin["phase"].as_str());
+        let plan_conversation_id = plan["conversationId"].as_str().unwrap_or("");
+        let session_id = origin["sessionId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(plan_conversation_id)
+            .to_owned();
+        let conversation_id = origin["workerConversationId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(plan_conversation_id)
+            .to_owned();
         WorkSessionSummary {
-            session_id: origin["sessionId"]
-                .as_str()
-                .or_else(|| plan["conversationId"].as_str())
-                .unwrap_or("")
-                .to_owned(),
+            session_id,
             workspace_id: origin["workspaceId"].as_str().unwrap_or("").to_owned(),
-            conversation_id: plan["conversationId"].as_str().unwrap_or("").to_owned(),
+            conversation_id,
             plan_id: plan["planId"].as_str().unwrap_or("").to_owned(),
             title: plan["title"].as_str().unwrap_or("").to_owned(),
             status,
@@ -1771,6 +1787,7 @@ impl SessionSupervisor {
             .into_iter()
             .find(|p| {
                 p["delegationOrigin"]["sessionId"].as_str() == Some(session_id)
+                    || p["delegationOrigin"]["workerConversationId"].as_str() == Some(session_id)
                     || p["conversationId"].as_str() == Some(session_id)
                     || p["planId"].as_str() == Some(session_id)
             })
@@ -2548,6 +2565,45 @@ impl SessionSupervisor {
                     );
                 }
             }
+            let precreated_worker_cid: Option<String> = if continuation.is_none() {
+                let canonical_ws =
+                    fs::canonicalize(&target_ws).unwrap_or_else(|_| target_ws.clone());
+                let conv_title = plan["title"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("Delegated task");
+                let created_at = now_iso();
+                let created = self
+                    .conversations
+                    .create_with_model(
+                        &NewConversation {
+                            title: conv_title,
+                            workspace_path: canonical_ws.to_str(),
+                            mode: RuntimeMode::Chat.as_str(),
+                            created_at: &created_at,
+                        },
+                        None,
+                        None,
+                    )
+                    .ok()
+                    .and_then(|v| v["id"].as_str().map(str::to_owned));
+                if let Some(ref wcid) = created
+                    && let Ok(_guard) = self.transition_lock()
+                    && let Ok(mut live_plan) = self.read_plan(&plan_id)
+                    && !matches!(
+                        derive_session_status(&live_plan).as_str(),
+                        "accepted" | "cancelled" | "paused" | "superseded"
+                    )
+                {
+                    live_plan["delegationOrigin"]["workerConversationId"] = json!(wcid);
+                    live_plan["updatedAt"] = json!(now_iso());
+                    let _ = self.write_plan(&live_plan);
+                }
+                created
+            } else {
+                None
+            };
             let runtime = NativeConversationRuntime::new(
                 &self.data_home,
                 ConversationAccess::new(session_profile.access_level),
@@ -2559,7 +2615,8 @@ impl SessionSupervisor {
                         workspace: &target_ws,
                         conversation_id: continuation
                             .as_ref()
-                            .map(|run| run.identity.conversation_id.as_str()),
+                            .map(|run| run.identity.conversation_id.as_str())
+                            .or(precreated_worker_cid.as_deref()),
                         resume_from: continuation.as_ref(),
                         prompt: &prompt,
                         image_paths: if continuation.is_some() {
