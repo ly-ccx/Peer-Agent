@@ -193,6 +193,7 @@ export function ChatSurface({
   banner,
   showComposer = true,
   showHeader = true,
+  externalStreaming = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -209,6 +210,8 @@ export function ChatSurface({
   readonly showComposer?: boolean;
   /** 是否显示内置顶部标题栏；无缝嵌入子任务页时由外层紧凑状态条替代。 */
   readonly showHeader?: boolean;
+  /** 由外部宿主驱动的实时执行态（如后台委派子任务），使进行中消息按 0.18.0 实时时间线展开。 */
+  readonly externalStreaming?: boolean;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly automationOrigin?: {
@@ -2408,7 +2411,7 @@ export function ChatSurface({
         recomputeKey={messages.length}
       />
       {banner ? <div className="selection-child-banner">{banner}</div> : null}
-      {currentTurnContext ? (
+      {showHeader && currentTurnContext ? (
         <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
           <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
           <span className="current-turn-context-text">{currentTurnContext}</span>
@@ -2452,7 +2455,7 @@ export function ChatSurface({
             turns={chatTurns}
             liveTurn={liveChatTurn}
             lastMessage={messages.at(-1)}
-            isStreaming={isStreaming}
+            isStreaming={isStreaming || externalStreaming}
             streamStartedAt={convState.turnStartedAt}
             isZh={isZh}
             i18n={i18n}

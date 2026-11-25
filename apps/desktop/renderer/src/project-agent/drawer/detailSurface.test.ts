@@ -42,11 +42,12 @@ test('explicit embedded task scene keeps the child conversation and has no neste
   const cleanups = effects.map(effect => effect()); await Promise.resolve();
   assert.deepEqual(calls.sort(), ['read-providers', 'read-settings']); cleanups.forEach(fn => fn?.());
 
-  const seamlessTree = scene.ConversationSceneDrawer({ embedded: true, seamless: true, active: true, workspaceId: 'A', workspacePath: '/synthetic/project', conversationId: 'child',
+  const seamlessTree = scene.ConversationSceneDrawer({ embedded: true, seamless: true, active: true, isLive: true, workspaceId: 'A', workspacePath: '/synthetic/project', conversationId: 'child',
     conversationRevision: 'running:1', title: 'Task', i18n: { t: (key: string) => key }, isZh: false, task, onClose() {} });
   assert.equal(find(seamlessTree, 'header'), undefined);
   assert.equal(find(seamlessTree, 'chat').props.showHeader, false);
   assert.equal(find(seamlessTree, 'chat').props.showComposer, false);
+  assert.equal(find(seamlessTree, 'chat').props.externalStreaming, true);
   assert.equal(find(seamlessTree, 'chat').props.conversationRevision, 'running:1');
 });
 

@@ -456,6 +456,7 @@ export function TaskWorkspaceView({
               workspacePath={workspacePath}
               conversationId={session.conversationId}
               conversationRevision={`${session.status}:${session.sourceRevision ?? ''}:${session.observationRevision ?? ''}:${liveTick}`}
+              isLive={isLiveSession}
               title={title}
               i18n={i18n}
               isZh={isZh}

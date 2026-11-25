@@ -87,11 +87,16 @@ export async function loadConversationMessages(conversationId: string, options?:
       const role: ChatMsg['role'] = roleRaw === 'assistant' || roleRaw === 'system'
         ? roleRaw
         : 'user';
+      const rawTs = typeof m.timestamp === 'number' && Number.isFinite(m.timestamp)
+        ? m.timestamp
+        : typeof m.createdAt === 'string'
+          ? Date.parse(m.createdAt)
+          : NaN;
       const msg: ChatMsg = {
         id: (m.id as string) || nextId(),
         role: roleRaw === 'tool' ? 'assistant' : role,
         content: (m.content as string) || '',
-        timestamp: m.timestamp as number | undefined,
+        timestamp: Number.isFinite(rawTs) ? rawTs : undefined,
       };
       if (m.segments) {
         msg.segments = m.segments as ContentSegment[];
