@@ -26,9 +26,12 @@ test('getAll returns {} when file is absent', () => {
 test('runtime policy rereads external changes and admits neither identity nor credentials', () => {
   const store=createSettingsStore({settingsFile});
   writeFileSync(settingsFile,JSON.stringify({schemaVersion:3,workspaces:[{id:'private-id',path:'/private/path'}],remoteAccess:{token:'secret'},apiKey:'secret',
+    modelRouting:{tiers:{strong:{primary:'model-strong',fallbacks:[],secret:'secret'}},roles:{project_agent:{mode:'tier',tier:'strong',apiKey:'secret'}},secret:'secret'},
     projectAgent:{shell:'bots',concurrency:2,interactiveResults:true,managedRoot:'/private',quietHours:{enabled:true,start:'23:00',end:'06:00',apiKey:'secret'}},memory:{enabled:true,learnPreferences:true,secret:'secret'}}));
   const first=store.getRuntimePolicy();assert.equal(first.projectAgent.shell,'bots');assert.equal(first.memory.enabled,true);
   assert.equal(first.projectAgent.interactiveResults, true);
+  assert.equal(first.modelRouting.tiers.strong.primary, 'model-strong');
+  assert.equal(first.modelRouting.roles.project_agent.tier, 'strong');
   assert.equal(JSON.stringify(first).includes('private'),false);assert.equal(JSON.stringify(first).includes('secret'),false);
   writeFileSync(settingsFile,JSON.stringify({schemaVersion:3,projectAgent:{shell:'classic',concurrency:1},memory:{enabled:false,learnPreferences:false}}));
   const next=store.getRuntimePolicy();assert.equal(next.projectAgent.shell,'classic');assert.equal(next.projectAgent.concurrency,1);assert.deepEqual(next.memory,{enabled:false,learnPreferences:false});

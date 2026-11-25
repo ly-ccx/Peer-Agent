@@ -607,7 +607,7 @@ export function registerDesktopProjectAgent({
     inputQueue,
     sessions: supervisor,
     listModels,
-    readModelRouting: () => readRuntimePolicy()?.modelRouting,
+    readModelRouting: () => readRuntimePolicy()?.modelRouting ?? getSettings?.()?.modelRouting,
     readActivity: workspaceId => (
       classicCoreBridge?.isProjectBotHostActive?.()
         ? classicCoreBridge.readProjectBotActivity(workspaceId)
