@@ -294,8 +294,7 @@ impl WorkSessionInteractiveProvider {
     }
 
     fn allows_publish(&self) -> bool {
-        self.ctx.can_publish
-            && matches!(self.ctx.role.as_str(), "session_worker" | "project_agent")
+        self.ctx.can_publish && matches!(self.ctx.role.as_str(), "session_worker" | "project_agent")
     }
 }
 
@@ -512,7 +511,9 @@ fn failed_publish_outcome(
     }
 }
 
-fn normalize_draft(raw: &Value) -> Result<(Value, String, Option<InteractiveResultReference>), &'static str> {
+fn normalize_draft(
+    raw: &Value,
+) -> Result<(Value, String, Option<InteractiveResultReference>), &'static str> {
     let obj = raw.as_object().ok_or("interactive_draft_invalid")?;
     for key in obj.keys() {
         if !matches!(
@@ -541,9 +542,13 @@ fn normalize_draft(raw: &Value) -> Result<(Value, String, Option<InteractiveResu
             if pub_obj.len() != 2 {
                 return Err("interactive_draft_invalid");
             }
-            let base: InteractiveResultReference =
-                serde_json::from_value(pub_obj.get("base").cloned().ok_or("interactive_draft_invalid")?)
-                    .map_err(|_| "interactive_draft_invalid")?;
+            let base: InteractiveResultReference = serde_json::from_value(
+                pub_obj
+                    .get("base")
+                    .cloned()
+                    .ok_or("interactive_draft_invalid")?,
+            )
+            .map_err(|_| "interactive_draft_invalid")?;
             if !base.is_valid() {
                 return Err("interactive_draft_invalid");
             }
@@ -561,7 +566,9 @@ fn normalize_draft(raw: &Value) -> Result<(Value, String, Option<InteractiveResu
     let text_fallback = obj
         .get("textFallback")
         .and_then(Value::as_str)
-        .filter(|s| !s.trim().is_empty() && s.len() <= INTERACTIVE_FALLBACK_BYTES && !s.contains('\0'))
+        .filter(|s| {
+            !s.trim().is_empty() && s.len() <= INTERACTIVE_FALLBACK_BYTES && !s.contains('\0')
+        })
         .ok_or("interactive_draft_invalid")?;
     let program = obj
         .get("program")
@@ -689,18 +696,32 @@ async fn run_publish(
     let store = InteractiveResultStore::new(&ctx.data_home);
     let (normalized_draft, pub_kind, base_ref) = match normalize_draft(args) {
         Ok(v) => v,
-        Err(code) => return failed_publish_outcome(code, "", "Invalid interactive result draft", None),
+        Err(code) => {
+            return failed_publish_outcome(code, "", "Invalid interactive result draft", None);
+        }
     };
 
     if let Some(ref base) = base_ref
         && base.owner != ctx.owner
     {
-        return failed_publish_outcome("interactive_scope_denied", "publication.base", "Base owner mismatch", None);
+        return failed_publish_outcome(
+            "interactive_scope_denied",
+            "publication.base",
+            "Base owner mismatch",
+            None,
+        );
     }
 
     let args_digest = match interactive_json_digest(&normalized_draft) {
         Ok(d) => d,
-        Err(_) => return failed_publish_outcome("interactive_draft_invalid", "", "Cannot digest draft", None),
+        Err(_) => {
+            return failed_publish_outcome(
+                "interactive_draft_invalid",
+                "",
+                "Cannot digest draft",
+                None,
+            );
+        }
     };
 
     // Idempotent replay / reconcile check for the same tool call ID
@@ -1091,8 +1112,9 @@ async fn run_inspect(
     // For `evaluate` view, run real bounded OpenUI pure evaluation via Desktop bridge!
     if args["view"].as_str() == Some("evaluate")
         && args["target"]["kind"].as_str() == Some("result")
-        && let Ok(reference) =
-            serde_json::from_value::<InteractiveResultReference>(args["target"]["reference"].clone())
+        && let Ok(reference) = serde_json::from_value::<InteractiveResultReference>(
+            args["target"]["reference"].clone(),
+        )
     {
         if !reference.is_valid() || reference.owner != ctx.owner {
             return EffectOutcome {
@@ -1122,10 +1144,16 @@ async fn run_inspect(
         let content = fixed["content"].clone();
         let values = content["initialValues"].clone();
         let state_digest = interactive_json_digest(&values).unwrap_or_default();
-        match ctx.bridge.evaluate_content(content.clone(), values.clone(), cancel).await {
+        match ctx
+            .bridge
+            .evaluate_content(content.clone(), values.clone(), cancel)
+            .await
+        {
             Ok(eval_res) => {
                 let text = eval_res["projection"]["text"].as_str().unwrap_or("");
-                let comp_trunc = eval_res["projection"]["truncated"].as_bool().unwrap_or(false);
+                let comp_trunc = eval_res["projection"]["truncated"]
+                    .as_bool()
+                    .unwrap_or(false);
                 let paged = match interactive_results::page_interactive_text(
                     text,
                     args["offset"].as_u64(),
@@ -1215,7 +1243,8 @@ mod tests {
     use super::*;
     use crate::{
         BotProfileStore, CreateBotProfile, InteractiveValidationError, SessionSupervisor,
-        SpawnCriterion, SpawnSessionRequest, verifier::resolve_work_session_profile_with_interactive,
+        SpawnCriterion, SpawnSessionRequest,
+        verifier::resolve_work_session_profile_with_interactive,
     };
     use peer_protocol::HostSurface;
     use peer_store::EvidenceIndexStore;
@@ -1282,7 +1311,12 @@ mod tests {
         }
     }
 
-    fn spawn_req(ws_id: &str, ws_path: &Path, read_only: bool, caps: Vec<&str>) -> SpawnSessionRequest {
+    fn spawn_req(
+        ws_id: &str,
+        ws_path: &Path,
+        read_only: bool,
+        caps: Vec<&str>,
+    ) -> SpawnSessionRequest {
         SpawnSessionRequest {
             workspace_id: ws_id.to_owned(),
             workspace_path: ws_path.to_path_buf(),
@@ -1335,7 +1369,10 @@ mod tests {
                     "ws-ir-gate",
                     ws.path(),
                     true,
-                    vec![INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_INSPECT_CAPABILITY],
+                    vec![
+                        INTERACTIVE_PUBLISH_CAPABILITY,
+                        INTERACTIVE_INSPECT_CAPABILITY,
+                    ],
                 ),
                 true,
             )
@@ -1372,7 +1409,10 @@ mod tests {
                     "ws-ir-gate",
                     ws.path(),
                     true,
-                    vec![INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_INSPECT_CAPABILITY],
+                    vec![
+                        INTERACTIVE_PUBLISH_CAPABILITY,
+                        INTERACTIVE_INSPECT_CAPABILITY,
+                    ],
                 ),
                 true,
             )
@@ -1504,7 +1544,12 @@ mod tests {
         assert_eq!(manifests[0].0, INTERACTIVE_INSPECT_TOOL);
         assert!(
             verifier_provider
-                .prepare(INTERACTIVE_PUBLISH_CAPABILITY, json!({}), ws.path(), dir.path())
+                .prepare(
+                    INTERACTIVE_PUBLISH_CAPABILITY,
+                    json!({}),
+                    ws.path(),
+                    dir.path()
+                )
                 .is_err()
         );
 
@@ -1567,7 +1612,12 @@ mod tests {
         );
         assert!(
             provider
-                .prepare(INTERACTIVE_INSPECT_CAPABILITY, json!({}), ws.path(), dir.path())
+                .prepare(
+                    INTERACTIVE_INSPECT_CAPABILITY,
+                    json!({}),
+                    ws.path(),
+                    dir.path()
+                )
                 .is_err()
         );
         let repair_counter = AtomicUsize::new(0);

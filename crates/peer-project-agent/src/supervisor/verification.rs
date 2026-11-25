@@ -441,8 +441,14 @@ impl SessionSupervisor {
         }
         drop(guard);
         let already_reported = self.session_already_reported(&updated, session_id);
-        let decision =
-            self.settle_session(workspace_id, session_id, already_reported, false, None, true)?;
+        let decision = self.settle_session(
+            workspace_id,
+            session_id,
+            already_reported,
+            false,
+            None,
+            true,
+        )?;
         Ok(json!({
             "ok": true,
             "sessionId": session_id,
@@ -761,7 +767,8 @@ mod tests {
                 "summary": "Verified README.md exists on disk"
             })
             .to_string();
-            let chunk = json!({"choices":[{"index":0,"delta":{"content":verdict},"finish_reason":"stop"}]});
+            let chunk =
+                json!({"choices":[{"index":0,"delta":{"content":verdict},"finish_reason":"stop"}]});
             let usage = json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}});
             let body = format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n");
             let response = format!(

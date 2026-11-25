@@ -16,7 +16,7 @@
 .bot-turn-process-content:has(> .bot-process-note) { padding: 10px 14px; }
 .bot-turn-process-content > .bot-process-note { margin: 0; }
 .bot-tool-step + .bot-tool-step { margin-top: 2px; padding-top: 2px; border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 75%, transparent); }
-.bot-tool-step > summary { display: flex; align-items: center; gap: 10px; min-height: 0; padding: 7px 8px; border-radius: calc(var(--ui-radius-panel) - 6px); }
+.bot-tool-step > summary { display: flex; align-items: center; gap: 10px; min-height: 0; padding: 7px 8px; border-radius: var(--ui-radius-row); }
 .bot-tool-step > summary:hover { background: var(--chrome-hover); }
 .bot-tool-step-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .bot-tool-step-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; background: var(--control-fill); border-radius: var(--ui-radius-control-compact); }

@@ -257,7 +257,8 @@ mod tests {
         );
 
         // Incomplete stream retries transient EOF / MALFORMED_FUNCTION_CALL, not deterministic caps.
-        let eof = ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason");
+        let eof =
+            ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason");
         assert!(eof.is_transient_retryable());
         assert_eq!(
             eof.format_diagnostic().as_deref(),

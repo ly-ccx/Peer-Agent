@@ -1009,12 +1009,9 @@ pub(crate) async fn run_independent_verifier_with_interactive(
         .any(|r| r.starts_with(INTERACTIVE_RESULT_PREFIX));
     let mount_interactive =
         interactive_bridge.is_some() && (interactive_enabled || has_interactive_refs);
-    let profile = resolve_work_session_profile_with_interactive(
-        plan,
-        "verifier",
-        mount_interactive,
-    )
-    .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
+    let profile =
+        resolve_work_session_profile_with_interactive(plan, "verifier", mount_interactive)
+            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
     // The verifier never prompts, but it reads the same current Bot policy as
     // the session it verifies instead of a level fixed by its role name.
     let workspace_id = plan["delegationOrigin"]["workspaceId"]

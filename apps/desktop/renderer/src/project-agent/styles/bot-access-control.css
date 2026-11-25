@@ -12,7 +12,7 @@
   max-width: calc(100vw - 2 * var(--space-2));
   max-height: min(360px, calc(100dvh - 2 * var(--space-2)));
   padding: var(--space-2);
-  border-radius: var(--ui-radius-popover);
+  border-radius: var(--ui-radius-modal);
   background: var(--paper-raised);
 }
 

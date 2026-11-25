@@ -70,7 +70,7 @@
   height: 26px;
   padding: 0 9px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control-compact, 8px);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-soft);
   font: inherit;
@@ -102,7 +102,7 @@
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  border-radius: var(--ui-radius-pill, 999px);
+  border-radius: var(--ui-radius-pill);
   font-size: 11.5px;
   font-weight: 600;
   background: var(--control-fill);
@@ -230,7 +230,7 @@
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control-compact, 8px);
+  border-radius: var(--ui-radius-control-compact);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   font: inherit;
@@ -295,7 +295,7 @@
   width: 30px;
   height: 30px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: var(--chrome-keycap-bg);
   color: var(--chrome-keycap-fg);
   cursor: pointer;
@@ -355,7 +355,7 @@
   flex: 1;
   height: 28px;
   border: 0;
-  border-radius: var(--ui-radius-control-compact, 8px);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-soft);
   font: inherit;
@@ -415,7 +415,7 @@
 .bot-inspector-code {
   align-self: flex-start;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--ui-radius-detail);
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--state-danger);
@@ -435,7 +435,7 @@
   gap: 8px;
   margin: 12px 0 0;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--ui-radius-control);
   background: var(--paper-base);
   border: 1px solid var(--chrome-hairline);
   font-size: 12px;

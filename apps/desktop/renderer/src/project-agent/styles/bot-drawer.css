@@ -1135,7 +1135,7 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 }
 .bot-cat-studio-tags span {
   padding: 2px 7px;
-  border-radius: var(--ui-radius-pill, 999px);
+  border-radius: var(--ui-radius-pill);
   background: var(--chrome-hover);
   color: var(--graphite-soft);
   font-size: 11px;
@@ -1489,7 +1489,7 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   margin: 0 -6px -4px;
   padding: 5px 6px;
   border: 0;
-  border-radius: var(--ui-radius-control-compact, 8px);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-base);
   font: inherit;

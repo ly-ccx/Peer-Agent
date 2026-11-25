@@ -565,7 +565,7 @@
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--graphite-base);
   font: inherit;
@@ -616,7 +616,7 @@
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: currentColor;
 }
 
@@ -628,12 +628,6 @@
 }
 .bot-inline-worker-row[data-tone="good"] .bot-inline-worker-status { color: var(--state-success); }
 .bot-inline-worker-row[data-tone="queued"] .bot-inline-worker-status { color: var(--graphite-soft); }
-
-@keyframes bot-inline-worker-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 42%, transparent); }
-  70% { box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent); }
-}
 
 .bot-inline-worker-arrow {
   flex: none;

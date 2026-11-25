@@ -701,8 +701,12 @@ mod tests {
     #[test]
     fn independent_verifier_is_not_required_unless_explicitly_opted_in() {
         let web = ["local.file.read", "local.web.fetch"];
-        assert!(independent_verifier_not_required(&web_research_plan(true, &web)));
-        assert!(independent_verifier_not_required(&web_research_plan(false, &web)));
+        assert!(independent_verifier_not_required(&web_research_plan(
+            true, &web
+        )));
+        assert!(independent_verifier_not_required(&web_research_plan(
+            false, &web
+        )));
         assert!(independent_verifier_not_required(&web_research_plan(
             true,
             &["local.file.read"]
@@ -744,7 +748,8 @@ mod tests {
     fn not_required_web_research_states_quality_criteria_without_gating() {
         let indexed: HashSet<String> = ["ev-1".to_owned()].into_iter().collect();
         let plan = web_research_plan(true, &["local.web.fetch"]);
-        let decision = decide_session_acceptance(&research_facts(&plan, &indexed, "not_required"), false);
+        let decision =
+            decide_session_acceptance(&research_facts(&plan, &indexed, "not_required"), false);
 
         assert_eq!(decision.verdict.outcome, "passed");
         assert!(decision.close_gate_passed);
@@ -771,10 +776,12 @@ mod tests {
         let mut plan = web_research_plan(true, &["local.file.read"]);
         plan["delegationOrigin"]["requireIndependentVerifier"] = json!(true);
 
-        let automatic = decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), false);
+        let automatic =
+            decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), false);
         assert!(!automatic.close_gate_passed);
         assert_eq!(automatic.accepted_by, None);
-        let confirmed = decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), true);
+        let confirmed =
+            decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), true);
         assert!(!confirmed.close_gate_passed);
         assert_eq!(confirmed.accepted_by, None);
         assert!(
@@ -796,10 +803,12 @@ mod tests {
         errored["verificationReport"] =
             json!({"passed": false, "error": "conversation_tool_intent_changed"});
         assert!(independent_review_not_required(&errored));
-        let automatic = decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), false);
+        let automatic =
+            decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), false);
         assert_eq!(automatic.verdict.outcome, "failed");
         assert_eq!(automatic.accepted_by, None);
-        let confirmed = decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), true);
+        let confirmed =
+            decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), true);
         assert!(confirmed.close_gate_passed);
         assert_eq!(confirmed.accepted_by.as_deref(), Some("user"));
 

@@ -290,12 +290,10 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
             let Some(parts_obj) = v.as_object() else {
                 return Ok(ok_fail("INVALID_AVATAR_PARTS"));
             };
-            if parts_obj.keys().any(|k| {
-                !matches!(
-                    k.as_str(),
-                    "shape" | "color" | "head" | "neck" | "backdrop"
-                )
-            }) {
+            if parts_obj
+                .keys()
+                .any(|k| !matches!(k.as_str(), "shape" | "color" | "head" | "neck" | "backdrop"))
+            {
                 return Ok(ok_fail("INVALID_AVATAR_PARTS"));
             }
             let shape = match parts_obj.get("shape") {

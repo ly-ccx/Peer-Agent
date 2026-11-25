@@ -30,9 +30,7 @@ impl Host<'_> {
         // run. These rejections happen before any intent, grant or dispatch
         // exists; policy, admission and capability rejections stay terminal
         // (ADR 137 D3).
-        let verification_args = self
-            .delegated_verification
-            .then(|| call.arguments.clone());
+        let verification_args = self.delegated_verification.then(|| call.arguments.clone());
         let unprojected_detail = delegated_args.as_ref().map(|_| {
             let names = projection.tool_names();
             if names.is_empty() {
@@ -109,15 +107,16 @@ impl Host<'_> {
                     )
                     .await;
             }
-            Err(HostError(argument_error @ ("tool_arguments_invalid"
-            | "invalid_line_range"
-            | "invalid_path"
-            | "file_parent_unavailable"
-            | "artifact_invalid"
-            | "git_query_invalid_input"
-            | "git_query_path_limit")))
-                if verification_args.is_some()
-                    && let Some(capability) = projection.capability(&call.name) =>
+            Err(HostError(
+                argument_error @ ("tool_arguments_invalid"
+                | "invalid_line_range"
+                | "invalid_path"
+                | "file_parent_unavailable"
+                | "artifact_invalid"
+                | "git_query_invalid_input"
+                | "git_query_path_limit"),
+            )) if verification_args.is_some()
+                && let Some(capability) = projection.capability(&call.name) =>
             {
                 let args = verification_args.expect("checked verification_args");
                 let capability = capability.to_owned();

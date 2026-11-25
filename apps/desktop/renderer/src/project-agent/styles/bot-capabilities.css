@@ -57,7 +57,7 @@
   max-width: min(360px, calc(100vw - 32px));
   max-height: min(520px, calc(100vh - 96px));
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-card);
+  border-radius: var(--ui-radius-inset);
   background: var(--paper-sheet);
   color: var(--graphite-base);
   box-shadow: var(--shadow-popover);
@@ -462,7 +462,7 @@
   gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-card);
+  border-radius: var(--ui-radius-inset);
   background: var(--chrome-canvas);
 }
 

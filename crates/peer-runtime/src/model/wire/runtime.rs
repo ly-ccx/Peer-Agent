@@ -171,7 +171,8 @@ fn lower_gemini_unsigned_function_calls(contents: &mut Vec<Value>) {
                     .get("parts")
                     .and_then(Value::as_array)
                     .is_some_and(|parts| {
-                        !parts.is_empty() && parts.iter().all(|p| p.get("functionResponse").is_some())
+                        !parts.is_empty()
+                            && parts.iter().all(|p| p.get("functionResponse").is_some())
                     })
         }) {
             history.push(it.next().unwrap());
@@ -413,7 +414,8 @@ mod tests {
     }
 
     #[test]
-    fn gemini_runtime_upgrades_json_schema_tools_merges_parallel_tool_results_and_sets_thinking_level() {
+    fn gemini_runtime_upgrades_json_schema_tools_merges_parallel_tool_results_and_sets_thinking_level()
+     {
         let options = GenerationOptions {
             supports_reasoning: true,
             effort: "xhigh".into(),
@@ -545,10 +547,7 @@ mod tests {
         let signed_contents = signed_body["contents"].as_array().unwrap();
         assert_eq!(signed_contents.len(), 3);
         assert_eq!(signed_contents[1]["role"], "model");
-        assert_eq!(
-            signed_contents[1]["parts"][0]["thoughtSignature"],
-            "sig-a"
-        );
+        assert_eq!(signed_contents[1]["parts"][0]["thoughtSignature"], "sig-a");
         assert_eq!(signed_contents[2]["role"], "user");
         assert_eq!(signed_contents[2]["parts"].as_array().unwrap().len(), 2);
         assert_eq!(
@@ -567,12 +566,22 @@ mod tests {
         // Complex JSON Schema tools move to `parametersJsonSchema`, dropping sibling required-only `anyOf`.
         assert!(decls[1].get("parameters").is_none());
         assert!(decls[1]["parametersJsonSchema"].get("anyOf").is_none());
-        assert_eq!(decls[1]["parametersJsonSchema"]["additionalProperties"], false);
-        assert_eq!(decls[1]["parametersJsonSchema"]["properties"]["budget"]["type"], "object");
+        assert_eq!(
+            decls[1]["parametersJsonSchema"]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            decls[1]["parametersJsonSchema"]["properties"]["budget"]["type"],
+            "object"
+        );
         // `oneOf` normalized to `anyOf` inside `parametersJsonSchema`.
         assert!(decls[2].get("parameters").is_none());
         assert!(decls[2]["parametersJsonSchema"]["properties"]["target"]["anyOf"].is_array());
-        assert!(decls[2]["parametersJsonSchema"]["properties"]["target"].get("oneOf").is_none());
+        assert!(
+            decls[2]["parametersJsonSchema"]["properties"]["target"]
+                .get("oneOf")
+                .is_none()
+        );
 
         // Gemini 4 honors `xhigh` thinkingLevel.
         assert_eq!(

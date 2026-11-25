@@ -2904,11 +2904,7 @@ async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifie
 async fn delegated_verifier_corrects_an_invalid_line_range_and_returns_a_verdict() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
-    fs::write(
-        ws.path().join("readme.md"),
-        "peer phase 3\nsecond line\n",
-    )
-    .unwrap();
+    fs::write(ws.path().join("readme.md"), "peer phase 3\nsecond line\n").unwrap();
 
     let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
     let (entry, profile) = host.bind_workspace(ws.path(), Some("VerifierBot")).unwrap();
@@ -2917,8 +2913,13 @@ async fn delegated_verifier_corrects_an_invalid_line_range_and_returns_a_verdict
         LeaseStatus::Acquired { .. }
     ));
     let conv_id = profile.agent_conversation_id.unwrap();
-    host.submit_user_input(&entry.workspace_id, "in-ver-range", "Review readme.md", None)
-        .unwrap();
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-ver-range",
+        "Review readme.md",
+        None,
+    )
+    .unwrap();
     host.inputs()
         .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
         .unwrap();
@@ -3196,9 +3197,7 @@ async fn delegated_verifier_unprojected_tool_name_still_ends_the_run() {
         .unwrap();
     assert_eq!(detail["verdict"]["independentVerifier"], "failed");
     assert_eq!(detail["verificationReport"]["passed"], false);
-    assert_eq!(
-        detail["verificationReport"]["error"], "tool_not_projected"
-    );
+    assert_eq!(detail["verificationReport"]["error"], "tool_not_projected");
     host.close();
 }
 
@@ -8818,11 +8817,7 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
     // The verifier cannot read web evidence, so the session is delivered on the
     // evidence gate: no verifier request, no run, no verdict (ADR 137 D1).
     assert!(
-        verifier_server
-            .requests
-            .lock()
-            .unwrap()
-            .is_empty(),
+        verifier_server.requests.lock().unwrap().is_empty(),
         "read-only web research must not request an independent verification"
     );
     let delivered = host
@@ -8844,15 +8839,15 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
     assert!(detail["modelReviews"].as_array().unwrap().is_empty());
     let checks = detail["verdict"]["checks"].as_array().unwrap();
     assert!(
-        checks.iter().any(|check| check["name"] == "independent_verifier"
-            && check["passed"] == true
-            && check["reason"] == "not_required")
+        checks
+            .iter()
+            .any(|check| check["name"] == "independent_verifier"
+                && check["passed"] == true
+                && check["reason"] == "not_required")
     );
-    assert!(
-        checks.iter().any(|check| check["name"] == "model_review"
-            && check["passed"] == false
-            && check["reason"] == "not_reviewed")
-    );
+    assert!(checks.iter().any(|check| check["name"] == "model_review"
+        && check["passed"] == false
+        && check["reason"] == "not_reviewed"));
 
     // 3. Simulate a legacy web-research plan that only recorded `local.web.fetch` before
     //    built-in `local.web.search` existed, then click "基于此重跑" (normal user turn) and
@@ -9149,7 +9144,8 @@ async fn readonly_research_session_follows_the_bots_saved_access_policy_for_git(
 }
 
 #[tokio::test]
-async fn gemini_main_bot_uses_parameters_json_schema_thinking_level_and_coalesces_long_thought_stream() {
+async fn gemini_main_bot_uses_parameters_json_schema_thinking_level_and_coalesces_long_thought_stream()
+ {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
     let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
@@ -9304,9 +9300,10 @@ async fn open_circuit_blocks_stale_user_input_repolls_and_surfaces_http_400_deta
     let mut handlers = Vec::new();
     for _ in 0..5 {
         let body = gemini_400_body.clone();
-        handlers.push(Box::new(move |_req: &Value| {
-            (400u16, "application/json", body.clone())
-        }) as HttpScriptHandler);
+        handlers.push(
+            Box::new(move |_req: &Value| (400u16, "application/json", body.clone()))
+                as HttpScriptHandler,
+        );
     }
     let server = start_http_mock_server(handlers);
     let model = mock_model(&server.endpoint);
@@ -9376,7 +9373,10 @@ async fn open_circuit_blocks_stale_user_input_repolls_and_surfaces_http_400_deta
         .iter()
         .filter(|m| m["card"] == "agent_unavailable")
         .count();
-    assert_eq!(cards_after, 5, "blocked tick must not append duplicate error cards");
+    assert_eq!(
+        cards_after, 5,
+        "blocked tick must not append duplicate error cards"
+    );
 
     // Submitting a brand-new user message while an older failed input is still pending must
     // admit a manual half-open trial instead of silently stopping on CircuitOpen.

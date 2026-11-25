@@ -36,9 +36,7 @@ pub const BOT_AVATAR_HEADS: [&str; 8] = [
     "crown",
 ];
 
-pub const BOT_AVATAR_NECKS: [&str; 6] = [
-    "bowtie", "scarf", "sweater", "moon", "sailor", "cape",
-];
+pub const BOT_AVATAR_NECKS: [&str; 6] = ["bowtie", "scarf", "sweater", "moon", "sailor", "cape"];
 
 pub const BOT_COMMUNICATION_STYLES: [&str; 4] = ["natural", "concise", "detailed", "technical"];
 pub const BOT_PROFILE_COMMUNICATION_STYLES: [&str; 5] =

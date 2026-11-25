@@ -2077,11 +2077,7 @@ impl ProjectAgentRunner {
             };
             live_messages.push(json!({"role": "user", "content": wake_text}));
             committed_message_ids.push(None);
-        } else if live_messages
-            .last()
-            .and_then(|m| m["role"].as_str())
-            == Some("assistant")
-        {
+        } else if live_messages.last().and_then(|m| m["role"].as_str()) == Some("assistant") {
             live_messages.push(json!({
                 "role": "user",
                 "content": "Continue and respond to the pending user request via post_reply or wait_for_sessions.",
@@ -2357,17 +2353,13 @@ impl ProjectAgentRunner {
                         }
                         Ok(None) => {
                             trial_in_flight = false;
-                            final_end =
-                                self.record_model_turn_failure(&failure_ctx, &err, cancel);
+                            final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                             break;
                         }
                         Err(compact_err) => {
                             trial_in_flight = false;
-                            final_end = self.record_model_turn_failure(
-                                &failure_ctx,
-                                &compact_err,
-                                cancel,
-                            );
+                            final_end =
+                                self.record_model_turn_failure(&failure_ctx, &compact_err, cancel);
                             break;
                         }
                     }
@@ -2851,8 +2843,7 @@ impl ProjectAgentRunner {
                         }
                         Err(err) => {
                             trial_in_flight = false;
-                            final_end =
-                                self.record_model_turn_failure(&failure_ctx, &err, cancel);
+                            final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                         }
                     }
                 }

@@ -684,10 +684,7 @@ impl InteractiveResultStore {
             .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 160 && !s.contains('\0'))
             .ok_or_else(|| ProjectError::code("interactive_content_invalid"))?
             .to_owned();
-        let spec_hash = content_obj["specHash"]
-            .as_str()
-            .unwrap_or("")
-            .to_owned();
+        let spec_hash = content_obj["specHash"].as_str().unwrap_or("").to_owned();
 
         let args_digest = json_digest(&req.normalized_draft)?;
         self.commit_prepared_publication(

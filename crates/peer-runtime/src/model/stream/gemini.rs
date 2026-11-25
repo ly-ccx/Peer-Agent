@@ -85,8 +85,9 @@ impl Gemini {
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(ModelError::new("model_stream_incomplete")
-                .with_detail("eof_before_finish_reason"));
+            return Err(
+                ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason")
+            );
         }
         let mut turn = finish(
             self.text,

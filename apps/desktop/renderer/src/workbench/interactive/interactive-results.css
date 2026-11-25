@@ -55,7 +55,7 @@
   content: '';
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--ui-radius-pill);
   background: var(--graphite-fade);
   flex: none;
 }

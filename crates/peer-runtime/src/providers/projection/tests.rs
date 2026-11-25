@@ -107,11 +107,28 @@ fn migrated_local_membership_matches_actual_tui_host_without_adding_missing_capa
         let mut actual: Vec<_> = projection
             .tools
             .iter()
-            .filter(|tool| tool.capability != "local.tool-result.read")
+            .filter(|tool| {
+                !matches!(
+                    tool.capability.as_str(),
+                    "local.tool-result.read" | "local.web.search"
+                )
+            })
             .map(|tool| tool.capability.clone())
             .collect();
         actual.sort();
         assert_eq!(json!(actual), expected["capabilities"], "{mode:?}");
+        let has_web_search = projection
+            .tools
+            .iter()
+            .any(|tool| tool.capability == "local.web.search");
+        assert_eq!(
+            has_web_search,
+            matches!(
+                mode,
+                RuntimeMode::Chat | RuntimeMode::Plan | RuntimeMode::Goal
+            ),
+            "native local.web.search membership for {mode:?}"
+        );
     }
 }
 

@@ -27,13 +27,7 @@
 .deferred-panel-spinner {
   flex: none;
   color: var(--graphite-fade);
-  animation: deferred-panel-spin 900ms linear infinite;
-}
-
-@keyframes deferred-panel-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: motion-spin 900ms linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

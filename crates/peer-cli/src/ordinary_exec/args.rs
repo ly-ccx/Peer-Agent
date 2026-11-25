@@ -260,6 +260,8 @@ pub(super) fn tools(tokens: Option<&[String]>) -> Result<Option<Vec<String>>, St
             Some(token)
         } else if matches!(token, "read_tool_result" | "local.tool-result.read") {
             Some("local.tool-result.read")
+        } else if matches!(token, "web_search" | "local.web.search") {
+            Some("local.web.search")
         } else {
             None
         };
@@ -328,6 +330,14 @@ mod tests {
                 *expected
             );
         }
+        assert_eq!(
+            tools(Some(&["web_search".into()])).unwrap().unwrap(),
+            vec!["local.web.search".to_owned()]
+        );
+        assert_eq!(
+            tools(Some(&["local.web.search".into()])).unwrap().unwrap(),
+            vec!["local.web.search".to_owned()]
+        );
         assert!(tools(Some(&["browser_open_panel".into()])).is_err());
     }
 

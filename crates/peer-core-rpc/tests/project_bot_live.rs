@@ -2222,7 +2222,10 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
     use tokio::io::AsyncWriteExt;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let endpoint = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
     let req_count = Arc::new(AtomicUsize::new(0));
     let sse_stop = CancellationToken::new();
     {

@@ -132,7 +132,7 @@
 .settings-content .appearance-mode-card:hover { background: var(--control-fill-hover); }
 .settings-content .appearance-mode-card-label { font-size: .75rem; font-weight: 400; padding-top: 5px; }
 
-:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--ui-radius-popover); box-shadow: var(--shadow-popover); }
+:is(.pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { border-radius: var(--ui-radius-modal); box-shadow: var(--shadow-popover); }
 @supports (corner-shape: superellipse(1.4)) {
   :is(.frost-settings-group, .frost-group-heading, .settings-card, .llm-instructions-card, .remote-access-card, .llm-provider-group, .shortcut-group-heading, .llm-instructions-header, .llm-group-header, .settings-nav-item, .settings-nav-search, .appearance-mode-card, .general-bot-time, .shortcut-recorder, .pa-dropdown-trigger, .pa-cascading-trigger, .pa-dropdown-menu, .pa-cascading-menu-panel, .pa-cascading-submenu, .reasoning-effort-panel) { corner-shape: var(--control-corner); }
 }
