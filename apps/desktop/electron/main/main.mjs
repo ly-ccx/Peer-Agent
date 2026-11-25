@@ -1645,9 +1645,6 @@ const providerAccessApplicationService = createProviderAccessApplicationService(
     target?.send(channel, payload);
   },
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
-  reportProjectResolutionError: (error) => {
-    console.warn('[oauth] resolve Gemini Code Assist project failed:', error?.message || error);
-  },
 });
 
 const mcpApplicationService = createMcpApplicationService({

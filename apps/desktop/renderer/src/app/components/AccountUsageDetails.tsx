@@ -1,10 +1,9 @@
 import type { LlmSubscriptionQuota } from '@peer-agent/protocol';
-import { usageAuth, usageDimension, usageFailure, usageLegacyMetrics, usageMoney, usageNumber, usagePeriod, usageScope, usageSource, usageTime, usageWindow, usageWindows } from './accountUsagePresentation';
+import { usageAuth, usageDimension, usageFailure, usageMoney, usageNumber, usagePeriod, usageScope, usageSource, usageTime, usageWindow, usageWindows } from './accountUsagePresentation';
 import '../../styles/account-usage.css';
 
 export function AccountUsageDetails({ quota, loading, zh, onRefresh }: { quota?: LlmSubscriptionQuota; loading: boolean; zh: boolean; onRefresh: () => void }) {
   const windows = usageWindows(quota);
-  const legacy = usageLegacyMetrics(quota, zh);
   const local = quota?.localUsage;
   const badge = loading ? (zh ? '查询中' : 'Loading') : quota?.stale ? (zh ? '已过期' : 'Stale')
     : quota && !quota.success ? (zh ? '暂不可用' : 'Unavailable') : quota?.partial ? (zh ? '部分数据' : 'Partial data') : '';
@@ -64,7 +63,6 @@ export function AccountUsageDetails({ quota, loading, zh, onRefresh }: { quota?:
             </div>;
           })}
         </div>}
-        {!!legacy.length && <dl className="account-usage-metrics">{legacy.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>}
         {!!quota.spend?.length && <div className="account-usage-spend"><h5>{zh ? '消费' : 'Spend'}</h5><dl className="account-usage-metrics">{quota.spend.map((item, index) => <div key={`${item.scope}-${item.period}-${index}`}><dt>{usageScope(item.scope, zh)} · {usagePeriod(item.period, zh)}</dt><dd title={`${item.currency} ${item.amount}`}>{usageMoney(item.amount, item.currency, zh)}</dd></div>)}</dl></div>}
         {!!quota.unavailable?.length && <ul className="account-usage-notes">{quota.unavailable.map((item, index) => <li key={index}><span className="account-usage-note-label">{usageDimension(item.dimension, zh)}</span><span>{item.reason}{item.requiredAuth && <span className="account-usage-auth">{usageAuth(item.requiredAuth, zh)}</span>}</span></li>)}</ul>}
       </section>}

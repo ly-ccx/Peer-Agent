@@ -209,12 +209,10 @@ function fillMissingPricingFromRegistry(item, registry) {
   // cache prices while normalizing their catalog records. Do not reintroduce those
   // fields from the reference registry or read -> backfill will never be idempotent.
   const skipCacheWrite = item.authMethod === 'oauth_chatgpt';
-  const skipCachePricing = item.channelId === 'qoder' || item.authMethod === 'qoder_local_auth';
 
   let changed = false;
   const next = { ...item };
   for (const field of PRICING_FIELDS) {
-    if (skipCachePricing && (field === 'cacheReadPrice' || field === 'cacheWritePrice')) continue;
     if (skipCacheWrite && field === 'cacheWritePrice') continue;
     if (next[field] === undefined && metadata[field] !== undefined) {
       next[field] = metadata[field];

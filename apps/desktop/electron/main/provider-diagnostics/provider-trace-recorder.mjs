@@ -40,16 +40,11 @@ function countSystemCacheBlocks(system) {
 }
 
 function summarizeRequestBody(body) {
-  // Gemini Code Assist envelope: { model, project, request: { contents, ... } }
-  const caContents = Array.isArray(body?.request?.contents) ? body.request.contents : null;
-  const messages = Array.isArray(body?.messages)
-    ? body.messages
-    : (caContents || []);
+  const messages = body?.messages ?? body?.contents ?? [];
   return {
     model: body?.model ?? null,
-    project: body?.project ?? null,
     stream: Boolean(body?.stream),
-    maxTokens: body?.max_tokens ?? body?.max_completion_tokens ?? body?.request?.generationConfig?.maxOutputTokens ?? null,
+    maxTokens: body?.max_tokens ?? body?.max_completion_tokens ?? body?.generationConfig?.maxOutputTokens ?? null,
     hasThinking: Boolean(body?.thinking),
     thinking: body?.thinking
       ? {

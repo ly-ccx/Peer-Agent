@@ -92,7 +92,7 @@ describe('TUI model environment', () => {
         {
           source: 'desktop-default', providerId: 'google', credentialId: 'credential-unsupported',
           displayName: 'Unsupported', model: 'model-c', baseUrl: 'https://c.example/v1',
-          authMethod: 'oauth_google', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
+          authMethod: 'api_key', credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
       ],
       loadSharedSelection: (options) => ({
@@ -118,16 +118,16 @@ describe('TUI model environment', () => {
   test('prefers Desktop modelLabel over raw model id for status and catalog', () => {
     const config = resolveTuiModelConfig({}, {
       loadSharedMetadata: () => ({
-        source: 'desktop-default', providerId: 'openai', credentialId: 'qoder-channel',
-        displayName: 'Qoder CLI', model: 'gm51model', modelLabel: 'GLM-5.2',
-        baseUrl: 'https://api2-v2.qoder.sh/model/v1', authMethod: 'qoder_local_auth',
+        source: 'desktop-default', providerId: 'openai', credentialId: 'test-channel',
+        displayName: 'Fixture API', model: 'gm51model', modelLabel: 'GLM-5.2',
+        baseUrl: 'https://api.example.test/v1', authMethod: 'api_key',
         credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
       }),
       loadSharedMetadataList: () => ([
         {
-          source: 'desktop-default', providerId: 'openai', credentialId: 'qoder-channel',
-          displayName: 'Qoder CLI', model: 'gm51model', modelLabel: 'GLM-5.2',
-          baseUrl: 'https://api2-v2.qoder.sh/model/v1', authMethod: 'qoder_local_auth',
+          source: 'desktop-default', providerId: 'openai', credentialId: 'test-channel',
+          displayName: 'Fixture API', model: 'gm51model', modelLabel: 'GLM-5.2',
+          baseUrl: 'https://api.example.test/v1', authMethod: 'api_key',
           credentialStored: true, configFile: '/tmp/llm-providers.json', supportedReasoningEfforts: ['low', 'medium', 'high'], defaultReasoningEffort: 'medium',
         },
       ]),
@@ -136,7 +136,7 @@ describe('TUI model environment', () => {
     expect(config.model).toBe('gm51model');
     expect(config.modelLabel).toBe('GLM-5.2 · desktop default');
     expect(config.catalog[0]?.modelId).toBe('gm51model');
-    expect(config.catalog[0]?.displayName).toBe('GLM-5.2 · Qoder CLI');
+    expect(config.catalog[0]?.displayName).toBe('GLM-5.2 · Fixture API');
   });
 
   test('shows desktop model metadata before a locked credential is decrypted', () => {

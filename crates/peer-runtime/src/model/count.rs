@@ -83,7 +83,7 @@ impl PreparedRequest<'_> {
             .map_err(|_| ModelError::new("context_count_request_invalid"))?;
         let request = self
             .owner
-            .request_builder(endpoint, "application/json", cancel, None)
+            .request_builder(endpoint, "application/json", cancel)
             .await?
             .body(bytes);
         let read = async {

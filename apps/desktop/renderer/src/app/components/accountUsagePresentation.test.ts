@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { usageMoney, usageNumber, usageTime, usageWindow, usageWindows, usageLegacyMetrics, usageScope, usageSource, usageAuth, usageDimension, usageFailure } from './accountUsagePresentation.ts';
+import { usageMoney, usageNumber, usageTime, usageWindow, usageWindows, usageScope, usageSource, usageAuth, usageDimension, usageFailure } from './accountUsagePresentation.ts';
 
 for (const zh of [true, false]) {
   const lang = zh ? 'zh' : 'en';
@@ -34,9 +34,8 @@ for (const zh of [true, false]) {
     assert.equal(result.tone, expected !== undefined && expected >= 90 ? 'high' : 'normal');
   });
 }
-test('presentation/legacy/oauth-cli-no-duplicate-window-no-lost-credits', () => {
+test('presentation/legacy/oauth-no-duplicate-window', () => {
   assert.equal(usageWindows({ success: true, usedPercent: 20 }).length, 1);
   assert.equal(usageWindows({ success: true, usedPercent: 20, windows: [{ id: 'w' }] }).length, 1);
   assert.equal(usageWindows({ success: false }).length, 0);
-  assert.deepEqual(usageLegacyMetrics({ success: true, availableCredits: 0, planCreditsUsed: 2, planCreditsTotal: 30, orgPackageUsed: 10, orgPackageCap: 50 }, true).map((item) => item.value), ['0', '2 / 30', '10 / 50']);
 });

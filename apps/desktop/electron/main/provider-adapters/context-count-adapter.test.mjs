@@ -98,10 +98,6 @@ test('provider capabilities explicitly distinguish exact and observed-only paths
     { kind: 'provider_count_api' },
   );
   assert.deepEqual(
-    contextCountCapabilityForProvider({ provider: 'gemini', authMethod: 'oauth_google' }),
-    { kind: 'observed_usage_only' },
-  );
-  assert.deepEqual(
     contextCountCapabilityForProvider({ provider: 'openai' }),
     { kind: 'observed_usage_only' },
   );

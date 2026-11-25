@@ -31,14 +31,6 @@ describe('resolveTuiWire', () => {
       kind: 'supported',
       wire: 'openai-responses',
     });
-    expect(resolveTuiWire({ authMethod: 'oauth_google' })).toMatchObject({
-      kind: 'supported',
-      wire: 'gemini',
-    });
-    expect(resolveTuiWire({ authMethod: 'qoder_local_auth' })).toMatchObject({
-      kind: 'supported',
-      wire: 'qoder-private',
-    });
   });
 
   test('maps Anthropic channels to messages wire, not openai-chat', () => {
@@ -56,17 +48,6 @@ describe('resolveTuiWire', () => {
     expect(resolveTuiWire({ channelId: 'google-ai', authMethod: 'api_key' })).toMatchObject({
       kind: 'supported',
       wire: 'gemini',
-    });
-    expect(resolveTuiWire({ authMethod: 'oauth_google', channelId: 'google-ai' })).toMatchObject({
-      kind: 'supported',
-      wire: 'gemini',
-    });
-  });
-
-  test('maps Qoder to private wire', () => {
-    expect(resolveTuiWire({ channelId: 'qoder', authMethod: 'api_key' })).toMatchObject({
-      kind: 'supported',
-      wire: 'qoder-private',
     });
   });
 
@@ -94,7 +75,6 @@ describe('resolveTuiWire', () => {
   test('documents supported wire set and matrix text', () => {
     expect(TUI_SUPPORTED_WIRES).toContain('gemini');
     expect(TUI_SUPPORTED_WIRES).toContain('anthropic-messages');
-    expect(formatTuiWireMatrix()).toContain('oauth_google');
     expect(formatTuiWireMatrix()).toContain('unsupported');
   });
 });

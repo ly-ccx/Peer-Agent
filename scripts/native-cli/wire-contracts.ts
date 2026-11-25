@@ -23,16 +23,17 @@ const options=[{},...['off','low','medium','default','high','xhigh','max'].map(e
  {supportsReasoning:true,effort:'low',reasoningParamStyle:'anthropic-enabled-budget',reasoningEffortMap:{low:'700'}},
  {supportsReasoning:true,effort:'off',reasoningParamStyle:'anthropic-enabled-output-effort'},
  {stableSystem:'stable core',promptCaching:true},
- {authMethod:'oauth_google',projectId:'synthetic-project',userPromptId:'prompt',sessionId:'session'},
+ // Retain generation IDs for the remaining conformance vectors.
+ undefined,
  {supportsReasoning:true,effort:'default',reasoningEffortMap:{default:null,medium:'low'}},
  {supportsReasoning:true,effort:'default',reasoningEffortMap:{default:'',medium:'high'}},
  {supportsReasoning:true,effort:'high',reasoningEffortMap:{high:0}},
  {supportsReasoning:true,effort:'high',reasoningEffortMap:{high:false}},
- {authMethod:'oauth_google',projectId:'',userPromptId:'',sessionId:''},
 ];
 const cases=[];
 for(const wire of ['openai-chat','openai-responses','anthropic-messages','gemini']){
  for(const [i,messages]of histories.entries())for(const [j,options0]of options.entries()){
+  if (!options0) continue;
   const options=structuredClone(options0);const model=j%3===0?'deepseek-v4':j%3===1?'claude-opus-4.8':'model';
   const input={model,system:'shared system',messages,tools,...options};
   const reference={...input,messages:structuredClone(messages),tools:structuredClone(tools)};

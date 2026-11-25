@@ -45,7 +45,6 @@ impl Token {
     pub(crate) fn validate_provider(&self, auth: &str) -> Result<(), ModelError> {
         if let Some(value) = self.0.get("provider") {
             let valid = match auth {
-                "oauth_google" => value == "google",
                 "oauth_grok" => value == "grok",
                 _ => value == "openai" || value == "chatgpt",
             };
@@ -108,11 +107,6 @@ impl Token {
         let mut pending = Self(self.0.clone());
         pending.0["peerModelRefresh"] = json!({"schemaVersion":1,"attemptId":uuid::Uuid::new_v4().to_string(),"authMethod":auth,"phase":"in_flight","createdAt":now});
         pending.serialize()
-    }
-    pub(super) fn project(&self) -> Option<String> {
-        self.text("projectId")
-            .or_else(|| self.text("project_id"))
-            .map(str::to_owned)
     }
     pub(crate) fn current(&self, now: u64) -> bool {
         self.text("access").is_some()
@@ -218,9 +212,6 @@ impl Token {
             self.replace("refresh", json!(refresh));
         }
         self.replace("expires", json!(expires));
-        if auth == "oauth_google" {
-            self.replace("provider", json!("google"));
-        }
         Ok(())
     }
     pub(crate) fn with_profile(&mut self, profile: &Token) {
@@ -261,15 +252,11 @@ impl Token {
                 if let Ok(raw) = std::str::from_utf8(&bytes)
                     && let Ok(claims) = Token::parse(raw)
                 {
-                    let account = if auth == "oauth_google" {
-                        claims.text("email").or_else(|| claims.text("sub"))
-                    } else {
-                        claims.0["https://api.openai.com/auth"]["chatgpt_account_id"]
-                            .as_str()
-                            .or_else(|| {
-                                claims.0["https://api.openai.com/auth"]["organization_id"].as_str()
-                            })
-                    };
+                    let account = claims.0["https://api.openai.com/auth"]["chatgpt_account_id"]
+                        .as_str()
+                        .or_else(|| {
+                            claims.0["https://api.openai.com/auth"]["organization_id"].as_str()
+                        });
                     if let Some(account) = account.filter(|s| !s.is_empty()) {
                         token.replace("accountId", json!(account));
                     }

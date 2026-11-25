@@ -73,7 +73,7 @@ export function usageWindow(window: LlmSubscriptionQuotaWindow, zh: boolean) {
   };
 }
 
-/** Preserve old OAuth/CLI observations without duplicating the same top-level percent. */
+/** Preserve older subscription observations without duplicating the same top-level percent. */
 export function usageWindows(quota: LlmSubscriptionQuota | undefined): readonly LlmSubscriptionQuotaWindow[] {
   if (!quota) return [];
   const windows = [...(quota.windows ?? [])];
@@ -90,12 +90,4 @@ export function usageSummaryChip(quota: LlmSubscriptionQuota | undefined, zh: bo
   if (windows.length) return `${windows.length} ${zh ? '个额度窗口' : 'usage windows'}`;
   if (quota.localUsage) return zh ? '仅本地统计' : 'Local usage only';
   return undefined;
-}
-export function usageLegacyMetrics(quota: LlmSubscriptionQuota | undefined, zh: boolean) {
-  if (!quota) return [];
-  const metrics: { label: string; value: string }[] = [];
-  if (quota.availableCredits !== undefined) metrics.push({ label: zh ? '可用积分' : 'Available credits', value: usageNumber(quota.availableCredits, zh) });
-  if (quota.planCreditsUsed !== undefined || quota.planCreditsTotal !== undefined) metrics.push({ label: zh ? '套餐积分' : 'Plan credits', value: `${usageNumber(quota.planCreditsUsed, zh)} / ${usageNumber(quota.planCreditsTotal, zh)}` });
-  if (quota.orgPackageUsed !== undefined || quota.orgPackageCap !== undefined) metrics.push({ label: zh ? '资源包' : 'Resource package', value: `${usageNumber(quota.orgPackageUsed, zh)} / ${usageNumber(quota.orgPackageCap, zh)}` });
-  return metrics;
 }

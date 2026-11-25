@@ -14,16 +14,12 @@ export type TuiWire =
   | 'openai-responses'
   | 'openai-chat'
   | 'anthropic-messages'
-  | 'qoder-private'
   | 'gemini';
 
 export type TuiWireAuthMethod =
   | 'api_key'
   | 'oauth_chatgpt'
-  | 'oauth_google'
   | 'oauth_grok'
-  | 'qoder_local_auth'
-  | 'local_cli'
   | string;
 
 export type TuiWireChannelId =
@@ -33,7 +29,6 @@ export type TuiWireChannelId =
   | 'anthropic-compatible'
   | 'google-ai'
   | 'grok'
-  | 'qoder'
   | string;
 
 export interface TuiWireResolveInput {
@@ -67,7 +62,6 @@ export const TUI_SUPPORTED_WIRES: readonly TuiWire[] = [
   'openai-responses',
   'openai-chat',
   'anthropic-messages',
-  'qoder-private',
   'gemini',
 ] as const;
 
@@ -88,12 +82,6 @@ export function resolveTuiWire(input: TuiWireResolveInput): TuiWireDecision {
   if (authMethod === 'oauth_grok') {
     return supported('openai-responses', channelId || 'grok', authMethod, 'Grok OAuth → OpenAI Responses');
   }
-  if (authMethod === 'oauth_google') {
-    return supported('gemini', channelId || 'google-ai', authMethod, 'Google OAuth → Gemini generateContent');
-  }
-  if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli') {
-    return supported('qoder-private', channelId || 'qoder', authMethod, 'Qoder local auth → private SSE wire');
-  }
 
   // Channel-id path for API-key / configured providers.
   const go = ['opencode-go', 'opencode-go-openai', 'opencode-go-anthropic'].includes(channelId);
@@ -109,9 +97,6 @@ export function resolveTuiWire(input: TuiWireResolveInput): TuiWireDecision {
   if (allowed.length) {
     const wire = input.wireOverride || (go ? resolveOpenCodeGoWire(input.model) : channelId === 'grok' ? 'openai-responses' : allowed[0]);
     return supported(wire as TuiWire, channelId, authMethod, 'Shared desktop channel protocol');
-  }
-  if (channelId === 'qoder' || providerId.includes('qoder') || displayName.includes('qoder')) {
-    return supported('qoder-private', channelId || 'qoder', authMethod, 'Qoder channel → private SSE wire');
   }
   if (
     channelId === 'anthropic'
@@ -151,7 +136,7 @@ export function resolveTuiWire(input: TuiWireResolveInput): TuiWireDecision {
     reason:
       `TUI has no wire mapping for channel "${channelId}" (auth=${authMethod}). `
       + 'Configure an OpenAI-compatible endpoint, or use a supported channel '
-      + '(openai / anthropic / anthropic-compatible / google-ai / grok / qoder).',
+      + '(openai / anthropic / anthropic-compatible / google-ai / grok).',
   };
 }
 
@@ -168,8 +153,6 @@ export function formatTuiWireMatrix(): string {
     'channel/auth → wire (TUI)',
     '  oauth_chatgpt          → openai-responses',
     '  oauth_grok             → openai-responses',
-    '  oauth_google           → gemini',
-    '  qoder_local_auth       → qoder-private',
     '  anthropic*             → anthropic-messages',
     '  google-ai / gemini     → gemini',
     '  openai (api)           → openai-chat',

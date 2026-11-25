@@ -13,7 +13,6 @@ pub struct ModelError {
     pub observation: Option<Box<ModelRequestObservation>>,
     pub context_overflow_status: Option<u16>,
     pub http_status: Option<u16>,
-    pub(crate) retry: Option<super::qoder_retry::Hint>,
 }
 impl ModelError {
     pub const AUTH_REJECTED: &'static str = "model_auth_rejected";
@@ -24,7 +23,6 @@ impl ModelError {
             observation: None,
             context_overflow_status: None,
             http_status: None,
-            retry: None,
         }
     }
     pub(super) fn http_access_rejection(status: u16) -> Option<Self> {
@@ -75,8 +73,7 @@ impl ModelError {
         {
             return false;
         }
-        self.retry.is_some()
-            || matches!(self.http_status, Some(408 | 429 | 500 | 502 | 503 | 504))
+        matches!(self.http_status, Some(408 | 429 | 500 | 502 | 503 | 504))
             || matches!(
                 self.code,
                 "model_timeout" | "model_transport_failed" | "model_stream_interrupted"

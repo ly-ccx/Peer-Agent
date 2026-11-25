@@ -84,7 +84,7 @@ describe('hasTunableEffortLevels', () => {
   });
 
   it('returns false when the only level is off (degenerate channel)', () => {
-    // e.g. Qoder Cantus: supportsReasoning=true but effortLevels=['off']
+    // supportsReasoning=true but effortLevels=['off']
     assert.equal(hasTunableEffortLevels(['off']), false);
   });
 

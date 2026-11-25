@@ -98,38 +98,21 @@ function extractProviderTopLevelError(parsed) {
   const type = typeof parsed.type === 'string' ? parsed.type : '';
   const code = parsed.code != null ? String(parsed.code) : '';
   const details = typeof parsed.details === 'string' ? parsed.details : '';
-  const messageField = parsed.message;
-  const nestedQueue = messageField && typeof messageField === 'object' && !Array.isArray(messageField)
-    ? messageField
-    : null;
-  const message = typeof messageField === 'string'
-    ? messageField
-    : nestedQueue
-      ? JSON.stringify(messageField)
-      : '';
-  const isQueued = nestedQueue?.isQueued === true
-    || nestedQueue?.queued === true
-    || code === '10605'
-    || /isQueued["']?\s*:\s*true/i.test(message);
-  // Qoder/gateway business errors may arrive as top-level { code, message }
-  // without an "error" type string (e.g. 103 Duplicate request, 10605 queue).
+  const message = typeof parsed.message === 'string' ? parsed.message : '';
+  // Some compatible gateways report numeric business errors in the top-level frame.
   const isNumericBusinessCode = /^\d{3,5}$/.test(code);
-  const isDuplicate = code === '103' || /duplicate request/i.test(message);
-  if (!message && !isQueued && !isDuplicate && !isNumericBusinessCode) return null;
+  if (!message && !isNumericBusinessCode) return null;
   if (
-    !isQueued
-    && !isDuplicate
-    && !isNumericBusinessCode
+    !isNumericBusinessCode
     && parsed.success !== false
     && !type.toLowerCase().includes('error')
     && !code.toLowerCase().includes('error')
-    && code !== '10605'
   ) return null;
   return {
-    type: type || code || (isQueued ? '10605' : 'provider_stream_error'),
+    type: type || code || 'provider_stream_error',
     message: details
       ? `${message || code}: ${details}`
-      : (message || (isQueued ? JSON.stringify({ code: code || '10605', message: nestedQueue }) : code)),
+      : (message || code),
   };
 }
 
@@ -220,7 +203,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
       } else {
         state.currentAnthropicToolIndex = -1;
         // A block can carry its first value before subsequent delta frames.
-        // Dropping it loses factual text or thinking on Qoder's sparse shape.
+        // Dropping it loses factual text or thinking on sparse streams.
         const block = parsed.content_block;
         if (block?.type === 'text' && typeof block.text === 'string' && block.text) {
           state.content += block.text;
@@ -373,7 +356,7 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
   await throwIfSseReaderAborted(signal, reader);
   if (!state.streamError && buffer.trim()) consumeOpenAIStreamLine(buffer, state, webContents, streamId, trace, options);
 
-  // Buffered streams may receive reasoning after final text from Qoder-compatible
+  // Buffered streams may receive reasoning after final text from compatible
   // APIs. Emit the accumulated thinking first so the renderer never has to show
   // a final answer before its reasoning block arrives.
   const canEmitBufferedThinking =

@@ -13,7 +13,6 @@ const officialAssets = [
   'anthropic.png',
   'gemini.jpg',
   'xai.png',
-  'qoder.svg',
   'deepseek.png',
   'zhipu.png',
   'kimi.png',
@@ -35,7 +34,6 @@ describe('LLM brand icon resolution', () => {
     assert.equal(resolveLlmBrand({ brand: 'Anthropic', serviceTemplateId: 'anthropic-api' }), 'anthropic');
     assert.equal(resolveLlmBrand({ brand: 'Google', channelId: 'gemini' }), 'google');
     assert.equal(resolveLlmBrand({ brand: 'xAI', serviceTemplateId: 'grok-api' }), 'xai');
-    assert.equal(resolveLlmBrand({ providerName: 'Qoder CLI' }), 'qoder');
     assert.equal(resolveLlmBrand({ brand: '智谱 GLM' }), 'zhipu');
     assert.equal(resolveLlmBrand({ channelId: 'glm-coding-plan-cn' }), 'zhipu');
     assert.equal(resolveLlmBrand({ channelId: 'glm-coding-plan-global' }), 'zhipu');

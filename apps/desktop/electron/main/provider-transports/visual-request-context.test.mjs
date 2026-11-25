@@ -347,14 +347,6 @@ test('chat-default-desktop-projection/does-not-open-visual-request', async t => 
   assert.deepEqual(f.receipts(), []);
 });
 
-test('gemini/oauth-envelope-contains-native-image', async t => {
-  const f = fixture(t);
-  const server = await endpoint(t);
-  const body = encode('gemini', messagesFor('gemini', f.visual), { authMethod: 'oauth_google', projectId: 'fixture-project' });
-  assert.ok(JSON.parse(body).request, 'exercise the real wrapped encoder path');
-  await coordinated(f, 'gemini', messagesFor('gemini', f.visual), () => transport(f, 'gemini', server.url, body));
-  assert.equal(f.receipts()[0].status, 'response-completed');
-});
 
 for (const wire of wires) test(`${wire}/malformed-body-cannot-prove-images`, () => {
   for (const value of [null, [], { messages: {} }, { messages: [null, { role: 'user', content: [null] }] },

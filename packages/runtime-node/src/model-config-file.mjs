@@ -4,6 +4,22 @@ import { constants, closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdi
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
+/** @param {object | null | undefined} row @returns {string | null} */
+export function retiredModelConfigCode(row) {
+  const field = (name) => typeof row?.[name] === 'string' ? row[name].trim().toLowerCase() : '';
+  if (['channelId', 'provider', 'providerType'].some(name => field(name) === 'qoder')
+    || ['wire', 'wireOverride', 'resolvedWire'].some(name => field(name) === 'qoder-private')) {
+    return 'unsupported_provider';
+  }
+  if (typeof row?.baseUrl === 'string' && URL.parse(row.baseUrl)?.hostname === 'cloudcode-pa.googleapis.com') {
+    return 'unsupported_provider';
+  }
+  if (['qoder_local_auth', 'local_cli', 'oauth_google'].includes(field('authMethod'))) {
+    return 'unsupported_auth_method';
+  }
+  return null;
+}
+
 const MAX_BYTES = 1024 * 1024;
 export const MODEL_OAUTH_HINT_FIELDS = Object.freeze(['oauthConfigured', 'oauthExpires', 'oauthAccountId']);
 export function modelConfigBinding(value) {

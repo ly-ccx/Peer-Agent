@@ -29,12 +29,6 @@ aho-corasick = "=1.1.4"
 icu_collator = "=2.1.1"
 icu_casemap = "=2.1.1"
 icu_locale_core = "=2.1.1"
-aes = { version = "=0.8.4", features = ["zeroize"] }
-cbc = { version = "=0.1.2", features = ["zeroize"] }
-aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
-hkdf = "=0.12.4"
-rsa = { version = "=0.10.0", features = ["pkcs1v15"] }
-md-5 = "=0.10.6"
 rmcp = { version = "=3.10.0", default-features = false, features = ["client", "auth"] }
 http = "1.4.0"
 getrandom = "=0.3.4"

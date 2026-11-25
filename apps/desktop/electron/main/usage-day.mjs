@@ -42,7 +42,7 @@ function rowModelKey(row) {
 
 /**
  * 从 llmConfigStore 的 provider 列表构建 modelProviderId → 可读 label 的索引。
- * qoder 等渠道的请求日志只写模型条目 UUID + 内部 id（如 cmodel），
+ * 部分渠道的请求日志只写模型条目 UUID 与内部模型 ID，
  * 可读 label 在配置条目（modelLabel）里，与 usage-stats 的 providerIndex 同源。
  */
 function buildModelLabelIndex(providers) {

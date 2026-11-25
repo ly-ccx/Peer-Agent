@@ -1,7 +1,7 @@
 const policies = {
   openai: ['API 平台组织用量需要独立 Admin Key；ChatGPT OAuth 查询的是订阅额度', 'admin_key'],
   anthropic: ['组织用量需要独立 Admin Key；Claude 订阅需要独立登录态', 'admin_key'],
-  'google-ai': ['普通 Gemini API Key 无法查询 OAuth Code Assist 账户额度', 'oauth'],
+  'google-ai': ['Gemini API Key 渠道提供 Peer Agent 本地用量统计'],
   'volcengine-ark': ['计划用量需要额外 arkcli 登录；不会发送收费推理请求探测限流', 'cli_login'],
   'xiaomi-mimo': ['账户余额需要 MiMo 控制台会话', 'web_session'],
   'xiaomi-mimo-token-plan': ['Token Plan 账户数据需要 MiMo 控制台会话', 'web_session'],

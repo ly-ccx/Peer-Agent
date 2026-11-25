@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
  * Shell 环境快照（对齐 Claude Code ShellSnapshot 机制）。
  *
  * 问题：electron GUI 启动的 process.env.PATH 不含用户 .zshrc/.bashrc 注入的路径
- * （如 .qoderwork/bin 的 a1 shim），裸 sh -c 的子进程找不到已登录的 CLI。
+ * ，裸 sh -c 的子进程找不到已登录的 CLI。
  *
  * 方案：启动时用用户的 $SHELL 以 login+interactive 模式 source 一次 shell 配置，
  * 捕获完整环境（PATH / aliases / functions / env vars）→ 存快照文件；
@@ -22,7 +22,6 @@ const SNAPSHOT_TIMEOUT_MS = 10_000;
 // 这些常见路径也会被显式 prepend，保证 a1 / pnpm / cargo 等 CLI 可被发现。
 const FALLBACK_USER_BINS = [
   '$HOME/.local/bin',
-  '$HOME/.qoderwork/bin',
   '$HOME/bin',
   '$HOME/.cargo/bin',
   '/opt/homebrew/bin',
@@ -66,10 +65,10 @@ export async function createShellEnvSnapshot() {
     echo "# peer-agent shell env snapshot" >| "$SNAPSHOT_FILE"
   
     # Export key env vars (PATH is the critical one — contains .zshrc additions)
-    # 白名单扩充：A1_*/BUC_*/AONE_*/ALIBABA_*/QODERWORK_*/XDG_* 用于内网 CLI 登录态
+    # 白名单扩充：A1_*/BUC_*/AONE_*/ALIBABA_*/XDG_* 用于内网 CLI 登录态
     env | while IFS='=' read -r key value; do
       case "$key" in
-        PATH|HOME|USER|SHELL|TERM|LANG|LC_*|EDITOR|VISUAL|PAGER|SSH_AUTH_SOCK|GPG_TTY|NVM_DIR|GOPATH|CARGO_HOME|RUSTUP_HOME|JAVA_HOME|ANDROID_HOME|PYENV_ROOT|A1_*|BUC_*|AONE_*|ALIBABA_*|QODERWORK_*|XDG_*)
+        PATH|HOME|USER|SHELL|TERM|LANG|LC_*|EDITOR|VISUAL|PAGER|SSH_AUTH_SOCK|GPG_TTY|NVM_DIR|GOPATH|CARGO_HOME|RUSTUP_HOME|JAVA_HOME|ANDROID_HOME|PYENV_ROOT|A1_*|BUC_*|AONE_*|ALIBABA_*|XDG_*)
           echo "export $key=\\"$value\\"" >> "$SNAPSHOT_FILE"
           ;;
       esac
@@ -132,7 +131,6 @@ export function buildShellSessionBootstrap() {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '';
   const pathPrefix = [
     join(homeDir, '.local/bin'),
-    join(homeDir, '.qoderwork/bin'),
     join(homeDir, 'bin'),
     join(homeDir, '.cargo/bin'),
     '/opt/homebrew/bin',

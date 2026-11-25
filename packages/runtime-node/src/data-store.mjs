@@ -9,7 +9,7 @@ import path from 'node:path';
  * （name/productName/appId），改名、升级、重装都可能换路径导致数据"消失"；
  * 且会跟 Chromium 运行时数据（Cache/Cookies/Local Storage/...）混在一起。
  *
- * `~/.peer-agent/` 是固定的、与 app 标识解耦的家目录（对标 .claude / .qoderwork）。
+ * `~/.peer-agent/` 是固定的、与 app 标识解耦的家目录。
  * 所有 Peer Agent 业务数据 + 后续配置（settings.json 等）+ 一键配置迁移都收口到这里，
  * 由本模块统一管理，不再让各 store 自己散拼路径。
  *

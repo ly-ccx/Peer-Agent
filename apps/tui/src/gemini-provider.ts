@@ -10,7 +10,6 @@ import type {
 import { ModelProviderHttpError, ModelProviderStreamError } from '@peer-agent/runtime-node';
 
 import {
-  GEMINI_CODE_ASSIST_BASE_URL,
   countGeminiRequestFromDesktop,
   sendGeminiStreamFromDesktop,
 } from './desktop-provider-adapters.ts';
@@ -41,11 +40,9 @@ export interface GeminiStreamResult {
 
 export interface CreateGeminiProviderOptions {
   readonly providerId: string;
-  /** Base URL; OAuth defaults to Code Assist host, not generativelanguage openai shim. */
+  /** Base URL for the native Gemini API. */
   readonly baseUrl?: string;
-  readonly authMethod: 'api_key' | 'oauth_google' | string;
   readonly getApiKey: () => Promise<string>;
-  readonly getProjectId?: () => Promise<string | null | undefined>;
   readonly sendStream?: (args: Record<string, unknown>) => Promise<GeminiStreamResult>;
   readonly countInputTokens?: (
     args: Record<string, unknown>,
@@ -125,7 +122,6 @@ function toDesktopTools(tools: ModelProviderRequest['tools']): Array<Record<stri
 
 function resolveBaseUrl(options: CreateGeminiProviderOptions): string {
   if (options.baseUrl?.trim()) return options.baseUrl.trim().replace(/\/+$/, '');
-  if (options.authMethod === 'oauth_google') return GEMINI_CODE_ASSIST_BASE_URL;
   return 'https://generativelanguage.googleapis.com/v1beta';
 }
 
@@ -142,37 +138,28 @@ export function createGeminiProvider(options: CreateGeminiProviderOptions): Mode
   const countInputTokens = options.countInputTokens ?? countGeminiRequestFromDesktop;
 
   return {
-    contextCountCapability: options.authMethod === 'api_key'
-      ? { kind: 'provider_count_api' }
-      : { kind: 'observed_usage_only' },
-    ...(options.authMethod === 'api_key'
-      ? {
-          async countInputTokens(request: ModelProviderRequest) {
-            const apiKey = await options.getApiKey();
-            if (!apiKey?.trim()) return null;
-            return countInputTokens({
-              baseUrl: resolveBaseUrl(options),
-              apiKey,
-              model: request.model,
-              messages: toDesktopMessages(request.messages),
-              tools: toDesktopTools(request.tools),
-              maxOutputTokens: request.maxOutputTokens,
-              signal: request.signal,
-            });
-          },
-        }
-      : {}),
+    contextCountCapability: { kind: 'provider_count_api' },
+    async countInputTokens(request: ModelProviderRequest) {
+      const apiKey = await options.getApiKey();
+      if (!apiKey?.trim()) return null;
+      return countInputTokens({
+        baseUrl: resolveBaseUrl(options),
+        apiKey,
+        model: request.model,
+        messages: toDesktopMessages(request.messages),
+        tools: toDesktopTools(request.tools),
+        maxOutputTokens: request.maxOutputTokens,
+        signal: request.signal,
+      });
+    },
     async stream(request: ModelProviderRequest): Promise<ModelProviderResult> {
       const apiKey = await options.getApiKey();
       if (!apiKey?.trim()) {
         throw new Error(
-          options.authMethod === 'oauth_google'
-            ? 'Google OAuth access token is unavailable. Sign in via Desktop or unlock Keychain and retry.'
-            : 'Gemini API key is unavailable. Configure it in Desktop settings and retry.',
+          'Gemini API key is unavailable. Configure a key in Desktop or unlock Keychain and retry.',
         );
       }
 
-      const projectId = options.getProjectId ? await options.getProjectId() : null;
       const webContents = createTuiWebContentsBridge(request.onEvent);
       const baseUrl = resolveBaseUrl(options);
 
@@ -185,8 +172,6 @@ export function createGeminiProvider(options: CreateGeminiProviderOptions): Mode
         effort: request.reasoningEffort || 'default',
         supportsReasoning: Boolean(request.reasoningEffort && request.reasoningEffort !== 'off'),
         maxOutputTokens: request.maxOutputTokens,
-        projectId: projectId || undefined,
-        authMethod: options.authMethod,
         signal: request.signal,
         webContents,
         streamId: `tui-gemini-${options.providerId}`,

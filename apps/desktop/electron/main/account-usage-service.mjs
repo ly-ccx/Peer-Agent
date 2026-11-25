@@ -4,10 +4,7 @@ import { accountUsageIdentity } from './account-usage-revision.mjs';
 
 const legacyChannels = {
   oauth_chatgpt: 'openai',
-  oauth_google: 'google-ai',
   oauth_grok: 'grok',
-  qoder_local_auth: 'qoder',
-  local_cli: 'qoder',
 };
 
 /** Main-process orchestration. All credential and network dependencies are injected. */

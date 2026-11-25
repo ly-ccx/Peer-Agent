@@ -121,7 +121,7 @@ describe('sanitizeApiMessages neutralization integration', () => {
 });
 
 describe('sanitizeApiMessages tool-call pairing normalization', () => {
-  // 复现线上报错：DeepSeek/qoder 返回 invalid_request_error
+  // 复现线上报错：DeepSeek 返回 invalid_request_error
   // "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
   // 成因：压缩（microcompaction）删掉了携带 tool_calls 的 assistant，却把配对的 role:tool 留下，
   // 形成“孤儿 tool”消息，原样发给模型即被拒。

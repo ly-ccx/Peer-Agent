@@ -1,5 +1,5 @@
 /**
- * Gemini 订阅模型目录。
+ * Gemini 模型目录。
  *
  * 对齐 google-gemini/gemini-cli：
  * - 模型列表以本地 curated 目录为准（packages/core/src/config/models.ts + acpUtils.buildAvailableModels）
@@ -34,11 +34,10 @@ export const GEMINI_PREVIEW_3_1_PRO_MODEL = 'gemini-3.1-pro-preview';
 export const GEMINI_PREVIEW_FLASH_MODEL = 'gemini-3-flash-preview';
 
 /**
- * 订阅登录可选模型目录（curated）。
+ * 内置模型目录（curated）。
  * 顺序对齐 gemini-cli buildAvailableModels：
  * preview(若可) → stable pro → flash → flash-lite
  *
- * 默认对订阅账号露出 preview；若后续有账号能力探测，可再收紧。
  */
 export const GEMINI_CURATED_MODELS = [
   {
@@ -143,14 +142,8 @@ export function preferGeminiModel(models = []) {
 
 /**
  * 返回 gemini-cli 风格 curated 模型目录。
- * tokens 参数保留是为了与 OAuth 登录/列表 IPC 签名兼容；目录本身不依赖远程 /models。
  */
-export async function listGeminiModels(
-  _tokens,
-  {
-    includePreview = true,
-  } = {},
-) {
+export function listGeminiModels({ includePreview = true } = {}) {
   const models = GEMINI_CURATED_MODELS.filter((model) => includePreview || !model.preview);
   return {
     models: cloneModels(models),

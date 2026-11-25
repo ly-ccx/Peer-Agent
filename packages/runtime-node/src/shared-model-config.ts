@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from './model-config-file.mjs';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding, retiredModelConfigCode } from './model-config-file.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -9,9 +9,7 @@ import type { LlmModelOptionDefinition, LlmModelOptionValues } from '@peer-agent
 export type SharedModelAuthMethod =
   | 'api_key'
   | 'oauth_chatgpt'
-  | 'oauth_google'
-  | 'oauth_grok'
-  | 'qoder_local_auth';
+  | 'oauth_grok';
 
 export interface StoredModelProvider {
   readonly wireOverride?: string;
@@ -34,7 +32,6 @@ export interface StoredModelProvider {
   readonly oauthConfigured?: boolean;
   readonly oauthExpires?: number;
   readonly oauthAccountId?: string;
-  readonly oauthProjectId?: string | null;
   readonly contextWindow?: number;
   readonly modelOptions?: readonly LlmModelOptionDefinition[];
   readonly modelOptionValues?: LlmModelOptionValues;
@@ -79,7 +76,7 @@ export interface SharedModelMetadata {
   readonly supportsStructured?: boolean;
   readonly source: 'desktop-default';
   readonly providerId: string;
-  /** Desktop channel id when present (openai / anthropic / anthropic-compatible / qoder / ...). */
+  /** Desktop channel id when present (openai / anthropic / anthropic-compatible / ...). */
   readonly channelId?: string;
   readonly credentialId: string;
   /**
@@ -112,7 +109,6 @@ export interface SharedModelMetadata {
 export interface SharedModelSelection extends SharedModelMetadata {
   readonly apiKey?: string;
   readonly accountId?: string | null;
-  readonly oauthProjectId?: string | null;
   readonly oauthTokens?: ChatGptOAuthTokens;
   persistOAuthTokens(tokens: ChatGptOAuthTokens): void;
   refreshOAuthTokens(tokens: ChatGptOAuthTokens, refresh: OAuthRefreshOperation, force?: boolean): Promise<OAuthRefreshResult>;
@@ -152,13 +148,13 @@ function groupKeyOf(provider: Pick<StoredModelProvider, 'groupId' | 'id'>): stri
  * Shared readers always expand to the flat provider/model row shape so TUI and
  * Desktop can share the same selection helpers.
  */
-function parseProviders(content: string): StoredModelProvider[] {
+function parseProviders(content: string, includeRetired = false): StoredModelProvider[] {
   const parsed: unknown = JSON.parse(content);
-  if (Array.isArray(parsed)) return parsed as StoredModelProvider[];
+  if (Array.isArray(parsed)) return (parsed as StoredModelProvider[]).filter(row => includeRetired || !retiredModelConfigCode(row));
   if (!isRecord(parsed)) return [];
 
   if (Array.isArray(parsed.providers)) {
-    return parsed.providers as StoredModelProvider[];
+    return (parsed.providers as StoredModelProvider[]).filter(row => includeRetired || !retiredModelConfigCode(row));
   }
 
   if (Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
@@ -177,7 +173,7 @@ function parseProviders(content: string): StoredModelProvider[] {
     for (const model of parsed.models as StoredModelProvider[]) {
       const key = groupKeyOf(model);
       const channel = channels.get(key);
-      if (!channel) continue;
+      if (!channel || (!includeRetired && (retiredModelConfigCode(channel) || retiredModelConfigCode(model)))) continue;
       providers.push({
         ...channel,
         ...model,
@@ -265,15 +261,7 @@ function serializeProvidersDocument(
         const channels = new Map<string, StoredModelProvider>();
         for (const channel of previous.channels as StoredModelProvider[]) {
           const key = groupKeyOf(channel);
-          if (key) channels.set(key, { ...channel, id: key, groupId: key });
-        }
-        for (const provider of providers) {
-          const key = groupKeyOf(provider);
-          if (!key) continue;
-          channels.set(key, {
-            ...(channels.get(key) ?? {}),
-            ...channelFromProvider(provider),
-          });
+          if (key) channels.set(key, channel);
         }
 
         const modelsById = new Map<string, StoredModelProvider>();
@@ -282,8 +270,15 @@ function serializeProvidersDocument(
           if (id) modelsById.set(id, model);
         }
         for (const provider of providers) {
-          const id = provider.id?.trim() || groupKeyOf(provider);
-          if (!id) continue;
+          const key = groupKeyOf(provider);
+          const id = provider.id?.trim() || key;
+          if (!key || !id || retiredModelConfigCode(provider)
+            || retiredModelConfigCode(channels.get(key))
+            || retiredModelConfigCode(modelsById.get(id))) continue;
+          channels.set(key, {
+            ...(channels.get(key) ?? {}),
+            ...channelFromProvider(provider),
+          });
           modelsById.set(id, {
             ...(modelsById.get(id) ?? {}),
             ...modelFromProvider(provider),
@@ -308,9 +303,7 @@ function serializeProvidersDocument(
 function normalizedAuthMethod(provider: StoredModelProvider): SharedModelAuthMethod {
   if (
     provider.authMethod === 'oauth_chatgpt'
-    || provider.authMethod === 'oauth_google'
     || provider.authMethod === 'oauth_grok'
-    || provider.authMethod === 'qoder_local_auth'
   ) {
     return provider.authMethod;
   }
@@ -323,13 +316,8 @@ function credentialIdOf(provider: StoredModelProvider): string {
 
 function hasStoredCredential(provider: StoredModelProvider): boolean {
   const authMethod = normalizedAuthMethod(provider);
-  if (authMethod === 'qoder_local_auth') return true;
   if (!credentialIdOf(provider)) return false;
-  if (
-    authMethod === 'oauth_chatgpt'
-    || authMethod === 'oauth_google'
-    || authMethod === 'oauth_grok'
-  ) {
+  if (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok') {
     return provider.oauthConfigured === true;
   }
   return provider.apiKeyConfigured === true;
@@ -339,7 +327,7 @@ export function selectDesktopDefaultProvider(
   providers: readonly StoredModelProvider[],
 ): StoredModelProvider | null {
   const enabled = providers.filter(
-    (provider) => provider.enabled !== false && provider.model?.trim(),
+    (provider) => !retiredModelConfigCode(provider) && provider.enabled !== false && provider.model?.trim(),
   );
   return enabled.find((provider) => provider.isDefault && hasStoredCredential(provider))
     ?? enabled.find((provider) => hasStoredCredential(provider))
@@ -522,30 +510,23 @@ export function loadSharedModelSelection(
   const apiKey = authMethod === 'api_key'
     ? options.credentialStore.getApiKey(credentialId)
     : undefined;
-  const oauthTokens = (
-    authMethod === 'oauth_chatgpt'
-    || authMethod === 'oauth_google'
-    || authMethod === 'oauth_grok'
-  )
+  const oauthTokens = (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok')
     ? options.credentialStore.getOAuthTokens(credentialId)
     : undefined;
-  // qoder_local_auth loads its token from the external Qoder CLI at stream time.
   if (authMethod === 'api_key' && !apiKey) return null;
   if (
-    (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_google' || authMethod === 'oauth_grok')
+    (authMethod === 'oauth_chatgpt' || authMethod === 'oauth_grok')
     && !oauthTokens?.access
   ) {
     return null;
   }
 
   const accountId = selected.oauthAccountId ?? oauthTokens?.accountId ?? null;
-  const oauthProjectId = selected.oauthProjectId ?? null;
 
   return {
     ...metadataFromSelected(configFile, selected),
     ...(apiKey ? { apiKey } : {}),
     ...(accountId ? { accountId } : { accountId: null }),
-    ...(oauthProjectId ? { oauthProjectId } : { oauthProjectId: null }),
     ...(oauthTokens ? { oauthTokens } : {}),
     async refreshOAuthTokens(tokens, refresh, force) {
       const store = options.credentialStore;
@@ -561,11 +542,10 @@ export function loadSharedModelSelection(
     persistOAuthTokens(tokens) {
       if (
         authMethod !== 'oauth_chatgpt'
-        && authMethod !== 'oauth_google'
         && authMethod !== 'oauth_grok'
       ) return;
       return withModelConfigLock(configFile, () => {
-        const current = parseProviders(read(configFile));
+        const current = parseProviders(read(configFile), true);
         const matches = current.filter(provider => provider.id === selected.id);
         if (matches.length !== 1 || modelConfigBinding(matches[0]) !== modelConfigBinding(selected)) {
           throw new Error('credential_oauth_configuration_changed');
@@ -573,7 +553,7 @@ export function loadSharedModelSelection(
         const previousTokens = options.credentialStore?.getOAuthTokens(credentialId) ?? null;
         options.credentialStore?.setOAuthTokens(credentialId, tokens);
         try {
-          const updated = current.map((provider) => credentialIdOf(provider) === credentialId
+          const updated = current.map((provider) => !retiredModelConfigCode(provider) && credentialIdOf(provider) === credentialId
             ? {
                 ...provider,
                 oauthConfigured: Boolean(tokens.access),

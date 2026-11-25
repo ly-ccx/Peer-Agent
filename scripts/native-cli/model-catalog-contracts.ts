@@ -42,7 +42,7 @@ if(process.argv.includes('--write'))writeFileSync(file,output);else assert.equal
 const bindingFile='packages/protocol/contracts/native-cli/model-binding.json';
 const base={id:'account',authMethod:'oauth_chatgpt',enabled:true,customHeaders:{'X-Key':'first','x-key':'last'}};
 const bindingCases=[base,{...base,oauthConfigured:true,oauthExpires:123,oauthAccountId:'hint'},
- {...base,authMethod:'oauth_google'},{...base,enabled:false},{...base,customHeaders:{'x-key':'last','X-Key':'first'}}]
+ {...base,enabled:false},{...base,customHeaders:{'x-key':'last','X-Key':'first'}}]
  .map(value=>({value,expected:modelConfigBinding(value)}));
 const binding=JSON.stringify({version:1,hintFields:MODEL_OAUTH_HINT_FIELDS,cases:bindingCases},null,2)+'\n';
 if(process.argv.includes('--write'))writeFileSync(bindingFile,binding);else assert.equal(readFileSync(bindingFile,'utf8'),binding);

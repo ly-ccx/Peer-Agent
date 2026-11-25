@@ -10,7 +10,6 @@ import { CredentialHelperClient, createSubprocessCredentialTransport } from '../
 import { createLlmConfigStore } from '../../apps/desktop/electron/main/llm-config-store.mjs';
 import { resolveProviderCredential } from '../../apps/desktop/electron/main/provider-credential-resolver.mjs';
 import { ensureFreshTokens } from '../../apps/desktop/electron/main/llm-oauth/openai-oauth.mjs';
-import { ensureFreshGoogleTokens } from '../../apps/desktop/electron/main/llm-oauth/google-oauth.mjs';
 import { DEFAULT_SUBSCRIPTION_MODEL } from '../../apps/desktop/electron/main/provider-adapters/openai-model-catalog.mjs';
 import { createTuiSharedModelCredentialStore } from '../../apps/tui/src/model-credential-store.ts';
 import { loadSharedModelSelection } from '../../packages/runtime-node/dist/models-public.js';
@@ -132,14 +131,7 @@ try {
   }
 
   // Public production resolver with real Google refresh form and encrypted Vault.
-  const google = store.addProvider({ provider: 'google', channelId: 'gemini', authMethod: 'oauth_google', groupId: 'google', model: 'gemini-2.5-pro' });
-  client.setSecret('model/google/oauth-tokens', JSON.stringify({ ...old, provider: 'google' }));
-  started = gate(); finish = gate(); finish.open(); status = 200;
-  const resolved = await resolveProviderCredential({ provider: google, llmConfigStore: store,
-    ensureFreshGeminiTokens: (tokens: any) => ensureFreshGoogleTokens(tokens, { fetchImpl: (_url: string, init: RequestInit) => fetch(url, { ...init, signal: AbortSignal.timeout(5000) }) }),
-  });
-  assert.equal(resolved.apiKey, 'refreshed-access');
-  assert.deepEqual(JSON.parse(client.getSecret('model/google/oauth-tokens')!).unknown, old.unknown);
+
   const tuiCredentials = createTuiSharedModelCredentialStore({ dataHome: home, client: guardedClient });
   const tuiSelection = () => {
     const value = loadSharedModelSelection({ userDataPath: home, credentialId: 'fixture', credentialStore: tuiCredentials });
@@ -179,7 +171,7 @@ try {
       const channel=config.channels.find((row:any)=>row.id==='fixture');assert.ok(channel);
       if(change==='hints') Object.assign(channel,{oauthConfigured:false,oauthExpires:42,oauthAccountId:'stale-hint'});
       if(change==='endpoint') channel.baseUrl='https://changed.invalid/v1';
-      if(change==='auth') channel.authMethod='oauth_google';
+      if(change==='auth') channel.authMethod='api_key';
       if(change==='headers') channel.customHeaders={'X-Synthetic':'changed'};
       writeFileSync(configurationFile,JSON.stringify(config));
     });

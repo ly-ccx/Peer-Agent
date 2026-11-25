@@ -3,7 +3,7 @@ import { useComposerAttachmentIntake } from '../hooks/useComposerAttachmentIntak
 import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
 
 import { findCurrentTurnIdForScroll, planStickToBottomScroll, shouldProbeTurnForScroll, type StickScrollAnchor } from "../state/threadScrollAnchor.ts";
-import { formatQueueNoticeText, formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
+import { formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
 import { loadConversationMessages, nextId, shouldLoadOlderHistory } from "../state/conversationHydration.ts";
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
@@ -2474,11 +2474,9 @@ export function ChatSurface({
           />
         ) : null}
         {providerRecoveryNotice ? (
-          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}${providerRecoveryNotice.kind === 'queue' ? ' provider-recovery-notice--queue' : ''}`}>
+          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">
-              {providerRecoveryNotice.kind === 'queue'
-                ? formatQueueNoticeText(providerRecoveryNotice, isZh)
-                : providerRecoveryNotice.kind === 'connection'
+              {providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
                     ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，${formatRetryCountdownLabel(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))}）`

@@ -91,18 +91,13 @@ fn command(f: &Fixture, plan: &str) -> Command {
 }
 fn configure(f: &Fixture, auth: &str, token_url: &str, model_base: &str, fresh: bool) -> Vec<u8> {
     std::fs::write(f.root.path().join(".synthetic-vault-key"), [17u8; 32]).unwrap();
-    let google = auth == "oauth_google";
     let mut config = get(f.root.path().join("llm-providers.json"));
-    config["channels"][0]["channelId"] = json!(if google { "google-ai" } else { "openai" });
+    config["channels"][0]["channelId"] = json!("openai");
     config["channels"][0]["authMethod"] = json!(auth);
     config["channels"][0]["oauthConfigured"] = json!(true);
     config["channels"][0]["oauthExpires"] = json!(1);
     config["channels"][0]["baseUrl"] = json!("https://must-not-receive-credentials.invalid");
-    let model = if google {
-        "gemini-2.5-pro"
-    } else {
-        "gpt-5.6-luna"
-    };
+    let model = "gpt-5.6-luna";
     config["models"][0]["model"] = json!(model);
     config["models"][0]["maxOutputTokens"] = json!(16384);
     put(f.root.path().join("llm-providers.json"), &config);
@@ -297,87 +292,73 @@ fn assert_pending_preserves_token(f: &Fixture, original: &Value) {
 #[test]
 fn pinned_model_oauth_refresh_commits_encrypted_tokens_before_real_tools_and_preserves_opaque_fields()
  {
-    for (auth, wire) in [
-        ("oauth_chatgpt", "openai-responses"),
-        ("oauth_google", "gemini"),
-    ] {
-        for fresh in [false, true] {
-            let idp = Idp::new(refreshed(), "200 OK", false, false);
-            let model = Server::new(vec![stream(wire, "tool"), stream(wire, "text")]);
-            let f = Fixture::new(&model);
-            let source = configure(&f, auth, &idp.url, &model.url, fresh);
-            let output = command(&f, "p").output().unwrap();
+    let (auth, wire) = ("oauth_chatgpt", "openai-responses");
+    for fresh in [false, true] {
+        let idp = Idp::new(refreshed(), "200 OK", false, false);
+        let model = Server::new(vec![stream(wire, "tool"), stream(wire, "text")]);
+        let f = Fixture::new(&model);
+        let source = configure(&f, auth, &idp.url, &model.url, fresh);
+        let output = command(&f, "p").output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{auth}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(idp.requests.lock().unwrap().len(), usize::from(!fresh));
+        assert_eq!(model.requests.lock().unwrap().len(), 2);
+        assert!(model.count_requests.lock().unwrap().is_empty());
+        let history = f.history();
+        let calls: Vec<_> = history
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .collect();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["segments"][0]["result"]["status"], "success");
+        assert!(calls[0]["segments"][0]["result"]["evidence"].is_object());
+        let saved: Value =
+            serde_json::from_str(vault(&f, "get", None)["secret"].as_str().unwrap()).unwrap();
+        assert_eq!(saved["futureOpaque"], json!({"kept":true}));
+        assert_eq!(
+            saved["access"],
+            if fresh {
+                "synthetic-old-access"
+            } else {
+                "synthetic-new-access"
+            }
+        );
+        assert_eq!(saved["projectId"], "fixture-project");
+        if fresh {
             assert_eq!(
-                output.status.code(),
-                Some(0),
-                "{auth}: {}",
-                String::from_utf8_lossy(&output.stderr)
+                std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
+                source
             );
-            assert_eq!(idp.requests.lock().unwrap().len(), usize::from(!fresh));
-            assert_eq!(model.requests.lock().unwrap().len(), 2);
-            assert!(model.count_requests.lock().unwrap().is_empty());
-            let history = f.history();
-            let calls: Vec<_> = history
-                .iter()
-                .filter(|m| m["segments"].is_array())
-                .collect();
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0]["segments"][0]["result"]["status"], "success");
-            assert!(calls[0]["segments"][0]["result"]["evidence"].is_object());
-            let saved: Value =
-                serde_json::from_str(vault(&f, "get", None)["secret"].as_str().unwrap()).unwrap();
-            assert_eq!(saved["futureOpaque"], json!({"kept":true}));
-            assert_eq!(
-                saved["access"],
+        } else {
+            assert_hints(&f, &source, Some(&saved));
+        }
+        let persisted = serde_json::to_string(&history).unwrap();
+        assert!(!persisted.contains("synthetic-new-access"));
+        assert!(!persisted.contains("synthetic-new-refresh"));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-new-access"));
+        for headers in model.request_headers.lock().unwrap().iter() {
+            assert!(headers.contains(&format!(
+                "authorization: Bearer {}",
                 if fresh {
                     "synthetic-old-access"
                 } else {
                     "synthetic-new-access"
                 }
-            );
-            assert_eq!(saved["projectId"], "fixture-project");
-            if fresh {
-                assert_eq!(
-                    std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
-                    source
-                );
-            } else {
-                assert_hints(&f, &source, Some(&saved));
+            )));
+            assert!(!headers.contains("x-goog-api-key:"));
+            if auth == "oauth_chatgpt" {
+                assert!(headers.contains("chatgpt-account-id: fixture-account"));
             }
-            let persisted = serde_json::to_string(&history).unwrap();
-            assert!(!persisted.contains("synthetic-new-access"));
-            assert!(!persisted.contains("synthetic-new-refresh"));
-            assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-new-access"));
-            for headers in model.request_headers.lock().unwrap().iter() {
-                assert!(headers.contains(&format!(
-                    "authorization: Bearer {}",
-                    if fresh {
-                        "synthetic-old-access"
-                    } else {
-                        "synthetic-new-access"
-                    }
-                )));
-                assert!(!headers.contains("x-goog-api-key:"));
-                if auth == "oauth_chatgpt" {
-                    assert!(headers.contains("chatgpt-account-id: fixture-account"));
-                }
-            }
-            if auth == "oauth_google" {
-                assert_eq!(
-                    model.requests.lock().unwrap()[0]["project"],
-                    "fixture-project"
-                );
-                assert!(model.requests.lock().unwrap()[1]["request"]["contents"].is_array());
-            } else {
-                assert!(model.requests.lock().unwrap()[0]["max_output_tokens"].is_null());
-                assert!(
-                    model.request_headers.lock().unwrap()[0].contains("originator: peer-agent")
-                );
-            }
-            let ciphertext =
-                std::fs::read_to_string(f.root.path().join("credentials.vault.json")).unwrap();
-            assert!(!ciphertext.contains("synthetic-new-access"));
         }
+        assert!(model.requests.lock().unwrap()[0]["max_output_tokens"].is_null());
+        assert!(model.request_headers.lock().unwrap()[0].contains("originator: peer-agent"));
+        let ciphertext =
+            std::fs::read_to_string(f.root.path().join("credentials.vault.json")).unwrap();
+        assert!(!ciphertext.contains("synthetic-new-access"));
     }
 }
 

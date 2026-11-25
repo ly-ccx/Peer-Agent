@@ -4,7 +4,6 @@ import path from 'node:path';
 import type { LlmSubscriptionQuota } from '@peer-agent/protocol';
 import {
   fetchChatGptUsage,
-  fetchGeminiQuota,
   fetchGrokQuota,
   loadSharedModelMetadataList,
   loadSharedModelSelection,
@@ -13,7 +12,6 @@ import {
 } from '@peer-agent/runtime-node';
 
 import {
-  ensureFreshGoogleTokensFromDesktop,
   ensureFreshGrokTokensFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { createTuiSharedModelCredentialStore } from './model-credential-store.ts';
@@ -26,7 +24,6 @@ export const TUI_SUBSCRIPTION_QUOTA_REFRESH_MS = 5 * 60 * 1000;
 
 const OAUTH_METHODS = new Set<SharedModelAuthMethod>([
   'oauth_chatgpt',
-  'oauth_google',
   'oauth_grok',
 ]);
 
@@ -96,11 +93,6 @@ type QuotaFetchers = {
     accountId?: string | null;
     fetchImpl?: typeof fetch;
   }) => Promise<LlmSubscriptionQuota>;
-  readonly fetchGeminiQuota: (args: {
-    accessToken: string;
-    projectId?: string | null;
-    fetchImpl?: typeof fetch;
-  }) => Promise<LlmSubscriptionQuota>;
   readonly fetchGrokQuota: (args: {
     accessToken: string;
     fetchImpl?: typeof fetch;
@@ -119,7 +111,6 @@ function createQuotaFetchImpl(): typeof fetch {
 async function loadQuotaFetchers(): Promise<QuotaFetchers> {
   return {
     fetchChatGptUsage,
-    fetchGeminiQuota,
     fetchGrokQuota,
   };
 }
@@ -132,7 +123,6 @@ export type FetchTuiSubscriptionQuotaOptions = {
   readonly loadSelection?: typeof loadSharedModelSelection;
   readonly loadFetchers?: () => Promise<QuotaFetchers>;
   readonly refreshChatGpt?: typeof refreshChatGptOAuthTokens;
-  readonly refreshGoogle?: typeof ensureFreshGoogleTokensFromDesktop;
   readonly refreshGrok?: typeof ensureFreshGrokTokensFromDesktop;
 };
 
@@ -175,7 +165,6 @@ export async function fetchTuiSubscriptionQuota(
   }
 
   const refreshChatGpt = options.refreshChatGpt ?? refreshChatGptOAuthTokens;
-  const refreshGoogle = options.refreshGoogle ?? ensureFreshGoogleTokensFromDesktop;
   const refreshGrok = options.refreshGrok ?? ensureFreshGrokTokensFromDesktop;
   const refreshFetch = createTuiOAuthRefreshFetch(options.fetchImpl ? { fetch: options.fetchImpl } : {});
 
@@ -183,9 +172,6 @@ export async function fetchTuiSubscriptionQuota(
     const result = await selection.refreshOAuthTokens(tokens, async (current) => {
       if (selection.authMethod === 'oauth_chatgpt') {
         return { tokens: await refreshChatGpt(current, refreshFetch), refreshed: true };
-      }
-      if (selection.authMethod === 'oauth_google') {
-        return { tokens: await refreshGoogle(current, { fetchImpl: refreshFetch }), refreshed: true };
       }
       return refreshGrok(current, { fetchImpl: refreshFetch });
     });
@@ -212,13 +198,6 @@ export async function fetchTuiSubscriptionQuota(
       return await fetchers.fetchChatGptUsage({
         accessToken: tokens.access,
         accountId: selection.accountId,
-        fetchImpl: options.fetchImpl ?? createQuotaFetchImpl(),
-      });
-    }
-    if (selection.authMethod === 'oauth_google') {
-      return await fetchers.fetchGeminiQuota({
-        accessToken: tokens.access,
-        projectId: selection.oauthProjectId,
         fetchImpl: options.fetchImpl ?? createQuotaFetchImpl(),
       });
     }

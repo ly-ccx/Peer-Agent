@@ -6,17 +6,14 @@
 // 「同一 groupId 下的多条虚拟记录」（各带不同 model、复合 id、共享同一订阅凭证），菜单就会
 // 自动列出全部订阅模型，且选中后路由拿到的就是带正确 model 的完整记录，会话据虚拟 id 各记各的。
 //
-// 关键约束（与 Qoder 展开的最大差异）：
 //   订阅凭证解析走 getCredential(provider.id) —— 按真实记录 id 精确查 OAuth token。虚拟记录的
 //   复合 id 在存储里不存在，故每条虚拟记录额外带 credentialId=原始记录 id；
 //   provider-credential-resolver / setOAuthTokens 对带 credentialId 的记录用它回退取/写 token。
 //
-// 复合 id 沿用 Qoder 的 `${groupId}::${modelId}` 口径（QODER_MODEL_ID_SEPARATOR），
 // 与渲染端「打平后 provider×model」的 id 口径一致，凭证回退键则由 credentialId 单独承载。
 //
 // 本模块是纯函数：catalog 由外部注入，不碰文件系统，便于单测。
 
-import { QODER_MODEL_ID_SEPARATOR, makeQoderModelProviderId } from './qoder-provider-expansion.mjs';
 
 /** 判定一条 provider 记录是否为 ChatGPT 订阅记录（oauth_chatgpt）。 */
 export function isSubscriptionProvider(provider) {
@@ -57,7 +54,7 @@ export function expandOneSubscriptionProvider(provider, catalog) {
   ];
   return ordered.map((model) => ({
     ...provider,
-    id: makeQoderModelProviderId(groupId, model.id),
+    id: `${groupId}::${model.id}`,
     groupId,
     // 凭证回退键：虚拟复合 id 在存储里不存在，凭证解析/刷新需用它回到原始订阅记录取 OAuth token。
     credentialId,
@@ -103,5 +100,3 @@ export function expandSubscriptionProviders(providers, resolveCatalog) {
   }
   return out;
 }
-
-export { QODER_MODEL_ID_SEPARATOR };

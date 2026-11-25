@@ -5,7 +5,7 @@ import { contextAccountUsageSummary as summary } from './contextAccountUsageSumm
 
 const cases: Record<string, { quota: LlmSubscriptionQuota; match: RegExp }> = {
   balance: { quota: { success: true, balances: [{ currency: 'CNY', total: '12.34', source: 'api_key', scope: 'account' }] }, match: /12.34/ },
-  zero: { quota: { success: true, availableCredits: 0 }, match: /0/ },
+  zero: { quota: { success: true, remainingPercent: 0 }, match: /0/ },
   legacy: { quota: { success: true, remainingPercent: 90 }, match: /90%/ },
   count: { quota: { success: true, windows: [{ id: 'session', used: 20, limit: 100 }] }, match: /80/ },
   periods: { quota: { success: true, windows: [{ id: 'week', used: 20, limit: 100 }, { id: 'month', usedPercent: 60 }] }, match: /80 \/ 100.*\n(?:本月剩余可用|Monthly remaining) 40%/ },

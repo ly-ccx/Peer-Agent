@@ -23,7 +23,6 @@ const SKIP_DIR_NAMES = new Set([
   'coverage',
   'target',
   '.peer-tmp',
-  '.qoder',
 ]);
 
 function sha256(buffer) {

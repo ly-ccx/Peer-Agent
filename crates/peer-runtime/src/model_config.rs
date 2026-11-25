@@ -16,6 +16,35 @@ mod channel;
 mod transaction;
 pub(crate) use binding::ModelBinding;
 pub(crate) use transaction::acquire as transaction;
+/// Legacy stored rows may still carry retired identifiers. Never resolve those rows as custom API keys.
+pub(crate) fn check_retired_model(row: &Value) -> Result<(), ModelError> {
+    let matches = |fields: &[&str], value: &str| {
+        fields.iter().any(|field| {
+            row[*field]
+                .as_str()
+                .is_some_and(|entry| entry.trim().eq_ignore_ascii_case(value))
+        })
+    };
+    if matches(&["channelId", "provider", "providerType"], "qoder")
+        || matches(&["wire", "wireOverride", "resolvedWire"], "qoder-private")
+    {
+        return Err(ModelError::new("native_model_channel_unsupported"));
+    }
+    if row["baseUrl"]
+        .as_str()
+        .and_then(|value| reqwest::Url::parse(value).ok())
+        .is_some_and(|url| url.host_str() == Some("cloudcode-pa.googleapis.com"))
+    {
+        return Err(ModelError::new("native_model_channel_unsupported"));
+    }
+    if ["qoder_local_auth", "local_cli", "oauth_google"]
+        .iter()
+        .any(|auth| matches(&["authMethod"], auth))
+    {
+        return Err(ModelError::new("native_model_auth_unsupported"));
+    }
+    Ok(())
+}
 pub(crate) fn account_auth(channel: &Value) -> Result<String, ModelError> {
     channel::account_auth(channel)
 }
@@ -114,6 +143,9 @@ fn resolve_with_context(
         return Err(ModelError::new("model_config_invalid"));
     }
     let c = matches[0];
+    for entry in [c, m] {
+        check_retired_model(entry)?;
+    }
     // Same flattened channel -> model precedence as the existing catalog.
     let field = |key| {
         m.get(key)
@@ -241,33 +273,7 @@ pub async fn load_session_model(
     }
     let config = read(&home.join("llm-providers.json"))?;
     let mut resolved = resolve_with_context(&config, selected, context)?;
-    let qoder = if resolved.wire == Wire::Qoder {
-        let account = crate::qoder::account::Account::load(
-            ModelBinding::new(home, &config, selected)?,
-            cancel,
-        )?;
-        resolved.endpoint = account.endpoint().to_string();
-        resolved.generation.qoder_metadata = account.metadata().cloned();
-        resolved.generation.qoder_dialect = account.dialect();
-        if let Some(metadata) = account.metadata()
-            && context.is_none()
-        {
-            resolved.context_window = crate::model::wire::qoder_context_window(
-                metadata,
-                resolved
-                    .generation
-                    .model_option_values
-                    .as_ref()
-                    .unwrap_or(&Value::Null),
-            )
-            .or(resolved.context_window);
-        }
-        resolved.generation.qoder_session_type = Some(account.session_type().to_owned());
-        Some(account)
-    } else {
-        None
-    };
-    let oauth = if resolved.auth_method != "api_key" && resolved.wire != Wire::Qoder {
+    let oauth = if resolved.auth_method != "api_key" {
         let oauth = crate::model_oauth::ModelOAuth::load(
             home,
             &resolved.credential_key,
@@ -276,9 +282,6 @@ pub async fn load_session_model(
             cancel,
         )
         .await?;
-        if resolved.wire == Wire::Gemini && resolved.generation.project_id.is_none() {
-            resolved.generation.project_id = oauth.project.clone();
-        }
         let base = crate::model_oauth::endpoints(
             home,
             &resolved.auth_method,
@@ -287,11 +290,7 @@ pub async fn load_session_model(
                 .unwrap(),
         )?
         .0;
-        resolved.endpoint = if resolved.wire == Wire::Gemini {
-            format!("{base}/v1internal:streamGenerateContent?alt=sse")
-        } else {
-            format!("{base}/responses")
-        };
+        resolved.endpoint = format!("{base}/responses");
         Some(oauth)
     } else {
         None
@@ -334,7 +333,6 @@ pub async fn load_session_model(
             .with_context_window(resolved.context_window)
             .with_headers(resolved.headers)
             .with_oauth(oauth)
-            .with_qoder(qoder)
             .with_compatibility(home, &resolved.auth_method)
     })
 }
@@ -344,22 +342,67 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
-    fn qoder_identity_headers_cannot_be_replaced_by_custom_configuration() {
-        let mut config = json!({"version":2,"channels":[{"id":"provider","provider":"qoder","channelId":"qoder","authMethod":"qoder_local_auth"}],"models":[{"id":"provider::auto","groupId":"provider","model":"auto","enabled":true}]});
-        let selected = json!({"providerId":"provider","family":"qoder","modelId":"auto","modelProviderId":"provider::auto"});
-        assert_eq!(resolve_model(&config, &selected).unwrap().wire, Wire::Qoder);
-        for header in [
-            "Cosy-Key",
-            "COSY-MachineId",
-            "cosy-user",
-            "Authorization",
-            "X-Model-Key",
-            "Login-Version",
+    fn retired_model_rows_are_rejected_without_hiding_other_catalog_entries() {
+        for (overrides, code) in [
+            (
+                json!({"channelId":"qoder"}),
+                "native_model_channel_unsupported",
+            ),
+            (
+                json!({"provider":"qoder"}),
+                "native_model_channel_unsupported",
+            ),
+            (
+                json!({"wireOverride":"qoder-private"}),
+                "native_model_channel_unsupported",
+            ),
+            (
+                json!({"authMethod":"local_cli"}),
+                "native_model_auth_unsupported",
+            ),
+            (
+                json!({"authMethod":"qoder_local_auth"}),
+                "native_model_auth_unsupported",
+            ),
+            (
+                json!({"authMethod":"oauth_google"}),
+                "native_model_auth_unsupported",
+            ),
         ] {
-            config["channels"][0]["customHeaders"] = json!({header:"synthetic-override"});
+            let mut config = json!({
+                "version": 2,
+                "channels": [
+                    {"id":"retired","provider":"openai","channelId":"google-ai","apiKeyConfigured":true},
+                    {"id":"key","provider":"openai","channelId":"google-ai","apiKeyConfigured":true},
+                    {"id":"subscription","provider":"openai","channelId":"openai","authMethod":"oauth_chatgpt","oauthConfigured":true}
+                ],
+                "models": [
+                    {"id":"old","groupId":"retired","model":"old","isDefault":true},
+                    {"id":"key-model","groupId":"key","model":"gemini-2.5-flash"},
+                    {"id":"subscription-model","groupId":"subscription","model":"gpt-5.6-luna"}
+                ]
+            });
+            config["channels"][0]
+                .as_object_mut()
+                .unwrap()
+                .extend(overrides.as_object().unwrap().clone());
+            let old = json!({"providerId":"retired","family":config["channels"][0]["provider"],"modelId":"old","modelProviderId":"old"});
+            assert_eq!(resolve_model(&config, &old).err().unwrap().code, code);
+            let catalog = crate::model_catalog::project(&config).unwrap();
             assert_eq!(
-                resolve_model(&config, &selected).err().unwrap().code,
-                "model_header_protected"
+                catalog
+                    .iter()
+                    .map(|model| model.provider_id.as_str())
+                    .collect::<Vec<_>>(),
+                ["key", "subscription"]
+            );
+            let key = json!({"providerId":"key","family":"openai","modelId":"gemini-2.5-flash","modelProviderId":"key-model"});
+            let model = resolve_model(&config, &key).unwrap();
+            assert_eq!(model.wire, Wire::Gemini);
+            assert_eq!(model.auth_method, "api_key");
+            assert_eq!(
+                model.endpoint,
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
             );
         }
     }
@@ -480,7 +523,7 @@ mod tests {
             config["models"][0]["customHeaders"] = headers;
             assert!(resolve_model(&config, selected).is_err());
         }
-        for channel in ["unknown", "grok", "qoder"] {
+        for channel in ["unknown", "grok"] {
             config["models"][0]["customHeaders"] = json!({});
             config["channels"][0]["channelId"] = json!(channel);
             assert!(resolve_model(&config, selected).is_err());

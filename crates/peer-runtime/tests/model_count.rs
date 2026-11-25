@@ -172,7 +172,13 @@ async fn native_count_and_send_share_original_messages_tools_and_fingerprint() {
             assert!(
                 captures
                     .iter()
-                    .all(|c| c.0.contains("anthropic-version: 2023-06-01"))
+                    .all(|(headers, _)| headers.lines().any(|line| {
+                        line.split_once(':').is_some_and(|(name, value)| {
+                            name.eq_ignore_ascii_case("anthropic-version")
+                                && value.trim() == "2023-06-01"
+                        })
+                    })),
+                "count and generation must send the Anthropic version header: {captures:?}"
             );
             sent.as_object_mut().unwrap().shift_remove("stream");
             sent.as_object_mut().unwrap().shift_remove("max_tokens");
@@ -310,18 +316,15 @@ async fn count_timeout_and_cancellation_close_socket_without_creating_usage() {
 }
 
 #[tokio::test]
-async fn observed_only_channels_and_oauth_never_probe_an_inapplicable_counter() {
-    for wire in [Wire::Chat, Wire::Responses, Wire::Gemini] {
-        let mut config = ModelConfig {
+async fn observed_only_channels_never_probe_an_inapplicable_counter() {
+    for wire in [Wire::Chat, Wire::Responses] {
+        let config = ModelConfig {
             endpoint: "http://127.0.0.1:9/v1/messages".into(),
             model: "model".into(),
             provider: "fixture".into(),
             wire,
             generation: GenerationOptions::default(),
         };
-        if wire == Wire::Gemini {
-            config.generation.auth_method = Some("oauth_google".into());
-        }
         let model = NativeModel::new(config, None, Duration::from_secs(2)).unwrap();
         let prepared = model
             .prepare_request(

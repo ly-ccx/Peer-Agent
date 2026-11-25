@@ -185,45 +185,6 @@ describe('provider channel registry', () => {
     );
     assert.deepEqual(resolved.headers, { 'Content-Type': 'application/json' });
   });
-
-  it('resolves Gemini subscription with Code Assist OAuth endpoint', () => {
-    const resolved = resolveChannel({
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-2.0-flash',
-      apiKey: 'oauth-access-token',
-      oauthProjectId: 'peer-project',
-    });
-
-    assert.equal(resolved.wire, 'gemini');
-    assert.equal(resolved.baseUrl, 'https://cloudcode-pa.googleapis.com');
-    assert.equal(
-      resolved.endpoint,
-      'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
-    );
-    assert.equal(
-      resolved.testEndpoint,
-      'https://cloudcode-pa.googleapis.com/v1internal:generateContent',
-    );
-    assert.equal(resolved.oauthProjectId, 'peer-project');
-    assert.equal(resolved.headers.Authorization, 'Bearer oauth-access-token');
-    assert.equal(resolved.headers['x-goog-user-project'], undefined);
-  });
-
-  it('resolves Qoder through the private API wire without static headers or API key', () => {
-    const resolved = resolveChannel({
-      channelId: 'qoder',
-      authMethod: 'qoder_local_auth',
-      model: 'auto',
-    });
-
-    assert.equal(resolved.wire, 'qoder-private');
-    assert.equal(resolved.endpoint, 'https://api2-v2.qoder.sh/model/v1/chat/completions');
-    assert.deepEqual(resolved.headers, {});
-    assert.equal(resolved.supportsReasoning, false);
-    assert.equal(resolved.descriptor.capabilities.toolUse, false);
-  });
 });
 
 describe('service templates', () => {

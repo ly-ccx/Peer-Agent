@@ -76,7 +76,7 @@ export async function runDesktopVisualReview({ handle, provider, resolvedChannel
         headers: resolvedChannel.headers, model: provider.model, tools: [], effort: 'off',
         supportsReasoning: false, streamId, signal: combined, webContents: { send() {} },
         maxOutputTokens: provider.maxOutputTokens, authMethod: resolvedChannel.authMethod,
-        projectId: resolvedChannel.oauthProjectId }),
+ }),
     });
     combined.throwIfAborted();
     return review.finish(execution.response, { goalPlanStore: review.goalPlanStore, workspacePath: review.workspacePath,
@@ -163,7 +163,6 @@ export async function runPlanVisualVerifier({
       ...provider,
       apiKey: credential.apiKey,
       accountId: credential.accountId,
-      oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
       sessionId: verifierRunId,
     });
     const systemContext = buildSystemContext(visualReview.workspacePath, {

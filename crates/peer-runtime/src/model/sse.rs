@@ -117,31 +117,6 @@ impl ChatStream {
         }
         Ok(())
     }
-    /// Repeated Qoder usage frames are observations of one physical request,
-    /// not additional billable requests. Retain the latest complete snapshot;
-    /// a later partial frame cannot erase already observed known quantities.
-    pub(super) fn qoder_usage(&mut self, raw: &Value) -> Result<(), ModelError> {
-        let observed = super::usage::normalize(wire::Wire::Qoder, raw)?;
-        if !observed.is_null() || self.usage.is_none() {
-            self.usage = Some(raw.clone());
-        }
-        Ok(())
-    }
-    /// Qoder may omit finish_reason, but only an actual terminal SSE event can
-    /// call this seam. JSON/object, IDs and call/result reason validation remain.
-    pub(super) fn qoder_terminal(&mut self) -> Result<(), ModelError> {
-        if self.reason.is_none() {
-            self.reason = Some(
-                if self.calls.is_empty() {
-                    "stop"
-                } else {
-                    "tool_calls"
-                }
-                .into(),
-            );
-        }
-        self.event(b"[DONE]")
-    }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if self.calls.is_empty() && self.text.trim().is_empty() {
             return Err(ModelError::new("model_empty_response"));

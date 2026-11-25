@@ -6,7 +6,6 @@ mod anthropic;
 mod content;
 mod environment;
 mod gemini;
-pub(super) mod qoder;
 mod responses;
 use content::*;
 pub(crate) const REQUEST_BYTES: usize = 2 * 1024 * 1024;
@@ -21,15 +20,6 @@ pub enum Wire {
     Anthropic,
     #[serde(rename = "gemini")]
     Gemini,
-    #[serde(rename = "qoder-private")]
-    Qoder,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum QoderDialect {
-    #[default]
-    Prepared,
-    Legacy,
 }
 fn default_effort() -> String {
     "default".into()
@@ -60,14 +50,6 @@ pub struct GenerationOptions {
     #[serde(default)]
     pub fast_mode: bool,
     pub auth_method: Option<String>,
-    pub project_id: Option<String>,
-    pub user_prompt_id: Option<String>,
-    pub session_id: Option<String>,
-    pub qoder_metadata: Option<Value>,
-    #[serde(default)]
-    pub qoder_dialect: QoderDialect,
-    pub model_option_values: Option<Value>,
-    pub qoder_session_type: Option<String>,
 }
 impl Default for GenerationOptions {
     fn default() -> Self {
@@ -89,7 +71,6 @@ pub fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
         Wire::Responses => responses::encode(input)?,
         Wire::Anthropic => anthropic::encode(input)?,
         Wire::Gemini => gemini::encode(input)?,
-        Wire::Qoder => qoder::encode(input)?,
     };
     check_limit(&body)?;
     Ok(body)
@@ -237,14 +218,6 @@ fn chat(input: &WireInput<'_>) -> Result<Value, ModelError> {
         }
     }
     Ok(body)
-}
-
-pub(crate) fn qoder_context_window(metadata: &Value, values: &Value) -> Option<u64> {
-    let (window, _) = qoder::context(metadata, values);
-    window
-        .as_f64()
-        .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
-        .map(|n| n.floor() as u64)
 }
 
 #[cfg(test)]

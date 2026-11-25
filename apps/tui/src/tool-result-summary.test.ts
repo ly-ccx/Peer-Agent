@@ -58,7 +58,7 @@ describe('tool result summary', () => {
     expect(toggleToolDetails(true)).toBe(false);
   });
 
-  test('presents tools with Qoder-like hierarchy: name, args, status glyph, nested detail', () => {
+  test('presents tools with nested hierarchy: name, args, status glyph, nested detail', () => {
     const presentation = createToolPresentation({
       capabilityId: 'local.shell.exec',
       arguments: { command: 'git status --short' },
