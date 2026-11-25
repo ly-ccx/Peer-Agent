@@ -20,9 +20,9 @@ export function InteractiveDraftPreparation({ session, isZh }: { readonly sessio
   const unavailable = !session.canPrepareDraft(), closed = ['closing', 'closed'].includes(state.phase);
   const readonly = !state.writer || state.phase === 'writer_lost' || closed;
   return <section className="interactive-draft-preparation" aria-label={isZh ? '把条件交回原对话' : 'Return conditions to the original conversation'}>
-    <div className="interactive-toolbar"><button type="button" className="ui-button" disabled={unavailable || busy || readonly || state.composing || !!state.calculationError}
+    <div className="interactive-toolbar"><button type="button" className="ui-button is-compact" disabled={unavailable || busy || readonly || state.composing || !!state.calculationError}
       aria-busy={state.draftPreparation === 'preparing'} onClick={() => { void session.prepareDraft(fields); }}>{isZh ? '将当前条件放入草稿' : 'Add current conditions to draft'}</button>
-      {state.draftPreparation === 'failed' && state.preparationError !== 'followup_input_incomplete' ? <button type="button" className="ui-button" disabled={unavailable || busy || closed}
+      {state.draftPreparation === 'failed' && state.preparationError !== 'followup_input_incomplete' ? <button type="button" className="ui-button is-compact" disabled={unavailable || busy || closed}
         onClick={() => { void session.prepareDraft(); }}>{isZh ? '重试原条件交回' : 'Retry captured conditions'}</button> : null}</div>
     {unavailable ? <p className="interactive-caption">{isZh ? '当前宿主暂不支持条件交回，试算和保存仍可使用。' : 'This host cannot prepare conditions for discussion. Calculation and saving remain available.'}</p>
       : state.draftPreparation === 'preparing' ? <p role="status">{isZh ? '正在将所选条件放入原 Bot 草稿…' : 'Preparing the selected conditions in the original Bot draft…'}</p>
