@@ -25,12 +25,13 @@ function ReadingSurface({ tab, active, isZh }: { readonly tab: ResourceInteracti
     if (tab.navigation) reading.restoreUnvisited(tab.navigation);
   }, [loaded, tab.navigation, reading.restoreUnvisited]);
   useLayoutEffect(() => { if (!active) setReady(false); }, [active]);
+  const windowAction = <OpenResourceWindowButton isZh={isZh} disabled={!active || !ready}
+    label={isZh ? '打开独立视图' : 'Open separate view'} request={() => ({ resource: { kind: 'interactive', reference: tab.reference }, sourceTabId: tab.id,
+      navigation: reading.capture() })} />;
   return <section className="resource-interactive-session">
-    <div className="resource-interactive-actions"><OpenResourceWindowButton isZh={isZh} disabled={!active || !ready}
-      label={isZh ? '打开独立视图' : 'Open separate view'} request={() => ({ resource: { kind: 'interactive', reference: tab.reference }, sourceTabId: tab.id,
-        navigation: reading.capture() })} /></div>
     <div className="resource-interactive-body" ref={reading.ref} onScroll={reading.onScroll}>
       <InteractiveResource reference={tab.reference} api={window.peerAgent?.interactiveResults} active={active} isZh={isZh}
+        headerExtra={windowAction}
         onReady={contentReady} onUnavailable={contentUnavailable} onMetadata={metadata} onOpenReference={workspace.openInteractive} />
     </div>
   </section>;
