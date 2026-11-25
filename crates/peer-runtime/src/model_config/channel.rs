@@ -120,16 +120,6 @@ fn headers(
             .unwrap()
             .iter()
             .any(|v| v == &normalized)
-            || (wire == Wire::Qoder
-                && (normalized.starts_with("cosy-")
-                    || matches!(
-                        normalized.as_str(),
-                        "login-version"
-                            | "x-model-key"
-                            | "x-model-source"
-                            | "x-request-id"
-                            | "x-session-id"
-                    )))
             || matches!(
                 normalized.as_str(),
                 "host"
@@ -195,9 +185,7 @@ fn descriptor(flat: &Value) -> Result<(&str, &'static Value), ModelError> {
 }
 fn auth_method<'a>(flat: &'a Value, d: &Value) -> Result<&'a str, ModelError> {
     let auth = text(flat, "authMethod").unwrap_or("api_key");
-    if (auth != "api_key"
-        && !matches!(auth, "qoder_local_auth" | "local_cli")
-        && crate::model_oauth::provider(auth).is_none())
+    if (auth != "api_key" && crate::model_oauth::provider(auth).is_none())
         || d["authMethods"][auth].is_null()
     {
         return Err(ModelError::new("native_model_auth_unsupported"));
@@ -249,23 +237,15 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         base.into()
     };
     let endpoint = match wire {
-        Wire::Qoder => format!(
-            "https://api3.qoder.sh{}",
-            crate::qoder::authentication::INFER_PATH
-        ),
         Wire::Chat => format!("{base}/chat/completions"),
         Wire::Responses => format!("{base}/responses"),
         Wire::Anthropic => format!("{base}/v1/messages"),
         Wire::Gemini => {
-            if auth == "oauth_google" {
-                format!("{base}/v1internal:streamGenerateContent?alt=sse")
-            } else {
-                let model = model.strip_prefix("models/").unwrap_or(model);
-                if model.is_empty() || model.contains(['?', '#', '\\', '/', '%']) {
-                    return Err(ModelError::new("model_selection_invalid"));
-                }
-                format!("{base}/models/{model}:streamGenerateContent?alt=sse")
+            let model = model.strip_prefix("models/").unwrap_or(model);
+            if model.is_empty() || model.contains(['?', '#', '\\', '/', '%']) {
+                return Err(ModelError::new("model_selection_invalid"));
             }
+            format!("{base}/models/{model}:streamGenerateContent?alt=sse")
         }
     };
     let mut reasoning = if is_go {
@@ -306,14 +286,8 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         ),
         max_output_tokens: flat["maxOutputTokens"].as_f64(),
         fast_mode: selected["fastMode"] == true,
-        auth_method: (oauth.is_some() || wire == Wire::Qoder).then(|| auth.to_owned()),
-        model_option_values: (wire == Wire::Qoder).then(|| flat["modelOptionValues"].clone()),
+        auth_method: oauth.is_some().then(|| auth.to_owned()),
         omit_max_output_tokens: matches!(auth, "oauth_chatgpt" | "oauth_grok"),
-        project_id: if auth == "oauth_google" {
-            text(flat, "oauthProjectId").map(str::to_owned)
-        } else {
-            None
-        },
         ..GenerationOptions::default()
     };
     Ok(Channel {

@@ -1,4 +1,4 @@
-//! Read-only OAuth subscription quota monitor (ChatGPT / Grok / Gemini).
+//! Read-only OAuth subscription quota monitor (ChatGPT / Grok).
 //!
 //! Shares the native `ModelOAuth` credential store and pinned `Network` transport
 //! (system proxy + trusted roots) without spawning any Node/Bun process.
@@ -41,7 +41,6 @@ struct QuotaTarget {
     auth_method: String,
     group_id: String,
     model_entry_id: String,
-    project_id: Option<String>,
 }
 
 fn find_quota_target(home: &Path, provider_id: &str) -> Option<QuotaTarget> {
@@ -57,8 +56,7 @@ fn find_quota_target(home: &Path, provider_id: &str) -> Option<QuotaTarget> {
         c["id"].as_str() == Some(provider_id) || c["groupId"].as_str() == Some(provider_id)
     })?;
     let auth_method = text(channel, "authMethod")?;
-    if !matches!(auth_method, "oauth_chatgpt" | "oauth_grok" | "oauth_google")
-        || channel["oauthConfigured"] != true
+    if !matches!(auth_method, "oauth_chatgpt" | "oauth_grok") || channel["oauthConfigured"] != true
     {
         return None;
     }
@@ -80,14 +78,10 @@ fn find_quota_target(home: &Path, provider_id: &str) -> Option<QuotaTarget> {
             })
         })?;
     let model_entry_id = text(matched_model, "id")?.to_owned();
-    let project_id = text(matched_model, "oauthProjectId")
-        .or_else(|| text(channel, "oauthProjectId"))
-        .map(str::to_owned);
     Some(QuotaTarget {
         auth_method: auth_method.to_owned(),
         group_id,
         model_entry_id,
-        project_id,
     })
 }
 
@@ -175,55 +169,6 @@ pub async fn fetch_subscription_quota(
             .await?;
             parse_grok_grpc_web(provider_id, &bytes)
         }
-        "oauth_google" => {
-            let headers = vec![
-                (
-                    "Authorization".to_owned(),
-                    format!("Bearer {}", access.secret.expose()),
-                ),
-                ("Content-Type".to_owned(), "application/json".to_owned()),
-                ("Accept".to_owned(), "application/json".to_owned()),
-                ("User-Agent".to_owned(), "PeerAgent/1.0".to_owned()),
-            ];
-            let mut project_id = target.project_id.or(oauth.project);
-            if project_id.is_none() {
-                let load_body = json!({
-                    "metadata": {
-                        "ideType": "IDE_UNSPECIFIED",
-                        "platform": "PLATFORM_UNSPECIFIED",
-                        "pluginType": "GEMINI"
-                    }
-                });
-                if let Some(load_bytes) = request_bytes(
-                    &network,
-                    Method::POST,
-                    "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-                    &headers,
-                    serde_json::to_vec(&load_body).ok(),
-                    cancel,
-                )
-                .await
-                    && let Some(load_val) = decode_bounded_json(&load_bytes)
-                {
-                    project_id = extract_gemini_project(&load_val);
-                }
-            }
-            let body = match project_id {
-                Some(pid) => json!({ "project": pid }),
-                None => json!({}),
-            };
-            let bytes = request_bytes(
-                &network,
-                Method::POST,
-                "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-                &headers,
-                serde_json::to_vec(&body).ok(),
-                cancel,
-            )
-            .await?;
-            let val = decode_bounded_json(&bytes)?;
-            parse_gemini_quota(provider_id, &val)
-        }
         _ => None,
     }
 }
@@ -298,32 +243,6 @@ fn extract_reset(v: &Value) -> Option<String> {
         .map(|n| n.floor().to_string())
 }
 
-fn extract_gemini_project(val: &Value) -> Option<String> {
-    for key in [
-        "cloudaicompanionProject",
-        "cloudAiCompanionProject",
-        "projectId",
-    ] {
-        let candidate = &val[key];
-        if let Some(s) = candidate.as_str().map(str::trim).filter(|s| !s.is_empty()) {
-            return Some(s.to_owned());
-        }
-        if let Some(obj) = candidate.as_object() {
-            for inner in ["id", "projectId", "name"] {
-                if let Some(s) = obj
-                    .get(inner)
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    return Some(s.to_owned());
-                }
-            }
-        }
-    }
-    None
-}
-
 pub(crate) fn parse_chatgpt_usage(
     provider_id: &str,
     payload: &Value,
@@ -360,44 +279,6 @@ pub(crate) fn parse_chatgpt_usage(
         used_percent: used,
         plan_label,
         resets_at,
-    })
-}
-
-pub(crate) fn parse_gemini_quota(
-    provider_id: &str,
-    payload: &Value,
-) -> Option<SubscriptionQuotaSnapshot> {
-    let buckets = payload["buckets"].as_array()?;
-    let mut min_remaining: Option<u8> = None;
-    let mut best_reset: Option<String> = None;
-    for bucket in buckets {
-        let Some(frac) = bucket
-            .get("remainingFraction")
-            .or_else(|| bucket.get("remaining_fraction"))
-            .and_then(Value::as_f64)
-        else {
-            continue;
-        };
-        let scaled = if frac <= 1.5 { frac * 100.0 } else { frac };
-        let Some(rem) = clamp_percent(scaled) else {
-            continue;
-        };
-        if min_remaining.is_none_or(|cur| rem < cur) {
-            min_remaining = Some(rem);
-            best_reset = bucket
-                .get("resetTime")
-                .or_else(|| bucket.get("reset_time"))
-                .and_then(extract_reset);
-        }
-    }
-    let remaining = min_remaining?;
-    Some(SubscriptionQuotaSnapshot {
-        provider_id: provider_id.to_owned(),
-        auth_method: "oauth_google".to_owned(),
-        remaining_percent: remaining,
-        used_percent: 100u8.saturating_sub(remaining),
-        plan_label: None,
-        resets_at: best_reset,
     })
 }
 
@@ -535,7 +416,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_chatgpt_gemini_and_grok_subscription_quotas() {
+    fn parses_chatgpt_and_grok_subscription_quotas() {
         let chatgpt = json!({
             "plan_type": "plus",
             "rate_limit": {
@@ -546,16 +427,6 @@ mod tests {
         assert_eq!(snap.remaining_percent, 72);
         assert_eq!(snap.used_percent, 28);
         assert_eq!(snap.plan_label.as_deref(), Some("plus"));
-
-        let gemini = json!({
-            "buckets": [
-                { "modelId": "gemini-pro", "remainingFraction": 0.42 },
-                { "modelId": "gemini-flash", "remainingFraction": 0.9 }
-            ]
-        });
-        let gem = parse_gemini_quota("p-gem", &gemini).unwrap();
-        assert_eq!(gem.remaining_percent, 42);
-        assert_eq!(gem.used_percent, 58);
 
         // gRPC-web frame carrying field #1 float 35.0
         let mut msg = vec![(1 << 3) | 5];

@@ -1,12 +1,9 @@
+import { retiredModelConfigCode } from '@peer-agent/runtime-node/storage';
 import { startBrowserLogin, ensureFreshTokens } from './llm-oauth/openai-oauth.mjs';
-import { startGoogleBrowserLogin, ensureFreshGoogleTokens } from './llm-oauth/google-oauth.mjs';
 import { startGrokOAuthLogin, ensureFreshGrokTokens } from './llm-oauth/grok-oauth.mjs';
 import { listSubscriptionModels, listModelCatalogForChannel } from './provider-adapters/openai-model-catalog.mjs';
 import { listGrokBuildModels } from './provider-adapters/grok-build-model-catalog.mjs';
-import { listGeminiModels, preferGeminiModel } from './provider-adapters/gemini-model-catalog.mjs';
-import { listQoderModels } from './provider-adapters/qoder-model-catalog.mjs';
 import { resolveChannel, resolveModelCatalogRequestConfig } from './provider-channels.mjs';
-import { resolveGeminiCodeAssistProjectId } from './subscription-quota.mjs';
 
 function assertFunction(value, label) {
   if (typeof value !== 'function') throw new TypeError(`${label} must be a function`);
@@ -15,20 +12,14 @@ function assertFunction(value, label) {
 
 const DEFAULT_OPERATIONS = Object.freeze({
   startBrowserLogin,
-  startGoogleBrowserLogin,
   startGrokOAuthLogin,
   ensureFreshTokens,
-  ensureFreshGoogleTokens,
   ensureFreshGrokTokens,
   listSubscriptionModels,
   listModelCatalogForChannel,
   listGrokBuildModels,
-  listGeminiModels,
-  preferGeminiModel,
-  listQoderModels,
   resolveChannel,
   resolveModelCatalogRequestConfig,
-  resolveGeminiCodeAssistProjectId,
 });
 
 export function createProviderAccessApplicationService({
@@ -47,8 +38,6 @@ export function createProviderAccessApplicationService({
   sendOAuthEvent,
   recordBaseline,
   wait = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs)),
-  now = () => new Date().toISOString(),
-  reportProjectResolutionError = () => {},
   operations = {},
 } = {}) {
   const ports = {
@@ -67,11 +56,6 @@ export function createProviderAccessApplicationService({
     sendOAuthEvent: assertFunction(sendOAuthEvent, 'sendOAuthEvent'),
     recordBaseline: assertFunction(recordBaseline, 'recordBaseline'),
     wait: assertFunction(wait, 'wait'),
-    now: assertFunction(now, 'now'),
-    reportProjectResolutionError: assertFunction(
-      reportProjectResolutionError,
-      'reportProjectResolutionError',
-    ),
   };
   const ops = Object.freeze({ ...DEFAULT_OPERATIONS, ...operations });
   let activeOAuthLogin = null;
@@ -95,7 +79,7 @@ export function createProviderAccessApplicationService({
     if (!id && !draft) throw new Error('provider id or draft required');
     const existing = id ? providerById(id) : null;
     const authMethod = draft?.authMethod || existing?.authMethod || 'oauth_chatgpt';
-    if (!['oauth_chatgpt', 'oauth_google', 'oauth_grok'].includes(authMethod)) {
+    if ((!draft && !existing) || retiredModelConfigCode(draft) || !['oauth_chatgpt', 'oauth_grok'].includes(authMethod)) {
       throw new Error(`unsupported_oauth_method:${authMethod}`);
     }
     if (activeOAuthLogin) {
@@ -103,9 +87,7 @@ export function createProviderAccessApplicationService({
       await ports.wait(200);
     }
 
-    const session = authMethod === 'oauth_google'
-      ? ops.startGoogleBrowserLogin()
-      : authMethod === 'oauth_grok'
+    const session = authMethod === 'oauth_grok'
         ? ops.startGrokOAuthLogin({
           fetchImpl: (url, init) => ports.fetchWithRecovery(url, init, {
             provider: 'grok',
@@ -146,32 +128,6 @@ export function createProviderAccessApplicationService({
             supportsReasoning: preferred.supportsReasoning,
           });
         }
-      } else if (authMethod === 'oauth_google') {
-        const catalog = await ops.listGeminiModels(tokens);
-        models = catalog.models;
-        const preferred = ops.preferGeminiModel(models);
-        let oauthProjectId = null;
-        try {
-          oauthProjectId = await ops.resolveGeminiCodeAssistProjectId({
-            accessToken: tokens.access,
-            fetchImpl: (url, init) => ports.fetchWithRecovery(url, init),
-          });
-        } catch (error) {
-          ports.reportProjectResolutionError(error);
-        }
-        if (preferred?.id || oauthProjectId) {
-          provider = ports.updateProvider(targetId, {
-            ...(preferred?.id ? {
-              model: preferred.id,
-              modelLabel: preferred.label || preferred.id,
-              contextWindow: preferred.contextWindow,
-              maxOutputTokens: preferred.maxOutputTokens,
-              metadataSource: catalog.source || 'builtin',
-              metadataSyncedAt: ports.now(),
-            } : {}),
-            ...(oauthProjectId ? { oauthProjectId } : {}),
-          }) || provider;
-        }
       }
       if (provider) ports.recordBaseline('oauth_login', provider);
       return { success: true, provider, models };
@@ -205,14 +161,6 @@ export function createProviderAccessApplicationService({
     const credential = ports.getCredential(id);
     const provider = providerById(id);
     const authMethod = credential?.authMethod || provider?.authMethod || 'oauth_chatgpt';
-    if (
-      authMethod === 'qoder_local_auth'
-      || authMethod === 'local_cli'
-      || provider?.channelId === 'qoder'
-    ) {
-      const { models, source, error } = await ops.listQoderModels();
-      return { success: true, models, source, error };
-    }
     if (authMethod === 'api_key') {
       const requestConfig = ports.getApiKeyRequestConfig(id);
       if (!requestConfig) return { success: false, models: [], error: 'api_key_not_configured' };
@@ -228,12 +176,9 @@ export function createProviderAccessApplicationService({
     const tokens = credential?.tokens || null;
     if (!tokens?.access) return { success: false, models: [], error: 'oauth_not_logged_in' };
     try {
-      const ensureFresh = authMethod === 'oauth_google' ? ops.ensureFreshGoogleTokens
-        : authMethod === 'oauth_grok' ? ops.ensureFreshGrokTokens : ops.ensureFreshTokens;
+      const ensureFresh = authMethod === 'oauth_grok' ? ops.ensureFreshGrokTokens : ops.ensureFreshTokens;
       const { tokens: fresh } = await ports.refreshOAuthTokens(id, tokens, ensureFresh);
-      const { models, source, error } = authMethod === 'oauth_google'
-        ? await ops.listGeminiModels(fresh)
-        : authMethod === 'oauth_grok'
+      const { models, source, error } = authMethod === 'oauth_grok'
           ? await ops.listGrokBuildModels(fresh.access, { baseUrl: provider?.baseUrl })
           : await ops.listSubscriptionModels(fresh);
       return { success: true, models, source, error };
@@ -244,12 +189,9 @@ export function createProviderAccessApplicationService({
 
   async function fetchModels(config) {
     if (!config) return { success: false, models: [], error: 'config_required' };
+    const retired = retiredModelConfigCode(config);
+    if (retired) return { success: false, models: [], error: retired };
     try {
-      const authMethod = config.authMethod || 'api_key';
-      if (authMethod === 'qoder_local_auth' || authMethod === 'local_cli' || config.channelId === 'qoder') {
-        const { models, source, error } = await ops.listQoderModels();
-        return { success: true, models, source, ...(error ? { error } : {}) };
-      }
       const resolved = ops.resolveChannel({
         channelId: config.channelId,
         wireOverride: config.wireOverride,

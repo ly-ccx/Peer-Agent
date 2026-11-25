@@ -108,7 +108,6 @@ pub(crate) struct ModelOAuth {
     state: tokio::sync::Mutex<String>,
     cas: bool,
     account: Option<String>,
-    pub project: Option<String>,
 }
 impl ModelOAuth {
     pub(crate) async fn load(
@@ -170,7 +169,6 @@ impl ModelOAuth {
             state: tokio::sync::Mutex::new(stamp(&secret, revision.as_deref())),
             cas,
             account: token.account(),
-            project: token.project(),
         })
     }
     pub(crate) async fn access(&self, cancel: &CancellationToken) -> Result<Access, ModelError> {
@@ -319,7 +317,7 @@ impl ModelOAuth {
                 .map_err(|_| ModelError::new("model_configuration_changed"))?;
         }
         self.binding.validate()?;
-        if token.account() != self.account || token.project() != self.project {
+        if token.account() != self.account {
             return Err(ModelError::new("model_oauth_binding_changed"));
         }
         let account = token.account();

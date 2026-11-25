@@ -77,19 +77,5 @@ pub(super) fn encode(i: &WireInput<'_>) -> Result<Value, ModelError> {
     if !system.is_empty() {
         body["systemInstruction"] = json!({"parts":[{"text":system.join("\n\n")}]});
     }
-    if i.options.auth_method.as_deref() == Some("oauth_google") {
-        if let Some(s) = i.options.session_id.as_ref().filter(|s| !s.is_empty()) {
-            body["session_id"] = s.clone().into();
-        }
-        let mut wrapped =
-            json!({"model":i.model.strip_prefix("models/").unwrap_or(i.model),"request":body});
-        if let Some(s) = i.options.project_id.as_ref().filter(|s| !s.is_empty()) {
-            wrapped["project"] = s.clone().into();
-        }
-        if let Some(s) = i.options.user_prompt_id.as_ref().filter(|s| !s.is_empty()) {
-            wrapped["user_prompt_id"] = s.clone().into();
-        }
-        return Ok(wrapped);
-    }
     Ok(body)
 }

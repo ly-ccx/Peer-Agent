@@ -66,7 +66,7 @@ export async function countAnthropicCanonicalRequest({
 }
 
 /**
- * Gemini API-key exact-count Adapter. OAuth Code Assist does not expose the
+ * Gemini API-key exact-count Adapter. The generation request uses a separate
  * public `models.countTokens` contract, so callers must declare it as
  * observed-only instead of routing it here.
  * @param {Record<string, any> & { fetchImpl: Function }} options

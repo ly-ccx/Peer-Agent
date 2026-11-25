@@ -5,7 +5,6 @@ pub(super) enum Access {
     Anonymous,
     Key(Secret),
     OAuth(Box<crate::model_oauth::ModelOAuth>),
-    Qoder(Box<crate::qoder::account::Account>),
 }
 impl Access {
     pub fn from_key(key: Option<Secret>) -> Self {
@@ -15,18 +14,8 @@ impl Access {
         &self,
         headers: &mut HeaderMap,
         wire: wire::Wire,
-        prepared: Option<(&Value, &[u8])>,
         cancel: &CancellationToken,
     ) -> Result<(), ModelError> {
-        if let Self::Qoder(account) = self {
-            let (body, bytes) =
-                prepared.ok_or(ModelError::new("qoder_prepared_request_required"))?;
-            headers.extend(account.headers(body, bytes, cancel)?);
-            return Ok(());
-        }
-        if wire == wire::Wire::Qoder {
-            return Err(ModelError::new("qoder_account_required"));
-        }
         let oauth = match self {
             Self::OAuth(oauth) => Some(oauth.access(cancel).await?),
             _ => None,

@@ -50,6 +50,9 @@ fn rows(value: &Value) -> Result<Vec<Value>, ModelError> {
         .as_array()
         .ok_or(ModelError::new("model_config_invalid"))?
     {
+        if crate::model_config::check_retired_model(channel).is_err() {
+            continue;
+        }
         if let Some(id) = group(channel) {
             let mut c = channel.clone();
             c["id"] = json!(id);
@@ -89,14 +92,17 @@ pub(crate) fn project(value: &Value) -> Result<Vec<ModelCatalogEntry>, ModelErro
         if !row.is_object() {
             return Err(ModelError::new("model_config_invalid"));
         }
+        if crate::model_config::check_retired_model(&row).is_err() {
+            continue;
+        }
         let Some(model) = text(&row, "model") else {
             continue;
         };
         let Some(id) = group(&row) else { continue };
         let ready = match text(&row, "authMethod").unwrap_or("api_key") {
-            "qoder_local_auth" => true,
-            "oauth_chatgpt" | "oauth_google" | "oauth_grok" => row["oauthConfigured"] == true,
-            _ => row["apiKeyConfigured"] == true,
+            "oauth_chatgpt" | "oauth_grok" => row["oauthConfigured"] == true,
+            "api_key" => row["apiKeyConfigured"] == true,
+            _ => false,
         };
         if row["enabled"] == false || !ready {
             continue;

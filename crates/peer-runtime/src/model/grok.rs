@@ -135,7 +135,7 @@ impl Compatibility {
             // In particular this rechecks actual credentials/config after metadata wait,
             // and again before the one permitted pre-inference compatibility resend.
             model
-                .request_builder(model.endpoint.clone(), "text/event-stream", cancel, None)
+                .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
                 .await?
                 .header("x-grok-client-version", version)
                 .body(body.to_vec())

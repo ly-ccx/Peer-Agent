@@ -35,7 +35,6 @@ export function contextAccountUsageSummary(quota: LlmSubscriptionQuota | undefin
   const lines: string[] = [];
   if (!quota) return [loading ? (zh ? '账户用量查询中…' : 'Loading account usage…') : (zh ? '账户用量暂不可用' : 'Account usage unavailable')];
   if (quota.balances?.length) lines.push(`${zh ? '剩余余额' : 'Balance remaining'} ${quota.balances.map(b => usageMoney(b.total, b.currency, zh)).join(' · ')}`);
-  else if (Number.isFinite(quota.availableCredits)) lines.push(`${zh ? '剩余额度' : 'Credits remaining'} ${usageNumber(quota.availableCredits, zh)}`);
   const windows = usageWindows(quota);
   const isPeriod = (id: string) => /week|month|周|月/i.test(id);
   const primary = windows.find(w => !isPeriod(`${w.id} ${w.label ?? ''}`));

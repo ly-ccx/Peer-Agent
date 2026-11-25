@@ -143,41 +143,10 @@ test('collectUsageDay reads rows from the request log', () => {
   assert.equal(snap.hours[5].totalTokens, 42);
 });
 
-test('labelIndex resolves configured modelLabel for UUID provider ids (qoder style)', () => {
-  const rows = [
-    row({ day: NOW, hour: 9, modelProviderId: '2c04f83f-5573-4a37-af7a-2a9a3da8bf7c', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 100, outputTokens: 20, estimatedCostUsd: 0.01 }),
-    row({ day: NOW, hour: 10, modelProviderId: '4cbe42eb-ddec-43d9-8969-a9acf381230d', model: 'gm51model', providerName: 'Qoder CLI', inputTokens: 200, outputTokens: 50, estimatedCostUsd: 0.02 }),
-    // 索引未命中的记录回退到原始 model 字段。
-    row({ day: NOW, hour: 11, modelProviderId: '00000000-0000-0000-0000-000000000000', model: 'legacy-model', providerName: 'Qoder CLI', inputTokens: 7, outputTokens: 3, estimatedCostUsd: null }),
-  ];
-  const labelIndex = new Map([
-    ['2c04f83f-5573-4a37-af7a-2a9a3da8bf7c', 'Cantus'],
-    ['4cbe42eb-ddec-43d9-8969-a9acf381230d', 'GLM-5.2'],
-  ]);
-  const snap = buildUsageDaySnapshot({ rows, date: '2026-07-19', now: NOW, labelIndex });
-  assert.equal(snap.totals.modelCount, 3);
-
-  const cantus = snap.byModel.find((m) => m.key === '2c04f83f-5573-4a37-af7a-2a9a3da8bf7c');
-  assert.ok(cantus);
-  assert.equal(cantus.label, 'Cantus');
-  assert.equal(cantus.providerName, 'Qoder CLI');
-  assert.equal(cantus.totalTokens, 120);
-
-  const glm = snap.byModel.find((m) => m.key === '4cbe42eb-ddec-43d9-8969-a9acf381230d');
-  assert.ok(glm);
-  assert.equal(glm.label, 'GLM-5.2');
-  assert.equal(glm.totalTokens, 250);
-
-  // 未命中回退：优先 row.model（内部 id），而不是 UUID。
-  const legacy = snap.byModel.find((m) => m.key === '00000000-0000-0000-0000-000000000000');
-  assert.ok(legacy);
-  assert.equal(legacy.label, 'legacy-model');
-});
-
 test('collectUsageDay builds labelIndex from llmConfigStore providers', () => {
   const usageRequestLog = {
     readAll: () => [
-      row({ day: NOW, hour: 6, modelProviderId: 'uuid-1', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 30, outputTokens: 5, estimatedCostUsd: 0.005 }),
+      row({ day: NOW, hour: 6, modelProviderId: 'uuid-1', model: 'cmodel', providerName: 'Fixture Provider', inputTokens: 30, outputTokens: 5, estimatedCostUsd: 0.005 }),
     ],
   };
   const llmConfigStore = {
@@ -189,5 +158,5 @@ test('collectUsageDay builds labelIndex from llmConfigStore providers', () => {
   const snap = collectUsageDay({ date: '2026-07-19', now: NOW, usageRequestLog, llmConfigStore });
   assert.equal(snap.byModel.length, 1);
   assert.equal(snap.byModel[0].label, 'Cantus');
-  assert.equal(snap.byModel[0].providerName, 'Qoder CLI');
+  assert.equal(snap.byModel[0].providerName, 'Fixture Provider');
 });

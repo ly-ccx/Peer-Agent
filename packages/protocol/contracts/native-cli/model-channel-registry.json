@@ -663,9 +663,6 @@
       "authMethods": {
         "api_key": {
           "wire": "gemini"
-        },
-        "oauth_google": {
-          "wire": "gemini"
         }
       },
       "headers": {},
@@ -728,40 +725,6 @@
         "vision": true,
         "toolUse": true,
         "temperature": true
-      }
-    },
-    {
-      "id": "qoder",
-      "defaultWire": "qoder-private",
-      "allowedWires": [
-        "qoder-private"
-      ],
-      "defaults": {
-        "baseUrl": "https://api2-v2.qoder.sh/model/v1",
-        "model": "auto"
-      },
-      "authMethods": {
-        "qoder_local_auth": {
-          "wire": "qoder-private"
-        },
-        "local_cli": {
-          "wire": "qoder-private"
-        }
-      },
-      "headers": {},
-      "capabilities": {
-        "reasoning": {
-          "supported": false,
-          "paramStyle": "none",
-          "effortLevels": [
-            "off"
-          ],
-          "defaultEffort": "off"
-        },
-        "promptCache": false,
-        "vision": false,
-        "toolUse": false,
-        "temperature": false
       }
     }
   ],

@@ -175,7 +175,7 @@ test('buildUsageStatsSnapshot resolves id / groupId / groupId::model shapes', ()
       {
         id: '4cbe42eb-ddec-43d9-8969-a9acf381230d',
         groupId: '4cbe42eb-ddec-43d9-8969-a9acf381230d',
-        name: 'Qoder CLI',
+        name: 'Fixture Provider',
         model: 'ultimate',
         modelLabel: 'Ultimate',
         inputPrice: 0,
@@ -227,9 +227,9 @@ test('buildUsageStatsSnapshot resolves id / groupId / groupId::model shapes', ()
   assert.equal(byGroupDefault.providerName, 'ChatGPT 订阅');
   assert.equal(byGroupDefault.conversationCount, 1);
 
-  const qoder = snapshot.byProvider.find((row) => row.key === '4cbe42eb-ddec-43d9-8969-a9acf381230d');
-  assert.ok(qoder);
-  assert.equal(qoder.label, 'Qoder CLI');
+  const fixture = snapshot.byProvider.find((row) => row.key === '4cbe42eb-ddec-43d9-8969-a9acf381230d');
+  assert.ok(fixture);
+  assert.equal(fixture.label, 'Fixture Provider');
   const ultimate = snapshot.byModel.find(
     (row) => row.key === '4cbe42eb-ddec-43d9-8969-a9acf381230d::ultimate',
   );
@@ -424,12 +424,12 @@ test('aggregateRequestUsage merges bare-uuid rows into one channel row via provi
   // 历史快照 modelProviderId 是裸 uuid（模型条目 id），同一渠道多个模型条目
   // 必须归一到渠道 groupId，而不是每个 uuid 各占一行。
   const providers = [
-    { id: 'uuid-ultimate', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'ultimate' },
-    { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel' },
+    { id: 'uuid-ultimate', groupId: 'fixture-group', name: 'Fixture Provider', model: 'ultimate' },
+    { id: 'uuid-cmodel', groupId: 'fixture-group', name: 'Fixture Provider', model: 'cmodel' },
   ];
   const requests = [
-    { modelProviderId: 'uuid-ultimate', model: 'ultimate', providerName: 'Qoder CLI', inputTokens: 100, outputTokens: 10 },
-    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 200, outputTokens: 20 },
+    { modelProviderId: 'uuid-ultimate', model: 'ultimate', providerName: 'Fixture Provider', inputTokens: 100, outputTokens: 10 },
+    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Fixture Provider', inputTokens: 200, outputTokens: 20 },
   ];
 
   const { byProvider, byModel } = aggregateRequestUsage(requests, {
@@ -437,7 +437,7 @@ test('aggregateRequestUsage merges bare-uuid rows into one channel row via provi
   });
 
   assert.equal(byProvider.size, 1, '同一渠道只出一行');
-  const row = byProvider.get('qoder-cli');
+  const row = byProvider.get('fixture-group');
   assert.ok(row, 'provider 行以渠道 groupId 为键');
   assert.equal(row.inputTokens, 300);
   assert.equal(row.outputTokens, 30);
@@ -449,12 +449,12 @@ test('aggregateRequestUsage merges bare-uuid rows into one channel row via provi
 
 test('aggregateRequestUsage prefers written groupId over provider index (方案 B)', () => {
   const requests = [
-    { modelProviderId: 'uuid-x', groupId: 'qoder-cli', model: 'ultimate', inputTokens: 10 },
-    { modelProviderId: 'uuid-y', groupId: 'qoder-cli', model: 'cmodel', inputTokens: 20 },
+    { modelProviderId: 'uuid-x', groupId: 'fixture-group', model: 'ultimate', inputTokens: 10 },
+    { modelProviderId: 'uuid-y', groupId: 'fixture-group', model: 'cmodel', inputTokens: 20 },
   ];
   const { byProvider } = aggregateRequestUsage(requests);
   assert.equal(byProvider.size, 1);
-  assert.equal(byProvider.get('qoder-cli').inputTokens, 30);
+  assert.equal(byProvider.get('fixture-group').inputTokens, 30);
 });
 
 test('aggregateRequestUsage falls back to raw id when uuid not in current providers', () => {
@@ -469,40 +469,14 @@ test('aggregateRequestUsage falls back to raw id when uuid not in current provid
   assert.ok(byProvider.get('legacy-uuid'), '未匹配索引时保留原 key');
 });
 
-test('buildUsageStatsSnapshot collapses Qoder CLI uuid rows into a single provider row', () => {
-  const snapshot = buildUsageStatsSnapshot({
-    generatedAt: '2026-08-03T00:00:00.000Z',
-    providers: [
-      { id: 'uuid-ultimate', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'ultimate' },
-      { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel' },
-      { id: 'gemini-entry', groupId: 'gemini-oauth', name: 'Gemini OAuth', model: 'gemini-3.1-flash-lite', inputPrice: 1 },
-    ],
-    conversations: [],
-    requests: [
-      { modelProviderId: 'uuid-ultimate', model: 'ultimate', providerName: 'Qoder CLI', inputTokens: 205_000_000, outputTokens: 900_000 },
-      { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 9_000, outputTokens: 191 },
-      { modelProviderId: 'gemini-oauth::gemini-3.1-flash-lite', model: 'gemini-3.1-flash-lite', providerName: 'Gemini OAuth', inputTokens: 19_000, outputTokens: 762 },
-    ],
-  });
-
-  assert.equal(snapshot.notes.scope, 'request_snapshot');
-  assert.equal(snapshot.byProvider.length, 2, '两个渠道各一行');
-  const qoder = snapshot.byProvider.find((row) => row.key === 'qoder-cli');
-  assert.ok(qoder, 'Qoder CLI 收敛为单行');
-  assert.equal(qoder.inputTokens, 205_009_000);
-  assert.equal(qoder.requestCount, 2);
-  const gemini = snapshot.byProvider.find((row) => row.key === 'gemini-oauth');
-  assert.ok(gemini, 'Gemini OAuth 复合 id 仍归到渠道');
-});
-
 test('aggregateRequestUsage labels models via provider index modelLabel (方案 A label)', () => {
   const providers = [
-    { id: 'uuid-cmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'cmodel', modelLabel: 'Cantus' },
-    { id: 'uuid-kmodel', groupId: 'qoder-cli', name: 'Qoder CLI', model: 'kmodel_latest', modelLabel: 'Kimi-K3' },
+    { id: 'uuid-cmodel', groupId: 'fixture-group', name: 'Fixture Provider', model: 'cmodel', modelLabel: 'Cantus' },
+    { id: 'uuid-kmodel', groupId: 'fixture-group', name: 'Fixture Provider', model: 'kmodel_latest', modelLabel: 'Kimi-K3' },
   ];
   const requests = [
-    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 100 },
-    { modelProviderId: 'uuid-kmodel', model: 'kmodel_latest', providerName: 'Qoder CLI', inputTokens: 50 },
+    { modelProviderId: 'uuid-cmodel', model: 'cmodel', providerName: 'Fixture Provider', inputTokens: 100 },
+    { modelProviderId: 'uuid-kmodel', model: 'kmodel_latest', providerName: 'Fixture Provider', inputTokens: 50 },
   ];
 
   const { byModel } = aggregateRequestUsage(requests, {
@@ -518,7 +492,7 @@ test('aggregateRequestUsage labels models via provider index modelLabel (方案 
 test('aggregateRequestUsage falls back to recorded model id when no label matches', () => {
   // 渠道已删 / 条目无 modelLabel 时，保留快照里的原始 id，不留空 label。
   const requests = [
-    { modelProviderId: 'gone-uuid', model: 'cmodel', providerName: 'Qoder CLI', inputTokens: 10 },
+    { modelProviderId: 'gone-uuid', model: 'cmodel', providerName: 'Fixture Provider', inputTokens: 10 },
   ];
   const { byModel } = aggregateRequestUsage(requests, {
     providerIndex: buildProviderIndex([]),

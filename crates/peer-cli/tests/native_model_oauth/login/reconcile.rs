@@ -20,58 +20,57 @@ fn result(out: &Output) -> Value {
 }
 #[test]
 fn reconciliation_repairs_only_known_hints_and_is_readonly_when_already_synced() {
-    for auth in ["oauth_chatgpt", "oauth_google"] {
-        let idp = Idp::new(body(auth), "200 OK", false, false);
-        let model = Server::new(vec![]);
-        let f = Fixture::new(&model);
-        setup(&f, auth, &idp, &model);
-        let file = f.root.path().join("llm-providers.json");
-        let mut config = get(&file);
-        config["futureRoot"] = json!({"preserved":[1,2]});
-        config["channels"][0]["futureChannel"] = json!({"kept":true});
-        config["models"][0]["futureModel"] = json!({"kept":true});
-        config["models"][0]["oauthAccountId"] = json!("stale-override");
-        config["models"][0]["oauthExpires"] = json!(3);
-        put(&file, &config);
-        let original = bytes(&f, "llm-providers.json");
-        let vault_before = bytes(&f, "credentials.vault.json");
-        let history_before = f.history();
-        let token = raw_token(&f);
-        assert_eq!(state(&f)["status"], "refresh_required");
-        assert_eq!(bytes(&f, "llm-providers.json"), original);
-        let mut list = models(&f);
-        assert!(list.output().unwrap().stdout.is_empty());
-        let out = cli(&f, "reconcile").output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert_eq!(
-            result(&out),
-            json!({"status":"metadata_reconciled","channelId":"provider","metadataStatus":"synced"})
-        );
-        assert_hints(&f, &original, Some(&token));
-        assert_eq!(bytes(&f, "credentials.vault.json"), vault_before);
-        let store = peer_store::ModelConfigStore::new(f.root.path());
-        let revision = store.read().unwrap().source_revision;
-        let synced = bytes(&f, "llm-providers.json");
-        assert!(cli(&f, "reconcile").output().unwrap().status.success());
-        assert_eq!(store.read().unwrap().source_revision, revision);
-        assert_eq!(bytes(&f, "llm-providers.json"), synced);
-        let mut list = models(&f);
-        let out = list.output().unwrap();
-        assert!(out.status.success());
-        assert!(String::from_utf8_lossy(&out.stdout).contains("provider\t"));
-        vault(&f, "delete", None);
-        let absent = bytes(&f, "credentials.vault.json");
-        assert!(cli(&f, "reconcile").output().unwrap().status.success());
-        assert_hints(&f, &original, None);
-        assert_eq!(bytes(&f, "credentials.vault.json"), absent);
-        assert!(idp.requests.lock().unwrap().is_empty());
-        assert!(model.requests.lock().unwrap().is_empty());
-        assert_eq!(f.history(), history_before);
-    }
+    let auth = "oauth_chatgpt";
+    let idp = Idp::new(body(auth), "200 OK", false, false);
+    let model = Server::new(vec![]);
+    let f = Fixture::new(&model);
+    setup(&f, auth, &idp, &model);
+    let file = f.root.path().join("llm-providers.json");
+    let mut config = get(&file);
+    config["futureRoot"] = json!({"preserved":[1,2]});
+    config["channels"][0]["futureChannel"] = json!({"kept":true});
+    config["models"][0]["futureModel"] = json!({"kept":true});
+    config["models"][0]["oauthAccountId"] = json!("stale-override");
+    config["models"][0]["oauthExpires"] = json!(3);
+    put(&file, &config);
+    let original = bytes(&f, "llm-providers.json");
+    let vault_before = bytes(&f, "credentials.vault.json");
+    let history_before = f.history();
+    let token = raw_token(&f);
+    assert_eq!(state(&f)["status"], "refresh_required");
+    assert_eq!(bytes(&f, "llm-providers.json"), original);
+    let mut list = models(&f);
+    assert!(list.output().unwrap().stdout.is_empty());
+    let out = cli(&f, "reconcile").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        result(&out),
+        json!({"status":"metadata_reconciled","channelId":"provider","metadataStatus":"synced"})
+    );
+    assert_hints(&f, &original, Some(&token));
+    assert_eq!(bytes(&f, "credentials.vault.json"), vault_before);
+    let store = peer_store::ModelConfigStore::new(f.root.path());
+    let revision = store.read().unwrap().source_revision;
+    let synced = bytes(&f, "llm-providers.json");
+    assert!(cli(&f, "reconcile").output().unwrap().status.success());
+    assert_eq!(store.read().unwrap().source_revision, revision);
+    assert_eq!(bytes(&f, "llm-providers.json"), synced);
+    let mut list = models(&f);
+    let out = list.output().unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("provider\t"));
+    vault(&f, "delete", None);
+    let absent = bytes(&f, "credentials.vault.json");
+    assert!(cli(&f, "reconcile").output().unwrap().status.success());
+    assert_hints(&f, &original, None);
+    assert_eq!(bytes(&f, "credentials.vault.json"), absent);
+    assert!(idp.requests.lock().unwrap().is_empty());
+    assert!(model.requests.lock().unwrap().is_empty());
+    assert_eq!(f.history(), history_before);
 }
 #[test]
 fn unknown_pending_corrupt_wrong_provider_and_unreadable_credentials_are_preserved() {

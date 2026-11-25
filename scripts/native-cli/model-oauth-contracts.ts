@@ -3,10 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
 import {startBrowserLogin} from '../../apps/desktop/electron/main/llm-oauth/openai-oauth.mjs';
-import {startGoogleBrowserLogin} from '../../packages/runtime-node/src/llm-oauth/google-oauth.mjs';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {refreshChatGptOAuthTokens} from '../../packages/runtime-node/src/chatgpt-oauth.ts';
-import {refreshGoogleAccessToken} from '../../packages/runtime-node/src/llm-oauth/google-oauth.mjs';
 import {resolveChannel} from '../../apps/desktop/electron/main/provider-channels.mjs';
 import {createChatGptResponsesProvider} from '../../packages/runtime-node/src/chatgpt-responses-provider.ts';
 import {SUBSCRIPTION_CATALOG,resolveSubscriptionContextWindow} from '../../apps/desktop/electron/main/provider-adapters/openai-model-catalog.mjs';
@@ -20,7 +18,7 @@ const providers:any[]=[]; const cases:any[]=[];const requests:any[]=[];const con
 // HTTP host. Registered localhost ports are captured, never bound on this host.
 async function loginContract(auth:string,start:any) {
  const original=http.createServer;let callback:any;let authorization='';let request:any;let port=0;let session:any;
- const claims=auth==='oauth_google'?{email:'fixture@example.invalid'}:{'https://api.openai.com/auth':{chatgpt_account_id:'fixture-account'}};
+ const claims={'https://api.openai.com/auth':{chatgpt_account_id:'fixture-account'}};
  const response={access_token:'synthetic-login-access',refresh_token:'synthetic-login-refresh',token_type:'Bearer',expires_in:7200,id_token:`e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.fixture`};
  try {
   (http as any).createServer=(handler:any)=>{callback=handler;return {on(){return this;},listen(p:number,_host:string,ready:()=>void){port=p;queueMicrotask(ready);return this;},close(){}};};
@@ -41,17 +39,16 @@ async function loginContract(auth:string,start:any) {
 try {
  for(const [authMethod,channelId,path,refresh] of [
   ['oauth_chatgpt','openai','../../packages/runtime-node/src/chatgpt-oauth.ts',refreshChatGptOAuthTokens],
-  ['oauth_google','google-ai','../../packages/runtime-node/src/llm-oauth/google-oauth.mjs',refreshGoogleAccessToken],
  ] as const) {
   const source=readFileSync(new URL(path,import.meta.url),'utf8');
   const resolved=resolveChannel({channelId,authMethod,model:'fixture-model',baseUrl:'https://untrusted.invalid',apiKey:'synthetic-access',accountId:'fixture-account'});
-  providers.push({authMethod,channelId,wire:resolved.wire,baseUrl:resolved.baseUrl,tokenUrl:literal(source,'TOKEN_URL'),clientId:literal(source,authMethod==='oauth_google'?'DEFAULT_CLIENT_ID':'CLIENT_ID'),...(authMethod==='oauth_google'?{clientSecret:literal(source,'DEFAULT_CLIENT_SECRET')}:{})});
+  providers.push({authMethod,channelId,wire:resolved.wire,baseUrl:resolved.baseUrl,tokenUrl:literal(source,'TOKEN_URL'),clientId:literal(source,'CLIENT_ID')});
   for(const variant of ['rotate','retain','default-expiry']) {
    const tokens={access:'synthetic-old-access',refresh:'synthetic-old-refresh',expires:now-1,accountId:'fixture-account'};
    const response:any={access_token:'synthetic-new-access',token_type:'Bearer',...(variant!=='default-expiry'?{expires_in:7200}:{}),...(variant==='rotate'?{refresh_token:'synthetic-new-refresh'}:{})};
    let captured:any;
    const fetchImpl:any=async(url:any,options:any)=>{captured={url:String(url),method:options.method,headers:options.headers,form:Object.fromEntries(new URLSearchParams(options.body))};return new Response(JSON.stringify(response),{headers:{'content-type':'application/json'}});};
-   const next=authMethod==='oauth_google'?await refresh(tokens,{fetchImpl}):await refresh(tokens,fetchImpl);
+   const next=await refresh(tokens,fetchImpl);
    cases.push({authMethod,variant,tokens,response,request:captured,expected:next});
   }
  }
@@ -68,7 +65,7 @@ try {
   await p.stream({model:SUBSCRIPTION_CATALOG[0].id,messages,tools,reasoningEffort:effort==='off'?undefined:effort,fastMode:effort==='max',signal:new AbortController().signal} as any);
   requests.push({effort,input:{model:SUBSCRIPTION_CATALOG[0].id,system:'shared system',messages:messages.slice(1),tools:tools.map(f=>({type:'function',function:f})),options:{authMethod:'oauth_chatgpt',effort,supportsReasoning:true,omitMaxOutputTokens:true,maxOutputTokens:16384,fastMode:effort==='max'}},expected:captured});
  }
- for(const [index,start] of [startBrowserLogin,startGoogleBrowserLogin].entries()) {
+ for(const [index,start] of [startBrowserLogin].entries()) {
   const captured=await loginContract(providers[index].authMethod,start);providers[index].login=captured.login;loginCases.push(captured.fixture);
  }
  providers[0].headers={originator:requests[0].expected.headers.originator};
@@ -97,7 +94,7 @@ try {
   await p.stream({model:'grok-4.5',messages,tools,maxOutputTokens:16384,reasoningEffort:effort==='off'?undefined:effort,fastMode:effort==='max',signal:new AbortController().signal});
   requests.push({effort,input:{model:'grok-4.5',system:'shared system',messages:messages.slice(1),tools:tools.map(f=>({type:'function',function:f})),options:{authMethod:'oauth_grok',effort,supportsReasoning:true,omitMaxOutputTokens:true,maxOutputTokens:16384,fastMode:effort==='max'}},expected:captured});
  }
- providers[2].headers={...GROK_SUBSCRIPTION_HEADERS,originator:requests.at(-1).expected.headers.originator};
+ providers.at(-1).headers={...GROK_SUBSCRIPTION_HEADERS,originator:requests.at(-1).expected.headers.originator};
  for(const model of SUBSCRIPTION_CATALOG) for(const values of [{},{contextTier:1000000},{contextTier:400000},{contextTier:'1000000'},{contextTier:false},{contextTier:'unknown'},{unadmitted:{system:'bad'}}]) contextCases.push({model:model.id,values,expected:resolveSubscriptionContextWindow(model,values)});
 }finally {Date.now=clock;}
 for(const [name,data] of Object.entries({'model-oauth':{schemaVersion:1,now,providers,cases,requests,contextCases,loginCases,authorizationPrompts:[{authorizationUrl:'https://auth.example/authorize'},{authorizationUrl:'https://auth.x.ai/activate',userCode:'TEST-CODE',expiresAt:'2026-11-17T00:15:00Z'}],accountStates:['not_logged_in','authenticated','refresh_required','recovery_required']},'model-oauth-registry':{schemaVersion:1,providers,subscriptionCatalog:SUBSCRIPTION_CATALOG}})) {

@@ -438,7 +438,7 @@ export interface WorkspaceProject {
 }
 
 export type LlmProviderType = 'openai' | 'anthropic';
-export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini' | 'qoder-private';
+export type LlmWireProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini';
 export type LlmChannelId = string;
 export type LlmReasoningParamStyle =
   | 'openai-effort'
@@ -589,12 +589,8 @@ export interface LlmChannelDescriptor {
 // - api_key: 用户手填 API Key,经 safeStorage 加密存储。
 // - oauth_chatgpt: ChatGPT 订阅账号 OAuth 登录,access/refresh token 存 main 进程,
 //   订阅模型走 OpenAI Responses 传输。
-// - oauth_google: Google OAuth 登录,access/refresh token 存 main 进程,
-//   Gemini 模型走 Google Generative Language API 传输。
 // - oauth_grok: Grok Build 订阅账号设备码登录,token 存 main 进程。
-// - qoder_local_auth: 复用本机 Qoder 登录态/token,不在 Peer Agent 内保存远端密钥。
-// - local_cli: 旧配置兼容值,读取时迁移到 qoder_local_auth。
-export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_google' | 'oauth_grok' | 'qoder_local_auth' | 'local_cli';
+export type LlmAuthMethod = 'api_key' | 'oauth_chatgpt' | 'oauth_grok';
 
 // 订阅(OAuth)登录态投影。token 永不回传 renderer,仅以状态 + 账号标识表达。
 export type LlmOAuthConnectionStatus = 'connected' | 'expired' | 'disconnected';
@@ -630,7 +626,6 @@ export interface LlmSubscriptionQuotaWindow {
 }
 
 /**
- * GPT / Gemini / Grok / Qoder 订阅额度快照。
  * success=false 时用 status/error 表达未登录、过期或拉取失败，UI 应降级展示。
  */
 export interface LlmSubscriptionQuota {
@@ -647,23 +642,16 @@ export interface LlmSubscriptionQuota {
   readonly status?: string;
   readonly providerId?: string;
   readonly authMethod?: LlmAuthMethod;
-  readonly provider?: 'chatgpt' | 'gemini' | 'grok' | 'qoder' | string;
+  readonly provider?: 'chatgpt' | 'grok';
   readonly planLabel?: string;
   readonly remainingPercent?: number;
   readonly usedPercent?: number;
   readonly resetsAt?: string;
   readonly windows?: readonly LlmSubscriptionQuotaWindow[];
   readonly accountId?: string;
-  readonly projectId?: string;
   readonly fetchedAt?: string;
   readonly cached?: boolean;
   readonly error?: string;
-  // Qoder 信用点数 / 资源包绝对值（可选；百分比字段仍保留供通用 UI）。
-  readonly availableCredits?: number;
-  readonly planCreditsUsed?: number;
-  readonly planCreditsTotal?: number;
-  readonly orgPackageUsed?: number;
-  readonly orgPackageCap?: number;
 }
 
 export interface LlmProviderConfig {
@@ -711,7 +699,6 @@ export interface LlmProviderConfig {
   readonly reasoningEffortLevels?: readonly string[];
   /** 渠道默认思考强度（如 Grok 为 high）。UI 切模型时用于落到正确默认档。 */
   readonly reasoningDefaultEffort?: string;
-  readonly oauthProjectId?: string;
   readonly customHeaders?: Readonly<Record<string, string>>;
   readonly customHeadersInvalid?: boolean;
   /**
@@ -791,7 +778,6 @@ export interface LlmProviderGroupConfig {
   readonly name: string;
   readonly baseUrl: string;
   readonly createdAt: string;
-  readonly oauthProjectId?: string;
   readonly models: readonly LlmModelConfig[];
 }
 
@@ -878,9 +864,6 @@ export interface LlmModelInfo {
   readonly longContextInputPrice?: number;
   readonly longContextCacheReadPrice?: number;
   readonly longContextOutputPrice?: number;
-  // Qoder CLI 积分倍率：当前结算倍率 / 原价倍率（如 0.25x ← 0.50x 表示折扣中）。
-  readonly priceFactor?: number;
-  readonly originalPriceFactor?: number;
 }
 
 // 列模型结果。source 标明数据来源:
@@ -901,7 +884,6 @@ export interface LlmModelListResult {
 export interface LlmModelFetchRequest {
   readonly channelId?: string;
   readonly wireOverride?: string;
-  /** Qoder 私有接口等本机鉴权渠道需要显式传入，避免 fetch 路径被默认当成 api_key。 */
   readonly authMethod?: LlmAuthMethod;
   readonly baseUrl?: string;
   readonly apiKey?: string;

@@ -12,7 +12,6 @@ describe('createGeminiProvider', () => {
     let sent: Record<string, unknown> | undefined;
     const provider = createGeminiProvider({
       providerId: 'gemini-cred',
-      authMethod: 'api_key',
       getApiKey: async () => 'AIza-test',
       countInputTokens: async (args) => {
         counted = args;
@@ -64,9 +63,7 @@ describe('createGeminiProvider', () => {
     const calls: Record<string, unknown>[] = [];
     const provider = createGeminiProvider({
       providerId: 'gemini-cred',
-      authMethod: 'oauth_google',
       getApiKey: async () => 'ya29.test-token',
-      getProjectId: async () => 'proj-123',
       sendStream: async (args) => {
         calls.push(args);
         return {
@@ -105,10 +102,7 @@ describe('createGeminiProvider', () => {
     const args = calls[0]!;
     expect(args.apiKey).toBe('ya29.test-token');
     expect(args.model).toBe('models/gemini-2.5-pro');
-    expect(args.authMethod).toBe('oauth_google');
-    expect(args.projectId).toBe('proj-123');
-    // Must use Code Assist host by default for OAuth — never .../v1beta/openai.
-    expect(String(args.baseUrl)).toBe('https://cloudcode-pa.googleapis.com');
+    expect(String(args.baseUrl)).toBe('https://generativelanguage.googleapis.com/v1beta');
     expect(String(args.baseUrl)).not.toContain('/openai');
     expect(JSON.stringify(args)).not.toContain('/chat/completions');
     expect(JSON.stringify(args)).not.toContain('v1beta/openai');
@@ -124,7 +118,6 @@ describe('createGeminiProvider', () => {
   test('maps function-style tool calls into ModelToolCall', async () => {
     const provider = createGeminiProvider({
       providerId: 'gemini-cred',
-      authMethod: 'api_key',
       baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
       getApiKey: async () => 'AIza-test',
       sendStream: async () => ({
@@ -152,7 +145,6 @@ describe('createGeminiProvider', () => {
   test('surfaces HTTP failures instead of falling through to openai-compatible', async () => {
     const provider = createGeminiProvider({
       providerId: 'gemini-cred',
-      authMethod: 'oauth_google',
       getApiKey: async () => 'ya29.bad',
       sendStream: async () => ({
         ok: false,
@@ -173,7 +165,7 @@ describe('createGeminiProvider', () => {
 // Exercise the legacy constructor through the real provider entrance.
 test('HTTP context errors remain recognizable without forwarding upstream text', async () => {
   const provider = createGeminiProvider({
-    providerId: 'legacy-fixture', authMethod: 'api_key', getApiKey: async () => 'fixture-key',
+    providerId: 'legacy-fixture', getApiKey: async () => 'fixture-key',
     sendStream: async () => ({ok:false,status:400,errorText:JSON.stringify({error:{code:'context_length_exceeded',message:'PRIVATE_ECHO'}})}),
   });
   const error = await provider.stream({model:'fixture',messages:[]}).catch(error => error);

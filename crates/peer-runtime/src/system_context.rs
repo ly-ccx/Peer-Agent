@@ -50,7 +50,6 @@ fn runtime_sections(workspace: &str, provider: &str, model: &str) -> Vec<Value> 
     let rules = match provider.as_str() {
         "openai" => "Provider family: OpenAI-compatible chat.\nUse native function tool calls when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.".into(),
         "anthropic" => "Provider family: Anthropic-compatible messages.\nUse native tool_use blocks when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.".into(),
-        "qoder" => "Provider family: Qoder private API.\nUse native function tool calls when a tool is needed. Do not print tool-call markup or provider wire-format details as text.\nDo not write textual [Tool call] or [Tool result] claims.".into(),
         _ => format!("Provider family: {}.\nUse only structured tool calls exposed by the runtime. Do not write textual [Tool call] or [Tool result] claims.",if provider.is_empty(){"unknown"}else{&provider}),
     };
     sections.push(section("runtime.provider","L2_RUNTIME",10,"Provider target",format!("Provider target: {provider} / {model}.\n{rules}\nProvider-specific request formatting is handled by the runtime encoder; do not describe provider wire-format details in the answer."),json!({"id":"runtime.provider","kind":"provider-selection","provider":provider,"model":model}),"runtime"));

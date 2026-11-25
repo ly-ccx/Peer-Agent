@@ -103,13 +103,13 @@ test('append persists explicit channel groupId (写入层方案 B)', () => {
   const record = log.append({
     id: 'req-grouped',
     modelProviderId: '7f2c1a3e-条目-uuid',
-    groupId: 'qoder-cli',
+    groupId: 'fixture-group',
     model: 'ultimate',
     usage: { inputTokens: 10 },
   });
-  assert.equal(record.groupId, 'qoder-cli');
+  assert.equal(record.groupId, 'fixture-group');
   const saved = JSON.parse(readFileSync(logFile, 'utf8').trim().split('\n').at(-1));
-  assert.equal(saved.groupId, 'qoder-cli');
+  assert.equal(saved.groupId, 'fixture-group');
 });
 
 test('append derives groupId from composite modelProviderId when not given', () => {
@@ -118,11 +118,11 @@ test('append derives groupId from composite modelProviderId when not given', () 
   const log = createUsageRequestLog({ logFile });
   const record = log.append({
     id: 'req-composite',
-    modelProviderId: 'gemini-oauth::gemini-3.1-flash-lite',
+    modelProviderId: 'gemini-api::gemini-3.1-flash-lite',
     model: 'gemini-3.1-flash-lite',
     usage: { inputTokens: 10 },
   });
-  assert.equal(record.groupId, 'gemini-oauth');
+  assert.equal(record.groupId, 'gemini-api');
 });
 
 test('append leaves groupId null for bare uuid (留给聚合层用 provider 索引归组)', () => {

@@ -62,7 +62,7 @@ const TOOL_CALL_UNRESOLVED_PLACEHOLDER =
 
 // OpenAI 风格工具调用配对归一化。
 //
-// OpenAI/DeepSeek/qoder 协议要求：每条 role:'tool' 必须紧跟在声明了对应
+// OpenAI/DeepSeek 协议要求：每条 role:'tool' 必须紧跟在声明了对应
 // tool_call id 的 assistant 消息之后；反之，assistant 声明的每个 tool_call
 // 也必须有一条配对的 tool 响应。任何一侧缺失都会被 provider 拒绝，报
 // invalid_request_error: "Messages with role 'tool' must be a response to a

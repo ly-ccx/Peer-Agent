@@ -9,18 +9,14 @@
 import {
   countAnthropicCanonicalRequest,
   countGeminiCanonicalRequest,
-  ensureFreshGoogleTokens,
   ensureFreshGrokTokens,
-  loadQoderAccessToken,
   sendAnthropicMessagesStream,
   sendGeminiStream,
-  sendQoderPrivateStream,
   startGrokOAuthLogin,
   type ChatGptOAuthTokens,
 } from '@peer-agent/runtime-node';
 
 import { createTuiProviderFetch } from './provider-transport.ts';
-import type { RecoveringFetchOptions } from './recovering-fetch.ts';
 
 export type DesktopStreamArgs = Record<string, unknown>;
 
@@ -33,25 +29,6 @@ function getTuiProviderFetch(): ReturnType<typeof createTuiProviderFetch> {
 
 function resolveProviderFetch(value: unknown): typeof fetch {
   return typeof value === 'function' ? value as typeof fetch : getTuiProviderFetch();
-}
-
-export async function loadQoderAccessTokenFromDesktop(): Promise<string> {
-  return loadQoderAccessToken();
-}
-
-export async function sendQoderPrivateStreamFromDesktop(
-  args: DesktopStreamArgs,
-): Promise<Record<string, unknown>> {
-  return sendQoderPrivateStream({
-    ...args,
-    fetchWithRecovery: (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-      recovery: Omit<RecoveringFetchOptions, 'fetchImpl'> = {},
-    ) => createTuiProviderFetch({
-      recovery,
-    })(input, init),
-  }) as Promise<Record<string, unknown>>;
 }
 
 export async function sendAnthropicMessagesStreamFromDesktop(
@@ -89,20 +66,6 @@ export async function countGeminiRequestFromDesktop(
     fetchImpl: resolveProviderFetch(args.fetchImpl),
   });
 }
-
-export async function ensureFreshGoogleTokensFromDesktop(
-  tokens: ChatGptOAuthTokens,
-  options?: { fetchImpl?: typeof fetch },
-): Promise<ChatGptOAuthTokens> {
-  const fresh = await ensureFreshGoogleTokens(tokens, {
-    ...options,
-    fetchImpl: options?.fetchImpl ?? getTuiProviderFetch(),
-  });
-  return fresh.tokens;
-}
-
-/** Code Assist base used by Desktop for oauth_google (not generativelanguage openai shim). */
-export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
 
 export async function ensureFreshGrokTokensFromDesktop(
   tokens: ChatGptOAuthTokens,

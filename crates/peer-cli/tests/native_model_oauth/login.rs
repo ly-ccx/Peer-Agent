@@ -20,7 +20,6 @@ fn setup(f: &Fixture, auth: &str, idp: &Idp, model: &Server) -> Vec<u8> {
     let path = f.root.path().join("llm-providers.json");
     let mut value = get(&path);
     value["channels"][0]["oauthConfigured"] = json!(false);
-    value["channels"][0]["oauthProjectId"] = json!("fixture-project");
     value["models"][0]["oauthConfigured"] = json!(false);
     put(&path, &value);
     put(
@@ -228,65 +227,61 @@ fn assert_no_secrets(out: &Output, form: &Value) {
 }
 #[test]
 fn native_browser_login_then_real_tool_loop_uses_vault_instead_of_stale_configuration_hints() {
-    for (auth, wire) in [
-        ("oauth_chatgpt", "openai-responses"),
-        ("oauth_google", "gemini"),
-    ] {
-        let idp = Idp::new(body(auth), "200 OK", false, false);
-        let model = Server::new(vec![stream(wire, "tool"), stream(wire, "text")]);
-        let f = Fixture::new(&model);
-        let source = setup(&f, auth, &idp, &model);
-        vault(&f, "delete", None);
-        assert_eq!(state(&f)["status"], "not_logged_in");
-        let login = Login::start(&f);
-        let challenge = login
-            .url
-            .query_pairs()
-            .find(|(k, _)| k == "code_challenge")
-            .unwrap()
-            .1
-            .into_owned();
-        assert!(
-            login
-                .callback("state=forged&code=forged")
-                .starts_with("HTTP/1.1 400")
-        );
-        assert!(idp.requests.lock().unwrap().is_empty());
-        login.approve();
-        let out = login.finish();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let forms = idp.requests.lock().unwrap();
-        assert_eq!(forms.len(), 1);
-        assert_eq!(forms[0]["grant_type"], "authorization_code");
-        assert_eq!(forms[0]["redirect_uri"], login_redirect_from_output(&out));
-        let verifier = forms[0]["code_verifier"].as_str().unwrap();
-        assert_eq!(verifier.len(), 43);
-        assert_eq!(
-            URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
-            challenge
-        );
-        assert_no_secrets(&out, &forms[0]);
-        drop(forms);
-        assert_eq!(state(&f)["status"], "authenticated");
-        assert_eq!(raw_token(&f)["access"], "synthetic-login-access");
-        let out = command(&f, "p").output().unwrap();
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert_eq!(model.requests.lock().unwrap().len(), 2);
-        let history = f.history();
-        let tool = history.iter().find(|v| v["segments"].is_array()).unwrap();
-        assert_eq!(tool["segments"][0]["result"]["status"], "success");
-        assert!(tool["segments"][0]["result"]["evidence"].is_object());
-        assert_hints(&f, &source, Some(&raw_token(&f)));
-        assert_eq!(idp.requests.lock().unwrap().len(), 1);
-    }
+    let (auth, wire) = ("oauth_chatgpt", "openai-responses");
+    let idp = Idp::new(body(auth), "200 OK", false, false);
+    let model = Server::new(vec![stream(wire, "tool"), stream(wire, "text")]);
+    let f = Fixture::new(&model);
+    let source = setup(&f, auth, &idp, &model);
+    vault(&f, "delete", None);
+    assert_eq!(state(&f)["status"], "not_logged_in");
+    let login = Login::start(&f);
+    let challenge = login
+        .url
+        .query_pairs()
+        .find(|(k, _)| k == "code_challenge")
+        .unwrap()
+        .1
+        .into_owned();
+    assert!(
+        login
+            .callback("state=forged&code=forged")
+            .starts_with("HTTP/1.1 400")
+    );
+    assert!(idp.requests.lock().unwrap().is_empty());
+    login.approve();
+    let out = login.finish();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let forms = idp.requests.lock().unwrap();
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0]["grant_type"], "authorization_code");
+    assert_eq!(forms[0]["redirect_uri"], login_redirect_from_output(&out));
+    let verifier = forms[0]["code_verifier"].as_str().unwrap();
+    assert_eq!(verifier.len(), 43);
+    assert_eq!(
+        URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes())),
+        challenge
+    );
+    assert_no_secrets(&out, &forms[0]);
+    drop(forms);
+    assert_eq!(state(&f)["status"], "authenticated");
+    assert_eq!(raw_token(&f)["access"], "synthetic-login-access");
+    let out = command(&f, "p").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(model.requests.lock().unwrap().len(), 2);
+    let history = f.history();
+    let tool = history.iter().find(|v| v["segments"].is_array()).unwrap();
+    assert_eq!(tool["segments"][0]["result"]["status"], "success");
+    assert!(tool["segments"][0]["result"]["evidence"].is_object());
+    assert_hints(&f, &source, Some(&raw_token(&f)));
+    assert_eq!(idp.requests.lock().unwrap().len(), 1);
 }
 #[test]
 fn explicit_reauthorization_replaces_unknown_refresh_state_and_logout_is_idempotent() {

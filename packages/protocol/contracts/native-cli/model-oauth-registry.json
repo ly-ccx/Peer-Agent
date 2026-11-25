@@ -22,24 +22,6 @@
       "accountHeader": "chatgpt-account-id"
     },
     {
-      "authMethod": "oauth_google",
-      "channelId": "google-ai",
-      "wire": "gemini",
-      "baseUrl": "https://cloudcode-pa.googleapis.com",
-      "tokenUrl": "https://oauth2.googleapis.com/token",
-      "clientId": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-      "clientSecret": "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",
-      "login": {
-        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
-        "redirectUri": "http://localhost:1456/auth/google/callback",
-        "scope": "openid email profile https://www.googleapis.com/auth/cloud-platform",
-        "parameters": {
-          "access_type": "offline",
-          "prompt": "consent"
-        }
-      }
-    },
-    {
       "authMethod": "oauth_grok",
       "channelId": "grok",
       "wire": "openai-responses",

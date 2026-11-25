@@ -94,6 +94,50 @@ test('a normal configuration mutation retains unknown root fields', () => withSt
   assert.deepEqual(JSON.parse(readFileSync(configFile, 'utf8')).future, { preserved: [1, 'yes'] });
 }));
 
+test('retired model config is hidden, rejected and preserved alongside an API key channel', () => withStore(async ({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const openai = store.addProvider({ provider: 'openai', model: 'fixture', apiKey: 'synthetic-key' });
+  const state = JSON.parse(readFileSync(configFile, 'utf8'));
+  const local = { id: 'old-local', channelId: 'qoder', authMethod: 'qoder_local_auth' };
+  const subscription = { id: 'old-subscription', channelId: 'google-ai', authMethod: 'oauth_google' };
+  const legacyModels = [
+    { id: 'stale-local', groupId: local.id, model: 'legacy-local', enabled: true, isDefault: true },
+    { id: 'stale-subscription', groupId: subscription.id, model: 'legacy-subscription', enabled: true },
+  ];
+  state.channels.push(local, subscription);
+  state.models.push(...legacyModels);
+  const original = JSON.stringify(state);
+  writeFileSync(configFile, original);
+
+  assert.deepEqual(store.listProviders().map(model => model.id), [openai.id]);
+  assert.deepEqual(store.listGroups().map(model => model.id), [openai.id]);
+  assert.equal(store.getDecryptedApiKey(openai.id), 'synthetic-key');
+  assert.equal(store.getCredential('stale-subscription'), null);
+  assert.equal(store.getDecryptedApiKey('stale-local'), null);
+  assert.equal((await store.testConnection('stale-local')).error, 'unsupported_provider');
+  assert.equal((await store.testConnection('stale-subscription')).error, 'unsupported_auth_method');
+  assert.throws(() => store.addProvider({ channelId: 'google-ai', authMethod: 'oauth_google' }), { code: 'unsupported_auth_method' });
+  assert.throws(() => store.updateProvider('stale-local', { name: 'rename' }), { code: 'unsupported_provider' });
+  assert.throws(() => store.removeGroup(subscription.id), { code: 'unsupported_auth_method' });
+  assert.equal(readFileSync(configFile, 'utf8'), original);
+
+  store.updateProvider(openai.id, { name: 'Current channel' });
+  const updated = JSON.parse(readFileSync(configFile, 'utf8'));
+  assert.deepEqual(updated.channels.filter(channel => channel.id !== openai.groupId), [local, subscription]);
+  assert.deepEqual(updated.models.filter(model => model.id !== openai.id), legacyModels);
+}));
+
+test('flat history does not hide a supported Gemini API key in the same group', () => withStore(({ configFile }) => {
+  const old = { id: 'old', groupId: 'shared', provider: 'gemini', channelId: 'google-ai', model: 'retired',
+    authMethod: 'oauth_google', enabled: true, oauthTokens: { access: 'unused' } };
+  const active = { id: 'current', groupId: 'shared', provider: 'gemini', channelId: 'google-ai', model: 'gemini-2.5-flash',
+    authMethod: 'api_key', enabled: true, isDefault: true };
+  writeFileSync(configFile, JSON.stringify([active, old]));
+  const store = createLlmConfigStore({ configFile, legacySecretDecryptor() { assert.fail('accessed a retired credential'); } });
+  assert.deepEqual(store.listProviders().map(model => [model.id, model.authMethod]), [['current', 'api_key']]);
+  assert.deepEqual(JSON.parse(readFileSync(configFile, 'utf8')).models.find(model => model.id === old.id), old);
+}));
+
 test('a late connection diagnostic cannot overwrite a changed configuration or hold the writer lock during HTTP', () => withStore(async ({ configFile }) => {
   let release, started;
   const ready = new Promise(resolve => { started = resolve; });
@@ -527,31 +571,6 @@ test('Grok official channel wins over stale low/medium/high effort cache', () =>
   assert.deepEqual(persisted.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
 }));
 
-test('Google OAuth records migrate away from the openai display name', () => withStore(({ configFile }) => {
-  writeFileSync(configFile, JSON.stringify([
-    {
-      id: 'google-oauth',
-      provider: 'openai',
-      authMethod: 'oauth_google',
-      name: 'openai',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-2.0-flash',
-      enabled: true,
-      isDefault: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    },
-  ], null, 2));
-
-  const store = createLlmConfigStore({ configFile });
-  const [provider] = store.listProviders();
-  assert.equal(provider.name, 'Gemini OAuth');
-  assert.equal(provider.channelId, 'google-ai');
-  assert.equal(provider.authMethod, 'oauth_google');
-
-  const [persisted] = readPersistedModels(configFile);
-  assert.equal(persisted.name, 'Gemini OAuth');
-  assert.equal(persisted.channelId, 'google-ai');
-}));
 
 test('legacy provider entries migrate to channel fields without losing stored settings', () => withStore(({ configFile, credentialSecrets }) => {
   writeFileSync(configFile, JSON.stringify([
@@ -713,14 +732,14 @@ test('supportsPromptCaching falls back to channel capability when the model reco
         createdAt: '2026-01-01T00:00:00.000Z',
       },
       {
-        // Qoder 渠道明确声明 promptCache: false，模型条目缺失缓存字段时应保持 false。
+        // Google AI 渠道明确声明 promptCache: false，模型条目缺失缓存字段时应保持 false。
         id: 'q-group',
         groupId: 'q-group',
         provider: 'openai',
-        channelId: 'qoder',
-        authMethod: 'qoder_local_auth',
-        name: 'Qoder CLI',
-        baseUrl: 'https://api2-v2.qoder.sh/model/v1',
+        channelId: 'google-ai',
+        authMethod: 'api_key',
+        name: 'Google AI',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
         apiKeyConfigured: false,
         createdAt: '2026-01-01T00:00:00.000Z',
       },
@@ -736,11 +755,11 @@ test('supportsPromptCaching falls back to channel capability when the model reco
         metadataSource: 'models.dev',
         supportsPromptCaching: null,
       },
-      // Qoder：渠道不支持缓存，模型条目未声明 → 保持 false。
+      // Google AI：渠道不支持缓存，模型条目未声明 → 保持 false。
       {
         id: 'q-model',
         groupId: 'q-group',
-        model: 'qoder/deepseek-chat',
+        model: 'gemini-2.5-flash',
         enabled: true,
         metadataSource: 'remote',
         supportsPromptCaching: null,
@@ -751,7 +770,7 @@ test('supportsPromptCaching falls back to channel capability when the model reco
   const store = createLlmConfigStore({ configFile });
   const views = store.listProviders();
   const ds = views.find((p) => p.model === 'deepseek-v4-flash');
-  const q = views.find((p) => p.model === 'qoder/deepseek-chat');
+  const q = views.find((p) => p.model === 'gemini-2.5-flash');
 
   // 渠道支持缓存 → 模型条目缺失时回填为 true，使渲染层门控 (=== true) 命中。
   assert.equal(ds.supportsPromptCaching, true);
@@ -842,283 +861,7 @@ test('manual provider creation and updates persist reasoning effort maps', () =>
   assert.deepEqual(persisted.reasoningEffortMap, { medium: 'high', xhigh: 'max' });
 }));
 
-test('Gemini subscription can be added without manual OAuth client configuration', () => withStore(({ configFile }) => {
-  const store = createLlmConfigStore({ configFile });
-  const provider = store.addProvider({
-    provider: 'openai',
-    channelId: 'google-ai',
-    authMethod: 'oauth_google',
-    name: 'openai',
-    model: 'gemini-2.0-flash',
-  });
 
-  assert.equal(provider.channelId, 'google-ai');
-  assert.equal(provider.authMethod, 'oauth_google');
-  assert.equal(provider.name, 'Gemini OAuth');
-  assert.equal(Object.hasOwn(provider, 'oauthClientId'), false);
-  assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
-
-  const [persisted] = readPersistedModels(configFile);
-  assert.equal(persisted.name, 'Gemini OAuth');
-}));
-
-test('legacy Gemini OAuth client fields are discarded while the provider remains usable', () => withStore(({ configFile }) => {
-  writeFileSync(configFile, JSON.stringify([
-    {
-      id: 'legacy-gemini-oauth',
-      provider: 'openai',
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      name: 'Gemini OAuth',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-2.0-flash',
-      apiKey: { encrypted: false, data: '' },
-      oauthTokens: { encrypted: false, data: '' },
-      oauthClientId: 'google-client-id',
-      oauthClientSecret: { encrypted: false, data: 'google-client-secret' },
-      oauthProjectId: 'my-project',
-      enabled: true,
-      isDefault: true,
-    },
-  ], null, 2));
-
-  const store = createLlmConfigStore({ configFile });
-  const [provider] = store.listProviders();
-  assert.equal(provider.id, 'legacy-gemini-oauth');
-  assert.equal(provider.channelId, 'google-ai');
-  assert.equal(provider.authMethod, 'oauth_google');
-  assert.equal(Object.hasOwn(provider, 'oauthClientId'), false);
-  assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
-  assert.equal(provider.oauthProjectId, 'my-project');
-
-  const credential = store.getCredential(provider.id);
-  assert.equal(Object.hasOwn(credential, 'oauthClientId'), false);
-  assert.equal(Object.hasOwn(credential, 'oauthClientSecret'), false);
-  assert.equal(credential.oauthProjectId, 'my-project');
-  const [persisted] = readPersistedModels(configFile);
-  assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
-  assert.equal(Object.hasOwn(persisted, 'oauthClientSecret'), false);
-}));
-
-test('Qoder local auth provider does not require a stored API key', () => withStore(({ configFile, credentialSecrets }) => {
-  const store = createLlmConfigStore({ configFile });
-  const provider = store.addProvider({
-    provider: 'openai',
-    channelId: 'qoder',
-    authMethod: 'qoder_local_auth',
-    name: 'Qoder',
-    model: 'auto',
-  });
-
-  assert.equal(provider.channelId, 'qoder');
-  assert.equal(provider.resolvedWire, 'qoder-private');
-  assert.equal(provider.authMethod, 'qoder_local_auth');
-  assert.equal(provider.baseUrl, 'https://api2-v2.qoder.sh/model/v1');
-  assert.equal(provider.model, 'auto');
-  assert.equal(provider.modelLabel, 'Auto');
-  assert.equal(provider.apiKeyConfigured, true);
-  assert.equal(provider.apiKeyMasked, '');
-  assert.equal(provider.contextWindow, 180000);
-  assert.equal(provider.maxOutputTokens, 32768);
-  assert.equal(provider.supportsVision, true);
-  assert.equal(provider.supportsReasoning, false);
-
-  const persisted = readPersistedModels(configFile)[0];
-  assert.equal(Object.hasOwn(persisted, 'apiKey'), false);
-  assert.equal(persisted.apiKeyConfigured, false);
-  assert.equal(credentialSecrets.has(`model/${provider.groupId}/api-key`), false);
-}));
-
-test('Qoder local auth provider exposes catalog display label without changing request model id', () => withStore(({ configFile, dir }) => {
-  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
-  const qoderDir = path.join(dir, '.qoder');
-  mkdirSync(path.join(qoderDir, '.auth'), { recursive: true });
-  writeFileSync(path.join(qoderDir, '.auth/models'), JSON.stringify({
-    chat: [
-      {
-        key: 'gm51model',
-        display_name: 'GLM-5.2',
-        max_input_tokens: 1_000_000,
-        max_output_tokens: 32_768,
-        is_vl: true,
-        is_reasoning: true,
-        context_config: {
-          '1M': { token_count: 1_000_000 },
-          '200K': { token_count: 200_000, is_default: true },
-        },
-      },
-    ],
-  }), 'utf8');
-  process.env.QODER_CONFIG_DIR = qoderDir;
-
-  try {
-    const store = createLlmConfigStore({ configFile });
-    const provider = store.addProvider({
-      provider: 'openai',
-      channelId: 'qoder',
-      authMethod: 'qoder_local_auth',
-      name: 'Qoder',
-      model: 'gm51model',
-    });
-
-    assert.equal(provider.model, 'gm51model');
-    assert.equal(provider.modelLabel, 'GLM-5.2');
-    // contextWindow 与发送链路同口径：默认档位（200K）投影后的可用输入窗口，
-    // 而非目录原始 max_input_tokens（1M）。
-    assert.equal(provider.contextWindow, 200_000);
-    assert.equal(provider.maxOutputTokens, 32_768);
-    assert.equal(provider.supportsVision, true);
-    assert.equal(provider.supportsReasoning, true);
-    assert.equal(provider.supportsPromptCaching, undefined);
-
-    // 用户切换 contextTier 档位后，contextWindow 跟随所选档位投影。
-    const upgraded = store.updateProvider(provider.id, {
-      modelOptionValues: { contextTier: '1M' },
-    });
-    assert.equal(upgraded.contextWindow, 1_000_000);
-  } finally {
-    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
-    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
-  }
-}));
-
-test('Qoder 1M tier keeps ~980k usable input when the default tier window exceeds max_input_tokens (Cantus shape)', () => withStore(({ configFile, dir }) => {
-  // Cantus 形态：默认档 1M、官方 max_input_tokens 只有 180k。
-  // 回归断言：选中 1M 档后 contextWindow 应为 980k，而不是被「默认档预留」
-  // 旧公式压回 180k、小档塌缩成 1；后续元数据重投影也不回退。
-  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
-  const qoderDir = path.join(dir, '.qoder');
-  mkdirSync(path.join(qoderDir, '.auth'), { recursive: true });
-  writeFileSync(path.join(qoderDir, '.auth/models'), JSON.stringify({
-    chat: [
-      {
-        key: 'cmodel',
-        display_name: 'Cantus',
-        max_input_tokens: 180_000,
-        max_output_tokens: 32_000,
-        is_vl: true,
-        is_reasoning: true,
-        context_config: {
-          '200K': { token_count: 200_000 },
-          '400K': { token_count: 400_000 },
-          '1M': { token_count: 1_000_000, is_default: true },
-        },
-      },
-    ],
-  }), 'utf8');
-  process.env.QODER_CONFIG_DIR = qoderDir;
-
-  try {
-    const store = createLlmConfigStore({ configFile });
-    const provider = store.addProvider({
-      provider: 'openai',
-      channelId: 'qoder',
-      authMethod: 'qoder_local_auth',
-      name: 'Qoder',
-      model: 'cmodel',
-      modelOptionValues: { contextTier: '1M' },
-    });
-
-    assert.equal(provider.modelLabel, 'Cantus');
-    assert.equal(provider.contextWindow, 980_000);
-    const choices = provider.modelOptions?.[0]?.choices || [];
-    assert.equal(choices.find((choice) => choice.value === '200K')?.inputTokenLimit, 180_000);
-    assert.equal(choices.find((choice) => choice.value === '400K')?.inputTokenLimit, 380_000);
-    assert.equal(choices.find((choice) => choice.value === '1M')?.inputTokenLimit, 980_000);
-
-    // 任意后续 patch 触发 applyQoderModelMetadata 重投影时仍保持 980k。
-    const refreshed = store.updateProvider(provider.id, { name: 'Qoder Cantus' });
-    assert.equal(refreshed.contextWindow, 980_000);
-  } finally {
-    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
-    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
-  }
-}));
-
-test('Qoder keeps the selected context tier when a saved model is absent from the live catalog', () => withStore(({ configFile }) => {
-  const store = createLlmConfigStore({ configFile });
-  const provider = store.addProvider({
-    provider: 'openai',
-    channelId: 'qoder',
-    authMethod: 'qoder_local_auth',
-    name: 'Qoder',
-    model: 'cmodel',
-    contextWindow: 180_000,
-    maxOutputTokens: 20_000,
-    modelOptions: [{
-      id: 'contextTier',
-      label: '上下文档位',
-      kind: 'select',
-      defaultValue: '200K',
-      choices: [
-        {
-          value: '200K',
-          label: '200K',
-          requestValue: '200K',
-          contextWindow: 200_000,
-          inputTokenLimit: 180_000,
-        },
-        {
-          value: '1M',
-          label: '1M',
-          requestValue: '1M',
-          contextWindow: 1_000_000,
-          inputTokenLimit: 980_000,
-        },
-      ],
-    }],
-    modelOptionValues: { contextTier: '1M' },
-  });
-
-  assert.equal(provider.contextWindow, 980_000);
-  assert.equal(provider.maxOutputTokens, 20_000);
-  assert.deepEqual(provider.modelOptionValues, { contextTier: '1M' });
-  assert.equal(provider.modelOptions?.[0]?.choices?.[1]?.inputTokenLimit, 980_000);
-}));
-
-test('Qoder connection test probes the selected private chat model', async () => withStore(async ({ configFile }) => {
-  const previousFetch = globalThis.fetch;
-  const previousToken = process.env.QODER_ACCESS_TOKEN;
-  const previousTrace = process.env.PEER_AGENT_PROVIDER_TRACE;
-  const previousQoderConfigDir = process.env.QODER_CONFIG_DIR;
-  process.env.QODER_ACCESS_TOKEN = 'local-qoder-token';
-  process.env.PEER_AGENT_PROVIDER_TRACE = '0';
-  process.env.QODER_CONFIG_DIR = path.dirname(configFile);
-  let capturedBody = null;
-  globalThis.fetch = async (_url, init) => {
-    capturedBody = JSON.parse(init.body);
-    return new Response([
-      'event: error',
-      'data: {"code":"invalid_model_error","message":"Unsupported model \\"gm51model\\"","type":"invalid_model_error"}',
-      '',
-    ].join('\n'), { status: 200, headers: { 'content-type': 'text/event-stream' } });
-  };
-
-  try {
-    const store = createLlmConfigStore({ configFile });
-    const provider = store.addProvider({
-      provider: 'openai',
-      channelId: 'qoder',
-      authMethod: 'qoder_local_auth',
-      name: 'Qoder',
-      model: 'gm51model',
-    });
-
-    const result = await store.testConnection(provider.id);
-
-    assert.equal(capturedBody.model, 'gm51model');
-    assert.equal(result.success, false);
-    assert.match(result.error, /Unsupported model "gm51model"/);
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousToken === undefined) delete process.env.QODER_ACCESS_TOKEN;
-    else process.env.QODER_ACCESS_TOKEN = previousToken;
-    if (previousTrace === undefined) delete process.env.PEER_AGENT_PROVIDER_TRACE;
-    else process.env.PEER_AGENT_PROVIDER_TRACE = previousTrace;
-    if (previousQoderConfigDir === undefined) delete process.env.QODER_CONFIG_DIR;
-    else process.env.QODER_CONFIG_DIR = previousQoderConfigDir;
-  }
-}));
 
 test('API key connection test uses the shared Desktop provider transport', async () => withStore(async ({ configFile }) => {
   const calls = [];
@@ -1392,7 +1135,7 @@ test('legacy safeStorage secrets migrate to Vault before encrypted fields are re
   writeFileSync(configFile, JSON.stringify([{
     id: 'legacy-oauth',
     provider: 'openai',
-    authMethod: 'oauth_google',
+    authMethod: 'oauth_grok',
     name: 'Legacy OAuth',
     baseUrl: 'https://example.test/v1',
     model: 'legacy-model',
@@ -1437,8 +1180,7 @@ test('legacy safeStorage secrets migrate to Vault before encrypted fields are re
   assert.equal(persisted.oauthAccountId, 'acct-legacy');
   assert.deepEqual(store.getCredential('legacy-oauth'), {
     tokens,
-    oauthProjectId: undefined,
-    authMethod: 'oauth_google',
+    authMethod: 'oauth_grok',
   });
 
   store.listProviders();
@@ -1558,106 +1300,6 @@ test('OAuth token updates store only Vault ciphertext references and non-sensiti
   assert.equal(Object.hasOwn(cleared, 'oauthAccountId'), false);
 }));
 
-test('legacy Google OAuth group migrates to API key without changing per-model metadata', () => withStore(({
-  configFile,
-  credentialSecrets,
-}) => {
-  const groupId = 'legacy-google-group';
-  const createdAt = '2026-01-01T00:00:00.000Z';
-  writeFileSync(configFile, JSON.stringify([
-    {
-      id: 'legacy-google-a',
-      groupId,
-      provider: 'openai',
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      name: 'Legacy Gemini OAuth',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-a',
-      modelLabel: 'Gemini A',
-      contextWindow: 128_000,
-      supportsVision: true,
-      metadataSource: 'remote',
-      metadataSyncedAt: createdAt,
-      oauthConfigured: true,
-      oauthExpires: Date.now() + 60_000,
-      oauthAccountId: 'legacy-account',
-      oauthClientId: 'legacy-client',
-      oauthClientSecretConfigured: true,
-      oauthProjectId: 'legacy-project',
-      enabled: true,
-      isDefault: true,
-      createdAt,
-    },
-    {
-      id: 'legacy-google-b',
-      groupId,
-      provider: 'openai',
-      channelId: 'google-ai',
-      authMethod: 'oauth_google',
-      name: 'Legacy Gemini OAuth',
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-      model: 'gemini-b',
-      modelLabel: 'Gemini B',
-      maxOutputTokens: 8_192,
-      supportsReasoning: true,
-      metadataSource: 'manual',
-      metadataSyncedAt: createdAt,
-      oauthConfigured: true,
-      oauthExpires: Date.now() + 60_000,
-      oauthAccountId: 'legacy-account',
-      oauthClientId: 'legacy-client',
-      oauthClientSecretConfigured: true,
-      oauthProjectId: 'legacy-project',
-      enabled: true,
-      isDefault: false,
-      createdAt,
-    },
-  ], null, 2));
-  credentialSecrets.set(modelOauthCredentialKey(groupId), JSON.stringify({
-    access: 'legacy-access',
-    refresh: 'legacy-refresh',
-    expires: Date.now() + 60_000,
-    accountId: 'legacy-account',
-  }));
-
-  const store = createLlmConfigStore({ configFile });
-  const connectionPatch = {
-    provider: 'openai',
-    channelId: 'google-ai',
-    authMethod: 'api_key',
-    name: 'Gemini API Key',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-  };
-  store.updateProvider('legacy-google-a', { ...connectionPatch, apiKey: 'gemini-api-key' });
-  store.updateProvider('legacy-google-b', connectionPatch);
-
-  const migrated = store.listProviders();
-  assert.equal(migrated.length, 2);
-  for (const provider of migrated) {
-    assert.equal(provider.authMethod, 'api_key');
-    assert.equal(provider.apiKeyConfigured, true);
-    assert.equal(provider.oauthStatus, undefined);
-    assert.equal(Object.hasOwn(provider, 'oauthClientSecretConfigured'), false);
-    assert.equal(store.getDecryptedApiKey(provider.id), 'gemini-api-key');
-  }
-  assert.equal(migrated[0].modelLabel, 'Gemini A');
-  assert.equal(migrated[0].contextWindow, 128_000);
-  assert.equal(migrated[0].supportsVision, true);
-  assert.equal(migrated[0].metadataSource, 'remote');
-  assert.equal(migrated[1].modelLabel, 'Gemini B');
-  assert.equal(migrated[1].maxOutputTokens, 8_192);
-  assert.equal(migrated[1].supportsReasoning, true);
-  assert.equal(migrated[1].metadataSource, 'manual');
-  assert.equal(credentialSecrets.has(modelOauthCredentialKey(groupId)), false);
-
-  for (const persisted of readPersistedModels(configFile)) {
-    assert.equal(Object.hasOwn(persisted, 'oauthExpires'), false);
-    assert.equal(Object.hasOwn(persisted, 'oauthAccountId'), false);
-    assert.equal(Object.hasOwn(persisted, 'oauthClientId'), false);
-    assert.equal(Object.hasOwn(persisted, 'oauthProjectId'), false);
-  }
-}));
 
 test('group members share one Vault key while duplicates and deletion keep independent lifecycles', () => withStore(({
   configFile,
@@ -1898,43 +1540,6 @@ test('backfillMissingPricingFromModelsDev does not thrash ChatGPT subscription c
   assert.equal(reloaded.inputPrice, 2.5);
   assert.equal(reloaded.outputPrice, 15);
   assert.equal(reloaded.cacheReadPrice, 0.25);
-}));
-
-test('backfillMissingPricingFromModelsDev does not thrash Qoder zero cache prices', async () => withStore(async ({ configFile }) => {
-  const store = createLlmConfigStore({ configFile });
-  const provider = store.addProvider({
-    name: 'Qoder CLI',
-    provider: 'qoder',
-    channelId: 'qoder',
-    authMethod: 'qoder_local_auth',
-    model: 'qwen3.8-max-preview',
-    inputPrice: 0,
-    outputPrice: 0,
-    pricingSource: 'models.dev-reference',
-  });
-
-  const fetchImpl = async () => ({
-    ok: true,
-    json: async () => ({
-      qoder: {
-        models: {
-          'qwen3.8-max-preview': {
-            id: 'qwen3.8-max-preview',
-            cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-          },
-        },
-      },
-    }),
-  });
-
-  const first = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
-  const second = await store.backfillMissingPricingFromModelsDev({ fetchImpl, cacheTtlMs: 0 });
-  assert.equal(first.updated, 0);
-  assert.equal(second.updated, 0);
-
-  const reloaded = store.listProviders().find((item) => item.id === provider.id);
-  assert.equal(reloaded.cacheReadPrice, undefined);
-  assert.equal(reloaded.cacheWritePrice, undefined);
 }));
 
 

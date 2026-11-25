@@ -16,7 +16,6 @@ const PROMPT_PATTERN = /(password|passphrase|continue\?|are you sure|press any k
 function buildFallbackPath(homeDir) {
   const segments = [
     join(homeDir, '.local/bin'),
-    join(homeDir, '.qoderwork/bin'),
     join(homeDir, 'bin'),
     join(homeDir, '.cargo/bin'),
     '/opt/homebrew/bin',

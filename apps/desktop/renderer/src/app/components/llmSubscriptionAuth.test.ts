@@ -17,19 +17,18 @@ const googleChannel = {
   capabilities: { reasoning: { supported: false, paramStyle: 'none' }, promptCache: false, vision: true },
   authMethods: {
     api_key: { wire: 'gemini' },
-    oauth_google: { wire: 'gemini' },
   },
 } satisfies LlmChannelDescriptor;
 
-describe('Google subscription auth UI', () => {
-  it('exposes Google subscription alongside API key', () => {
-    assert.deepEqual(availableOAuthMethods(googleChannel), ['oauth_google']);
+describe('Subscription auth UI', () => {
+  it('keeps Gemini on API key authentication', () => {
+    assert.deepEqual(availableOAuthMethods(googleChannel), []);
     assert.ok(googleChannel.authMethods.api_key);
   });
 
-  it('uses an explicit Google subscription login call to action', () => {
-    assert.equal(subscriptionLoginLabel('oauth_google', true), '使用 Google 订阅登录');
-    assert.equal(subscriptionLoginLabel('oauth_google', false), 'Login with Google Subscription');
+  it('uses an explicit subscription login call to action', () => {
+    assert.equal(subscriptionLoginLabel('oauth_chatgpt', true), '登录 ChatGPT');
+    assert.equal(subscriptionLoginLabel('oauth_chatgpt', false), 'Login with ChatGPT');
   });
 
   it('skips model selection when the provider already has a default model', () => {

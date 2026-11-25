@@ -14,7 +14,6 @@ import { applyThemeScheme, COLOR, DARK_PALETTE } from './tui-theme.ts';
 describe('tui subscription quota formatting', () => {
   test('supports only OAuth subscription auth methods', () => {
     expect(supportsTuiSubscriptionQuota('oauth_chatgpt')).toBe(true);
-    expect(supportsTuiSubscriptionQuota('oauth_google')).toBe(true);
     expect(supportsTuiSubscriptionQuota('oauth_grok')).toBe(true);
     expect(supportsTuiSubscriptionQuota('api_key')).toBe(false);
     expect(supportsTuiSubscriptionQuota(undefined)).toBe(false);

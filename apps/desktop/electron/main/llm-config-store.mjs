@@ -1,7 +1,7 @@
 import electron from 'electron';
 import { createPredictionCredentialResolver } from './input-prediction/credential-resolver.mjs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from '@peer-agent/runtime-node/storage';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding, retiredModelConfigCode } from '@peer-agent/runtime-node/storage';
 import {
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
@@ -26,9 +26,6 @@ import {
   CHATGPT_SUBSCRIPTION_BASE_URL,
   CHATGPT_SUBSCRIPTION_NAME,
   DEEPSEEK_ANTHROPIC_BASE_URL,
-  GEMINI_CODE_ASSIST_BASE_URL,
-  GEMINI_OAUTH_NAME,
-  QODER_PRIVATE_NAME,
   defaultsForChannel,
   inferChannelId,
   legacyProviderForWire,
@@ -37,14 +34,11 @@ import {
   resolveServiceTemplateId,
   validateCustomHeaders,
 } from './provider-channels.mjs';
-import { loadQoderAccessToken } from './provider-adapters/qoder-local-auth.mjs';
-import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { resolveSubscriptionContextWindow } from './provider-adapters/openai-model-catalog.mjs';
 import {
   fetchModelsDevRegistry,
   fillMissingPricingFromRegistry,
 } from './provider-adapters/models-dev-registry.mjs';
-import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
 import { fetchWithConnectionRecovery } from './provider-transports/recovering-fetch.mjs';
 
 const { safeStorage } = electron;
@@ -166,60 +160,12 @@ function normalizeModelOptions(value) {
 
 function normalizeAuthMethod(value) {
   if (value === 'oauth_chatgpt') return 'oauth_chatgpt';
-  if (value === 'oauth_google') return 'oauth_google';
   if (value === 'oauth_grok') return 'oauth_grok';
-  if (value === 'qoder_local_auth' || value === 'local_cli') return 'qoder_local_auth';
   return 'api_key';
 }
 
 function isOAuthAuthMethod(value) {
-  return value === 'oauth_chatgpt' || value === 'oauth_google' || value === 'oauth_grok';
-}
-
-function isLocalCliAuthMethod(value) {
-  return value === 'qoder_local_auth' || value === 'local_cli';
-}
-
-function applyQoderModelMetadata(item) {
-  const catalogMetadata = getQoderModelMetadata(item.model);
-  if (catalogMetadata?.label) item.modelLabel = catalogMetadata.label;
-  const metadata = catalogMetadata || {
-    contextWindow: item.contextWindow,
-    modelOptions: item.modelOptions,
-    supportsReasoning: item.supportsReasoning,
-    reasoningEffortLevels: item.reasoningEffortLevels,
-    reasoningDefaultEffort: item.reasoningDefaultEffort,
-  };
-  // 与发送链路同口径：按 contextTier 档位投影后的可用输入窗口（1M 档 − 输出预留），
-  // 而非目录原始窗口。历史模型不在实时目录时，继续使用持久化的 modelOptions，
-  // 避免已选择的档位退回旧 contextWindow。
-  const optionProjection = resolveQoderModelOptionProjection(metadata, item.modelOptionValues);
-  item.contextWindow = optionProjection?.inputTokenLimit
-    ?? metadata?.contextWindow
-    ?? item.contextWindow;
-  item.maxOutputTokens = metadata?.maxOutputTokens ?? item.maxOutputTokens;
-  if (Array.isArray(metadata?.modelOptions) && metadata.modelOptions.length) {
-    item.modelOptions = metadata.modelOptions;
-  }
-  if (typeof metadata?.supportsVision === 'boolean') item.supportsVision = metadata.supportsVision;
-  // thinking_config 投影优先：有 reasoningEffortLevels 即支持思考（性能档 is_reasoning=false 也要开）。
-  if (Array.isArray(metadata?.reasoningEffortLevels) && metadata.reasoningEffortLevels.length) {
-    item.supportsReasoning = true;
-    item.reasoningEffortLevels = [...metadata.reasoningEffortLevels];
-    if (metadata.reasoningDefaultEffort) {
-      item.reasoningDefaultEffort = metadata.reasoningDefaultEffort;
-    }
-  } else if (typeof metadata?.supportsReasoning === 'boolean') {
-    item.supportsReasoning = metadata.supportsReasoning;
-  }
-  // Qoder's catalog does not currently declare prompt-cache support. Keep that
-  // capability unknown instead of turning missing metadata into an explicit no.
-  delete item.supportsPromptCaching;
-  item.cacheWritePrice = undefined;
-  item.cacheReadPrice = undefined;
-  item.customHeaders = undefined;
-  item.reasoningParamStyle = undefined;
-  item.reasoningEffortMap = undefined;
+  return value === 'oauth_chatgpt' || value === 'oauth_grok';
 }
 
 function applyExplicitModelMetadataPatch(item, patch) {
@@ -588,24 +534,6 @@ export function createLlmConfigStore({
         changed = true;
       }
     }
-    if (item.authMethod === 'oauth_google') {
-      if (item.name !== GEMINI_OAUTH_NAME) {
-        item.name = GEMINI_OAUTH_NAME;
-        changed = true;
-      }
-      if (item.channelId !== 'google-ai') {
-        item.channelId = 'google-ai';
-        changed = true;
-      }
-      if (item.baseUrl !== GEMINI_CODE_ASSIST_BASE_URL) {
-        item.baseUrl = GEMINI_CODE_ASSIST_BASE_URL;
-        changed = true;
-      }
-      if (item.wireOverride !== undefined) {
-        delete item.wireOverride;
-        changed = true;
-      }
-    }
     if (item.authMethod === 'oauth_grok') {
       if (item.name !== 'Grok 官方') {
         item.name = 'Grok 官方';
@@ -619,42 +547,6 @@ export function createLlmConfigStore({
         delete item.wireOverride;
         changed = true;
       }
-    }
-    if (item.authMethod === 'local_cli') {
-      item.authMethod = 'qoder_local_auth';
-      changed = true;
-    }
-    if (item.authMethod === 'qoder_local_auth') {
-      if (item.channelId !== 'qoder') {
-        item.channelId = 'qoder';
-        changed = true;
-      }
-      if (item.wireOverride !== undefined) {
-        delete item.wireOverride;
-        changed = true;
-      }
-      if (item.apiKey !== undefined) {
-        delete item.apiKey;
-        item.apiKeyConfigured = false;
-        delete item.apiKeyMasked;
-        changed = true;
-      }
-      const before = JSON.stringify({
-        contextWindow: item.contextWindow,
-        maxOutputTokens: item.maxOutputTokens,
-        supportsVision: item.supportsVision,
-        supportsReasoning: item.supportsReasoning,
-        supportsPromptCaching: item.supportsPromptCaching,
-      });
-      applyQoderModelMetadata(item);
-      const after = JSON.stringify({
-        contextWindow: item.contextWindow,
-        maxOutputTokens: item.maxOutputTokens,
-        supportsVision: item.supportsVision,
-        supportsReasoning: item.supportsReasoning,
-        supportsPromptCaching: item.supportsPromptCaching,
-      });
-      if (before !== after) changed = true;
     }
     // DeepSeek 官方改走 Anthropic 兼容入口：旧 openai-chat + api.deepseek.com
     // 必须迁到 anthropic-messages + api.deepseek.com/anthropic，否则思考强度契约不生效。
@@ -892,14 +784,36 @@ export function createLlmConfigStore({
   function readStoredState() {
     const snapshot = readModelConfigFile(configFile);
     const parsed = snapshot.value;
-    if (Array.isArray(parsed)) {
-      const channels = [...new Map(parsed.map((item) => [groupKey(item), channelFromItem(item)])).values()];
-      return { channels, models: parsed, legacy: true, snapshot };
+    const flat = Array.isArray(parsed) ? parsed : parsed.providers;
+    if (Array.isArray(flat)) {
+      const channels = new Map();
+      for (const item of flat) {
+        const groupId = groupKey(item);
+        if (!channels.has(groupId) || !retiredModelConfigCode(item)) {
+          channels.set(groupId, channelFromItem(item));
+        }
+      }
+      return { channels: [...channels.values()], models: flat, legacy: true, snapshot };
     }
     if (parsed && Array.isArray(parsed.channels) && Array.isArray(parsed.models)) {
       return { channels: parsed.channels, models: parsed.models, legacy: false, snapshot };
     }
     throw new Error('model_config_invalid');
+  }
+
+  function retiredRowCode(model, channels) {
+    return retiredModelConfigCode(model) || retiredModelConfigCode(channels.get(groupKey(model)));
+  }
+
+  function retiredBindingCode(id) {
+    const { channels, models } = readStoredState();
+    const channelMap = new Map(channels.map(channel => [channel.id || channel.groupId, channel]));
+    const model = models.find(row => row.id === id);
+    return model ? retiredRowCode(model, channelMap) : retiredModelConfigCode(channelMap.get(id));
+  }
+
+  function rejectRetired(code) {
+    if (code) throw Object.assign(new Error(code), { code });
   }
 
   function readAll() {
@@ -909,7 +823,7 @@ export function createLlmConfigStore({
     const state = readStoredState();
     const channels = new Map(state.channels.map((channel) => [channel.id || channel.groupId, channel]));
     let legacyChannelValuesCleaned = false;
-    const parsed = state.models.map((model) => {
+    const parsed = state.models.filter(model => !retiredRowCode(model, channels)).map((model) => {
       const channel = channels.get(groupKey(model));
       if (!channel) return model;
       // 模型条目值优先于渠道级残留值（thinking 档位等模型级字段是按模型声明的；
@@ -930,7 +844,7 @@ export function createLlmConfigStore({
       }
       return merged;
     });
-    let migrated = state.legacy || legacyChannelValuesCleaned;
+    let migrated = (state.legacy && parsed.length > 0) || legacyChannelValuesCleaned;
     for (const item of parsed) {
       if (migrateChannelItem(item)) migrated = true;
       if (migrateSubscriptionItem(item)) migrated = true;
@@ -993,8 +907,12 @@ export function createLlmConfigStore({
       model.groupId = groupKey(item);
       return model;
     });
+    const previousChannels = new Map(previous.channels.map(channel => [channel.id || channel.groupId, channel]));
+    // Preserve original retired rows on writes to another model. They never enter migration or credential access.
+    models.push(...previous.models.filter(model => retiredRowCode(model, previousChannels)));
     const root = Array.isArray(previous.snapshot.value) ? {} : previous.snapshot.value;
     const stored = { ...root, version: 2, channels: [...channels.values()], models };
+    if (previous.legacy) delete stored.providers;
     replaceModelConfigFile(configFile, previous.snapshot.revision, stored);
   }
 
@@ -1056,7 +974,7 @@ export function createLlmConfigStore({
       // 模型目录(如 models.dev/remote)通常不带 supportsPromptCaching 字段，
       // 若直接透传 null/undefined，渲染层门控(supportsPromptCaching === true)会失守。
       // 渠道声明(如 DeepSeek promptCache: true)在此作为权威回退；
-      // 但渠道明确不支持缓存(如 Qoder promptCache: false)或不可解析时保持 undefined，
+      // 但渠道明确不支持缓存或不可解析时保持 undefined，
       // 避免把「无缓存语义」误判成「禁用缓存」。
       supportsPromptCaching: item.supportsPromptCaching ?? (resolved?.supportsPromptCaching === true ? true : undefined),
       // 同步落库的模型级思考档位声明（wire 原值），供渲染层与运行时共同消费。
@@ -1108,7 +1026,6 @@ export function createLlmConfigStore({
           ? (resolved?.reasoningDefaultEffort ?? item.reasoningDefaultEffort)
           : (item.reasoningDefaultEffort ?? resolved?.reasoningDefaultEffort)
       ) ?? undefined,
-      oauthProjectId: item.oauthProjectId ?? undefined,
       customHeaders: item.customHeaders ?? undefined,
       customHeadersInvalid: item.customHeadersInvalid ?? undefined,
       serviceTemplateId:
@@ -1127,11 +1044,8 @@ export function createLlmConfigStore({
       lastDiagnostic: item.lastDiagnostic || undefined,
       apiKeyMasked: item.apiKeyMasked || '',
       // 订阅链路无 API Key,凭据是否就绪以 OAuth 登录态(connected)为准；
-      // 本机 CLI 链路的登录态由外部应用维护,Peer Agent 只检查命令与登录态是否可用。
       apiKeyConfigured:
-        isLocalCliAuthMethod(item.authMethod)
-          ? true
-          : isOAuthAuthMethod(item.authMethod)
+        isOAuthAuthMethod(item.authMethod)
           ? oauthStatus?.status === 'connected'
           : Boolean(item.apiKeyConfigured),
     };
@@ -1152,6 +1066,7 @@ export function createLlmConfigStore({
       modelsByGroup.set(groupId, groupModels);
     }
     return state.channels.flatMap((channel) => {
+      if (retiredModelConfigCode(channel)) return [];
       const groupId = channel.id || channel.groupId;
       const groupModels = modelsByGroup.get(groupId) || [];
       if (groupModels.length > 0) return groupModels.map(toView);
@@ -1174,43 +1089,36 @@ export function createLlmConfigStore({
     return listProviders();
   }
 
-  function addProvider({ provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, reasoningEffortValues, oauthProjectId, customHeaders, serviceTemplateId }) {
+  function addProvider(input) {
+    rejectRetired(retiredModelConfigCode(input) || (input.groupId && retiredBindingCode(input.groupId)));
+    const { provider, groupId: rawGroupId, channelId: rawChannelId, wireOverride, authMethod, name, baseUrl, model, modelLabel, metadataSource, pricingSource, metadataSyncedAt, apiKey, contextWindow, maxOutputTokens, modelOptions, modelOptionValues, inputPrice, outputPrice, cacheWritePrice, cacheReadPrice, supportsVision, supportsReasoning, supportsPromptCaching, reasoningParamStyle, reasoningEffortMap, reasoningEffortValues, customHeaders, serviceTemplateId } = input;
     const items = readAll();
     const method = normalizeAuthMethod(authMethod);
-    const channelId = method === 'oauth_chatgpt'
-      ? 'openai'
-      : method === 'oauth_google'
-        ? 'google-ai'
-        : method === 'oauth_grok'
-          ? 'grok'
-          : method === 'qoder_local_auth'
-            ? 'qoder'
-            : (rawChannelId || inferChannelId({ provider, authMethod: method }));
+    const channelId = method === 'oauth_chatgpt' ? 'openai'
+      : method === 'oauth_grok' ? 'grok'
+        : (rawChannelId || inferChannelId({ provider, authMethod: method }));
     const defaults = rawChannelId ? defaultsForChannel(channelId) : (PROVIDER_DEFAULTS[provider] || defaultsForChannel(channelId));
     if (customHeaders) validateCustomHeaders(customHeaders);
     // 订阅(OAuth)身份写死:名称/baseURL 固定,不接受外部传入。model 留待登录后选择。
     const isSubscription = method === 'oauth_chatgpt';
-    const isGoogleOAuth = method === 'oauth_google';
     const isGrokOAuth = method === 'oauth_grok';
-    const isLocalQoderAuth = method === 'qoder_local_auth';
     const selectedModel = model || (isSubscription ? DEFAULT_SUBSCRIPTION_MODEL : defaults.model);
     const subscriptionMetadata = isSubscription ? getSubscriptionModelMetadata(selectedModel) : null;
     const resolved = resolveChannel({
       channelId,
       wireOverride,
       authMethod: method,
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (isLocalQoderAuth ? defaults.baseUrl : (baseUrl || defaults.baseUrl)),
-      apiKey: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? '' : (apiKey || ''),
-      supportsReasoning: isSubscription ? true : (isLocalQoderAuth ? false : supportsReasoning),
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : (baseUrl || defaults.baseUrl),
+      apiKey: isSubscription || isGrokOAuth ? '' : (apiKey || ''),
+      supportsReasoning: isSubscription ? true : supportsReasoning,
       supportsPromptCaching: isSubscription
         ? (subscriptionMetadata?.supportsPromptCaching ?? subscriptionMetadata?.cacheReadPrice !== undefined)
-        : (isLocalQoderAuth ? false : supportsPromptCaching),
+        : supportsPromptCaching,
       supportsVision,
       reasoningParamStyle,
       reasoningEffortMap,
       // 思考档位声明：数组（含空）原样落库；undefined 交由运行时静态表/回填链路。
       reasoningEffortValues: Array.isArray(reasoningEffortValues) ? [...reasoningEffortValues] : undefined,
-      oauthProjectId,
       customHeaders,
     });
     const newId = randomUUID();
@@ -1221,23 +1129,22 @@ export function createLlmConfigStore({
       groupId: (typeof rawGroupId === 'string' && rawGroupId) ? rawGroupId : newId,
       provider: provider || resolved.legacyProvider,
       channelId,
-      wireOverride: isSubscription || isGoogleOAuth || isGrokOAuth || isLocalQoderAuth ? undefined : wireOverride,
+      wireOverride: isSubscription || isGrokOAuth ? undefined : wireOverride,
       authMethod: method,
       serviceTemplateId: serviceTemplateId
         || resolveServiceTemplateId({ channelId, authMethod: method })
         || undefined,
       configVersion: 1,
       connectionState: 'pending_verification',
-      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGoogleOAuth ? GEMINI_OAUTH_NAME : isGrokOAuth ? (name || 'Grok 官方') : isLocalQoderAuth ? (name || QODER_PRIVATE_NAME) : name || provider || 'Untitled',
-      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : isGoogleOAuth ? GEMINI_CODE_ASSIST_BASE_URL : isLocalQoderAuth ? defaults.baseUrl : baseUrl || defaults.baseUrl,
+      name: isSubscription ? CHATGPT_SUBSCRIPTION_NAME : isGrokOAuth ? (name || 'Grok 官方') : name || provider || 'Untitled',
+      baseUrl: isSubscription ? CHATGPT_SUBSCRIPTION_BASE_URL : baseUrl || defaults.baseUrl,
       // 订阅默认落到权威清单的最新模型(gpt-5.5),非订阅沿用各家 preset。
       model: selectedModel,
       modelLabel: modelLabel || undefined,
-      metadataSource: isSubscription ? 'builtin' : isLocalQoderAuth ? 'local' : metadataSource,
-      pricingSource: isSubscription || isLocalQoderAuth ? undefined : pricingSource,
-      metadataSyncedAt: isSubscription || isLocalQoderAuth ? new Date().toISOString() : metadataSyncedAt,
+      metadataSource: isSubscription ? 'builtin' : metadataSource,
+      pricingSource: isSubscription ? undefined : pricingSource,
+      metadataSyncedAt: isSubscription ? new Date().toISOString() : metadataSyncedAt,
       apiKeyConfigured: false,
-      oauthProjectId: isGoogleOAuth ? String(oauthProjectId || '').trim() || undefined : undefined,
       oauthConfigured: false,
       enabled: true,
       isDefault: items.length === 0,
@@ -1250,7 +1157,7 @@ export function createLlmConfigStore({
       modelOptionValues: normalizeModelOptionValues(modelOptionValues),
       inputPrice: isSubscription ? subscriptionMetadata?.inputPrice : (inputPrice ?? undefined),
       outputPrice: isSubscription ? subscriptionMetadata?.outputPrice : (outputPrice ?? undefined),
-      cacheWritePrice: isSubscription || isLocalQoderAuth ? undefined : (cacheWritePrice ?? undefined),
+      cacheWritePrice: isSubscription ? undefined : (cacheWritePrice ?? undefined),
       cacheReadPrice: isSubscription ? subscriptionMetadata?.cacheReadPrice : (cacheReadPrice ?? undefined),
       longContextInputThreshold: isSubscription ? subscriptionMetadata?.longContextInputThreshold : undefined,
       longContextInputPrice: isSubscription ? subscriptionMetadata?.longContextInputPrice : undefined,
@@ -1258,15 +1165,14 @@ export function createLlmConfigStore({
       longContextOutputPrice: isSubscription ? subscriptionMetadata?.longContextOutputPrice : undefined,
       supportsVision: isSubscription
         ? subscriptionMetadata?.supportsVision
-        : (isLocalQoderAuth ? undefined : supportsVision),
+        : supportsVision,
       // 订阅链路(codex/responses)原生支持思考强度,默认开启。
-      // Qoder 本地鉴权由 applyQoderModelMetadata 按 thinking_config 投影，不在这里写死 false。
       supportsReasoning: isSubscription
         ? (subscriptionMetadata?.supportsReasoning ?? true)
-        : (isLocalQoderAuth ? undefined : supportsReasoning),
+        : supportsReasoning,
       supportsPromptCaching: isSubscription
         ? (subscriptionMetadata?.supportsPromptCaching ?? subscriptionMetadata?.cacheReadPrice !== undefined)
-        : (isLocalQoderAuth ? undefined : supportsPromptCaching),
+        : supportsPromptCaching,
       reasoningParamStyle: reasoningParamStyle || undefined,
       reasoningEffortMap: resolved.reasoningEffortMap || undefined,
       // 拉取/导入链路带来的模型级思考档位声明（同步声明优先于渠道静态表）。
@@ -1277,7 +1183,6 @@ export function createLlmConfigStore({
       reasoningDefaultEffort: resolved.reasoningDefaultEffort || undefined,
       customHeaders: customHeaders || undefined,
     };
-    if (isLocalQoderAuth) applyQoderModelMetadata(item);
     item.provider = legacyProviderForWire(resolved.wire);
 
     const existingGroup = items.find((candidate) => groupKey(candidate) === item.groupId);
@@ -1292,7 +1197,7 @@ export function createLlmConfigStore({
       return toView(item);
     }
 
-    const storedApiKey = isOAuthAuthMethod(method) || isLocalQoderAuth ? '' : String(apiKey || '');
+    const storedApiKey = isOAuthAuthMethod(method) ? '' : String(apiKey || '');
     item.apiKeyConfigured = Boolean(storedApiKey);
     item.apiKeyMasked = storedApiKey ? maskApiKey(storedApiKey) : undefined;
     items.push(item);
@@ -1309,6 +1214,7 @@ export function createLlmConfigStore({
   }
 
   function updateProvider(id, patch) {
+    rejectRetired(retiredModelConfigCode(patch) || retiredBindingCode(id));
     const items = readAll();
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) throw new Error(`Provider ${id} not found`);
@@ -1350,12 +1256,6 @@ export function createLlmConfigStore({
         apiKeyMasked: patch.apiKey ? maskApiKey(patch.apiKey) : undefined,
       });
     }
-    if (patch.oauthProjectId !== undefined) {
-      const nextProjectId = String(patch.oauthProjectId || '').trim() || undefined;
-      item.oauthProjectId = nextProjectId;
-      // project 是 group 级元数据：同步到同 group 全部 model，并在 writeAll 时写入 channel。
-      syncGroupSecretMetadata(items, groupId, { oauthProjectId: nextProjectId });
-    }
     if (patch.customHeaders !== undefined) {
       validateCustomHeaders(patch.customHeaders || {});
       item.customHeaders = patch.customHeaders || undefined;
@@ -1366,7 +1266,6 @@ export function createLlmConfigStore({
         oauthConfigured: false,
         oauthExpires: undefined,
         oauthAccountId: undefined,
-        oauthProjectId: undefined,
       });
     }
     if (item.authMethod === 'oauth_chatgpt') {
@@ -1378,13 +1277,6 @@ export function createLlmConfigStore({
       item.supportsReasoning = true;
       applySubscriptionModelMetadata(item);
     }
-    if (item.authMethod === 'oauth_google') {
-      item.name = GEMINI_OAUTH_NAME;
-      item.channelId = 'google-ai';
-      delete item.wireOverride;
-      item.provider = 'openai';
-      item.baseUrl = GEMINI_CODE_ASSIST_BASE_URL;
-    }
     if (item.authMethod === 'oauth_grok') {
       item.name = 'Grok 官方';
       item.channelId = 'grok';
@@ -1392,19 +1284,6 @@ export function createLlmConfigStore({
       item.provider = 'openai';
       item.baseUrl = defaultsForChannel('grok').baseUrl;
       item.supportsReasoning = true;
-    }
-    if (item.authMethod === 'qoder_local_auth' || item.authMethod === 'local_cli') {
-      item.authMethod = 'qoder_local_auth';
-      item.channelId = 'qoder';
-      delete item.wireOverride;
-      item.provider = 'openai';
-      item.baseUrl = defaultsForChannel('qoder').baseUrl;
-      syncGroupSecretMetadata(items, groupId, {
-        apiKeyConfigured: false,
-        apiKeyMasked: undefined,
-      });
-      applyQoderModelMetadata(item);
-      applyExplicitModelMetadataPatch(item, patch);
     }
     const resolved = resolveChannel({
       ...item,
@@ -1420,7 +1299,6 @@ export function createLlmConfigStore({
         if (leavingOAuth) {
           setGroupOAuthTokens(groupId, null);
         }
-        if (isLocalCliAuthMethod(item.authMethod)) setGroupApiKey(groupId, '');
       },
       () => {
         writeAll(items);
@@ -1445,6 +1323,7 @@ export function createLlmConfigStore({
   // B-2 删除整个 provider 组(同 groupId 的全部模型)。
   // 若删掉的组里含当前默认模型,则把剩余首条记录设为默认(与 removeProvider 一致)。
   function removeGroup(groupId) {
+    rejectRetired(retiredBindingCode(groupId));
     let items = readAll();
     const removed = items.filter((i) => groupKey(i) === groupId);
     const hadDefault = removed.some((i) => i.isDefault);
@@ -1636,7 +1515,6 @@ export function createLlmConfigStore({
     if (!item) return null;
     return {
       tokens: readOAuthTokens(item),
-      oauthProjectId: item.oauthProjectId,
       authMethod: item.authMethod,
     };
   }
@@ -1645,7 +1523,7 @@ export function createLlmConfigStore({
   //
   // 复用 resolveChannel 已经拼装好的 headers(含 Authorization / x-api-key /
   // anthropic-version / customHeaders 等),避免在上层重复实现"如何认证 OpenAI 兼容
-  // 网关"这套散落逻辑。仅面向 authMethod='api_key';OAuth/本机 CLI provider 走各自
+  // 网关"这套散落逻辑。仅面向 authMethod='api_key';OAuth provider 走各自
   // 的适配器,不通过此方法。
   //
   // 返回 null 的三种情况:
@@ -1656,7 +1534,7 @@ export function createLlmConfigStore({
     const items = readAll();
     const item = items.find((i) => i.id === id);
     if (!item) return null;
-    if (isOAuthAuthMethod(item.authMethod) || isLocalCliAuthMethod(item.authMethod)) return null;
+    if (isOAuthAuthMethod(item.authMethod)) return null;
     const apiKey = readApiKey(item);
     if (!apiKey) return null;
     const resolved = resolveChannel({ ...item, apiKey });
@@ -1708,7 +1586,7 @@ export function createLlmConfigStore({
     const item = items.find((i) => i.id === id);
     if (!item) {
       return enrichTestResultWithDiagnostics(
-        { success: false, error: 'Provider not found' },
+        { success: false, error: retiredBindingCode(id) || 'Provider not found' },
         { connectionId: id, trigger: 'user' },
       );
     }
@@ -1728,11 +1606,6 @@ export function createLlmConfigStore({
     let result;
     if (isOAuthAuthMethod(item.authMethod)) {
       result = resolveSubscriptionTestResult(oauthStatusOf(item), item.model);
-    } else if (isLocalCliAuthMethod(item.authMethod)) {
-      result = enrichTestResultWithDiagnostics(
-        await testQoderPrivate(item.model),
-        diagnosticContext,
-      );
     } else {
       const apiKey = readApiKey(item);
       if (!apiKey) {
@@ -1834,7 +1707,7 @@ export function createLlmConfigStore({
     if (!item) return { success: false, error: 'Provider not found', text: '' };
 
     // One-shot completion is for API-key providers. OAuth/subscription models use the chat runtime.
-    if (isOAuthAuthMethod(item.authMethod) || isLocalCliAuthMethod(item.authMethod)) {
+    if (isOAuthAuthMethod(item.authMethod)) {
       return {
         success: false,
         error: 'Selected model does not support one-shot detection. Choose an API-key model.',
@@ -2057,31 +1930,4 @@ async function testGemini(resolved, model, start, fetchImpl) {
   }
   await res.json().catch(() => ({}));
   return { success: true, model, latencyMs };
-}
-
-async function testQoderPrivate(model = 'auto') {
-  const start = Date.now();
-  try {
-    const token = await loadQoderAccessToken();
-    const result = await sendQoderPrivateStream({
-      apiKey: token,
-      model: model || 'auto',
-      messages: [{ role: 'user', content: 'hi' }],
-      maxOutputTokens: 8,
-      signal: AbortSignal.timeout(15000),
-      webContents: { send: () => {} },
-      streamId: `llm-test-qoder-${Date.now()}`,
-    });
-    const latencyMs = Date.now() - start;
-    if (!result.ok) {
-      const error = result.errorText || (result.status ? `HTTP ${result.status}` : 'qoder_private_error');
-      return { success: false, error, latencyMs };
-    }
-    if (!String(result.content || '').trim()) {
-      return { success: false, error: 'qoder_private_empty_response', latencyMs };
-    }
-    return { success: true, model: model || 'auto', latencyMs };
-  } catch (err) {
-    return { success: false, error: err?.code || 'qoder_auth_unavailable', latencyMs: Date.now() - start };
-  }
 }

@@ -32,15 +32,12 @@ import {
   createUnavailableChatModel,
   type ProviderSystemPromptContext,
 } from './provider-chat-model.ts';
-import { createQoderPrivateProvider } from './qoder-private-provider.ts';
 import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
 import { createGeminiProvider } from './gemini-provider.ts';
 import { resolveTuiWire } from './provider-wire-matrix.ts';
 import {
-  ensureFreshGoogleTokensFromDesktop,
   ensureFreshGrokTokensFromDesktop,
   startGrokReLoginFromDesktop,
-  loadQoderAccessTokenFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
 import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
@@ -187,19 +184,6 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           }).stream(request);
         }
 
-        // Qoder private SSE wire (not OpenAI-compatible chat/completions).
-        if (decision.wire === 'qoder-private') {
-          return createQoderPrivateProvider({
-            providerId: credentialId,
-            baseUrl,
-            async getAccessToken() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (current?.apiKey) return current.apiKey;
-              return loadQoderAccessTokenFromDesktop();
-            },
-          }).stream(request);
-        }
-
         // Anthropic Messages API (/v1/messages), not OpenAI-compatible chat/completions.
         if (decision.wire === 'anthropic-messages') {
           return createAnthropicMessagesProvider({
@@ -216,32 +200,15 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           }).stream(request);
         }
 
-        // Gemini generateContent SSE (Code Assist for OAuth; never .../v1beta/openai).
+        // Gemini generateContent SSE.
         if (decision.wire === 'gemini') {
           return createGeminiProvider({
             providerId: credentialId,
             baseUrl,
-            authMethod: metadata.authMethod || decision.authMethod || 'api_key',
             async getApiKey() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (current?.apiKey) return current.apiKey;
-              if (metadata.authMethod === 'oauth_google' && current?.oauthTokens) {
-                const fresh = await current.refreshOAuthTokens(current.oauthTokens,
-                  async (tokens) => ({ tokens: await ensureFreshGoogleTokensFromDesktop(tokens, { fetchImpl: oauthRefreshFetch }), refreshed: true }));
-                if (fresh.tokens?.access) {
-                  return String(fresh.tokens.access);
-                }
-              }
-              throw new Error(
-                metadata.authMethod === 'oauth_google'
-                  ? 'Google OAuth access token is unavailable. Sign in via Desktop or unlock Keychain and retry.'
-                  : 'Desktop credential is locked. Allow Keychain access and retry.',
-              );
-            },
-            async getProjectId() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              const tokens = current?.oauthTokens as { projectId?: string; project_id?: string } | undefined;
-              return tokens?.projectId || tokens?.project_id || null;
+              if (!current?.apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+              return current.apiKey;
             },
           }).stream(request);
         }

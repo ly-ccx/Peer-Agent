@@ -79,7 +79,7 @@ export async function refreshModelOAuthTokens<T extends ModelOAuthTokens>({
   /** Own the host's short config -> Vault transaction; never wrap HTTP waits. */
   readonly withConfiguration?: <R>(action: () => R) => R;
 }): Promise<{ tokens: T; refreshed: boolean }> {
-  if (!['oauth_chatgpt', 'oauth_google', 'oauth_grok'].includes(authMethod)) fail('credential_oauth_auth_unsupported');
+  if (!['oauth_chatgpt', 'oauth_grok'].includes(authMethod)) fail('credential_oauth_auth_unsupported');
   const receipt = receipts.get(tokens);
   if (!receipt || receipt.client !== client || receipt.key !== key
       || !isDeepStrictEqual(tokens, receipt.view)) fail('credential_oauth_snapshot_required');

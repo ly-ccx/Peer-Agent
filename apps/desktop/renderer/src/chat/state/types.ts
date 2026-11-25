@@ -249,12 +249,12 @@ export type ToolProgress = { tool: string; path: string | null; receivedLines: n
  * 视图模型同级。store 与 hook 都从这里 import，避免重复定义导致的结构漂移。
  */
 export interface ProviderRecoveryNotice {
-  kind?: 'provider' | 'connection' | 'queue';
+  kind?: 'provider' | 'connection';
   fromProvider?: string;
   toProvider?: string;
   provider?: string;
   model?: string;
-  status?: 'retrying' | 'recovered' | 'queued';
+  status?: 'retrying' | 'recovered';
   fromConnection?: string;
   toConnection?: string;
   connection?: string;
@@ -262,17 +262,5 @@ export interface ProviderRecoveryNotice {
   maxRetries?: number;
   delayMs?: number;
   reason?: string;
-  /** Qoder slow-queue (10605) specifics. */
-  queueType?: string | null;
-  queueCount?: number | null;
-  serviceAvailable?: boolean | null;
-  /** Current single wait (ms) before the next queue poll. */
-  waitMs?: number;
-  /** Upstream estimated total wait (ms). */
-  upstreamWaitTimeMs?: number | null;
-  /** Time already spent waiting in queue (ms). */
-  waitedMs?: number;
-  /** Client-side queue wait budget (ms). */
-  budgetMs?: number;
   message?: string;
 }

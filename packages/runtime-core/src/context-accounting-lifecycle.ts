@@ -93,7 +93,7 @@ export function isContextAccountingSnapshotCurrent(
 
 /**
  * Reproject a restored/displayed context-accounting snapshot onto the current
- * model config window (e.g. Qoder tier projection). Occupied tokens stay from
+ * model config window. Occupied tokens stay from
  * the snapshot; only capacity fields + percent are refreshed so UI/runtime do
  * not keep a stale window after the user changes tiers or projection is fixed.
  */

@@ -278,18 +278,7 @@ export function ModelCatalogDialog({
                 ? (zh ? `默认 ${context} · 最高 ${maxContext}` : `Default ${context} · Up to ${maxContext}`)
                 : context;
               const output = compactTokens(model.maxOutputTokens);
-              const priceFactor = typeof model.priceFactor === 'number' && Number.isFinite(model.priceFactor)
-                ? model.priceFactor
-                : null;
-              const originalPriceFactor = typeof model.originalPriceFactor === 'number' && Number.isFinite(model.originalPriceFactor)
-                ? model.originalPriceFactor
-                : null;
-              const creditLabel = priceFactor == null
-                ? null
-                : (originalPriceFactor != null && originalPriceFactor !== priceFactor
-                  ? `${originalPriceFactor.toFixed(2).replace(/\.?0+$/, '')}x→${priceFactor.toFixed(2).replace(/\.?0+$/, '')}x Credit`
-                  : `${priceFactor.toFixed(2).replace(/\.?0+$/, '')}x Credit`);
-              const hasMetadata = Boolean(contextSummary || output || model.supportsVision || model.supportsReasoning || creditLabel);
+              const hasMetadata = Boolean(contextSummary || output || model.supportsVision || model.supportsReasoning);
               return (
                 <label key={model.id} className={`llm-catalog-item ${configured ? 'is-configured' : ''} ${checked ? 'is-selected' : ''}`}>
                   <Checkbox checked={checked} disabled={selectionMode === 'single' && configured} onChange={() => toggle(model.id)} aria-label={`${model.label || model.id} ${checked ? (zh ? '已选择' : 'selected') : (zh ? '未选择' : 'not selected')}`} />
@@ -299,7 +288,7 @@ export function ModelCatalogDialog({
                     <code>{model.id}</code>
                     <small>
                       {hasMetadata
-                        ? [contextSummary ? `${contextSummary} ctx` : null, output ? `${output} out` : null, model.supportsVision ? (zh ? '图像输入' : 'vision') : null, model.supportsReasoning ? (zh ? '推理' : 'reasoning') : null, creditLabel].filter(Boolean).join(' · ')
+                        ? [contextSummary ? `${contextSummary} ctx` : null, output ? `${output} out` : null, model.supportsVision ? (zh ? '图像输入' : 'vision') : null, model.supportsReasoning ? (zh ? '推理' : 'reasoning') : null].filter(Boolean).join(' · ')
                         : (zh ? '远程接口仅返回 Model ID；导入后元数据待完善' : 'Only a model ID was returned; metadata needs review after import')}
                     </small>
                   </span>

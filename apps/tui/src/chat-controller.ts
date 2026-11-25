@@ -1194,7 +1194,7 @@ export function createChatController(options: {
                 ...(images.length > 0 ? { images } : {}),
               }]),
           // Insert a pending assistant immediately so the UI can show a Thinking
-          // transition state before the first token arrives (Claude Code / Qoder style).
+          // transition state before the first token arrives.
           {
             id: `assistant-${++sequence}`,
             role: 'assistant',

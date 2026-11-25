@@ -25,18 +25,10 @@ function normalizeGeminiUsage(usage) {
   };
 }
 
-function unwrapGeminiPayload(parsed) {
-  // Code Assist SSE 外层是 { response: GenerateContentResponse }；API key 路径则是裸 GenerateContentResponse。
-  if (parsed && typeof parsed === 'object' && parsed.response && typeof parsed.response === 'object') {
-    return parsed.response;
-  }
-  return parsed;
-}
-
 function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null) {
-  const payload = unwrapGeminiPayload(parsed);
+  const payload = parsed;
   trace?.recordSsePayload?.(JSON.stringify(parsed), payload);
-  const streamError = extractGeminiStreamError(payload) || extractGeminiStreamError(parsed);
+  const streamError = extractGeminiStreamError(payload);
   if (streamError) {
     state.streamError = streamError;
     return;
@@ -144,10 +136,6 @@ export async function sendGeminiStream({
   effort,
   supportsReasoning,
   maxOutputTokens,
-  authMethod,
-  projectId,
-  userPromptId,
-  sessionId,
   signal,
   webContents,
   eventSink = null,
@@ -163,11 +151,6 @@ export async function sendGeminiStream({
     messages,
     tools,
     maxOutputTokens,
-    model,
-    projectId,
-    authMethod,
-    userPromptId,
-    sessionId,
   });
   const trace = createProviderStreamTrace({
     provider: 'gemini',

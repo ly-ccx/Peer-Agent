@@ -2849,10 +2849,6 @@
 .provider-recovery-notice--connection {
   color: var(--graphite-soft);
 }
-/* Upstream slow-queue (Qoder 10605): informational, not an error. */
-.provider-recovery-notice--queue {
-  color: var(--graphite-soft);
-}
 .provider-recovery-body {
   flex: 1;
   line-height: 1.4;

@@ -1,3 +1,4 @@
+import { retiredModelConfigCode } from '@peer-agent/runtime-node/storage';
 import { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl, GROK_SUBSCRIPTION_BASE_URL, GROK_SUBSCRIPTION_HEADERS } from '@peer-agent/runtime-node';
 import { randomUUID } from 'node:crypto';
 
@@ -7,9 +8,6 @@ export const CHATGPT_SUBSCRIPTION_NAME = 'ChatGPT 订阅';
 export const CHATGPT_SUBSCRIPTION_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const GROK_OFFICIAL_NAME = 'Grok 官方';
 export { GROK_SUBSCRIPTION_BASE_URL };
-export const GEMINI_OAUTH_NAME = 'Gemini OAuth';
-export const GEMINI_CODE_ASSIST_BASE_URL = 'https://cloudcode-pa.googleapis.com';
-export const QODER_PRIVATE_NAME = 'Qoder（本机 CLI）';
 
 export const CHANNEL_IDS = {
   OPENAI: 'openai',
@@ -34,7 +32,6 @@ export const CHANNEL_IDS = {
   ANTHROPIC_COMPATIBLE: 'anthropic-compatible',
   GOOGLE_AI: 'google-ai',
   GROK: 'grok',
-  QODER: 'qoder',
 };
 
 /**
@@ -585,7 +582,6 @@ const CHANNEL_DESCRIPTORS = {
     allowedWires: ['gemini'],
     authMethods: {
       api_key: { wire: 'gemini' },
-      oauth_google: { wire: 'gemini' },
     },
     defaults: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-pro' },
     capabilities: {
@@ -632,30 +628,6 @@ const CHANNEL_DESCRIPTORS = {
       vision: true,
       toolUse: true,
       temperature: true,
-    },
-  },
-  [CHANNEL_IDS.QODER]: {
-    id: CHANNEL_IDS.QODER,
-    label: QODER_PRIVATE_NAME,
-    legacyProvider: 'openai',
-    defaultWire: 'qoder-private',
-    allowedWires: ['qoder-private'],
-    authMethods: {
-      qoder_local_auth: { wire: 'qoder-private' },
-      local_cli: { wire: 'qoder-private' },
-    },
-    defaults: { baseUrl: 'https://api2-v2.qoder.sh/model/v1', model: 'auto' },
-    capabilities: {
-      reasoning: {
-        supported: false,
-        paramStyle: 'none',
-        effortLevels: ['off'],
-        defaultEffort: 'off',
-      },
-      promptCache: false,
-      vision: false,
-      toolUse: false,
-      temperature: false,
     },
   },
 };
@@ -1012,25 +984,6 @@ const SERVICE_TEMPLATES = [
     tags: ['验证兼容', 'API Key'],
   },
   {
-    id: 'google-oauth',
-    brand: 'Google',
-    title: 'Gemini OAuth',
-    description: '使用 Google 账号授权登录',
-    accessCategory: 'oauth',
-    supportTier: 'verified',
-    channelId: CHANNEL_IDS.GOOGLE_AI,
-    authMethod: 'oauth_google',
-    legacyProvider: 'openai',
-    defaultWire: 'gemini',
-    defaults: {
-      baseUrl: GEMINI_CODE_ASSIST_BASE_URL,
-      model: 'gemini-2.5-pro',
-      hideBaseUrlByDefault: true,
-    },
-    searchAliases: ['gemini oauth', 'google login'],
-    tags: ['授权登录'],
-  },
-  {
     id: 'grok-oauth',
     brand: 'xAI',
     title: GROK_OFFICIAL_NAME,
@@ -1048,25 +1001,6 @@ const SERVICE_TEMPLATES = [
     },
     searchAliases: ['grok', 'xai'],
     tags: ['授权登录'],
-  },
-  {
-    id: 'qoder-local',
-    brand: 'Qoder',
-    title: QODER_PRIVATE_NAME,
-    description: '本机已登录的 Qoder CLI',
-    accessCategory: 'local',
-    supportTier: 'verified',
-    channelId: CHANNEL_IDS.QODER,
-    authMethod: 'qoder_local_auth',
-    legacyProvider: 'openai',
-    defaultWire: 'qoder-private',
-    defaults: {
-      baseUrl: 'https://api2-v2.qoder.sh/model/v1',
-      model: 'auto',
-      hideBaseUrlByDefault: false,
-    },
-    searchAliases: ['qoder', 'local'],
-    tags: ['本地 / 私有'],
   },
   {
     id: 'openrouter-api',
@@ -1373,9 +1307,7 @@ export function resolveServiceTemplateId({ channelId, authMethod } = {}) {
 export function inferChannelId(config = {}) {
   if (typeof config.channelId === 'string' && config.channelId.trim()) return config.channelId;
   if (config.authMethod === 'oauth_chatgpt') return CHANNEL_IDS.OPENAI;
-  if (config.authMethod === 'oauth_google') return CHANNEL_IDS.GOOGLE_AI;
   if (config.authMethod === 'oauth_grok') return CHANNEL_IDS.GROK;
-  if (config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli') return CHANNEL_IDS.QODER;
   if (config.provider === 'anthropic') return CHANNEL_IDS.ANTHROPIC;
   return CHANNEL_IDS.OPENAI_COMPATIBLE;
 }
@@ -1428,18 +1360,11 @@ function geminiModelPath(model) {
   return raw.startsWith('models/') ? raw : `models/${raw}`;
 }
 
-function endpointForWire(baseUrl, wire, { model, apiKey, authMethod, stream = true } = {}) {
+function endpointForWire(baseUrl, wire, { model, apiKey, stream = true } = {}) {
   const root = String(baseUrl || '').replace(/\/+$/, '');
-  if (wire === 'qoder-private') return `${root}/chat/completions`;
   if (wire === 'anthropic-messages') return `${root}/v1/messages`;
   if (wire === 'openai-responses') return `${root}/responses`;
   if (wire === 'gemini') {
-    // Gemini OAuth / Code Assist 对齐 gemini-cli：走 cloudcode-pa v1internal，
-    // 而不是 generativelanguage.googleapis.com 的 models/{model}:streamGenerateContent。
-    if (authMethod === 'oauth_google') {
-      const action = stream ? 'streamGenerateContent' : 'generateContent';
-      return `${root}/v1internal:${action}${stream ? '?alt=sse' : ''}`;
-    }
     const method = stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
     const keyParam = !apiKey
       ? ''
@@ -1449,8 +1374,7 @@ function endpointForWire(baseUrl, wire, { model, apiKey, authMethod, stream = tr
   return `${root}/chat/completions`;
 }
 
-function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectId }) {
-  if (wire === 'qoder-private') return {};
+function requiredHeadersFor({ wire, apiKey, accountId }) {
   if (wire === 'anthropic-messages') {
     return {
       'Content-Type': 'application/json',
@@ -1458,16 +1382,7 @@ function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectI
       'anthropic-version': '2023-06-01',
     };
   }
-  if (wire === 'gemini') {
-    const headers = { 'Content-Type': 'application/json' };
-    if (authMethod === 'oauth_google') {
-      // Code Assist 只需要 Bearer；project 放在请求体 project 字段。
-      // 不要加 x-goog-user-project：它会把请求路由到 GCP 项目配额，
-      // 对个人 Code Assist project 常触发 SERVICE_DISABLED / cloudcode-pa 403。
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-    return headers;
-  }
+  if (wire === 'gemini') return { 'Content-Type': 'application/json' };
   const headers = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
@@ -1478,20 +1393,14 @@ function requiredHeadersFor({ wire, apiKey, accountId, authMethod, oauthProjectI
 }
 
 export function resolveChannel(config = {}) {
+  const retired = retiredModelConfigCode(config);
+  if (retired) throw Object.assign(new Error(retired), { code: retired });
   const channelId = normalizeChannelId(inferChannelId(config));
   const descriptor = getChannelDescriptor(channelId);
   if (!descriptor) throw new Error(`unknown_channel:${channelId}`);
   const isOpenCodeGo = channelId === CHANNEL_IDS.OPENCODE_GO;
 
-  const authMethod = config.authMethod === 'oauth_chatgpt'
-    ? 'oauth_chatgpt'
-    : config.authMethod === 'oauth_google'
-      ? 'oauth_google'
-      : config.authMethod === 'oauth_grok'
-        ? 'oauth_grok'
-        : config.authMethod === 'qoder_local_auth' || config.authMethod === 'local_cli'
-          ? 'qoder_local_auth'
-          : 'api_key';
+  const authMethod = config.authMethod || 'api_key';
   const authRule = descriptor.authMethods[authMethod];
   if (!authRule) throw new Error(`unsupported_auth_method:${channelId}:${authMethod}`);
 
@@ -1513,13 +1422,7 @@ export function resolveChannel(config = {}) {
   if (authMethod === 'oauth_chatgpt' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
-  if (authMethod === 'oauth_google' && wireOverride && wireOverride !== wire) {
-    throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
-  }
   if (authMethod === 'oauth_grok' && wireOverride && wireOverride !== wire) {
-    throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
-  }
-  if (authMethod === 'qoder_local_auth' && wireOverride && wireOverride !== wire) {
     throw new Error(`unsupported_wire:${channelId}:${wireOverride}`);
   }
 
@@ -1527,14 +1430,12 @@ export function resolveChannel(config = {}) {
     ? CHATGPT_SUBSCRIPTION_BASE_URL
     : authMethod === 'oauth_grok'
       ? GROK_SUBSCRIPTION_BASE_URL
-      : authMethod === 'oauth_google'
-        ? GEMINI_CODE_ASSIST_BASE_URL
-        : (config.baseUrl || descriptor.defaults.baseUrl);
+      : (config.baseUrl || descriptor.defaults.baseUrl);
   if (isOpenCodeGo) {
     baseUrl = resolveOpenCodeGoBaseUrl(wire, baseUrl);
   }
   const apiKey = config.apiKey || '';
-  const endpoint = endpointForWire(baseUrl, wire, { model: config.model, apiKey, authMethod, stream: true });
+  const endpoint = endpointForWire(baseUrl, wire, { model: config.model, apiKey, stream: true });
   const accountId = config.accountId || null;
   const customHeaders = config.customHeaders || {};
   validateCustomHeaders(customHeaders);
@@ -1543,8 +1444,6 @@ export function resolveChannel(config = {}) {
       wire,
       apiKey,
       accountId,
-      authMethod,
-      oauthProjectId: config.oauthProjectId,
     }),
     descriptor.headers,
     isOpenCodeGo && wire === 'anthropic-messages' ? buildClaudeCliIdentityHeaders() : {},
@@ -1594,11 +1493,10 @@ export function resolveChannel(config = {}) {
   return {
     channelId,
     authMethod,
-    oauthProjectId: String(config.oauthProjectId || '').trim() || null,
     wire,
     baseUrl,
     endpoint,
-    testEndpoint: endpointForWire(baseUrl, wire, { model: config.model, apiKey, authMethod, stream: false }),
+    testEndpoint: endpointForWire(baseUrl, wire, { model: config.model, apiKey, stream: false }),
     headers,
     descriptor,
     capabilities,

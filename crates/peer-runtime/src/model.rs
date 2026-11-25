@@ -14,8 +14,7 @@ mod tool_results;
 pub(crate) use tool_results::ToolResultEncoding;
 mod count;
 mod grok;
-pub(crate) mod qoder_retry;
-mod retry_seed;
+mod request;
 pub use count::ProviderTokenCount;
 const TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
 mod sse;
@@ -92,10 +91,8 @@ pub enum ModelDelta<'a> {
 
 pub const SAME_PROVIDER_RETRY_DELAYS_MS: [u64; 3] = [500, 1_500, 3_000];
 
-/// Bounded same-provider transient backoff policy (ADR 30) unifying generic HTTP/transport
-/// retries (`[500, 1500, 3000]ms`) and Qoder-specific retry hints.
+/// Bounded same-provider transient HTTP/transport backoff (ADR 30).
 pub struct SameProviderRetryPolicy {
-    qoder: qoder_retry::Policy,
     delays_ms: Vec<u64>,
     generic_attempts: usize,
 }
@@ -109,16 +106,12 @@ impl Default for SameProviderRetryPolicy {
 impl SameProviderRetryPolicy {
     pub fn with_delays_ms(delays_ms: Vec<u64>) -> Self {
         Self {
-            qoder: qoder_retry::Policy::default(),
             delays_ms,
             generic_attempts: 0,
         }
     }
 
     pub fn next_delay(&mut self, error: &ModelError) -> Result<Option<Duration>, &'static str> {
-        if error.retry.is_some() {
-            return self.qoder.next(error).map_err(|e| e.code);
-        }
         if error.is_transient_retryable()
             && let Some(&ms) = self.delays_ms.get(self.generic_attempts)
         {
@@ -143,12 +136,6 @@ impl NativeModel {
     pub(crate) fn with_oauth(mut self, oauth: Option<crate::model_oauth::ModelOAuth>) -> Self {
         if let Some(oauth) = oauth {
             self.authentication = Arc::new(authentication::Access::OAuth(Box::new(oauth)));
-        }
-        self
-    }
-    pub(crate) fn with_qoder(mut self, account: Option<crate::qoder::account::Account>) -> Self {
-        if let Some(account) = account {
-            self.authentication = Arc::new(authentication::Access::Qoder(Box::new(account)));
         }
         self
     }
@@ -184,10 +171,7 @@ impl NativeModel {
             || endpoint.password().is_some()
             || endpoint.fragment().is_some()
             || (endpoint.query().is_some()
-                && !(config.wire == wire::Wire::Gemini && endpoint.query() == Some("alt=sse"))
-                && !(config.wire == wire::Wire::Qoder
-                    && endpoint.query()
-                        == Some("FetchKeys=llm_model_result&AgentId=agent_common&Encode=1")))
+                && !(config.wire == wire::Wire::Gemini && endpoint.query() == Some("alt=sse")))
             || config.model.is_empty()
             || config.model.len() > 512
             || config.provider.is_empty()
@@ -334,7 +318,6 @@ impl NativeModel {
         endpoint: reqwest::Url,
         accept: &str,
         cancel: &CancellationToken,
-        prepared: Option<(&Value, &[u8])>,
     ) -> Result<reqwest::RequestBuilder, ModelError> {
         let mut headers = self.headers.clone();
         headers.insert(
@@ -370,7 +353,7 @@ impl NativeModel {
             reqwest::header::HeaderValue::from_static("close"),
         );
         self.authentication
-            .apply(&mut headers, self.wire, prepared, cancel)
+            .apply(&mut headers, self.wire, cancel)
             .await?;
         Ok(client.post(endpoint).headers(headers))
     }
@@ -396,28 +379,17 @@ impl PreparedRequest<'_> {
             let mut response = match &model.compatibility {
                 Some(adapter) => adapter.send(model, &self.bytes, cancel).await?,
                 None => model
-                    .request_builder(
-                        model.endpoint.clone(),
-                        "text/event-stream",
-                        cancel,
-                        Some((&self.body, &self.bytes)),
-                    )
+                    .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
                     .await?
                     .body(self.bytes)
                     .send()
                     .await
                     .map_err(|e| {
-                        let mut error = ModelError::new(if e.is_timeout() {
+                        ModelError::new(if e.is_timeout() {
                             "model_timeout"
                         } else {
                             "model_transport_failed"
-                        });
-                        if model.wire == wire::Wire::Qoder
-                            && (e.is_connect() || e.is_request() || e.is_timeout())
-                        {
-                            error.retry = Some(qoder_retry::Hint::Connection);
-                        }
-                        error
+                        })
                     })?,
             };
             if !response.status().is_success() {
@@ -438,11 +410,7 @@ impl PreparedRequest<'_> {
                     }
                     body.extend_from_slice(&chunk);
                 }
-                return Err(if model.wire == wire::Wire::Qoder {
-                    qoder_retry::http(status, &body)
-                } else {
-                    ModelError::http(status, &body)
-                });
+                return Err(ModelError::http(status, &body));
             }
             if !sse_content_type_allowed(response.headers()) {
                 return Err(ModelError::new("model_content_type_invalid"));
@@ -450,13 +418,11 @@ impl PreparedRequest<'_> {
             let decoder = stream.as_mut().expect("one request decoder");
             let mut shown = 0;
             let mut shown_thinking = 0;
-            while let Some(chunk) = response.chunk().await.map_err(|e| {
-                let mut error = ModelError::new("model_stream_interrupted");
-                if model.wire == wire::Wire::Qoder && !e.is_timeout() {
-                    error.retry = Some(qoder_retry::Hint::Transient);
-                }
-                error
-            })? {
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|_| ModelError::new("model_stream_interrupted"))?
+            {
                 decoder.push(&chunk)?;
                 let thinking = decoder.preview_thinking();
                 if thinking.len() > shown_thinking {

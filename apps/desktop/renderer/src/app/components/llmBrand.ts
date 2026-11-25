@@ -3,7 +3,6 @@ export type LlmBrandId =
   | 'anthropic'
   | 'google'
   | 'xai'
-  | 'qoder'
   | 'deepseek'
   | 'zhipu'
   | 'kimi'
@@ -32,7 +31,6 @@ const BRAND_LABELS: Readonly<Record<LlmBrandId, string>> = {
   anthropic: 'Anthropic',
   google: 'Google Gemini',
   xai: 'xAI',
-  qoder: 'Qoder',
   deepseek: 'DeepSeek',
   zhipu: '智谱 GLM',
   kimi: 'Kimi',
@@ -55,7 +53,6 @@ function matchBrand(value: string): LlmBrandId | null {
   if (/\b(anthropic|claude)\b/.test(value)) return 'anthropic';
   if (/\b(google|gemini|gemma|vertex)\b/.test(value)) return 'google';
   if (/\b(xai|grok)\b/.test(value)) return 'xai';
-  if (/\b(qoder)\b/.test(value)) return 'qoder';
   if (/deepseek/.test(value)) return 'deepseek';
   // 智谱 / GLM Coding Plan / bigmodel / z.ai
   if (/zhipu|bigmodel|智谱|glm-coding-plan|\bglm\b|\bz\.ai\b/.test(value)) return 'zhipu';

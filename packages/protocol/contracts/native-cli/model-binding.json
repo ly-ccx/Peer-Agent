@@ -36,18 +36,6 @@
     {
       "value": {
         "id": "account",
-        "authMethod": "oauth_google",
-        "enabled": true,
-        "customHeaders": {
-          "X-Key": "first",
-          "x-key": "last"
-        }
-      },
-      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_google\",\"enabled\":true,\"customHeaders\":{\"X-Key\":\"first\",\"x-key\":\"last\"}}"
-    },
-    {
-      "value": {
-        "id": "account",
         "authMethod": "oauth_chatgpt",
         "enabled": false,
         "customHeaders": {
