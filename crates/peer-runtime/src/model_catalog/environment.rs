@@ -86,7 +86,7 @@ impl Environment {
                 },
             },
             Some(self.key),
-            Duration::from_secs(120),
+            Duration::from_secs(300),
         )
     }
 }
