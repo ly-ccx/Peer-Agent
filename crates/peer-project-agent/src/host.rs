@@ -543,6 +543,10 @@ impl NativeProjectHost {
             if cancel.is_cancelled() {
                 break;
             }
+            let is_newly_consumed = consumed
+                .consumed
+                .iter()
+                .any(|item| item.input_id == input.input_id);
             let outcome = Box::pin(self.runner.run_turn_with_verifier(
                 &RunTurnOptions {
                     workspace_id,
@@ -553,6 +557,7 @@ impl NativeProjectHost {
                     wake_events: &[],
                     worker_model_selection: worker_model_selection.clone(),
                     holds_lease: true,
+                    manual_trial: is_newly_consumed,
                 },
                 model,
                 verifier_model,
@@ -630,6 +635,7 @@ impl NativeProjectHost {
                 wake_events: &batch.events,
                 worker_model_selection,
                 holds_lease: true,
+                manual_trial: false,
             },
             model,
             verifier_model,

@@ -2216,3 +2216,171 @@ async fn bot_get_reports_path_exists_and_rebind_folder_preserves_bot_and_clears_
 
     client.shutdown(handle).await;
 }
+
+#[tokio::test]
+async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
+    use tokio::io::AsyncWriteExt;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/v1/chat/completions", listener.local_addr().unwrap());
+    let req_count = Arc::new(AtomicUsize::new(0));
+    let sse_stop = CancellationToken::new();
+    {
+        let req_count = Arc::clone(&req_count);
+        let stop = sse_stop.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = stop.cancelled() => break,
+                    accepted = listener.accept() => {
+                        let Ok((mut socket, _)) = accepted else { break; };
+                        let n = req_count.fetch_add(1, Ordering::SeqCst);
+                        tokio::spawn(async move {
+                            let _ = read_http_request(&mut socket).await;
+                            if n == 0 {
+                                let body = json!([{
+                                    "error": {
+                                        "code": 400,
+                                        "status": "INVALID_ARGUMENT",
+                                        "message": "bad schema"
+                                    }
+                                }]).to_string();
+                                let resp = format!(
+                                    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                    body.len(),
+                                    body
+                                );
+                                let _ = socket.write_all(resp.as_bytes()).await;
+                            } else {
+                                write_sse_reply(
+                                    &mut socket,
+                                    &sse_text_response("Recovered after manual retry"),
+                                )
+                                .await;
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-hb-pause");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+
+    let (mut client, handle) = spawn_live_server(&home, Some(make_test_loader(endpoint))).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({ "enabled": true, "heartbeatIntervalMs": 50 }),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({ "path": ws_dir, "name": "HB Bot", "startFamiliarize": false }),
+        )
+        .await;
+    let ws_id = created["profile"]["workspaceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id,
+                "inputId": "inp-hb-fail-1",
+                "text": "Trigger single failure",
+            }),
+        )
+        .await;
+
+    // Wait for the first failure card with HTTP 400 detail.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let failed_turn_id = loop {
+        let conv = client
+            .call(
+                "project.bot.readConversation",
+                json!({ "workspaceId": ws_id }),
+            )
+            .await;
+        let msgs = conv["messages"].as_array().cloned().unwrap_or_default();
+        if let Some(card) = msgs.iter().find(|m| m["card"] == "agent_unavailable") {
+            let content = card["content"].as_str().unwrap_or("");
+            assert!(
+                content.contains("HTTP 400 (model_http_rejected): INVALID_ARGUMENT: bad schema"),
+                "unexpected failure card content: {content}"
+            );
+            break card["turnId"].as_str().unwrap().to_owned();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for failure card: {conv}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    // Let >= 6 heartbeat intervals pass; heartbeat must NOT spam retries or duplicate cards.
+    tokio::time::sleep(Duration::from_millis(320)).await;
+    assert_eq!(
+        req_count.load(Ordering::SeqCst),
+        1,
+        "heartbeat must not re-fire failed turn automatically"
+    );
+    let conv_paused = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id }),
+        )
+        .await;
+    let cards_paused = conv_paused["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["card"] == "agent_unavailable")
+        .count();
+    assert_eq!(cards_paused, 1);
+
+    // Explicit manual retry clears the heartbeat pause and runs the turn cleanly.
+    let ret = client
+        .call(
+            "project.bot.retry",
+            json!({ "workspaceId": ws_id, "turnId": failed_turn_id }),
+        )
+        .await;
+    assert_eq!(ret["ok"], true, "retry failed: {ret}");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let conv = client
+            .call(
+                "project.bot.readConversation",
+                json!({ "workspaceId": ws_id }),
+            )
+            .await;
+        let msgs = conv["messages"].as_array().cloned().unwrap_or_default();
+        if msgs.iter().any(|m| {
+            m["role"] == "assistant"
+                && m["content"]
+                    .as_str()
+                    .is_some_and(|c| c.contains("Recovered after manual retry"))
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for retried reply: {conv}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(req_count.load(Ordering::SeqCst), 2);
+
+    sse_stop.cancel();
+    client.shutdown(handle).await;
+}

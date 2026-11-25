@@ -5954,6 +5954,7 @@ async fn wake_turn_host_fallback_reports_failed_session_when_model_yields_withou
                 wake_events: &wake_events,
                 worker_model_selection: json!({}),
                 holds_lease: true,
+                manual_trial: false,
             },
             &model,
             &cancel,
@@ -8245,4 +8246,235 @@ async fn autonomy_resume_only_continues_host_confirmed_technical_interruptions()
         worker_conv
     );
     host.close();
+}
+
+#[tokio::test]
+async fn gemini_main_bot_uses_parameters_json_schema_thinking_level_and_coalesces_long_thought_stream() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("GeminiBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    let input_id = "in-gemini-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Write a Gemini plan", None)
+        .unwrap();
+
+    let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let captured_ref = Arc::clone(&captured);
+    let anchor_for_reply = anchor.clone();
+    let server = start_mock_server(vec![Box::new(move |req: &Value| {
+        captured_ref.lock().unwrap().push(req.clone());
+        let mut sse = String::new();
+        // >128 thought chunks plus signature-only part would previously hit model_continuation_limit / model_block_unsupported.
+        for _ in 0..140 {
+            sse.push_str(
+                "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"text\":\"step \",\"thought\":true}]}}]}\n\n",
+            );
+        }
+        sse.push_str(
+            "data: {\"candidates\":[{\"index\":0,\"content\":{\"parts\":[{\"thoughtSignature\":\"sig-thought\",\"thought\":true}]}}]}\n\n",
+        );
+        let call_chunk = json!({
+            "candidates": [{
+                "index": 0,
+                "content": {
+                    "parts": [{
+                        "functionCall": {
+                            "name": "post_reply",
+                            "args": {
+                                "replyTo": [anchor_for_reply],
+                                "text": "Gemini reply committed cleanly."
+                            }
+                        },
+                        "thoughtSignature": "sig-call"
+                    }]
+                },
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 42,
+                "candidatesTokenCount": 18,
+                "thoughtsTokenCount": 30,
+                "totalTokenCount": 90
+            }
+        });
+        sse.push_str(&format!("data: {call_chunk}\n\n"));
+        sse
+    })]);
+
+    let model = NativeModel::new(
+        ModelConfig {
+            endpoint: format!(
+                "{}/v1beta/models/gemini-4-hydrogen:streamGenerateContent?alt=sse",
+                server.endpoint.trim_end_matches("/chat/completions")
+            ),
+            model: "gemini-4-hydrogen".to_owned(),
+            provider: "google-ai".to_owned(),
+            wire: Wire::Gemini,
+            generation: peer_runtime::model::wire::GenerationOptions {
+                supports_reasoning: true,
+                effort: "xhigh".to_owned(),
+                ..peer_runtime::model::wire::GenerationOptions::default()
+            },
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let mut perm = AutoAllowPermission;
+    let cancel = CancellationToken::new();
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            tick.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::ReplyCommitted { .. })
+        ),
+        "expected Gemini ReplyCommitted, got {:?}",
+        tick.last_turn.as_ref().map(|t| &t.end)
+    );
+
+    let reqs = captured.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    let body = &reqs[0];
+    assert_eq!(
+        body["generationConfig"]["thinkingConfig"],
+        json!({"thinkingLevel": "xhigh", "includeThoughts": true})
+    );
+    let decls = body["tools"][0]["functionDeclarations"]
+        .as_array()
+        .expect("Gemini functionDeclarations");
+    assert!(!decls.is_empty());
+    // No declaration may pass `additionalProperties` inside legacy `parameters`.
+    for decl in decls {
+        if let Some(legacy_params) = decl.get("parameters") {
+            let serialized = legacy_params.to_string();
+            assert!(
+                !serialized.contains("\"additionalProperties\""),
+                "legacy Gemini `parameters` must never contain additionalProperties: {decl}"
+            );
+        } else {
+            assert!(
+                decl["parametersJsonSchema"].is_object(),
+                "expected parametersJsonSchema on declaration: {decl}"
+            );
+        }
+    }
+    let spawn_decl = decls
+        .iter()
+        .find(|d| d["name"] == "spawn_session")
+        .expect("spawn_session declaration");
+    assert!(spawn_decl.get("parameters").is_none());
+    assert!(spawn_decl["parametersJsonSchema"].is_object());
+    assert!(spawn_decl["parametersJsonSchema"].get("anyOf").is_none());
+
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, input_id)
+        .unwrap()
+        .expect("committed reply");
+    assert_eq!(reply["content"], "Gemini reply committed cleanly.");
+    assert!(!conv_id.is_empty());
+}
+
+#[tokio::test]
+async fn open_circuit_blocks_stale_user_input_repolls_and_surfaces_http_400_detail() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("BreakerBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    host.submit_user_input(&entry.workspace_id, "in-400-1", "Trigger 400", None)
+        .unwrap();
+
+    let gemini_400_body = json!([{
+        "error": {
+            "code": 400,
+            "message": "Invalid JSON payload received. Unknown name \"additionalProperties\".",
+            "status": "INVALID_ARGUMENT"
+        }
+    }])
+    .to_string();
+
+    let mut handlers = Vec::new();
+    for _ in 0..5 {
+        let body = gemini_400_body.clone();
+        handlers.push(Box::new(move |_req: &Value| {
+            (400u16, "application/json", body.clone())
+        }) as HttpScriptHandler);
+    }
+    let server = start_http_mock_server(handlers);
+    let model = mock_model(&server.endpoint);
+    let mut perm = AutoAllowPermission;
+    let cancel = CancellationToken::new();
+
+    // First 5 ticks trip the circuit breaker (failures 1..=5).
+    for i in 1..=5 {
+        let tick = host
+            .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                tick.last_turn.as_ref().map(|t| &t.end),
+                Some(TurnEndKind::Failed { code }) if code == "model_http_rejected"
+            ),
+            "tick {i}: expected model_http_rejected, got {:?}",
+            tick.last_turn.as_ref().map(|t| &t.end)
+        );
+    }
+
+    let msgs_before = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let first_card = msgs_before
+        .iter()
+        .find(|m| m["card"] == "agent_unavailable")
+        .expect("agent_unavailable card");
+    let card_content = first_card["content"].as_str().unwrap_or("");
+    assert!(
+        card_content.contains("HTTP 400 (model_http_rejected): INVALID_ARGUMENT:"),
+        "expected HTTP 400 diagnostic detail in card content, got: {card_content}"
+    );
+    assert_eq!(first_card["meta"]["httpStatus"], 400);
+
+    let cards_before = msgs_before
+        .iter()
+        .filter(|m| m["card"] == "agent_unavailable")
+        .count();
+    assert_eq!(cards_before, 5);
+
+    // 6th tick re-polling the SAME already-consumed failed input must be blocked by the open
+    // circuit breaker (0 HTTP calls, 0 extra cards), NOT bypassed as a manual trial.
+    let blocked_tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            blocked_tick.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::CircuitOpen)
+        ),
+        "expected open circuit to block stale user input repoll, got {:?}",
+        blocked_tick.last_turn.as_ref().map(|t| &t.end)
+    );
+    let msgs_after = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let cards_after = msgs_after
+        .iter()
+        .filter(|m| m["card"] == "agent_unavailable")
+        .count();
+    assert_eq!(cards_after, 5, "blocked tick must not append duplicate error cards");
 }
