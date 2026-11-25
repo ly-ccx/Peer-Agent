@@ -731,6 +731,7 @@ fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> boo
         .map(Vec::as_slice)
         .unwrap_or(&[]);
 
+    let advisory_review = crate::acceptance::independent_review_not_required(plan);
     for criterion in criteria {
         let Some(cid) = criterion["id"]
             .as_str()
@@ -770,6 +771,7 @@ fn close_gate_passed_for_list(plan: &Value, known_refs: &HashSet<String>) -> boo
                     }
                 });
             if !review_ok
+                && !advisory_review
                 && !crate::acceptance::criterion_verified_by_independent_report(
                     plan, cid, known_refs,
                 )
@@ -2736,7 +2738,11 @@ impl SessionSupervisor {
                     .into_iter()
                     .flatten()
                     .any(|c| c["kind"] == "model_review");
-                if verifier_model.is_some() || has_model_review {
+                // Read-only web evidence is unreadable by the independent
+                // verifier; these sessions are delivered on the gate (ADR 137 D1).
+                let verifier_not_required =
+                    crate::acceptance::independent_verifier_not_required(&updated);
+                if !verifier_not_required && (verifier_model.is_some() || has_model_review) {
                     // Keep plan status non-terminal while verifying so watchdog/UI
                     // never project premature `result_ready` or wake before verification ends.
                     updated["status"] = json!("executing");
@@ -2752,6 +2758,12 @@ impl SessionSupervisor {
                     if self.read_plan(&plan_id)? != started {
                         return Err(ProjectError::code("session_state_changed"));
                     }
+                } else if verifier_not_required
+                    && updated["delegationOrigin"]["independentVerifier"] != "failed"
+                {
+                    // A failed mechanical check keeps its repair path; nothing else
+                    // claims an independent verdict that was never requested.
+                    updated["delegationOrigin"]["independentVerifier"] = json!("not_required");
                 }
                 Self::complete_worker_plan(&mut updated, ev_refs);
             } else {

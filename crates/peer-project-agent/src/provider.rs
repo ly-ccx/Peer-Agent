@@ -180,7 +180,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                                     "kind": {
                                         "type": "string",
                                         "enum": ["command", "test", "file-contains", "file-exists", "model_review"],
-                                        "description": "Use command/test/file-exists/file-contains for mechanical checks, and model_review for report completeness, audit, or quality checks (verified automatically by the independent verifier without requiring manual user sign-off)."
+                                        "description": "Use command/test/file-exists/file-contains for mechanical checks, and model_review for report completeness, audit, or quality checks (verified automatically by the independent verifier without requiring manual user sign-off). On read-only tasks that request web search or fetch, model_review items only guide the report and are not independently verified."
                                     },
                                     "description": {"type": "string"},
                                     "command": {"type": "string"},
@@ -1013,10 +1013,14 @@ impl PreparedProjectEffect {
         };
         let origin = &plan["delegationOrigin"];
         let force = self.args["force"] == true || focus.is_some();
-        let missing_or_failed = origin["independentVerifier"] == "failed"
-            || origin["independentVerifier"] == "missing"
-            || origin["independentVerifier"].is_null()
-            || plan["verificationReport"]["passed"] == false;
+        // A session whose evidence the verifier cannot read needs no check until
+        // one is forced; its recorded host errors stay visible (ADR 137 D2).
+        let review_not_required = crate::acceptance::independent_review_not_required(&plan);
+        let missing_or_failed = !review_not_required
+            && (origin["independentVerifier"] == "failed"
+                || origin["independentVerifier"] == "missing"
+                || origin["independentVerifier"].is_null()
+                || plan["verificationReport"]["passed"] == false);
         if (force || missing_or_failed)
             && let Some(model) = &self.verifier_model
         {

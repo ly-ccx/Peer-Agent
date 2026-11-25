@@ -12,6 +12,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+use peer_protocol::interactive_result::INTERACTIVE_PUBLISH_CAPABILITY;
+
 pub const CHANGED_FILE_CONFIRM_LIMIT: usize = 20;
 
 const CONFIRM_REASON_ORDER: [&str; 8] = [
@@ -144,6 +146,52 @@ pub fn handoff_question_id(
     format!("{prefix}-{}", &hash[..16])
 }
 
+/// A read-only session whose evidence lives on the web: the worker asked for the
+/// built-in read-only web capabilities and did not ask to publish an interactive
+/// result. The independent verifier never receives web capabilities, so it
+/// cannot read that evidence and the session's floor is the verification gate
+/// (ADR 137 D1). Decided only from persisted delegation facts.
+pub fn independent_verifier_not_required(plan: &Value) -> bool {
+    let origin = &plan["delegationOrigin"];
+    if origin["readOnly"] != true {
+        return false;
+    }
+    let mut web = false;
+    for capability in origin["requiredCapabilities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .flat_map(|raw| crate::verifier::expand_requested_capabilities(raw))
+    {
+        match capability {
+            "local.web.search" | "local.web.fetch" => web = true,
+            INTERACTIVE_PUBLISH_CAPABILITY => return false,
+            _ => {}
+        }
+    }
+    web
+}
+
+/// A not-required session for which no verifier run has returned a verdict
+/// (none was requested, or every run ended in a host error, timeout or invalid
+/// report). Its `model_review` criteria guide the report only, and a default
+/// `verify_session` does not request a check. Failed runs keep their record; an
+/// explicit `force` / `focus` still runs one.
+pub fn independent_review_not_required(plan: &Value) -> bool {
+    if !independent_verifier_not_required(plan) {
+        return false;
+    }
+    let report = &plan["verificationReport"];
+    !report.is_object() || report.get("error").is_some_and(|error| !error.is_null())
+}
+
+fn has_model_review_criterion(plan: &Value) -> bool {
+    plan["successCriteria"]
+        .as_array()
+        .is_some_and(|criteria| criteria.iter().any(|c| c["kind"] == "model_review"))
+}
+
 fn collect_leaf_tasks<'a>(tasks: &'a [Value], out: &mut Vec<&'a Value>) {
     for task in tasks {
         let subtasks = task["subtasks"]
@@ -267,6 +315,8 @@ fn evaluate_close_gate_inner(
         return (false, vec!["no_leaf_tasks".to_owned()]);
     }
     let mut unmet = Vec::new();
+    // ADR 137 D1: quality criteria the verifier cannot read are stated, not gated.
+    let advisory_review = independent_review_not_required(plan);
     for leaf in &leaves {
         let status = leaf["status"].as_str().unwrap_or("");
         let tid = leaf["taskId"].as_str().unwrap_or("unknown");
@@ -315,7 +365,7 @@ fn evaluate_close_gate_inner(
                                 && r["passed"] == true
                                 && criterion_result_has_indexed_evidence(r, known_refs)
                         }) || criterion_verified_by_independent_report(plan, cid, known_refs);
-                    if !reviewed {
+                    if !reviewed && !advisory_review {
                         unmet.push(format!("criterion:{cid}:model_review_unmet"));
                     }
                 }
@@ -411,8 +461,15 @@ pub fn compute_verification_verdict(
     checks.push(VerificationCheck {
         name: "independent_verifier".to_owned(),
         passed: verifier_passed,
-        reason: (!verifier_passed).then_some(independent.clone()),
+        reason: (independent != "passed").then(|| independent.clone()),
     });
+    if independent_review_not_required(plan) && has_model_review_criterion(plan) {
+        checks.push(VerificationCheck {
+            name: "model_review".to_owned(),
+            passed: false,
+            reason: Some("not_reviewed".to_owned()),
+        });
+    }
 
     let mut seen = HashSet::new();
     let mut intersected = Vec::new();
@@ -616,6 +673,143 @@ mod tests {
                 .reasons
                 .contains(&"changed_files_over_limit".to_owned())
         );
+    }
+
+    fn web_research_plan(read_only: bool, capabilities: &[&str]) -> Value {
+        json!({
+            "planId": "p-web",
+            "tasks": [{"taskId": "t1", "status": "completed", "evidenceRefs": ["ev-1"]}],
+            "successCriteria": [
+                {"id": "c-quality", "kind": "model_review", "description": "report cites primary sources"}
+            ],
+            "delegationOrigin": {"readOnly": read_only, "requiredCapabilities": capabilities},
+        })
+    }
+
+    fn research_facts<'a>(
+        plan: &'a Value,
+        evidence: &'a HashSet<String>,
+        verifier: &'a str,
+    ) -> AcceptanceFacts<'a> {
+        AcceptanceFacts {
+            plan,
+            session_id: "s-web",
+            evidence_index: evidence,
+            host_authority: HostAuthorityFacts {
+                independent_verifier: Some(verifier.to_owned()),
+                ..Default::default()
+            },
+            policy: "auto",
+            reported: true,
+            read_only: true,
+            changed_files: vec![],
+            manual_criteria_pending: false,
+            external_side_effects: false,
+            irreversible: false,
+            out_of_scope_write: false,
+            anchor_text: "research",
+            verification_below_floor: false,
+        }
+    }
+
+    #[test]
+    fn independent_verifier_is_not_required_only_for_read_only_web_evidence() {
+        let web = ["local.file.read", "local.web.fetch"];
+        assert!(independent_verifier_not_required(&web_research_plan(true, &web)));
+        assert!(
+            independent_verifier_not_required(&web_research_plan(true, &["web_research"])),
+            "the preset alias normalizes to the web capabilities"
+        );
+        assert!(
+            !independent_verifier_not_required(&web_research_plan(false, &web)),
+            "a session that can write keeps its verifier"
+        );
+        assert!(
+            !independent_verifier_not_required(&web_research_plan(true, &["local.file.read"])),
+            "local evidence is readable by the verifier"
+        );
+        assert!(
+            !independent_verifier_not_required(&web_research_plan(
+                true,
+                &["local.web.search", "publish_interactive_result"]
+            )),
+            "an interactive result stays inspectable"
+        );
+    }
+
+    #[test]
+    fn not_required_web_research_states_quality_criteria_without_gating() {
+        let indexed: HashSet<String> = ["ev-1".to_owned()].into_iter().collect();
+        let plan = web_research_plan(true, &["local.web.fetch"]);
+        let decision = decide_session_acceptance(&research_facts(&plan, &indexed, "not_required"), false);
+
+        assert_eq!(decision.verdict.outcome, "passed");
+        assert!(decision.close_gate_passed);
+        assert_eq!(decision.accepted_by.as_deref(), Some("policy"));
+        let checks: Vec<(&str, bool, Option<&str>)> = decision
+            .verdict
+            .checks
+            .iter()
+            .map(|check| (check.name.as_str(), check.passed, check.reason.as_deref()))
+            .collect();
+        assert_eq!(
+            checks,
+            vec![
+                ("leaf_evidence", true, None),
+                ("independent_verifier", true, Some("not_required")),
+                ("model_review", false, Some("not_reviewed")),
+            ]
+        );
+    }
+
+    #[test]
+    fn local_read_only_research_keeps_its_model_review_gate() {
+        let indexed: HashSet<String> = ["ev-1".to_owned()].into_iter().collect();
+        let plan = web_research_plan(true, &["local.file.read"]);
+
+        let automatic = decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), false);
+        assert!(!automatic.close_gate_passed);
+        assert_eq!(automatic.accepted_by, None);
+        let confirmed = decide_session_acceptance(&research_facts(&plan, &indexed, "missing"), true);
+        assert!(!confirmed.close_gate_passed);
+        assert_eq!(confirmed.accepted_by, None);
+        assert!(
+            !confirmed
+                .verdict
+                .checks
+                .iter()
+                .any(|check| check.name == "model_review")
+        );
+    }
+
+    #[test]
+    fn web_research_without_a_verdict_stays_manually_acceptable_after_failed_runs() {
+        let indexed: HashSet<String> = ["ev-1".to_owned()].into_iter().collect();
+
+        // Runs that ended in a host error left no verdict; their record is kept
+        // and is never auto-accepted, but the user may accept the result.
+        let mut errored = web_research_plan(true, &["local.web.fetch"]);
+        errored["verificationReport"] =
+            json!({"passed": false, "error": "conversation_tool_intent_changed"});
+        assert!(independent_review_not_required(&errored));
+        let automatic = decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), false);
+        assert_eq!(automatic.verdict.outcome, "failed");
+        assert_eq!(automatic.accepted_by, None);
+        let confirmed = decide_session_acceptance(&research_facts(&errored, &indexed, "failed"), true);
+        assert!(confirmed.close_gate_passed);
+        assert_eq!(confirmed.accepted_by.as_deref(), Some("user"));
+
+        // A real verdict that failed the criterion still gates acceptance.
+        let mut reviewed = web_research_plan(true, &["local.web.fetch"]);
+        reviewed["verificationReport"] = json!({
+            "passed": false,
+            "failedCriteria": [{"criterionId": "c-quality", "reason": "no primary source", "evidenceRefs": []}],
+            "missingEvidence": [], "risks": [], "evidenceRefs": [], "summary": "missing sources"
+        });
+        assert!(!independent_review_not_required(&reviewed));
+        let gated = decide_session_acceptance(&research_facts(&reviewed, &indexed, "failed"), true);
+        assert!(!gated.close_gate_passed);
+        assert_eq!(gated.accepted_by, None);
     }
 
     #[test]

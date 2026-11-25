@@ -706,6 +706,9 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.verificationPassed'
   | 'projectAgent.drawer.task.verificationFailed'
   | 'projectAgent.drawer.task.verificationMissing'
+  | 'projectAgent.drawer.task.verificationNotRequired'
+  | 'projectAgent.drawer.task.verificationNotReviewed'
+  | 'projectAgent.drawer.task.verificationQualityCriteria'
   | 'projectAgent.drawer.task.verificationOther'
   | 'projectAgent.drawer.task.hint.confirm'
   | 'projectAgent.drawer.task.hint.failed'
@@ -2533,6 +2536,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.verificationPassed': '通过',
     'projectAgent.drawer.task.verificationFailed': '未通过',
     'projectAgent.drawer.task.verificationMissing': '尚未核验',
+    'projectAgent.drawer.task.verificationNotRequired': '无需独立核验',
+    'projectAgent.drawer.task.verificationNotReviewed': '未经独立核验',
+    'projectAgent.drawer.task.verificationQualityCriteria': '质量标准',
     'projectAgent.drawer.task.verificationOther': '其他检查',
     'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
     'projectAgent.drawer.task.hint.failed': '任务未能完成。后续安排由 {name} 在主对话中说明。',
@@ -4098,6 +4104,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.verificationPassed': 'Passed',
     'projectAgent.drawer.task.verificationFailed': 'Failed',
     'projectAgent.drawer.task.verificationMissing': 'Not reviewed',
+    'projectAgent.drawer.task.verificationNotRequired': 'Not required',
+    'projectAgent.drawer.task.verificationNotReviewed': 'Not independently reviewed',
+    'projectAgent.drawer.task.verificationQualityCriteria': 'Quality criteria',
     'projectAgent.drawer.task.verificationOther': 'Other check',
     'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
     'projectAgent.drawer.task.hint.failed': 'The task could not finish. {name} explains the next steps in the main conversation.',

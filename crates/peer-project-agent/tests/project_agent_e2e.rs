@@ -2699,55 +2699,63 @@ async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifie
         .unwrap();
     let anchor = input_message_id("in-ver-1").unwrap();
 
-    let spawned = host
+    let request = |required_capabilities: Vec<String>| SpawnSessionRequest {
+        workspace_id: entry.workspace_id.clone(),
+        workspace_path: ws.path().to_path_buf(),
+        parent_conversation_id: conv_id.clone(),
+        anchor_message_ids: vec![anchor.clone()],
+        input_id: "in-ver-1".into(),
+        surface: "tui".into(),
+        title: "Read readme cleanly".into(),
+        brief: "Read readme.md and confirm contents without mutating files.".into(),
+        kind: "research".into(),
+        read_only: true,
+        required_capabilities,
+        success_criteria: vec![
+            SpawnCriterion {
+                id: Some("c-file".into()),
+                kind: "file-exists".into(),
+                command: None,
+                path: Some("readme.md".into()),
+                expect: None,
+                description: "readme.md exists".into(),
+            },
+            SpawnCriterion {
+                id: Some("c-review".into()),
+                kind: "model_review".into(),
+                command: None,
+                path: None,
+                expect: None,
+                description: "Verify readme mentions phase 3".into(),
+            },
+        ],
+        priority: "normal".into(),
+        depends_on: vec![],
+        supersedes: None,
+        objective_id: None,
+        isolation: "none".into(),
+        worker_model_selection: json!({
+            "providerId": "openai",
+            "modelId": "gpt-5.2"
+        }),
+    };
+    // Read-only work that asks for writes is rejected at admission (ADR 106), so
+    // the profile below starts from an admissible read-only request.
+    let denied = host
         .supervisor()
         .spawn_session(
-            SpawnSessionRequest {
-                workspace_id: entry.workspace_id.clone(),
-                workspace_path: ws.path().to_path_buf(),
-                parent_conversation_id: conv_id,
-                anchor_message_ids: vec![anchor],
-                input_id: "in-ver-1".into(),
-                surface: "tui".into(),
-                title: "Read readme cleanly".into(),
-                brief: "Read readme.md and confirm contents without mutating files.".into(),
-                kind: "research".into(),
-                read_only: true,
-                required_capabilities: vec![
-                    "local.file.read".into(),
-                    "local.file.write".into(),
-                    "local.shell.exec".into(),
-                ],
-                success_criteria: vec![
-                    SpawnCriterion {
-                        id: Some("c-file".into()),
-                        kind: "file-exists".into(),
-                        command: None,
-                        path: Some("readme.md".into()),
-                        expect: None,
-                        description: "readme.md exists".into(),
-                    },
-                    SpawnCriterion {
-                        id: Some("c-review".into()),
-                        kind: "model_review".into(),
-                        command: None,
-                        path: None,
-                        expect: None,
-                        description: "Verify readme mentions phase 3".into(),
-                    },
-                ],
-                priority: "normal".into(),
-                depends_on: vec![],
-                supersedes: None,
-                objective_id: None,
-                isolation: "none".into(),
-                worker_model_selection: json!({
-                    "providerId": "openai",
-                    "modelId": "gpt-5.2"
-                }),
-            },
+            request(vec![
+                "local.file.read".into(),
+                "local.file.write".into(),
+                "local.shell.exec".into(),
+            ]),
             true,
         )
+        .unwrap_err();
+    assert_eq!(denied.code, "capability_not_available");
+    let spawned = host
+        .supervisor()
+        .spawn_session(request(vec!["local.file.read".into()]), true)
         .unwrap();
 
     let plan = host
@@ -2893,6 +2901,308 @@ async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifie
     assert_eq!(reviews[0]["passed"], true);
     assert_eq!(reviews[0]["sameFamilyAsWorker"], false);
     assert_eq!(detail["verdict"]["outcome"], "passed");
+    host.close();
+}
+
+#[tokio::test]
+async fn delegated_verifier_corrects_an_invalid_line_range_and_returns_a_verdict() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(
+        ws.path().join("readme.md"),
+        "peer phase 3\nsecond line\n",
+    )
+    .unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("VerifierBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-ver-range", "Review readme.md", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![input_message_id("in-ver-range").unwrap()],
+                input_id: "in-ver-range".into(),
+                surface: "tui".into(),
+                title: "Review readme lines".into(),
+                brief: "Read readme.md and confirm its contents without mutating files.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-review".into()),
+                    kind: "model_review".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                    description: "Verify readme mentions phase 3".into(),
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        host.supervisor()
+            .promote_queued(&entry.workspace_id, true)
+            .unwrap()
+            .start,
+        vec![spawned.session_id.clone()]
+    );
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Read readme.md and confirmed phase 3.")),
+    ]);
+    let verifier_server = start_mock_server(vec![
+        // Lines are 1-based. The host answers this mistake as a not-dispatched
+        // result instead of ending the run (ADR 137 D3).
+        Box::new(|_| {
+            sse_tool_call(
+                "v-range",
+                "read_file",
+                &json!({ "path": "readme.md", "start_line": 0, "end_line": 2 }),
+            )
+        }),
+        Box::new(|req| {
+            let answered = latest_autonomy_tool_result(req);
+            assert!(answered.contains("invalid_line_range"), "{answered}");
+            assert!(answered.contains("denied"), "{answered}");
+            assert!(
+                answered.contains("1-based"),
+                "the correction hint must reach the verifier: {answered}"
+            );
+            sse_tool_call(
+                "v-read",
+                "read_file",
+                &json!({ "path": "readme.md", "start_line": 1, "end_line": 2 }),
+            )
+        }),
+        Box::new(|req| {
+            let read = last_tool_result_json(req).expect("corrected read_file result");
+            assert!(
+                read["preview"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("phase 3")),
+                "{read}"
+            );
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs line in verifier prompt");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            sse_text(
+                &json!({
+                    "passed": true,
+                    "failedCriteria": [],
+                    "missingEvidence": [],
+                    "risks": [],
+                    "evidenceRefs": [known[0]],
+                    "summary": "Independent review passed.",
+                })
+                .to_string(),
+            )
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+    assert_eq!(
+        verifier_server.requests.lock().unwrap().len(),
+        3,
+        "one rejected call, one corrected call, one verdict"
+    );
+    let detail = host
+        .supervisor()
+        .read_verification_detail(&entry.workspace_id, &spawned.session_id)
+        .unwrap();
+    assert_eq!(detail["verificationReport"]["passed"], true);
+    assert_eq!(detail["verdict"]["independentVerifier"], "passed");
+    let reviews = detail["modelReviews"]
+        .as_array()
+        .expect("modelReviews array");
+    assert_eq!(reviews.len(), 1);
+    assert_eq!(reviews[0]["criterionId"], "c-review");
+    assert_eq!(reviews[0]["passed"], true);
+    host.close();
+}
+
+#[tokio::test]
+async fn delegated_verifier_unprojected_tool_name_still_ends_the_run() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "peer phase 3\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("VerifierBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-ver-unprojected",
+        "Review readme.md",
+        None,
+    )
+    .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![input_message_id("in-ver-unprojected").unwrap()],
+                input_id: "in-ver-unprojected".into(),
+                surface: "tui".into(),
+                title: "Review readme sources".into(),
+                brief: "Read readme.md and confirm its contents without mutating files.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec!["local.file.read".into()],
+                success_criteria: vec![SpawnCriterion {
+                    id: Some("c-review".into()),
+                    kind: "model_review".into(),
+                    command: None,
+                    path: None,
+                    expect: None,
+                    description: "Verify readme mentions phase 3".into(),
+                }],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        host.supervisor()
+            .promote_queued(&entry.workspace_id, true)
+            .unwrap()
+            .start,
+        vec![spawned.session_id.clone()]
+    );
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))),
+        Box::new(|_| sse_text("Read readme.md and confirmed phase 3.")),
+    ]);
+    // The verifier is never granted web access; asking for it is not an argument
+    // mistake and keeps ending the run (ADR 137 D3).
+    let verifier_server = start_mock_server(vec![Box::new(|_| {
+        sse_tool_call(
+            "v-fetch",
+            "web_fetch",
+            &json!({ "url": "https://example.com/acp" }),
+        )
+    })]);
+    let worker_model = mock_model(&worker_server.endpoint);
+    let verifier_model = mock_model(&verifier_server.endpoint);
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+    assert_eq!(verifier_server.requests.lock().unwrap().len(), 1);
+    let detail = host
+        .supervisor()
+        .read_verification_detail(&entry.workspace_id, &spawned.session_id)
+        .unwrap();
+    assert_eq!(detail["verdict"]["independentVerifier"], "failed");
+    assert_eq!(detail["verificationReport"]["passed"], false);
+    assert_eq!(
+        detail["verificationReport"]["error"], "tool_not_projected"
+    );
     host.close();
 }
 
@@ -8507,6 +8817,45 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
         .await
         .unwrap();
     assert_eq!(episode.status, "completed");
+
+    // The verifier cannot read web evidence, so the session is delivered on the
+    // evidence gate: no verifier request, no run, no verdict (ADR 137 D1).
+    assert!(
+        verifier_server
+            .requests
+            .lock()
+            .unwrap()
+            .is_empty(),
+        "read-only web research must not request an independent verification"
+    );
+    let delivered = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &first_sid)
+        .unwrap();
+    assert_eq!(
+        delivered["delegationOrigin"]["independentVerifier"],
+        "not_required"
+    );
+    assert!(delivered["runner"]["verifierRuns"].is_null());
+    assert!(delivered["verificationReport"].is_null());
+    let detail = host
+        .supervisor()
+        .read_verification_detail(&ws_id, &first_sid)
+        .unwrap();
+    assert_eq!(detail["verdict"]["outcome"], "passed");
+    assert_eq!(detail["verdict"]["independentVerifier"], "not_required");
+    assert!(detail["modelReviews"].as_array().unwrap().is_empty());
+    let checks = detail["verdict"]["checks"].as_array().unwrap();
+    assert!(
+        checks.iter().any(|check| check["name"] == "independent_verifier"
+            && check["passed"] == true
+            && check["reason"] == "not_required")
+    );
+    assert!(
+        checks.iter().any(|check| check["name"] == "model_review"
+            && check["passed"] == false
+            && check["reason"] == "not_reviewed")
+    );
 
     // 3. Simulate a legacy web-research plan that only recorded `local.web.fetch` before
     //    built-in `local.web.search` existed, then click "基于此重跑" (normal user turn) and

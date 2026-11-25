@@ -14,6 +14,7 @@ import type { TaskConversationContext } from '../state/taskConversationState';
 import { ComposerTouchBar } from '../conversation/ComposerTouchBar';
 import { ConversationSceneDrawer } from '../drawer/ConversationScene';
 import { TaskEvidenceInspector, type InspectorTab } from './TaskEvidenceInspector';
+import { gateDeliveryDetail, verdictBannerTitle } from './verdictBanner';
 import '../styles/bot-task-workspace.css';
 import '../styles/bot-touchbar.css';
 
@@ -484,20 +485,13 @@ export function TaskWorkspaceView({
                 const verdictDetail = session.verification.summary
                   || (latestAttempt?.failureReason ? formatFailureReason({ code: latestAttempt.failureReason }, isZh) : '')
                   || (session.verification.error ? formatFailureReason({ code: session.verification.error }, isZh) : '');
+                const gateDetail = verdictDetail ? '' : gateDeliveryDetail(session.verification, isZh);
                 return (
                   <div className="bot-task-verdict-banner">
                     <div className="bot-task-verdict-copy">
-                      <strong>
-                        {session.verification.outcome === 'passed'
-                          ? (isZh ? '独立只读核验通过' : 'Independent verification passed')
-                          : session.verification.outcome === 'failed'
-                            ? (isZh
-                              ? `独立核验未通过${attemptCount > 0 ? `（已完成 ${Math.min(attemptCount, 3)}/3 次）` : ''}`
-                              : `Verification failed${attemptCount > 0 ? ` (${Math.min(attemptCount, 3)}/3)` : ''}`)
-                            : (isZh ? '独立核验进行中或部分完成' : 'Verification in progress')}
-                      </strong>
-                      {verdictDetail ? (
-                        <p className="bot-task-verdict-summary">{verdictDetail}</p>
+                      <strong>{verdictBannerTitle(session.verification, attemptCount, isZh)}</strong>
+                      {verdictDetail || gateDetail ? (
+                        <p className="bot-task-verdict-summary">{verdictDetail || gateDetail}</p>
                       ) : null}
                       <span>
                         {isZh

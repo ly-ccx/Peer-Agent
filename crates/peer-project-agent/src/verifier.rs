@@ -79,7 +79,7 @@ fn is_excluded_capability(cap: &str) -> bool {
         .any(|prefix| cap.starts_with(prefix))
 }
 
-fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
+pub(crate) fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
     let key = raw.trim().to_ascii_lowercase();
     if key.is_empty() || is_excluded_capability(&key) {
         return Vec::new();
