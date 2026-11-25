@@ -49,6 +49,7 @@ import {
   BOT_LIST_WIDTH_MIN,
   clampBotListWidth,
   enterBotSelection,
+  formatBotListTime,
   moveBotSelection,
   sumNeedsYou,
   resolveBotMessageFocus,
@@ -593,6 +594,7 @@ export function BotListShell({
           </button>
         </div>
         <div className="bot-search-frame">
+          <PeerIcon name="search" size={13} className="bot-search-icon" />
           <input
             ref={searchRef}
             aria-controls="bot-list"
@@ -888,30 +890,87 @@ export function BotListShell({
           />
         ) : (
           <div className="bot-main-empty">
+            <div className="bot-main-empty-drag" aria-hidden="true" />
             <div className="bot-main-empty-content">
-              <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
-              <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+              <div className="bot-home-hero">
+                <span className="bot-home-emblem" aria-hidden="true">
+                  <img className="bot-brand-icon light" src="./logo-light.png" alt="" />
+                  <img className="bot-brand-icon dark" src="./logo-dark.png" alt="" />
+                </span>
+                <h1>{i18n.t('projectAgent.list.mainEmptyTitle')}</h1>
+                <p>{i18n.t('projectAgent.list.mainEmptyBody')}</p>
+              </div>
               {list.catalog.length > 0 ? (
                 <div className="bot-main-picks">
-                  <span className="bot-main-picks-label">{i18n.t('projectAgent.list.recentBots')}</span>
-                  {list.catalog.slice(0, 3).map((item) => (
+                  <div className="bot-main-picks-head">
+                    <span className="bot-main-picks-label">{i18n.t('projectAgent.list.recentBots')}</span>
                     <button
-                      key={item.workspaceId}
                       type="button"
-                      className="bot-main-pick"
-                      onClick={() => openBotView(item.workspaceId)}
+                      className="bot-main-picks-create"
+                      onClick={() => {
+                        setErrorCode('');
+                        list.setMenuOpen(false);
+                        list.setSheetOpen(true);
+                      }}
                     >
-                      <BotAvatar avatar={item.profile.avatar} label={item.profile.displayName} workspaceId={item.workspaceId}
-                        mood={botAvatarMood(item.state)} />
-                      <span className="bot-main-pick-copy">
-                        <strong>{item.profile.displayName}</strong>
-                        <small>{i18n.t('projectAgent.list.openBot')}</small>
-                      </span>
-                      <PeerIcon name="chevronRight" size={16} className="bot-main-pick-arrow" />
+                      <PeerIcon name="plus" size={13} />
+                      <span>{isZh ? '新建项目' : 'New project'}</span>
                     </button>
-                  ))}
+                  </div>
+                  <div className={`bot-main-picks-grid${list.catalog.length === 1 ? ' is-single' : ''}`}>
+                    {list.catalog.slice(0, 4).map((item) => {
+                      const timeLabel = formatBotListTime(item.lastActiveAt);
+                      const cardMood = botAvatarMood(item.state);
+                      const previewText = item.preview.trim()
+                        || (isZh ? '随时开始新的对话或交代任务' : 'Start a conversation or assign a task');
+                      return (
+                        <button
+                          key={item.workspaceId}
+                          type="button"
+                          className="bot-main-pick"
+                          onClick={() => openBotView(item.workspaceId)}
+                        >
+                          <div className="bot-main-pick-top">
+                            <BotAvatar
+                              avatar={item.profile.avatar}
+                              label={item.profile.displayName}
+                              workspaceId={item.workspaceId}
+                              animate={cardMood !== 'idle'}
+                              mood={cardMood}
+                            />
+                            <span className="bot-main-pick-meta">
+                              {item.state.needsYou > 0 ? (
+                                <span className="bot-main-pick-pill is-warn">
+                                  {isZh ? `待处理 ${item.state.needsYou}` : `${item.state.needsYou} pending`}
+                                </span>
+                              ) : item.state.running > 0 ? (
+                                <span className="bot-main-pick-pill is-active">
+                                  {isZh ? '进行中' : 'Active'}
+                                </span>
+                              ) : timeLabel ? (
+                                <span className="bot-main-pick-time">{timeLabel}</span>
+                              ) : null}
+                            </span>
+                          </div>
+                          <span className="bot-main-pick-copy">
+                            <strong>{item.profile.displayName}</strong>
+                            <small>{previewText}</small>
+                          </span>
+                          <span className="bot-main-pick-foot">
+                            <span>{i18n.t('projectAgent.list.openBot')}</span>
+                            <PeerIcon name="arrowRight" size={13} className="bot-main-pick-arrow" />
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : null}
+              <div className="bot-home-shortcuts" aria-hidden="true">
+                <span><kbd>⌘K</kbd>{isZh ? '搜索项目与消息' : 'Search projects'}</span>
+                <span className="bot-home-shortcuts-dot">·</span>
+                <span><kbd>⌘,</kbd>{isZh ? '设置' : 'Settings'}</span>
+              </div>
             </div>
           </div>
         )}
