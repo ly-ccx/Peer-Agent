@@ -39,6 +39,10 @@ impl ModelError {
             http_detail: None,
         }
     }
+    pub(super) fn with_detail(mut self, detail: impl AsRef<str>) -> Self {
+        self.http_detail = sanitize_provider_error_text(detail.as_ref());
+        self
+    }
     pub(super) fn http_access_rejection(status: u16) -> Option<Self> {
         matches!(status, 401 | 403).then(|| Self {
             http_status: Some(status),
@@ -91,11 +95,32 @@ impl ModelError {
         {
             return false;
         }
+        if self.code == "model_stream_incomplete" {
+            return self.is_retryable_incomplete_stream();
+        }
         matches!(self.http_status, Some(408 | 429 | 500 | 502 | 503 | 504))
             || matches!(
                 self.code,
                 "model_timeout" | "model_transport_failed" | "model_stream_interrupted"
             )
+    }
+
+    fn is_retryable_incomplete_stream(&self) -> bool {
+        let Some(detail) = self.http_detail.as_deref() else {
+            return true;
+        };
+        let upper = detail.to_ascii_uppercase();
+        // Deterministic terminal stop reasons (token cap or safety/policy blocks) will not
+        // recover by replaying the identical request; premature EOF and transient Gemini
+        // MALFORMED_FUNCTION_CALL / OTHER flakes recover on retry.
+        !(upper.contains("MAX_TOKENS")
+            || upper.contains("LENGTH")
+            || upper.contains("SAFETY")
+            || upper.contains("RECITATION")
+            || upper.contains("PROHIBITED_CONTENT")
+            || upper.contains("BLOCKLIST")
+            || upper.contains("SPII")
+            || upper.contains("CONTENT_FILTER"))
     }
 
     pub fn observed_usage(&self) -> Option<&UsageAmounts> {
@@ -114,6 +139,15 @@ impl ModelError {
             }
             _ => format!("HTTP {status} ({})", self.code),
         })
+    }
+
+    /// Safe user-facing diagnostic summary for HTTP rejections and structured stream failures.
+    pub fn format_diagnostic(&self) -> Option<String> {
+        if let Some(http) = self.format_http_rejection() {
+            return Some(http);
+        }
+        let detail = self.http_detail.as_deref().filter(|s| !s.is_empty())?;
+        Some(format!("{} ({detail})", self.code))
     }
 }
 impl std::fmt::Display for ModelError {
@@ -220,6 +254,28 @@ mod tests {
         assert_eq!(
             html_err.format_http_rejection().as_deref(),
             Some("HTTP 502 (model_http_rejected)")
+        );
+
+        // Incomplete stream retries transient EOF / MALFORMED_FUNCTION_CALL, not deterministic caps.
+        let eof = ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason");
+        assert!(eof.is_transient_retryable());
+        assert_eq!(
+            eof.format_diagnostic().as_deref(),
+            Some("model_stream_incomplete (eof_before_finish_reason)")
+        );
+        let malformed_call = ModelError::new("model_stream_incomplete")
+            .with_detail("finishReason=MALFORMED_FUNCTION_CALL");
+        assert!(malformed_call.is_transient_retryable());
+        assert_eq!(
+            malformed_call.format_diagnostic().as_deref(),
+            Some("model_stream_incomplete (finishReason=MALFORMED_FUNCTION_CALL)")
+        );
+        let max_tokens =
+            ModelError::new("model_stream_incomplete").with_detail("finishReason=MAX_TOKENS");
+        assert!(!max_tokens.is_transient_retryable());
+        assert_eq!(
+            max_tokens.format_diagnostic().as_deref(),
+            Some("model_stream_incomplete (finishReason=MAX_TOKENS)")
         );
     }
 }

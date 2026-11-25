@@ -102,7 +102,8 @@ impl Stream {
             Self::Chat(s) => s.finish(fingerprint),
             Self::Other(s) => {
                 if !s.frames.complete() {
-                    return Err(ModelError::new("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete")
+                        .with_detail("unfinished_sse_frame"));
                 }
                 match s.decoder {
                     Decoder::Anthropic(d) => d.finish(fingerprint),
