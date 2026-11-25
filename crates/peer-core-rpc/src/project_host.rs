@@ -860,12 +860,15 @@ impl ProjectHostRuntime {
             "verifier",
             profile.as_ref().and_then(|p| p.model_policy.as_ref()),
         ) {
-            self.load_model_for_role(workspace_id, "verifier", &turn_cancel)
+            match self
+                .load_model_for_role(workspace_id, "verifier", &turn_cancel)
                 .await
-                .ok()
-                .map(|(model, _)| model)
+            {
+                Ok((model, _)) => Some(model),
+                Err(_) => Some(bot_model.clone()),
+            }
         } else {
-            None
+            Some(bot_model.clone())
         };
         let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
             workspace_id,
@@ -1010,6 +1013,17 @@ impl ProjectHostRuntime {
         })
         .await
         .map_err(|_| peer_project_agent::ProjectError::code("verifier_task_failed"))??;
+        let passed = result["verificationReport"]["passed"].as_bool() == Some(true);
+        let accepted = result["decision"]["acceptedBy"].as_str().is_some();
+        if passed && !accepted {
+            let plan_id = result["planId"].as_str().unwrap_or("");
+            self.host
+                .supervisor()
+                .notify_reverified_result(workspace_id, session_id, plan_id);
+            if self.is_enabled() {
+                self.wake_workspace(workspace_id);
+            }
+        }
         self.emit_conversation_changed(workspace_id, None);
         self.emit_changed(vec![workspace_id.to_owned()]);
         Ok(result)

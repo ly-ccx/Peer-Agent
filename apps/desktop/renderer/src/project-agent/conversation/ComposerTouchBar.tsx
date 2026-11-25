@@ -92,12 +92,13 @@ export function ComposerTouchBar(props: ComposerTouchBarProps) {
 
   const { session, evidenceCount, inspectorOpen, hasPendingApproval, i18n } = props;
   const followUp = session.followUp;
-  const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused'].includes(session.status);
-  const verifyFailed = followUp?.reason === 'verification_failed';
+  const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused', 'failed'].includes(session.status);
+  const verifyFailed = session.status === 'result_ready' && followUp?.reason === 'verification_failed';
   const cancelable = !ended && canCancelTask(session.status, session.cancelable);
   const statusText = formatDrawerSessionStatus(session, i18n);
   const verifyAttempts = session.verification?.reviewAttempts.length ?? 0;
   const canReverify = verifyFailed && verifyAttempts < 3;
+  const reverifyExhausted = verifyFailed && verifyAttempts >= 3;
 
   const tone = hasPendingApproval || followUp?.owner === 'user'
     ? 'warn'
@@ -147,6 +148,12 @@ export function ComposerTouchBar(props: ComposerTouchBarProps) {
               <PeerIcon name="panelRight" size={13} />
               <span>{isZh ? `证据${evidenceCount ? ` ${evidenceCount}` : ''}` : `Evidence${evidenceCount ? ` ${evidenceCount}` : ''}`}</span>
             </button>
+            {cancelable && props.onCancel ? (
+              <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
+                <PeerIcon name="close" size={12} />
+                <span>{props.cancelBusy ? (isZh ? '正在关闭…' : 'Closing…') : (isZh ? '关闭任务' : 'Dismiss')}</span>
+              </button>
+            ) : null}
             <button type="button" className="bot-tb-chip is-cta" disabled={props.verifyBusy} onClick={props.onVerify}>
               <PeerIcon name="repeat" size={13} className={props.verifyBusy ? 'motion-spin' : undefined} />
               <span>
@@ -155,6 +162,25 @@ export function ComposerTouchBar(props: ComposerTouchBarProps) {
                   : (isZh ? `重新核验 (${Math.min(verifyAttempts + 1, 3)}/3)` : `Re-verify (${Math.min(verifyAttempts + 1, 3)}/3)`)}
               </span>
             </button>
+          </>
+        ) : reverifyExhausted ? (
+          <>
+            <button type="button" className={`bot-tb-chip${inspectorOpen ? ' is-toggle-active' : ''}`} onClick={props.onToggleInspector}>
+              <PeerIcon name="panelRight" size={13} />
+              <span>{isZh ? `证据${evidenceCount ? ` ${evidenceCount}` : ''}` : `Evidence${evidenceCount ? ` ${evidenceCount}` : ''}`}</span>
+            </button>
+            {cancelable && props.onCancel ? (
+              <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
+                <PeerIcon name="close" size={12} />
+                <span>{props.cancelBusy ? (isZh ? '正在关闭…' : 'Closing…') : (isZh ? '关闭任务' : 'Dismiss')}</span>
+              </button>
+            ) : null}
+            {props.onRerunDraft ? (
+              <button type="button" className="bot-tb-chip is-cta" onClick={props.onRerunDraft}>
+                <PeerIcon name="repeat" size={13} />
+                <span>{isZh ? '基于此重跑' : 'Re-run draft'}</span>
+              </button>
+            ) : null}
           </>
         ) : ended ? (
           <>

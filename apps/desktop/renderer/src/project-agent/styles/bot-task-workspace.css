@@ -269,6 +269,65 @@
   color: var(--graphite-soft);
 }
 
+.bot-task-verdict-summary {
+  margin: 4px 0 2px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--graphite-base);
+}
+
+.bot-task-failure-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--ui-radius-control, 12px);
+  border: 1px solid color-mix(in srgb, var(--state-danger) 24%, transparent);
+  background: color-mix(in srgb, var(--state-danger) 6%, var(--paper-sheet));
+}
+
+.bot-task-failure-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--state-danger);
+  font-size: 13px;
+}
+
+.bot-task-failure-head strong {
+  color: var(--graphite-base);
+  font-weight: 600;
+}
+
+.bot-task-failure-head code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--state-danger);
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
+}
+
+.bot-task-failure-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--graphite-soft);
+}
+
+.bot-task-brief-card {
+  background: color-mix(in srgb, var(--paper-sunken) 55%, var(--paper-sheet));
+}
+
+.bot-task-brief-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--graphite-soft);
+  white-space: pre-wrap;
+}
+
 .bot-task-feedback {
   margin: 0;
   padding: 8px 12px;

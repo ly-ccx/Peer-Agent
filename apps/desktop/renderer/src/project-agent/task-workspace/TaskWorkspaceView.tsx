@@ -49,6 +49,42 @@ export interface TaskWorkspaceViewProps {
 
 const INSPECTOR_PUSH_MIN = 960;
 
+function formatFailureReason(
+  failure: { readonly code: string; readonly message?: string },
+  isZh: boolean,
+): string {
+  const knownZh: Record<string, string> = {
+    tool_not_projected: '所需工具能力未投影到该工作会话',
+    WORKER_MODEL_UNAVAILABLE: '工作会话执行模型不可用',
+    agent_loop_exhausted: '已达到单次执行的最大工具轮次上限',
+    model_timeout: '模型响应超时',
+    model_transport_failed: '模型网络连接中断',
+    model_stream_interrupted: '模型输出流意外中断',
+    permission_denied: '操作被权限边界拒绝',
+    verifier_timeout: '独立核验超时（5 分钟）',
+    verifier_permission_denied: '核验会话触发了只读边界限制',
+    verifier_report_invalid: '核验模型未返回合法的结构化核验结论',
+    verifier_host_interrupted: '宿主重启导致核验中断',
+  };
+  const knownEn: Record<string, string> = {
+    tool_not_projected: 'Required tool capability was not projected into this work session',
+    WORKER_MODEL_UNAVAILABLE: 'Worker model is unavailable',
+    agent_loop_exhausted: 'Reached the maximum tool-turn limit for this session',
+    model_timeout: 'Model request timed out',
+    model_transport_failed: 'Model network connection failed',
+    model_stream_interrupted: 'Model response stream was interrupted',
+    permission_denied: 'Action denied by permission boundary',
+    verifier_timeout: 'Independent verification timed out',
+    verifier_permission_denied: 'Verifier attempted an action outside its read-only boundary',
+    verifier_report_invalid: 'Verifier did not return a valid structured report',
+    verifier_host_interrupted: 'Verification interrupted by host restart',
+  };
+  const dict = isZh ? knownZh : knownEn;
+  if (dict[failure.code]) return dict[failure.code];
+  if (failure.message && failure.message !== failure.code) return failure.message;
+  return isZh ? `执行中止（${failure.code}）` : `Execution failed (${failure.code})`;
+}
+
 export function TaskWorkspaceView({
   workspaceId,
   workspacePath,
@@ -399,7 +435,7 @@ export function TaskWorkspaceView({
               </section>
             ) : null}
 
-            {/* Report & Narrative Card */}
+            {/* Report & Verification Card */}
             <section className="bot-task-card">
               <div className="bot-task-card-head">
                 <h2>{isZh ? '执行汇报与核验状态' : 'Execution report & verification'}</h2>
@@ -418,37 +454,74 @@ export function TaskWorkspaceView({
                   ) : null}
                 </div>
               </div>
-              {session.summary ? (
-                <p className="bot-task-summary">{session.summary}</p>
-              ) : (
+              {session.status === 'failed' && session.failure ? (
+                <div className="bot-task-failure-banner" role="status">
+                  <div className="bot-task-failure-head">
+                    <PeerIcon name="warning" size={14} />
+                    <strong>{formatFailureReason(session.failure, isZh)}</strong>
+                    <code>{session.failure.code}</code>
+                  </div>
+                  <p className="bot-task-failure-note">
+                    {isZh
+                      ? '该任务在执行阶段中止，未进入结果核验。可查看执行过程定位细节，或点击下方「基于此重跑」。'
+                      : 'This task stopped during execution before verification. Inspect the worker trace or use Re-run draft below.'}
+                  </p>
+                </div>
+              ) : null}
+              {session.workerOutput ? (
+                <p className="bot-task-summary">{session.workerOutput}</p>
+              ) : session.status !== 'failed' && !session.verification ? (
                 <p className="bot-task-card-note">
                   {reportRead.state === 'loading'
                     ? i18n.t('projectAgent.drawer.task.readingReport')
-                    : (isZh ? '任务正在推进或尚未产出书面摘要，可展开执行过程查看实时进展。' : 'No written summary yet. Open the worker trace for live steps.')}
+                    : (isZh ? '任务正在推进或尚未产出执行汇报，可展开执行过程查看实时进展。' : 'No execution report yet. Open the worker trace for live steps.')}
                 </p>
-              )}
-              {session.verification ? (
-                <div className="bot-task-verdict-banner">
-                  <div className="bot-task-verdict-copy">
-                    <strong>
-                      {session.verification.outcome === 'passed'
-                        ? (isZh ? '独立只读核验通过' : 'Independent verification passed')
-                        : session.verification.outcome === 'failed'
-                          ? (isZh ? `独立核验未通过（已完成 ${Math.max(1, session.verification.reviewAttempts.length)}/3 次）` : `Verification failed (${Math.max(1, session.verification.reviewAttempts.length)}/3)`)
-                          : (isZh ? '独立核验进行中或部分完成' : 'Verification in progress')}
-                    </strong>
-                    <span>
-                      {isZh
-                        ? `共 ${session.verification.checks.length} 项检查 · ${session.verification.outputs.length} 份已登记产物`
-                        : `${session.verification.checks.length} checks · ${session.verification.outputs.length} indexed outputs`}
-                    </span>
-                  </div>
-                  <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('verdict')}>
-                    {isZh ? '查看核验裁决' : 'View verdict'}
-                  </button>
-                </div>
               ) : null}
+              {session.verification ? (() => {
+                const attempts = session.verification.reviewAttempts;
+                const latestAttempt = attempts.at(-1);
+                const attemptCount = attempts.length;
+                const verdictDetail = session.verification.summary
+                  || (latestAttempt?.failureReason ? formatFailureReason({ code: latestAttempt.failureReason }, isZh) : '')
+                  || (session.verification.error ? formatFailureReason({ code: session.verification.error }, isZh) : '');
+                return (
+                  <div className="bot-task-verdict-banner">
+                    <div className="bot-task-verdict-copy">
+                      <strong>
+                        {session.verification.outcome === 'passed'
+                          ? (isZh ? '独立只读核验通过' : 'Independent verification passed')
+                          : session.verification.outcome === 'failed'
+                            ? (isZh
+                              ? `独立核验未通过${attemptCount > 0 ? `（已完成 ${Math.min(attemptCount, 3)}/3 次）` : ''}`
+                              : `Verification failed${attemptCount > 0 ? ` (${Math.min(attemptCount, 3)}/3)` : ''}`)
+                            : (isZh ? '独立核验进行中或部分完成' : 'Verification in progress')}
+                      </strong>
+                      {verdictDetail ? (
+                        <p className="bot-task-verdict-summary">{verdictDetail}</p>
+                      ) : null}
+                      <span>
+                        {isZh
+                          ? `共 ${session.verification.checks.length} 项检查 · ${session.verification.outputs.length} 份已登记产物`
+                          : `${session.verification.checks.length} checks · ${session.verification.outputs.length} indexed outputs`}
+                      </span>
+                    </div>
+                    <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('verdict')}>
+                      {isZh ? '查看核验裁决' : 'View verdict'}
+                    </button>
+                  </div>
+                );
+              })() : null}
             </section>
+
+            {/* Task Brief / Delegated Instructions (kept distinct from execution report) */}
+            {session.summary && session.summary !== session.workerOutput ? (
+              <section className="bot-task-card bot-task-brief-card">
+                <div className="bot-task-card-head">
+                  <h2>{isZh ? '任务说明' : 'Task brief'}</h2>
+                </div>
+                <p className="bot-task-brief-text">{session.summary}</p>
+              </section>
+            ) : null}
 
             {/* Optional Expandable Worker Execution Trace */}
             {sceneOpen && session.conversationId ? (

@@ -61,6 +61,8 @@ export interface DrawerSession {
   readonly objectiveId?: string;
   readonly modelLabel: string;
   readonly summary: string;
+  readonly workerOutput?: string;
+  readonly failure?: { readonly code: string; readonly message?: string; readonly at?: string };
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
   readonly resourceBlocker?: ExecutionResourceBlocker;
@@ -292,6 +294,12 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     // This drawer field is the task instruction disclosure. Worker output now
     // has a distinct source; it must not be relabeled as task instructions.
     summary: readString(report.taskBrief) || (report.contentSource ? '' : readString(report.summary)),
+    ...(report.contentSource && readString(report.summary)
+      ? { workerOutput: readString(report.summary) }
+      : readString(origin.lastWorkerOutput)
+        ? { workerOutput: readString(origin.lastWorkerOutput) }
+        : {}),
+    ...(readSessionFailure(report.failure, origin.error) ? { failure: readSessionFailure(report.failure, origin.error) } : {}),
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
@@ -397,12 +405,38 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readSessionFailure(
+  rawFailure: unknown,
+  originError: unknown,
+): { readonly code: string; readonly message?: string; readonly at?: string } | undefined {
+  if (rawFailure && typeof rawFailure === 'object') {
+    const rec = rawFailure as Record<string, unknown>;
+    const code = readString(rec.code) || readString(originError);
+    if (code) {
+      const message = readString(rec.message);
+      const at = readString(rec.at);
+      return {
+        code,
+        ...(message && message !== code ? { message } : {}),
+        ...(at ? { at } : {}),
+      };
+    }
+  }
+  const fallback = readString(originError);
+  return fallback ? { code: fallback } : undefined;
+}
+
 function readVerification(value: unknown, sessionId: string): SessionVerificationDetail | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const row = value as SessionVerificationDetail;
   if (row.sessionId !== sessionId || !['passed', 'failed', 'partial', 'unverifiable'].includes(row.outcome)
     || !Array.isArray(row.checks) || !Array.isArray(row.reviewAttempts) || !Array.isArray(row.outputs)) return undefined;
-  return { ...row, checks: row.checks.filter(check => check && typeof check.name === 'string'
+  const summary = readString((row as { summary?: unknown }).summary);
+  const error = readString((row as { error?: unknown }).error);
+  return { ...row,
+    ...(summary ? { summary } : {}),
+    ...(error ? { error } : {}),
+    checks: row.checks.filter(check => check && typeof check.name === 'string'
     && ['passed', 'failed'].includes(check.result) && Array.isArray(check.evidenceRefs)),
     reviewAttempts: row.reviewAttempts.filter(attempt => attempt && typeof attempt.verifierRunId === 'string'
       && typeof attempt.failureReason === 'string' && Array.isArray(attempt.failedCriteria) && Array.isArray(attempt.missingEvidence)),

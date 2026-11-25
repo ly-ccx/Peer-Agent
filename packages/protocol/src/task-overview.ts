@@ -468,6 +468,7 @@ export interface LifecycleFacts {
   readonly interrupted?: boolean;
   readonly interruptionOrigin?: import('./agent-supervision.ts').InterruptionOrigin;
   readonly verificationActive?: boolean;
+  readonly verificationFailed?: boolean;
   readonly blockedReason?: string;
   readonly cancellationPhase?: string;
   readonly cancellationDisposition?: 'user_withdrawn';
@@ -503,6 +504,7 @@ export type FollowUpReason =
   | 'local_persistence_failed'
   | 'awaiting_acceptance_technical'
   | 'verification_failed'
+  | 'execution_failed'
   | 'live_execution'
   | 'paused'
   | 'unknown_facts'
@@ -559,7 +561,9 @@ export function decideFollowUp(
   if (facts.superseded === true || status === 'superseded') return followUpOf('none', 'superseded');
   // 3) 核验失败/缺证据：即使存在历史 accepted 事实也不能静默（那次验收是旧结论）。
   if (['failed', 'waiting_agent'].includes(status) && facts.blockedReason === 'conversation_persistence_failed') return followUpOf('bot', 'local_persistence_failed');
-  if (status === 'failed') return followUpOf('bot', 'verification_failed');
+  if (status === 'result_ready' && facts.verificationFailed === true) return followUpOf('bot', 'verification_failed');
+  // 终态执行失败（未产生可核验结果）：归入历史记录，不再伪装成待重验任务钉死在活跃列表。
+  if (status === 'failed') return followUpOf('none', 'execution_failed');
   if (facts.accepted === true) return followUpOf('none', 'settled');
   if (stopStatus) return followUpOf('none', 'stop_confirmed');
   // 4) 父代理等技术阻塞：主 Bot 责任，不显示需要用户确认。

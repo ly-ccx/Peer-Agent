@@ -258,12 +258,14 @@ export function summarizeActiveSessions(
   }
   let needsUser = 0;
   let verifyFailed = 0;
+  let execFailed = 0;
   let verifying = 0;
   let running = 0;
   let queued = 0;
   for (const s of sessions) {
     if (s.followUp?.owner === 'user' || s.status === 'waiting_user') needsUser += 1;
-    else if (s.followUp?.reason === 'verification_failed' || s.status === 'failed') verifyFailed += 1;
+    else if (s.status === 'result_ready' && s.followUp?.reason === 'verification_failed') verifyFailed += 1;
+    else if (s.status === 'failed') execFailed += 1;
     else if (s.status === 'verifying' || (s.status === 'result_ready' && s.followUp?.owner === 'bot')) verifying += 1;
     else if (s.status === 'queued') queued += 1;
     else running += 1;
@@ -277,6 +279,10 @@ export function summarizeActiveSessions(
   }
   if (verifyFailed > 0) {
     segments.push(isZh ? `核验未通过 ${verifyFailed}` : `Verify failed ${verifyFailed}`);
+    if (leadTone === 'muted') leadTone = 'danger';
+  }
+  if (execFailed > 0) {
+    segments.push(isZh ? `执行失败 ${execFailed}` : `Failed ${execFailed}`);
     if (leadTone === 'muted') leadTone = 'danger';
   }
   if (running > 0) {

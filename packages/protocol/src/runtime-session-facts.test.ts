@@ -39,7 +39,19 @@ test('confirmed withdrawal preserves unknown history without reopening managed r
 });
 
 test('technical repair, human requests and advancing execution retain distinct handlers', () => {
-  assert.equal(runtimeSessionFacts({ sessionId: 'failed', status: 'failed', executionOwnership: 'ended' }).handling, 'model');
+  assert.equal(
+    runtimeSessionFacts({
+      sessionId: 'vf',
+      status: 'result_ready',
+      executionOwnership: 'ended',
+      followUp: { owner: 'bot', inCurrentList: true, reason: 'verification_failed' },
+    }).handling,
+    'model',
+  );
+  const execFailed = runtimeSessionFacts({ sessionId: 'failed', status: 'failed', executionOwnership: 'ended' });
+  assert.equal(execFailed.reason, 'execution_failed');
+  assert.equal(execFailed.handling, 'none');
+  assert.equal(execFailed.pendingManaged, false);
   assert.equal(runtimeSessionFacts({ sessionId: 'human', status: 'waiting_user' }).handling, 'user');
   assert.equal(runtimeSessionFacts({ sessionId: 'running', status: 'running', executionOwnership: 'live' }).handling, 'host');
   assert.equal(runtimeSessionFacts({ sessionId: 'accepted', status: 'accepted' }).handling, 'none');
