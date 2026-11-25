@@ -626,8 +626,8 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 .bot-overview-tab .bot-overview-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
+  gap: 14px 20px;
+  padding: 15px 16px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   background: var(--chrome-canvas);
@@ -636,25 +636,22 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 .bot-overview-details > div {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-}
-
-.bot-overview-details > div + div {
-  padding-left: 12px;
-  border-left: 1px solid var(--chrome-hairline);
 }
 
 .bot-overview-details span {
   color: var(--graphite-fade);
   font-size: 11px;
+  line-height: 1.4;
 }
 
 .bot-overview-details strong {
   overflow: hidden;
   color: var(--graphite-base);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1265,8 +1262,31 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 .bot-drawer-body .frost-settings-group > .frost-group-heading p { font-size: .75rem; line-height: 1.7; }
 .bot-drawer-body .frost-group-content > .bot-settings-row { padding: 15px; min-height: 64px; }
 .bot-drawer-body .frost-group-content > .bot-settings-row + .bot-settings-row { border-top: 1px solid var(--chrome-hairline); }
-.bot-drawer-body .bot-model-settings-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.bot-drawer-body .bot-model-settings-row > span { padding: 0; font-size: .75rem; font-weight: 600; }
+.bot-drawer-body .bot-model-settings-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.bot-drawer-body .bot-model-settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.bot-drawer-body .bot-model-settings-head > span:first-child {
+  min-width: 0;
+  padding: 0;
+  color: var(--graphite-base);
+  font-size: .75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.bot-drawer-body .bot-model-settings-head > .bot-model-source {
+  flex: none;
+  margin: 0;
+  color: var(--graphite-fade);
+  font-size: .6875rem;
+  font-weight: 450;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .bot-drawer-body .bot-settings-row { font-size: .75rem; }
 .bot-drawer-body .frost-settings-group .pa-dropdown-trigger { height: auto; min-height: 34px; padding: 6px 12px; border-radius: var(--ui-radius-control); font-size: .75rem; }
 .bot-drawer-body .bot-settings-identity .frost-group-content { display: flex; flex-direction: column; gap: 18px; padding: 15px; }
@@ -1305,7 +1325,51 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
 .bot-memory-provenance p { margin: 6px 0; overflow-wrap: anywhere; }
 .bot-memory-provenance code { font-size: 10px; }
 
-.bot-overview-tab .bot-overview-details > div:last-child { grid-column: 1 / -1; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--chrome-hairline); }
+.bot-overview-tab .bot-overview-details > div:last-child {
+  grid-column: 1 / -1;
+  padding: 12px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--graphite-base) 7%, transparent);
+}
+
+.bot-overview-tab .bot-overview-details .bot-overview-cap-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: calc(100% + 12px);
+  margin: 0 -6px -4px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact, 8px);
+  background: transparent;
+  color: var(--graphite-base);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 560;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-overview-tab .bot-overview-details .bot-overview-cap-link > span {
+  color: var(--graphite-base);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.bot-overview-tab .bot-overview-details .bot-overview-cap-link svg {
+  flex: none;
+  color: var(--graphite-fade);
+  transition: transform var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-overview-tab .bot-overview-details .bot-overview-cap-link:hover {
+  background: var(--chrome-hover);
+}
+
+.bot-overview-tab .bot-overview-details .bot-overview-cap-link:hover svg {
+  color: var(--graphite-base);
+  transform: translateX(2px);
+}
 
 .bot-inspect-technical > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; }
 .bot-inspect-technical > summary::-webkit-details-marker { display: none; }
