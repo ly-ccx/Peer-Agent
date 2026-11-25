@@ -662,7 +662,13 @@ export function createGoalRunner({
   }
 
   function collectIndexedEvidenceRefsForPlan(plan) {
-    if (!plan || typeof goalPlanStore.listEvidenceIndex !== 'function') return null;
+    if (!plan) return null;
+    if (typeof goalPlanStore.listEvidenceIndexForPlan === 'function') {
+      return (goalPlanStore.listEvidenceIndexForPlan(plan) || [])
+        .map((record) => record?.evidenceRef)
+        .filter((ref) => typeof ref === 'string');
+    }
+    if (typeof goalPlanStore.listEvidenceIndex !== 'function') return null;
     const conversationId = typeof plan.conversationId === 'string' && plan.conversationId.trim()
       ? plan.conversationId.trim()
       : null;

@@ -229,7 +229,7 @@ export function registerDesktopProjectAgent({
   const verification = createSessionVerification({
     goalPlanStore,
     verifySession: (plan, focus, context) => goalRunner?.verifyDelegatedSession?.({ plan, focus, workId: context?.workId }),
-    readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
+    readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId, plan),
     completeRecheck: input => goalRunner?.completeRecheck?.(input),
   });
   const objectiveStore = createObjectiveStore({rootDir:dataHome});
@@ -263,7 +263,7 @@ export function registerDesktopProjectAgent({
     }) ?? { ok: false, missing: 'agent_turn_executor_unavailable' },
     resolveAcceptancePolicy: (workspaceId, plan) => plan?.delegationOrigin?.objectiveId ? objectiveService.acceptancePolicy(workspaceId,plan.delegationOrigin.objectiveId) : profileStore.read(workspaceId)?.acceptancePolicy,
     readSessionFacts: (plan) => ({ autoHandoffOnPolicyAccept: profileStore.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true, hostAuthority: {
-      ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
+      ...(verification.facts(plan.delegationOrigin.sessionId, plan) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
     } }),
     emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: event.eventId || supervisorEventId(event) }]),
@@ -395,7 +395,7 @@ export function registerDesktopProjectAgent({
     listApprovals: (workspaceId) => approvalStore.list({ workspaceId }),
     readApprovalsBatch: ids => approvalStore.listByWorkspaceIds(ids),
     readCards: (workspaceId) => projectFacts.cards(workspaceId),
-    readQuestionCards: (workspaceId) => projectFacts.questionCards(workspaceId),
+    readQuestionCards: (workspaceId, sessions) => projectFacts.questionCards(workspaceId, sessions),
   });
   const lifecycle = createBotLifecycle({
     rootDir: dataHome,
@@ -486,7 +486,7 @@ export function registerDesktopProjectAgent({
     resolveContext:({workspaceId,...scope})=>({coordination:supervisor.coordinationFacts(workspaceId,resolveConversationId(workspaceId),scope),objectives:objectiveService.list({}, {workspaceId,conversationId:resolveConversationId(workspaceId)}).items?.slice(0,16)||[],objectiveProposals:objectiveActions.list(workspaceId).filter(row=>row.mode==='proposal'&&['proposed','reserved'].includes(row.state)).slice(0,16)}),
     resolveRoster: (workspaceId) => supervisor.list({ workspaceId }),
     resolveTurnRoster: scope => supervisor.summaries(scope),
-    reconcileSessions: () => supervisor.reconcile(),
+    reconcileSessions: () => (rustBotHostOwned() ? Promise.resolve() : supervisor.reconcile()),
     reconcileVerification: input => verification.reconcileInterrupted(input),
     findEvidenceRecords: refs => goalPlanStore.findEvidenceIndexRecords(refs),
     readResourceClaims: workspaceId => executionScheduler.resourceSnapshot().filter(row => row.workspaceId === workspaceId),
@@ -526,6 +526,7 @@ export function registerDesktopProjectAgent({
     subscribePlans: (listener) => (
       typeof goalPlanStore?.subscribeChanges === 'function'
         ? goalPlanStore.subscribeChanges((event) => {
+          if (rustBotHostOwned()) return;
           // 本进程自己的 runner 计数回写会追加 .changes.jsonl。
           // 那条尾通知不能再排一次全量 sweep，否则大计划每秒写盘就把主进程叫醒。
           if (event?.writerPid === process.pid && event?.changeKind === 'runner-progress') return;

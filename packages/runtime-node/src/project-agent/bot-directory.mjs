@@ -170,7 +170,7 @@ export function createBotDirectory({
     const mappedSessions = sessions.map(session => ({ status: session?.status, updatedAt: session?.updatedAt }));
     const approvals = approvalBatch instanceof Map && approvalBatch.has(profile.workspaceId)
       ? approvalBatch.get(profile.workspaceId) : listApprovals(profile.workspaceId);
-    const cards = readQuestionCards(profile.workspaceId);
+    const cards = readQuestionCards(profile.workspaceId, sessions);
     const attention = projectBotAttention({ profile, messages, sessions, cards: Array.isArray(cards) ? cards : [], approvals: Array.isArray(approvals) ? approvals : [],
       confirmations: Array.isArray(confirmations) ? confirmations : [], now: Date.parse(stamp()) });
     const item = projectBotListItem({

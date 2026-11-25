@@ -586,3 +586,49 @@ test('raw plan metadata does not hydrate UI completion and observes same-size ex
   assert.equal(store.listPlanMetadata()[0].conversationId,'other');
   rmSync(file);assert.deepEqual(store.listPlanMetadata(),[]);
 });
+
+test('listEvidenceIndexForPlan returns isolated scoped records in order without reparsing', t => {
+  const { dir, store } = createTempStore();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'evidence-index.jsonl');
+  store.recordEvidenceRefs({ planId: 'p1', conversationId: 'c1', evidenceRef: 'ref-a', artifactRefs: ['a1'] });
+  store.recordEvidenceRefs({ planId: 'p2', conversationId: 'c2', evidenceRef: 'ref-b', artifactRefs: ['b1'] });
+  store.recordEvidenceRefs({ planId: 'p1', conversationId: 'c1', evidenceRef: 'ref-c', artifactRefs: ['c1'] });
+  store.recordEvidenceRefs({ conversationId: 'c1', evidenceRef: 'ref-d', artifactRefs: ['d1'] });
+
+  const original = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (...args) => {
+    if (args[0] === file) reads += 1;
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+
+  const scoped = store.listEvidenceIndexForPlan({ planId: 'p1', conversationId: 'c1' });
+  assert.deepEqual(scoped.map(r => r.evidenceRef), ['ref-a', 'ref-c', 'ref-d']);
+  scoped[0].evidenceRef = 'mutated';
+  scoped[0].artifactRefs.push('mutated');
+
+  const again = store.listEvidenceIndexForPlan({ planId: 'p1', conversationId: 'c1' });
+  assert.deepEqual(again.map(r => r.evidenceRef), ['ref-a', 'ref-c', 'ref-d']);
+  assert.deepEqual(again[0].artifactRefs, ['a1']);
+  assert.equal(reads, 1, 'repeated scoped reads must share parsed and indexed cache');
+});
+
+test('listPlansByConversation only checks UI delivery for plans in the target conversation', t => {
+  const seen = [];
+  const { dir, store } = createTempStore({
+    readUiDelivery: (plan) => { seen.push(plan.planId); return { required: false }; },
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const p1 = store.createPlan({ title: 'one', goal: 'one', conversationId: 'conv-1', tasks: [{ taskId: 't1', title: 't1', status: 'completed' }] });
+  const p2 = store.createPlan({ title: 'two', goal: 'two', conversationId: 'conv-2', tasks: [{ taskId: 't2', title: 't2', status: 'completed' }] });
+  store.revisePlan(p1.planId, { status: 'completed' });
+  store.revisePlan(p2.planId, { status: 'completed' });
+  seen.length = 0;
+
+  const listed = store.listPlansByConversation('conv-1');
+  assert.deepEqual(listed.map(m => m.planId), [p1.planId]);
+  assert.deepEqual(seen, [p1.planId], 'unrelated completed plans must not be hydrated for another conversation');
+});
