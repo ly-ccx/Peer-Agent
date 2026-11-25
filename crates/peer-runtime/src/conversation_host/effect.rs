@@ -153,7 +153,11 @@ impl Host<'_> {
                         None=>closed=true,
                         Some(AdmissionRequest::Check(reply))=>{let _=reply.send(valid);},
                         Some(AdmissionRequest::ReadScope{path,reply})=>{
-                            let result=match valid{Err(e)=>Err(e),Ok(())=>self.authorize_read(grant,&args,path).await};
+                            let result=match valid{Err(e)=>Err(e),Ok(())=>self.authorize_read(grant,&args,path,None).await};
+                            if let Err(e)=result{if stopped.is_none(){stopped=Some(e);}self.owned.cancel();}let _=reply.send(result);
+                        },
+                        Some(AdmissionRequest::GitConfigSource{path,repository,reply})=>{
+                            let result=match valid{Err(e)=>Err(e),Ok(())=>self.authorize_read(grant,&args,path,Some(&repository)).await};
                             if let Err(e)=result{if stopped.is_none(){stopped=Some(e);}self.owned.cancel();}let _=reply.send(result);
                         },
                         Some(AdmissionRequest::CommandStarting(reply))=>{

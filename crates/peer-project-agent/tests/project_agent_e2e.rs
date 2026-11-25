@@ -2762,12 +2762,8 @@ async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifie
         .supervisor()
         .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
         .unwrap();
-    let worker_prof = peer_project_agent::resolve_work_session_profile(
-        &plan,
-        "worker",
-        peer_protocol::LocalAccessLevel::SessionLocal,
-    )
-    .expect("work session profile");
+    let worker_prof = peer_project_agent::resolve_work_session_profile(&plan, "worker")
+        .expect("work session profile");
     assert!(worker_prof.allowlist.iter().any(|c| c == "local.file.read"));
     assert!(
         !worker_prof
@@ -8942,4 +8938,211 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
     assert_eq!(second_anchors.len(), 1);
     assert_ne!(second_anchors, first_anchors);
     host.close();
+}
+
+/// A real Git repository whose effective configuration includes two files
+/// outside the workspace, as a machine-wide Git configuration does.
+#[cfg(unix)]
+fn research_repository(
+    workspace: &std::path::Path,
+    outside: &std::path::Path,
+) -> [std::path::PathBuf; 2] {
+    let home = workspace.join(".git-fixture-home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(workspace.join("input.txt"), "owned source").unwrap();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("/usr/bin/git")
+            .args(args)
+            .current_dir(workspace)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", &home)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "Host Fixture")
+            .env("GIT_AUTHOR_EMAIL", "host@example.invalid")
+            .env("GIT_COMMITTER_NAME", "Host Fixture")
+            .env("GIT_COMMITTER_EMAIL", "host@example.invalid")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--initial-branch=main"]);
+    git(&["add", "input.txt"]);
+    git(&["commit", "-m", "owned original"]);
+    let includes = [outside.join("first.config"), outside.join("second.config")];
+    fs::write(&includes[0], "[user]\n\tname = First outside source\n").unwrap();
+    fs::write(&includes[1], "[user]\n\temail = second@example.invalid\n").unwrap();
+    for include in &includes {
+        git(&["config", "--add", "include.path", include.to_str().unwrap()]);
+    }
+    includes
+}
+
+/// Counts every real permission question and approves it.
+#[derive(Default)]
+struct CountingPermission {
+    prompts: Arc<Mutex<Vec<Value>>>,
+}
+impl PermissionInput for CountingPermission {
+    fn decide<'a>(
+        &'a mut self,
+        prompt: Value,
+        _cancel: &'a CancellationToken,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LocalPermissionDecision> + 'a>> {
+        self.prompts.lock().unwrap().push(prompt);
+        Box::pin(async { LocalPermissionDecision::Approve })
+    }
+}
+
+/// The reported RC 42 defect: a read-only research session asked for
+/// `git_query` although its Bot was set to Full access. A read-only role was
+/// pinned to `session_local`, and Git's own configuration lives outside the
+/// workspace.
+#[cfg(unix)]
+#[tokio::test]
+async fn readonly_research_session_follows_the_bots_saved_access_policy_for_git() {
+    use peer_protocol::LocalAccessLevel;
+    use peer_store::PolicyStore;
+    for (level, questions) in [
+        (LocalAccessLevel::FullLocal, 0),
+        (LocalAccessLevel::AskBeforeLocal, 1),
+    ] {
+        let home = tempdir().unwrap();
+        let ws = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let includes = research_repository(ws.path(), outside.path());
+        let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+        let (entry, profile) = host
+            .bind_workspace(ws.path(), Some("Research Bot"))
+            .unwrap();
+        let ws_id = entry.workspace_id;
+        let parent = profile.agent_conversation_id.unwrap();
+        host.ensure_lease(&ws_id).unwrap();
+        // The user's own choice for this Bot, saved as its access control does.
+        let store = PolicyStore::new(home.path());
+        store
+            .initialize(level, &peer_project_agent::now_iso(), None)
+            .unwrap();
+        assert_eq!(store.read_existing(&ws_id).unwrap().access_level, level);
+
+        host.submit_user_input(&ws_id, "research-input", "Report the Git state", None)
+            .unwrap();
+        host.inputs()
+            .consume(&ws_id, &parent, host.conversations(), true)
+            .unwrap();
+        host.inputs()
+            .mark_executed(&ws_id, &["research-input".to_owned()], &[], true)
+            .unwrap();
+        let child = host
+            .supervisor()
+            .spawn_session(
+                SpawnSessionRequest {
+                    workspace_id: ws_id.clone(),
+                    workspace_path: ws.path().into(),
+                    parent_conversation_id: parent.clone(),
+                    anchor_message_ids: vec![input_message_id("research-input").unwrap()],
+                    input_id: "research-input".into(),
+                    surface: "desktop".into(),
+                    title: "Report the Git state".into(),
+                    brief: "Observe this repository with git_query.".into(),
+                    kind: "research".into(),
+                    read_only: true,
+                    required_capabilities: vec!["local.git.query".into()],
+                    success_criteria: vec![SpawnCriterion {
+                        id: Some("input".into()),
+                        kind: "file-exists".into(),
+                        description: "input.txt exists".into(),
+                        path: Some("input.txt".into()),
+                        expect: None,
+                        command: None,
+                    }],
+                    priority: "normal".into(),
+                    depends_on: vec![],
+                    supersedes: None,
+                    objective_id: None,
+                    isolation: "none".into(),
+                    worker_model_selection: json!({}),
+                },
+                true,
+            )
+            .unwrap();
+        host.supervisor().promote_queued(&ws_id, true).unwrap();
+
+        let worker = start_mock_server(vec![
+            Box::new(|_| sse_tool_call("observe", "git_query", &json!({"path": "."}))),
+            Box::new(|_| sse_text("Observed the repository state.")),
+        ]);
+        let worker_model = mock_model(&worker.endpoint);
+        let cancel = CancellationToken::new();
+        let mut perm = CountingPermission::default();
+        let episode = host
+            .run_promoted_session(
+                &ws_id,
+                &child.session_id,
+                &worker_model,
+                None,
+                &mut perm,
+                8,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(episode.status, "completed", "{level:?}");
+        // Full: never asked. Ask: one decision for all configuration sources.
+        assert_eq!(perm.prompts.lock().unwrap().len(), questions, "{level:?}");
+
+        let plan = host
+            .supervisor()
+            .find_plan_by_session(&ws_id, &child.session_id)
+            .unwrap();
+        let history = host
+            .conversations()
+            .read_committed(
+                plan["delegationOrigin"]["workerConversationId"]
+                    .as_str()
+                    .unwrap(),
+                None,
+                4 * 1024 * 1024,
+            )
+            .unwrap()
+            .history
+            .messages;
+        let observation = history
+            .iter()
+            .flat_map(|m| m["segments"].as_array().into_iter().flatten())
+            .find(|s| s["tool"] == "git_query")
+            .expect("actual git_query of the worker");
+        assert_eq!(observation["result"]["status"], "success", "{observation}");
+        let sources: Vec<&str> = observation["result"]["output"]["configurationSources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|source| source.as_str())
+            .collect();
+        for include in &includes {
+            let include = include.canonicalize().unwrap();
+            assert!(sources.contains(&include.to_str().unwrap()), "{sources:?}");
+        }
+        // Every grant of the session is a real grant under the Bot's own policy.
+        let grants: Vec<Value> = history
+            .iter()
+            .flat_map(|m| {
+                m["permissionGrants"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+            })
+            .collect();
+        assert!(grants.iter().all(|g| g["granted"] == true), "{grants:?}");
+        assert_eq!(
+            grants[0]["metadata"]["policyRevision"],
+            format!("bot:{ws_id}:{parent}:1")
+        );
+        assert_eq!(plan["criterionResults"][0]["status"], "passed");
+    }
 }

@@ -1217,7 +1217,7 @@ mod tests {
         BotProfileStore, CreateBotProfile, InteractiveValidationError, SessionSupervisor,
         SpawnCriterion, SpawnSessionRequest, verifier::resolve_work_session_profile_with_interactive,
     };
-    use peer_protocol::{HostSurface, LocalAccessLevel};
+    use peer_protocol::HostSurface;
     use peer_store::EvidenceIndexStore;
     use std::pin::Pin;
     use tempfile::tempdir;
@@ -1381,13 +1381,8 @@ mod tests {
             .find_plan_by_session("ws-ir-gate", &summary.session_id)
             .unwrap();
 
-        let worker_profile = resolve_work_session_profile_with_interactive(
-            &plan,
-            "worker",
-            LocalAccessLevel::SessionLocal,
-            true,
-        )
-        .unwrap();
+        let worker_profile =
+            resolve_work_session_profile_with_interactive(&plan, "worker", true).unwrap();
         assert!(worker_profile.read_only);
         assert!(
             worker_profile
@@ -1400,13 +1395,8 @@ mod tests {
                 .contains(&INTERACTIVE_INSPECT_CAPABILITY.to_owned())
         );
 
-        let verifier_profile = resolve_work_session_profile_with_interactive(
-            &plan,
-            "verifier",
-            LocalAccessLevel::SessionLocal,
-            true,
-        )
-        .unwrap();
+        let verifier_profile =
+            resolve_work_session_profile_with_interactive(&plan, "verifier", true).unwrap();
         assert!(
             verifier_profile
                 .allowlist

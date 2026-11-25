@@ -508,12 +508,18 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         fs::write(workspace.path().join("README.md"), "current evidence").unwrap();
-        let sup = SessionSupervisor::new(home.path(), None);
+        // The verifier reads the delegating Bot's real policy, so the plan is
+        // owned by the Bot profile that a delegated plan always has.
+        let host = crate::NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+        let (entry, _profile) = host
+            .bind_workspace(workspace.path(), Some("FenceBot"))
+            .unwrap();
+        let sup = host.supervisor();
         let plan = json!({
             "planId":"plan-reverify-fence", "conversationId":"reverify-fence",
             "targetWorkspacePath": workspace.path(), "status":"completed",
             "delegationOrigin":{
-                "sessionId":"reverify-fence", "workspaceId":"ws-fence",
+                "sessionId":"reverify-fence", "workspaceId": entry.workspace_id,
                 "readOnly":true, "phase":"completed", "independentVerifier":"failed"
             },
             "successCriteria":[{"id":"file", "kind":"file-exists", "path":"README.md"}],
@@ -627,27 +633,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         fs::write(workspace.path().join("README.md"), "verified content").unwrap();
-        let sup = SessionSupervisor::new(home.path(), None);
+        let host = crate::NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+        let (entry, profile) = host
+            .bind_workspace(workspace.path(), Some("SettleBot"))
+            .unwrap();
+        let ws_id = entry.workspace_id;
+        let parent_id = profile.agent_conversation_id.unwrap();
+        let sup = host.supervisor();
 
         // Seed parent conversation with a prior agent_reply citing `reverify-settle`.
-        let parent_conv = sup
-            .conversations
-            .create_project_conversation(
-                &NewProjectConversation {
-                    id: None,
-                    title: "Bot",
-                    workspace_id: "ws-settle",
-                    workspace_path: Some(&workspace.path().to_string_lossy()),
-                    role: "project_agent",
-                    parent_conversation_id: None,
-                    mode: "project_agent",
-                    created_at: "2026-11-25T01:00:00.000Z",
-                },
-                None,
-                None,
-            )
-            .unwrap();
-        let parent_id = parent_conv["id"].as_str().unwrap().to_owned();
         sup.conversations
             .append_message_idempotent(
                 &parent_id,
@@ -676,7 +670,7 @@ mod tests {
             }],
             "delegationOrigin": {
                 "sessionId": "reverify-settle",
-                "workspaceId": "ws-settle",
+                "workspaceId": ws_id,
                 "parentConversationId": parent_id,
                 "readOnly": true,
                 "phase": "completed",

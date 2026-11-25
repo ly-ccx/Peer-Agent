@@ -5,7 +5,7 @@
 use crate::{
     BotCapabilityPolicy, INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL,
     InteractiveContentBridge, ProjectError, WorkSessionInteractiveContext,
-    WorkSessionInteractiveProvider, interactive_context_extension,
+    WorkSessionInteractiveProvider, interactive_context_extension, now_iso,
 };
 use peer_protocol::{
     LocalAccessLevel,
@@ -21,7 +21,7 @@ use peer_runtime::{
     providers::{CapabilityProvider, RuntimeMode},
     session_host::{LocalPermissionDecision, PermissionInput},
 };
-use peer_store::{EvidenceIndexStore, McpRegistryStore, SkillCatalog};
+use peer_store::{EvidenceIndexStore, McpRegistryStore, PolicyStore, SkillCatalog};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -68,9 +68,44 @@ pub const WORKER_CAPABILITY_CEILING: [&str; 12] = [
 pub struct WorkSessionProfile {
     pub agent_kind: String,
     pub read_only: bool,
-    pub access_level: LocalAccessLevel,
     pub allowlist: Vec<String>,
     pub exclude_prefixes: Vec<&'static str>,
+}
+
+fn access_error(error: peer_store::StoreError) -> ProjectError {
+    ProjectError::code(match error {
+        peer_store::StoreError::OutOfScope
+        | peer_store::StoreError::NotFound
+        | peer_store::StoreError::InvalidInput => "access_identity_invalid",
+        _ => "access_policy_unavailable",
+    })
+}
+
+/// The access of a session delegated by a Bot. It is the policy the Bot's own
+/// access control shows: the first appearance of a Bot starts at Ask, and every
+/// later call re-reads the saved level. A policy that cannot be read, or that
+/// belongs to another Bot conversation, is a structured rejection; no other
+/// level is substituted for it (ADR101 §2.3, §4.3, §6.3).
+pub(crate) fn delegated_access(
+    data_home: &Path,
+    workspace_id: &str,
+) -> Result<ConversationAccess, ProjectError> {
+    let store = PolicyStore::new(data_home);
+    let at = now_iso();
+    if !data_home
+        .join("project-runtime")
+        .join("bot-access.sqlite")
+        .exists()
+    {
+        store
+            .initialize(LocalAccessLevel::AskBeforeLocal, &at, None)
+            .map_err(access_error)?;
+    }
+    store
+        .read_or_register(workspace_id, &at)
+        .map_err(access_error)?;
+    ConversationAccess::for_bot(data_home, workspace_id)
+        .map_err(|error| ProjectError::code(error.0))
 }
 
 fn is_excluded_capability(cap: &str) -> bool {
@@ -137,18 +172,17 @@ pub(crate) fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
 /// against strict role ceilings and never admits control/delegation/write caps
 /// in read-only roles (except the ADR 118 §9.1 internal interactive publication
 /// exception when `interactive_enabled` is true for `"worker"`).
-pub fn resolve_work_session_profile(
-    plan: &Value,
-    agent_kind: &str,
-    workspace_access: LocalAccessLevel,
-) -> Option<WorkSessionProfile> {
-    resolve_work_session_profile_with_interactive(plan, agent_kind, workspace_access, false)
+///
+/// The profile decides which capabilities a role may use. Whether an admitted
+/// call needs user approval is the Bot's current policy, read by the Host at
+/// execution time; no access level is copied here (ADR101 §2.3, §2.5, §2.6).
+pub fn resolve_work_session_profile(plan: &Value, agent_kind: &str) -> Option<WorkSessionProfile> {
+    resolve_work_session_profile_with_interactive(plan, agent_kind, false)
 }
 
 pub fn resolve_work_session_profile_with_interactive(
     plan: &Value,
     agent_kind: &str,
-    workspace_access: LocalAccessLevel,
     interactive_enabled: bool,
 ) -> Option<WorkSessionProfile> {
     let origin = plan["delegationOrigin"].as_object()?;
@@ -297,11 +331,6 @@ pub fn resolve_work_session_profile_with_interactive(
     Some(WorkSessionProfile {
         agent_kind: agent_kind.to_owned(),
         read_only,
-        access_level: if read_only {
-            LocalAccessLevel::SessionLocal
-        } else {
-            workspace_access
-        },
         allowlist,
         exclude_prefixes: WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES.to_vec(),
     })
@@ -983,10 +1012,16 @@ pub(crate) async fn run_independent_verifier_with_interactive(
     let profile = resolve_work_session_profile_with_interactive(
         plan,
         "verifier",
-        LocalAccessLevel::SessionLocal,
         mount_interactive,
     )
     .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
+    // The verifier never prompts, but it reads the same current Bot policy as
+    // the session it verifies instead of a level fixed by its role name.
+    let workspace_id = plan["delegationOrigin"]["workspaceId"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| ProjectError::code("OUT_OF_SCOPE"))?;
+    let access = delegated_access(data_home, workspace_id)?;
 
     let worker_model_id = plan["delegationOrigin"]["modelSelection"]["worker"]["modelId"]
         .as_str()
@@ -1013,10 +1048,7 @@ pub(crate) async fn run_independent_verifier_with_interactive(
             }
             _ => build_verifier_prompt(plan, &allowed_refs, focus),
         };
-        let runtime = NativeConversationRuntime::new(
-            data_home,
-            ConversationAccess::new(LocalAccessLevel::SessionLocal),
-        );
+        let runtime = NativeConversationRuntime::new(data_home, access.clone());
         let mut deny_perm = DenyEscalationPermission;
         let reuse_conv_id =
             (is_repair && !last_conv_id.is_empty()).then_some(last_conv_id.as_str());
@@ -1184,6 +1216,82 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn bound_bot(home: &Path, workspace: &Path) -> (crate::NativeProjectHost, String) {
+        let host = crate::NativeProjectHost::new(home, "0.1.0-test", Some(1)).unwrap();
+        let (entry, _profile) = host.bind_workspace(workspace, Some("Policy Bot")).unwrap();
+        (host, entry.workspace_id)
+    }
+
+    #[test]
+    fn delegated_access_starts_a_bot_without_a_saved_policy_at_ask() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        // This device already saved Full as its old global level.
+        PolicyStore::new(home.path())
+            .initialize(LocalAccessLevel::FullLocal, &now_iso(), None)
+            .unwrap();
+        let (_host, workspace_id) = bound_bot(home.path(), workspace.path());
+        // A Bot that appears later does not inherit that level: it starts at Ask.
+        let access = delegated_access(home.path(), &workspace_id).unwrap();
+        assert_eq!(
+            access.snapshot().unwrap(),
+            (LocalAccessLevel::AskBeforeLocal, 1)
+        );
+        let saved = PolicyStore::new(home.path())
+            .read_existing(&workspace_id)
+            .unwrap();
+        assert_eq!(saved.access_level, LocalAccessLevel::AskBeforeLocal);
+        assert_eq!(saved.source, "new_bot");
+    }
+
+    #[test]
+    fn delegated_access_creates_a_missing_policy_store_and_follows_saved_changes() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (_host, workspace_id) = bound_bot(home.path(), workspace.path());
+        assert!(
+            !home
+                .path()
+                .join("project-runtime/bot-access.sqlite")
+                .exists()
+        );
+        let access = delegated_access(home.path(), &workspace_id).unwrap();
+        assert_eq!(
+            access.snapshot().unwrap(),
+            (LocalAccessLevel::AskBeforeLocal, 1)
+        );
+        PolicyStore::new(home.path())
+            .update_existing(&workspace_id, 1, LocalAccessLevel::FullLocal, &now_iso())
+            .unwrap();
+        // The session that is already running decides its next call under the
+        // level the user just saved.
+        assert_eq!(access.snapshot().unwrap(), (LocalAccessLevel::FullLocal, 2));
+    }
+
+    #[test]
+    fn delegated_access_rejects_a_missing_bot_or_a_damaged_policy_store() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (_host, workspace_id) = bound_bot(home.path(), workspace.path());
+        // A plan that names a workspace no Bot owns is not another Bot's session.
+        assert_eq!(
+            delegated_access(home.path(), "ws-nobody").unwrap_err().code,
+            "access_identity_invalid"
+        );
+        delegated_access(home.path(), &workspace_id).unwrap();
+        std::fs::write(
+            home.path().join("project-runtime/bot-access.sqlite"),
+            "not a policy store",
+        )
+        .unwrap();
+        assert_eq!(
+            delegated_access(home.path(), &workspace_id)
+                .unwrap_err()
+                .code,
+            "access_policy_unavailable"
+        );
+    }
+
     #[test]
     fn profile_enforces_strict_read_only_and_worker_ceilings() {
         let plan = json!({
@@ -1197,8 +1305,7 @@ mod tests {
                 ]
             }
         });
-        let worker = resolve_work_session_profile(&plan, "worker", LocalAccessLevel::FullLocal)
-            .expect("worker profile");
+        let worker = resolve_work_session_profile(&plan, "worker").expect("worker profile");
         assert!(!worker.read_only);
         assert!(worker.allowlist.contains(&"local.file.write".to_owned()));
         assert!(
@@ -1212,10 +1319,8 @@ mod tests {
                 .contains(&"local.web.control.click".to_owned())
         );
 
-        let verifier = resolve_work_session_profile(&plan, "verifier", LocalAccessLevel::FullLocal)
-            .expect("verifier profile");
+        let verifier = resolve_work_session_profile(&plan, "verifier").expect("verifier profile");
         assert!(verifier.read_only);
-        assert_eq!(verifier.access_level, LocalAccessLevel::SessionLocal);
         assert!(!verifier.allowlist.contains(&"local.file.write".to_owned()));
         assert!(verifier.allowlist.contains(&"local.file.read".to_owned()));
         assert!(
@@ -1264,8 +1369,7 @@ mod tests {
             }
         });
         let worker =
-            resolve_work_session_profile(&shorthand_write, "worker", LocalAccessLevel::FullLocal)
-                .expect("worker profile");
+            resolve_work_session_profile(&shorthand_write, "worker").expect("worker profile");
         for expected in [
             "local.file.read",
             "local.file.list",
@@ -1290,17 +1394,15 @@ mod tests {
                 "requiredCapabilities": ["file-write", "shell", "read_file"]
             }
         });
-        let ro_worker =
-            resolve_work_session_profile(&ro_shorthand, "worker", LocalAccessLevel::FullLocal)
-                .expect("read-only worker profile");
+        let ro_worker = resolve_work_session_profile(&ro_shorthand, "worker")
+            .expect("read-only worker profile");
         assert!(!ro_worker.allowlist.contains(&"local.file.write".to_owned()));
         assert!(!ro_worker.allowlist.contains(&"local.file.edit".to_owned()));
         assert!(!ro_worker.allowlist.contains(&"local.shell.exec".to_owned()));
         assert!(ro_worker.allowlist.contains(&"local.file.read".to_owned()));
 
         let verifier =
-            resolve_work_session_profile(&shorthand_write, "verifier", LocalAccessLevel::FullLocal)
-                .expect("verifier profile");
+            resolve_work_session_profile(&shorthand_write, "verifier").expect("verifier profile");
         assert!(!verifier.allowlist.contains(&"local.file.write".to_owned()));
         assert!(!verifier.allowlist.contains(&"local.shell.exec".to_owned()));
 
@@ -1311,8 +1413,7 @@ mod tests {
             }
         });
         let fallback_worker =
-            resolve_work_session_profile(&empty_write, "worker", LocalAccessLevel::FullLocal)
-                .expect("fallback worker profile");
+            resolve_work_session_profile(&empty_write, "worker").expect("fallback worker profile");
         assert!(
             fallback_worker
                 .allowlist
@@ -1343,9 +1444,8 @@ mod tests {
                 { "kind": "command", "description": "Run tests", "command": "pnpm test" }
             ]
         });
-        let cmd_worker =
-            resolve_work_session_profile(&command_criterion, "worker", LocalAccessLevel::FullLocal)
-                .expect("command criterion worker profile");
+        let cmd_worker = resolve_work_session_profile(&command_criterion, "worker")
+            .expect("command criterion worker profile");
         assert!(
             cmd_worker
                 .allowlist
@@ -1525,9 +1625,7 @@ mod tests {
         });
 
         // 1. Default inherit: alpha-skill + local-skill + docs-mcp tools; beta-skill & ops-mcp excluded.
-        let mut rw_default =
-            resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
-                .unwrap();
+        let mut rw_default = resolve_work_session_profile(&rw_plan, "worker").unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut rw_default);
         assert!(
             rw_default
@@ -1567,9 +1665,7 @@ mod tests {
             enabled_mcp_ids: vec!["ops-mcp".into()],
             disabled_mcp_ids: vec!["docs-mcp".into()],
         };
-        let mut rw_override =
-            resolve_work_session_profile(&rw_plan, "worker", LocalAccessLevel::SessionLocal)
-                .unwrap();
+        let mut rw_override = resolve_work_session_profile(&rw_plan, "worker").unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, Some(&policy), &mut rw_override);
         assert!(
             !rw_override
@@ -1598,9 +1694,7 @@ mod tests {
         );
 
         // 3. Read-only worker inherits mounted skills + read-only MCP only (no L3_external_write MCP).
-        let mut ro_worker =
-            resolve_work_session_profile(&ro_plan, "worker", LocalAccessLevel::SessionLocal)
-                .unwrap();
+        let mut ro_worker = resolve_work_session_profile(&ro_plan, "worker").unwrap();
         extend_worker_allowlist_with_bot_capabilities(&home, &ws, None, &mut ro_worker);
         assert!(
             ro_worker
@@ -1619,9 +1713,7 @@ mod tests {
         );
 
         // 4. Independent verifier NEVER gets skills or MCP.
-        let mut verifier_profile =
-            resolve_work_session_profile(&rw_plan, "verifier", LocalAccessLevel::SessionLocal)
-                .unwrap();
+        let mut verifier_profile = resolve_work_session_profile(&rw_plan, "verifier").unwrap();
         extend_worker_allowlist_with_bot_capabilities(
             &home,
             &ws,
@@ -1666,10 +1758,8 @@ mod tests {
             }
         });
         let worker =
-            resolve_work_session_profile(&web_research_plan, "worker", LocalAccessLevel::FullLocal)
-                .expect("worker profile");
+            resolve_work_session_profile(&web_research_plan, "worker").expect("worker profile");
         assert!(worker.read_only);
-        assert_eq!(worker.access_level, LocalAccessLevel::SessionLocal);
         assert!(worker.allowlist.contains(&"local.web.search".to_owned()));
         assert!(worker.allowlist.contains(&"local.web.fetch".to_owned()));
         assert!(worker.allowlist.contains(&"local.file.read".to_owned()));
@@ -1692,9 +1782,8 @@ mod tests {
                 "requiredCapabilities": ["web_research"]
             }
         });
-        let shorthand_worker =
-            resolve_work_session_profile(&shorthand_plan, "worker", LocalAccessLevel::SessionLocal)
-                .expect("shorthand worker profile");
+        let shorthand_worker = resolve_work_session_profile(&shorthand_plan, "worker")
+            .expect("shorthand worker profile");
         assert!(
             shorthand_worker
                 .allowlist
@@ -1714,8 +1803,7 @@ mod tests {
         // Independent verifier and explorer NEVER receive `local.web.search` or `local.web.fetch`.
         for role in ["verifier", "explorer"] {
             let role_profile =
-                resolve_work_session_profile(&web_research_plan, role, LocalAccessLevel::FullLocal)
-                    .expect("role profile");
+                resolve_work_session_profile(&web_research_plan, role).expect("role profile");
             assert!(role_profile.read_only);
             assert!(
                 !role_profile
@@ -1739,8 +1827,7 @@ mod tests {
             }
         });
         let plain_ro_worker =
-            resolve_work_session_profile(&plain_ro_plan, "worker", LocalAccessLevel::FullLocal)
-                .expect("plain read-only worker");
+            resolve_work_session_profile(&plain_ro_plan, "worker").expect("plain read-only worker");
         assert!(
             !plain_ro_worker
                 .allowlist

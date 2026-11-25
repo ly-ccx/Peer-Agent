@@ -24,6 +24,9 @@ pub(super) struct ToolGrant {
     pub revision: u64,
     pub scopes: Vec<ResolvedReadScope>,
     pub credential_revision: String,
+    /// The user decision that already admitted a read outside the workspace in
+    /// this call. The Git configuration sources of the same call join it.
+    pub outside_read_decision: Option<&'static str>,
     readonly_worker_id: Option<String>,
     goal_intake: GoalIntake,
     pub goal_denial: Option<&'static str>,
@@ -162,6 +165,14 @@ impl Host<'_> {
     fn session_read_key(&self, revision: u64, capability: &str, canonical_path: &str) -> String {
         format!(
             "read:{revision}:{}:{capability}:{canonical_path}",
+            self.identity.conversation_id
+        )
+    }
+    /// "Repeat" for a Git configuration source is remembered for the repository
+    /// of that query, not for the one file that happened to be asked first.
+    fn git_config_key(&self, revision: u64, capability: &str, repository: &str) -> String {
+        format!(
+            "git-config:{revision}:{}:{capability}:{repository}",
             self.identity.conversation_id
         )
     }
@@ -359,7 +370,7 @@ impl Host<'_> {
         };
         let duration = approval_duration(granted, reason);
         let mut grant = ToolGrant {
-            facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":duration,"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":format!("ordinary:{}:{revision}",self.identity.stream_id)}}),
+            facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":duration,"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":self.access.policy_revision(&self.identity.stream_id, revision)?}}),
             additional: vec![],
             terminal,
             capability: capability.into(),
@@ -368,6 +379,12 @@ impl Host<'_> {
             revision,
             scopes: scope.into_iter().collect(),
             credential_revision,
+            // A user-approved read outside the workspace covers the Git
+            // configuration sources that the same call discovers.
+            outside_read_decision: (granted
+                && inside == Some(false)
+                && matches!(reason, "approved_once_in_tui" | "approved_for_tui_session"))
+            .then_some(reason),
             readonly_worker_id: self
                 .worker
                 .as_ref()
@@ -405,7 +422,9 @@ impl Host<'_> {
         let deadline = (time::OffsetDateTime::now_utc() + time::Duration::minutes(5))
             .format(&time::format_description::well_known::Rfc3339)
             .map_err(|_| HostError("invalid_host_time"))?;
-        let policy = format!("ordinary:{}:{revision}", self.identity.stream_id);
+        let policy = self
+            .access
+            .policy_revision(&self.identity.stream_id, revision)?;
         let row = store.open(
             &HostApproval {
                 approval_id: &id,
@@ -446,7 +465,7 @@ impl Host<'_> {
             loop {tokio::select!{biased;
                 _=owned.cancelled()=>return (LocalPermissionDecision::Cancel,false),
                 _=&mut expiry=>return (LocalPermissionDecision::Timeout,false),
-                _=tick.tick()=>if access.snapshot().is_err()||access.snapshot().is_ok_and(|s|s.1!=revision){return (LocalPermissionDecision::Cancel,true);},
+                _=tick.tick()=>{let current=access.snapshot();if current.is_err()||current.is_ok_and(|s|s.1!=revision){return (LocalPermissionDecision::Cancel,true);}},
                 result=&mut decision=>return (result,false),
             }}
         }).await;
@@ -538,11 +557,18 @@ impl Host<'_> {
             ),
         })
     }
+    /// A read scope that the running Provider discovers. `repository` names
+    /// the observed repository when `path` is one of its Git configuration
+    /// sources. In a session delegated by a Bot, one outside read decision of
+    /// a `git_query` covers the other configuration sources of that call, and
+    /// "repeat" is remembered for that repository. Every other read scope keeps
+    /// its own decision.
     pub(super) async fn authorize_read(
         &mut self,
         grant: &mut ToolGrant,
         args: &Value,
         path: PathBuf,
+        config_repository: Option<&Path>,
     ) -> Result<(), HostError> {
         self.validate_grant(grant, args)?;
         let capability = grant.capability.clone();
@@ -569,6 +595,9 @@ impl Host<'_> {
         let inside = root.covers(Path::new(&target.facts.path));
         let scope = if inside { root } else { target };
         let level = self.access.snapshot()?.0;
+        // A session delegated by a Bot decides the Git configuration sources of
+        // one query together. Other sessions keep one decision per path.
+        let grouped = self.access.follows_bot();
         let (granted, reason, terminal) = if self.worker.is_some() && !inside {
             (false, "explorer_scope_denied", None)
         } else if !inside
@@ -580,13 +609,25 @@ impl Host<'_> {
         } else if level == LocalAccessLevel::FullLocal || inside {
             (true, "host_policy_read", None)
         } else {
-            let read_key = self.worker.is_none().then(|| {
-                self.session_read_key(grant.revision, &grant.capability, &scope.facts.path)
+            let config = config_repository.filter(|_| grouped);
+            let read_key = self.worker.is_none().then(|| match config {
+                Some(repository) => self.git_config_key(
+                    grant.revision,
+                    &grant.capability,
+                    &repository.to_string_lossy(),
+                ),
+                None => self.session_read_key(grant.revision, &grant.capability, &scope.facts.path),
             });
             if let Some(key) = read_key.as_deref()
                 && self.access.has_session_approval(grant.revision, key)?
             {
                 (true, "approved_for_tui_session", None)
+            } else if config.is_some()
+                && let Some(reason) = grant.outside_read_decision
+            {
+                // The user already approved an outside read of this query; its
+                // other configuration sources join that decision.
+                (true, reason, None)
             } else {
                 self.decide(
                     PermissionCall {
@@ -600,13 +641,23 @@ impl Host<'_> {
                     grant.revision,
                     DecisionContext {
                         risk_level: "L1_local_read",
-                        reason: "Outside workspace file read requires approval.",
+                        reason: if config.is_some() {
+                            GIT_CONFIG_REASON
+                        } else {
+                            "Outside workspace file read requires approval."
+                        },
                         session_key: read_key,
                     },
                 )
                 .await?
             }
         };
+        if granted
+            && !inside
+            && matches!(reason, "approved_once_in_tui" | "approved_for_tui_session")
+        {
+            grant.outside_read_decision = Some(reason);
+        }
         let duration = approval_duration(granted, reason);
         grant.additional.push(json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":grant.call,"granted":granted,"scope":scope.value(),"duration":duration,"decidedAt":now(),"reason":reason}));
         grant.terminal = terminal;
@@ -617,6 +668,7 @@ impl Host<'_> {
         self.validate_grant(grant, args)
     }
 }
+const GIT_CONFIG_REASON: &str = "Git configuration outside the workspace requires approval. One decision covers the other configuration sources of this query.";
 
 #[cfg(test)]
 mod tests {

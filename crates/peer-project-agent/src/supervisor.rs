@@ -18,19 +18,20 @@ use crate::{
     scheduler::{ExecutionScheduler, SelectionOutcome},
     sha256_json,
     verifier::{
-        WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, resolve_work_session_profile_with_interactive,
+        WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, delegated_access,
+        resolve_work_session_profile_with_interactive,
     },
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
 use peer_protocol::{
-    HostSurface, LocalAccessLevel,
+    HostSurface,
     interactive_result::{
         INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, InteractiveOwner,
     },
 };
 use peer_runtime::{
     CancellationToken,
-    conversation_host::{ConversationAccess, ConversationOptions, NativeConversationRuntime},
+    conversation_host::{ConversationOptions, NativeConversationRuntime},
     model::NativeModel,
     native_exec::{execute_plan, recover_plan},
     providers::{CapabilityProvider, RuntimeMode},
@@ -39,7 +40,6 @@ use peer_runtime::{
 use peer_store::{
     ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, DirectoryLock,
     EvidenceIndexStore, HostApproval, HostToolEvidence, NewConversation, NewProjectConversation,
-    PolicyStore,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -2379,10 +2379,22 @@ impl SessionSupervisor {
                 );
                 return Err(ProjectError::new("WORKSPACE_NOT_FOUND", detail));
             }
-            let ws_access = PolicyStore::new(&self.data_home)
-                .read_existing(workspace_id)
-                .map(|p| p.access_level)
-                .unwrap_or(LocalAccessLevel::SessionLocal);
+            // The session follows the Bot's current policy on every call. A
+            // policy that cannot be read fails the session rather than falling
+            // back to another level (ADR101 §2.3, §6.1, §6.3).
+            let access = match delegated_access(&self.data_home, workspace_id) {
+                Ok(access) => access,
+                Err(error) => {
+                    let _ = self.fail_session(
+                        workspace_id,
+                        session_id,
+                        error.code,
+                        &error.detail,
+                        holds_lease,
+                    );
+                    return Err(error);
+                }
+            };
             let interactive_available = self.is_interactive_publishing_available();
             let interactive_bridge = interactive_available
                 .then(|| self.interactive_bridge())
@@ -2390,7 +2402,6 @@ impl SessionSupervisor {
             let mut session_profile = match resolve_work_session_profile_with_interactive(
                 &plan,
                 "worker",
-                ws_access,
                 interactive_bridge.is_some(),
             ) {
                 Some(p) => p,
@@ -2606,11 +2617,8 @@ impl SessionSupervisor {
             } else {
                 None
             };
-            let runtime = NativeConversationRuntime::new(
-                &self.data_home,
-                ConversationAccess::new(session_profile.access_level),
-            )
-            .with_capability_overrides(worker_cap_overrides);
+            let runtime = NativeConversationRuntime::new(&self.data_home, access)
+                .with_capability_overrides(worker_cap_overrides);
             let conv_res = Box::pin(
                 runtime.execute_delegated_with_extensions(
                     &ConversationOptions {

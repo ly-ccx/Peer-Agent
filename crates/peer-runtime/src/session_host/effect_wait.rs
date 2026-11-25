@@ -121,7 +121,7 @@ impl NativeSessionHost {
                                 };
                                 let _=reply.send(result.and(valid));
                             },
-                            AdmissionRequest::ReadScope{path,reply}=>{
+                            AdmissionRequest::ReadScope{path,reply}|AdmissionRequest::GitConfigSource{path,reply,..}=>{
                                 let result=if let Err(error)=valid{Err(error)}else{
                                     let a=authorization.as_mut().unwrap();
                                     if let Some(reads)=a.reads.as_mut(){

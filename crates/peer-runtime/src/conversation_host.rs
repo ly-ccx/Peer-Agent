@@ -52,15 +52,47 @@ mod verifier;
 use permission::ToolGrant;
 use runner::RunnerOutcome;
 
+#[derive(Debug)]
 struct AccessState {
     level: LocalAccessLevel,
     revision: u64,
     session_approvals: HashSet<String>,
+    /// A delegated session follows its Bot's device-local policy instead of a
+    /// level frozen at spawn. The principal is fixed when the session starts.
+    bot: Option<BotPolicySource>,
+}
+
+#[derive(Clone, Debug)]
+struct BotPolicySource {
+    home: PathBuf,
+    workspace_id: String,
+    conversation_id: String,
+}
+impl BotPolicySource {
+    fn read(&self) -> Result<(LocalAccessLevel, u64), HostError> {
+        let policy = peer_store::PolicyStore::new(&self.home)
+            .read_existing(&self.workspace_id)
+            .map_err(|error| HostError(policy_error(error)))?;
+        if policy.workspace_id != self.workspace_id
+            || policy.conversation_id != self.conversation_id
+        {
+            return Err(HostError("access_identity_invalid"));
+        }
+        Ok((policy.access_level, policy.revision))
+    }
+}
+fn policy_error(error: peer_store::StoreError) -> &'static str {
+    match error {
+        peer_store::StoreError::OutOfScope
+        | peer_store::StoreError::NotFound
+        | peer_store::StoreError::InvalidInput => "access_identity_invalid",
+        _ => "access_policy_unavailable",
+    }
 }
 
 /// Host-owned live access revision. UI/ACP commands change this actual authority;
 /// persisted approval history alone never constructs it or a ToolGrant.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConversationAccess(Arc<Mutex<AccessState>>);
 impl ConversationAccess {
     pub fn new(level: LocalAccessLevel) -> Self {
@@ -68,13 +100,38 @@ impl ConversationAccess {
             level,
             revision: 0,
             session_approvals: HashSet::new(),
+            bot: None,
         })))
+    }
+    /// The access of a session delegated by a project Bot. Every later call
+    /// re-reads that Bot's current policy; a changed level or revision ends the
+    /// session approvals recorded under the earlier policy. A missing, damaged
+    /// or replaced policy never falls back to another level.
+    pub fn for_bot(home: impl AsRef<Path>, workspace_id: &str) -> Result<Self, HostError> {
+        let home = home.as_ref().to_owned();
+        let policy = peer_store::PolicyStore::new(&home)
+            .read_existing(workspace_id)
+            .map_err(|error| HostError(policy_error(error)))?;
+        Ok(Self(Arc::new(Mutex::new(AccessState {
+            level: policy.access_level,
+            revision: policy.revision,
+            session_approvals: HashSet::new(),
+            bot: Some(BotPolicySource {
+                home,
+                workspace_id: policy.workspace_id,
+                conversation_id: policy.conversation_id,
+            }),
+        }))))
     }
     pub fn set(&self, level: LocalAccessLevel) -> Result<(), HostError> {
         let mut state = self
             .0
             .lock()
             .map_err(|_| HostError("permission_unavailable"))?;
+        if state.bot.is_some() {
+            // Only the Bot's own local authority changes a delegated session.
+            return Err(HostError("access_policy_bot_owned"));
+        }
         if state.level != level {
             state.revision = state
                 .revision
@@ -115,11 +172,40 @@ impl ConversationAccess {
         }
         Ok(true)
     }
-    fn snapshot(&self) -> Result<(LocalAccessLevel, u64), HostError> {
-        self.0
+    /// The level and policy revision that the next call is decided under. A
+    /// Bot-owned access re-reads its policy here.
+    pub fn snapshot(&self) -> Result<(LocalAccessLevel, u64), HostError> {
+        let mut state = self
+            .0
             .lock()
-            .map(|s| (s.level, s.revision))
-            .map_err(|_| HostError("permission_unavailable"))
+            .map_err(|_| HostError("permission_unavailable"))?;
+        let current = state.bot.as_ref().map(BotPolicySource::read).transpose()?;
+        if let Some(current) = current
+            && current != (state.level, state.revision)
+        {
+            state.level = current.0;
+            state.revision = current.1;
+            state.session_approvals.clear();
+        }
+        Ok((state.level, state.revision))
+    }
+    /// Identity of the policy behind a grant or approval at `revision`.
+    fn policy_revision(&self, stream_id: &str, revision: u64) -> Result<String, HostError> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| HostError("permission_unavailable"))?;
+        Ok(match &state.bot {
+            Some(bot) => format!(
+                "bot:{}:{}:{revision}",
+                bot.workspace_id, bot.conversation_id
+            ),
+            None => format!("ordinary:{stream_id}:{revision}"),
+        })
+    }
+    /// Whether this is the access of a session delegated by a project Bot.
+    pub(super) fn follows_bot(&self) -> bool {
+        self.0.lock().is_ok_and(|state| state.bot.is_some())
     }
 }
 pub struct ConversationOptions<'a> {
