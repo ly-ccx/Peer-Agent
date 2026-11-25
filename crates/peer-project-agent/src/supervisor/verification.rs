@@ -223,6 +223,7 @@ impl SessionSupervisor {
         let conversation = plan["delegationOrigin"]["verifierConversationId"].clone();
         let model = plan["delegationOrigin"]["verifierModel"].clone();
         let same_family = plan["delegationOrigin"]["sameFamilyAsWorker"].clone();
+        let report_snapshot = plan["verificationReport"].clone();
         if let Some(run) = plan["runner"]["verifierRuns"]
             .as_array_mut()
             .and_then(|runs| runs.last_mut())
@@ -231,12 +232,87 @@ impl SessionSupervisor {
             run["completedAt"] = json!(now_iso());
             if let Some(error) = error {
                 run["error"] = json!(error);
+                run["failureReason"] = json!(error);
             } else {
                 run["verifierConversationId"] = conversation;
                 run["verifierModel"] = model;
                 run["sameFamilyAsWorker"] = same_family;
+                if let Some(summary) = report_snapshot["summary"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    run["summary"] = json!(summary);
+                }
+                if status != "passed" {
+                    let reason = report_snapshot["error"]
+                        .as_str()
+                        .or_else(|| report_snapshot["summary"].as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    if let Some(reason) = reason {
+                        run["failureReason"] = json!(reason);
+                    }
+                    if let Some(err) = report_snapshot["error"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        run["error"] = json!(err);
+                    }
+                }
+                if report_snapshot.is_object() {
+                    run["report"] = json!({
+                        "failedCriteria": report_snapshot["failedCriteria"],
+                        "missingEvidence": report_snapshot["missingEvidence"],
+                        "risks": report_snapshot["risks"],
+                        "recommendedNextAction": report_snapshot["recommendedNextAction"],
+                        "evidenceRefs": report_snapshot["evidenceRefs"],
+                    });
+                }
             }
         }
+    }
+
+    fn session_already_reported(&self, plan: &Value, session_id: &str) -> bool {
+        let Some(parent_cid) = plan["delegationOrigin"]["parentConversationId"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            return false;
+        };
+        let Ok(messages) = crate::read_full_conversation_messages(&self.conversations, parent_cid)
+        else {
+            return false;
+        };
+        messages.iter().any(|msg| {
+            if msg["role"].as_str() != Some("assistant")
+                || msg["kind"].as_str() != Some("agent_reply")
+            {
+                return false;
+            }
+            let direct = msg["sources"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(session_id)));
+            let in_meta = msg["meta"]["sources"]
+                .as_array()
+                .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(session_id)));
+            direct || in_meta
+        })
+    }
+
+    pub fn notify_reverified_result(&self, workspace_id: &str, session_id: &str, plan_id: &str) {
+        self.emit_event(
+            workspace_id,
+            "report_available",
+            session_id,
+            json!({
+                "planId": plan_id,
+                "status": "completed",
+                "reverified": true,
+            }),
+        );
     }
 
     pub async fn reverify_session(
@@ -362,10 +438,13 @@ impl SessionSupervisor {
             self.write_plan(&updated)?;
         }
         drop(guard);
-        let decision = self.settle_session(workspace_id, session_id, false, false, None, true)?;
+        let already_reported = self.session_already_reported(&updated, session_id);
+        let decision =
+            self.settle_session(workspace_id, session_id, already_reported, false, None, true)?;
         Ok(json!({
             "ok": true,
             "sessionId": session_id,
+            "planId": plan_id,
             "decision": decision,
             "reverified": true,
             "verificationReport": updated["verificationReport"],
@@ -539,5 +618,180 @@ mod tests {
         assert_eq!(active["delegationOrigin"]["phase"], "completed");
         assert_eq!(active["runner"]["verifierRuns"][1]["status"], "interrupted");
         assert_eq!(active["verificationReport"], plan["verificationReport"]);
+    }
+
+    #[tokio::test]
+    async fn reverify_session_settles_already_reported_session_and_persists_run_summary() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        fs::write(workspace.path().join("README.md"), "verified content").unwrap();
+        let sup = SessionSupervisor::new(home.path(), None);
+
+        // Seed parent conversation with a prior agent_reply citing `reverify-settle`.
+        let parent_conv = sup
+            .conversations
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Bot",
+                    workspace_id: "ws-settle",
+                    workspace_path: Some(&workspace.path().to_string_lossy()),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: "2026-11-25T01:00:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let parent_id = parent_conv["id"].as_str().unwrap().to_owned();
+        sup.conversations
+            .append_message_idempotent(
+                &parent_id,
+                &json!({
+                    "id": "reply-prior-1",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "content": "Initial report delivered.",
+                    "sources": ["reverify-settle"],
+                    "createdAt": "2026-11-25T01:01:00.000Z",
+                }),
+                "2026-11-25T01:01:00.000Z",
+                None,
+            )
+            .unwrap();
+
+        let plan = json!({
+            "planId": "plan-reverify-settle",
+            "conversationId": "reverify-settle",
+            "targetWorkspacePath": workspace.path(),
+            "status": "completed",
+            "tasks": [{
+                "taskId": "task-1",
+                "status": "completed",
+                "evidenceRefs": ["ev-seed-1"]
+            }],
+            "delegationOrigin": {
+                "sessionId": "reverify-settle",
+                "workspaceId": "ws-settle",
+                "parentConversationId": parent_id,
+                "readOnly": true,
+                "phase": "completed",
+                "independentVerifier": "failed"
+            },
+            "successCriteria": [{"id": "file", "kind": "file-exists", "path": "README.md"}],
+            "verificationReport": {"passed": false, "error": "previous_failure"}
+        });
+        sup.save_plan_json(&plan).unwrap();
+
+        // Register seed leaf evidence in host Evidence index so close gate can pass.
+        let ev_store = EvidenceIndexStore::new(home.path());
+        let grant = json!({
+            "grantId": "g-seed",
+            "toolCallId": "call-seed",
+            "granted": true,
+            "duration": "once",
+            "scope": "local.file.read",
+            "decidedAt": "2026-11-25T01:00:30.000Z",
+        });
+        let result_rec = json!({
+            "toolCallId": "call-seed",
+            "status": "success",
+            "completedAt": "2026-11-25T01:00:31.000Z",
+            "outputPreview": { "ok": true },
+            "evidence": {
+                "evidenceId": "ev-seed-1",
+                "toolCallId": "call-seed",
+                "summary": "read README.md",
+                "artifactRefs": [],
+            }
+        });
+        let registered = ev_store
+            .register(
+                &HostToolEvidence {
+                    conversation_id: "reverify-settle",
+                    plan_id: Some("plan-reverify-settle"),
+                    stream_id: Some("s-seed"),
+                    tool_name: "read_file",
+                    capability_id: "local.file.read",
+                    tool_call_id: "call-seed",
+                    grant: &grant,
+                    result: &result_rec,
+                },
+                None,
+            )
+            .unwrap();
+        let leaf_ref = registered[0]["evidenceRef"].as_str().unwrap().to_owned();
+        let mut seeded_plan = sup.read_plan("plan-reverify-settle").unwrap();
+        seeded_plan["tasks"][0]["evidenceRefs"] = json!([leaf_ref]);
+        sup.save_plan_json(&seeded_plan).unwrap();
+
+        let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let model = NativeModel::new(
+            ModelConfig {
+                endpoint: format!("http://{}/chat/completions", socket.local_addr().unwrap()),
+                model: "mock-verifier".to_owned(),
+                provider: "openai".to_owned(),
+                wire: Wire::Chat,
+                generation: GenerationOptions::default(),
+            },
+            None,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let leaf_ref_for_srv = leaf_ref.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = socket.accept().await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(stream.read_u8().await.unwrap());
+            }
+            let head = String::from_utf8(headers).unwrap().to_ascii_lowercase();
+            let len: usize = head
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            stream.read_exact(&mut vec![0; len]).await.unwrap();
+            let verdict = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [leaf_ref_for_srv],
+                "summary": "Verified README.md exists on disk"
+            })
+            .to_string();
+            let chunk = json!({"choices":[{"index":0,"delta":{"content":verdict},"finish_reason":"stop"}]});
+            let usage = json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}});
+            let body = format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let cancel = CancellationToken::new();
+        let out = sup
+            .reverify_session(seeded_plan, None, &model, &cancel, || true)
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(out["ok"], true);
+        assert_eq!(out["decision"]["acceptedBy"], "policy");
+        let final_plan = sup.read_plan("plan-reverify-settle").unwrap();
+        assert_eq!(final_plan["delegationOrigin"]["phase"], "accepted");
+        assert_eq!(final_plan["resultAcceptance"]["acceptedBy"], "policy");
+        let last_run = final_plan["runner"]["verifierRuns"]
+            .as_array()
+            .and_then(|a| a.last())
+            .expect("verifier run persisted");
+        assert_eq!(last_run["status"], "passed");
+        assert_eq!(last_run["summary"], "Verified README.md exists on disk");
     }
 }

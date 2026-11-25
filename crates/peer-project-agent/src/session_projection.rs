@@ -542,8 +542,11 @@ fn decide_follow_up(
     {
         return make("bot", "local_persistence_failed");
     }
-    if status == "failed" {
+    if status == "result_ready" && verification_failed {
         return make("bot", "verification_failed");
+    }
+    if status == "failed" {
+        return make("none", "execution_failed");
     }
     if accepted {
         return make("none", "settled");
@@ -555,9 +558,6 @@ fn decide_follow_up(
         return make("bot", "technical_block");
     }
     if status == "result_ready" {
-        if verification_failed {
-            return make("bot", "verification_failed");
-        }
         return make("bot", "awaiting_acceptance_technical");
     }
     if matches!(status, "verifying" | "running" | "starting" | "queued") {
@@ -854,6 +854,21 @@ pub fn build_session_report(
     out.insert("keyFindings".into(), json!(findings));
     out.insert("changedFiles".into(), json!(changed_files));
     out.insert("evidenceRefs".into(), json!(evidence_refs));
+    if let Some(code) = opt_str(&plan["failure"]["code"])
+        .or_else(|| opt_str(&plan["delegationOrigin"]["error"]))
+    {
+        let mut fail = Map::new();
+        fail.insert("code".into(), json!(code));
+        if let Some(msg) = opt_str(&plan["failure"]["message"])
+            .or_else(|| opt_str(&plan["failure"]["detail"]))
+        {
+            fail.insert("message".into(), json!(msg));
+        }
+        if let Some(at) = opt_str(&plan["failure"]["at"]) {
+            fail.insert("at".into(), json!(at));
+        }
+        out.insert("failure".into(), Value::Object(fail));
+    }
     if !summary.is_empty() {
         let mut src = Map::new();
         src.insert(
@@ -1137,9 +1152,149 @@ pub fn build_verification_detail(
         verifier_model.map(Value::String).unwrap_or(Value::Null),
     );
     out.insert("sameSource".into(), json!(same_family == Some(true)));
-    out.insert("reviewAttempts".into(), json!([]));
+    if let Some(summary) = opt_str(&plan["verificationReport"]["summary"]) {
+        out.insert("summary".into(), json!(summary));
+    }
+    if let Some(err) = opt_str(&plan["verificationReport"]["error"]) {
+        out.insert("error".into(), json!(err));
+    }
+    let review_attempts = build_review_attempts(plan);
+    out.insert("reviewAttempts".into(), Value::Array(review_attempts));
     out.insert("outputs".into(), json!([]));
     Value::Object(out)
+}
+
+fn normalize_diagnostic_criteria(raw: Option<&Value>, id_key: &str) -> Vec<Value> {
+    raw.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            if let Some(s) = item.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                return Some(json!({
+                    id_key: "",
+                    "reason": s,
+                    "evidenceRefs": [],
+                }));
+            }
+            let obj = item.as_object()?;
+            let reason = obj
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())?;
+            let id = obj
+                .get(id_key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            let refs: Vec<String> = obj
+                .get("evidenceRefs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            Some(json!({
+                id_key: id,
+                "reason": reason,
+                "evidenceRefs": refs,
+            }))
+        })
+        .collect()
+}
+
+fn build_review_attempts(plan: &Value) -> Vec<Value> {
+    let Some(runs) = plan["runner"]["verifierRuns"].as_array() else {
+        return Vec::new();
+    };
+    let finished_indices: Vec<usize> = runs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| matches!(r["status"].as_str(), Some("passed" | "failed" | "interrupted")))
+        .map(|(i, _)| i)
+        .collect();
+    let last_finished = finished_indices.last().copied();
+    let current_report = plan["verificationReport"]
+        .as_object()
+        .map(|_| &plan["verificationReport"]);
+
+    finished_indices
+        .into_iter()
+        .map(|idx| {
+            let run = &runs[idx];
+            let raw_status = run["status"].as_str().unwrap_or("failed");
+            let status = if raw_status == "passed" {
+                "passed"
+            } else {
+                "failed"
+            };
+            let run_id = opt_str(&run["verifierRunId"])
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("vrun-legacy-{}", idx + 1));
+            let completed_at = opt_str(&run["completedAt"])
+                .or_else(|| opt_str(&run["startedAt"]))
+                .unwrap_or("")
+                .to_owned();
+            let fallback_report = (Some(idx) == last_finished).then_some(current_report).flatten();
+            let embedded_report = run.get("report").filter(|v| v.is_object());
+            let report_src = embedded_report.or(fallback_report);
+
+            let failure_reason = if status == "passed" {
+                String::new()
+            } else {
+                opt_str(&run["failureReason"])
+                    .or_else(|| opt_str(&run["summary"]))
+                    .or_else(|| opt_str(&run["error"]))
+                    .or_else(|| report_src.and_then(|r| opt_str(&r["summary"])))
+                    .or_else(|| report_src.and_then(|r| opt_str(&r["error"])))
+                    .unwrap_or("verification_failed")
+                    .to_owned()
+            };
+            let failed_criteria =
+                normalize_diagnostic_criteria(report_src.and_then(|r| r.get("failedCriteria")), "criterionId");
+            let missing_evidence =
+                normalize_diagnostic_criteria(report_src.and_then(|r| r.get("missingEvidence")), "taskId");
+            let risks: Vec<String> = report_src
+                .and_then(|r| r["risks"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let evidence_refs: Vec<String> = report_src
+                .and_then(|r| r["evidenceRefs"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let recommended_next_action = report_src
+                .and_then(|r| opt_str(&r["recommendedNextAction"]))
+                .unwrap_or("")
+                .to_owned();
+
+            json!({
+                "verifierRunId": run_id,
+                "status": status,
+                "diagnosticOnly": true,
+                "matchesCurrentSource": Value::Null,
+                "completedAt": completed_at,
+                "failureReason": failure_reason,
+                "failedCriteria": failed_criteria,
+                "missingEvidence": missing_evidence,
+                "risks": risks,
+                "recommendedNextAction": recommended_next_action,
+                "evidenceRefs": evidence_refs,
+            })
+        })
+        .collect()
 }
 
 fn verification_progress_from_plan(plan: &Value) -> Option<Value> {
@@ -1763,7 +1918,9 @@ fn matches_history_category(projected: &Value, category: &str) -> bool {
                     "stop_confirmed" | "user_withdrawn" | "superseded" | "paused"
                 )
         }
-        "failed" => status == "failed" || reason == "verification_failed",
+        "failed" => {
+            status == "failed" || reason == "verification_failed" || reason == "execution_failed"
+        }
         _ => true,
     }
 }
@@ -2043,7 +2200,10 @@ pub fn get_session_projected(
             || matches!(
                 opt_str(&plan["delegationOrigin"]["independentVerifier"]),
                 Some("passed" | "failed" | "not_required")
-            );
+            )
+            || plan["runner"]["verifierRuns"]
+                .as_array()
+                .is_some_and(|runs| !runs.is_empty());
         if reviewed {
             let indexed: Vec<String> = supervisor
                 .indexed_evidence_refs_for_plan(&plan)
@@ -2324,5 +2484,184 @@ mod tests {
             all_paged_1.sessions[0]["sessionId"]
         );
         assert!(all_paged_2.next_cursor.is_none());
+    }
+
+    #[test]
+    fn execution_failure_vs_verification_failure_and_review_attempts_projection() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let ws_dir = dir.path().join("repo");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let reg = ProjectRegistry::new(home)
+            .register(&ws_dir.to_string_lossy(), None)
+            .unwrap();
+        let ws_id = reg.workspace_id;
+
+        let conv_store = ConversationStore::new(home);
+        let parent_conv = conv_store
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Bot",
+                    workspace_id: &ws_id,
+                    workspace_path: Some(&reg.path),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: "2026-11-25T01:00:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let parent_id = parent_conv["id"].as_str().unwrap().to_owned();
+        BotProfileStore::new(home)
+            .create(&CreateBotProfile {
+                workspace_id: &ws_id,
+                display_name: "TestBot",
+                managed: false,
+                agent_conversation_id: &parent_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+
+        let plan_dir = home.join("goal-plans");
+        fs::create_dir_all(&plan_dir).unwrap();
+
+        // 1) Worker execution failure (never ran verification): must NOT be `verification_failed` or stuck in active list.
+        let exec_failed_plan = json!({
+            "planId": "plan-exec-fail",
+            "conversationId": "conv-exec-fail",
+            "title": "Render OpenUI Demo",
+            "goal": "Publish interactive demo card",
+            "status": "failed",
+            "createdAt": "2026-11-25T01:01:00.000Z",
+            "updatedAt": "2026-11-25T01:02:00.000Z",
+            "tasks": [{ "taskId": "task-1", "title": "Render", "status": "failed", "evidenceRefs": [] }],
+            "failure": {
+                "code": "tool_not_projected",
+                "message": "tool_not_projected",
+                "at": "2026-11-25T01:02:00.000Z"
+            },
+            "delegationOrigin": {
+                "workspaceId": ws_id,
+                "sessionId": "sess-exec-fail",
+                "parentConversationId": parent_id,
+                "phase": "failed",
+                "error": "tool_not_projected"
+            }
+        });
+
+        // 2) Completed worker whose independent verifier failed twice: stays active as `verification_failed`
+        //    and projects both `reviewAttempts` entries plus verification summary/error.
+        let verify_failed_plan = json!({
+            "planId": "plan-verify-fail",
+            "conversationId": "conv-verify-fail",
+            "title": "Audit Build",
+            "goal": "Verify build output",
+            "status": "completed",
+            "createdAt": "2026-11-25T01:03:00.000Z",
+            "updatedAt": "2026-11-25T01:05:00.000Z",
+            "tasks": [{ "taskId": "task-1", "title": "Build", "status": "completed", "result": "Build output ok", "evidenceRefs": [] }],
+            "runner": {
+                "verifierRuns": [
+                    {
+                        "verifierRunId": "vrun-1",
+                        "status": "interrupted",
+                        "startedAt": "2026-11-25T01:03:30.000Z",
+                        "completedAt": "2026-11-25T01:03:42.000Z",
+                        "error": "CANCELLED"
+                    },
+                    {
+                        "verifierRunId": "vrun-2",
+                        "status": "failed",
+                        "startedAt": "2026-11-25T01:04:00.000Z",
+                        "completedAt": "2026-11-25T01:04:20.000Z",
+                        "failureReason": "Missing test evidence",
+                        "summary": "Verifier could not locate test artifact",
+                        "report": {
+                            "failedCriteria": [{ "criterionId": "c-1", "reason": "No test log", "evidenceRefs": [] }],
+                            "missingEvidence": [],
+                            "risks": ["flaky runner"],
+                            "evidenceRefs": []
+                        }
+                    }
+                ]
+            },
+            "verificationReport": {
+                "passed": false,
+                "summary": "Verifier could not locate test artifact",
+                "failedCriteria": [{ "criterionId": "c-1", "reason": "No test log", "evidenceRefs": [] }]
+            },
+            "delegationOrigin": {
+                "workspaceId": ws_id,
+                "sessionId": "sess-verify-fail",
+                "parentConversationId": parent_id,
+                "phase": "completed",
+                "independentVerifier": "failed",
+                "verifierModel": "gpt-6.2-sol"
+            }
+        });
+
+        fs::write(
+            plan_dir.join("plan-exec-fail.json"),
+            serde_json::to_string(&exec_failed_plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            plan_dir.join("plan-verify-fail.json"),
+            serde_json::to_string(&verify_failed_plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            plan_dir.join("index.jsonl"),
+            "{\"planId\":\"plan-exec-fail\"}\n{\"planId\":\"plan-verify-fail\"}\n",
+        )
+        .unwrap();
+
+        let active = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("active"),
+                limit: Some(10),
+                ..Default::default()
+            },
+        );
+        assert_eq!(active.total_count, 1);
+        assert_eq!(active.sessions[0]["sessionId"], "sess-verify-fail");
+        assert_eq!(active.sessions[0]["followUp"]["reason"], "verification_failed");
+
+        let history_failed = list_sessions_paged(
+            home,
+            &ListSessionsQuery {
+                workspace_id: Some(&ws_id),
+                scope: Some("history"),
+                category: Some("failed"),
+                limit: Some(10),
+                ..Default::default()
+            },
+        );
+        assert_eq!(history_failed.total_count, 1);
+        assert_eq!(history_failed.sessions[0]["sessionId"], "sess-exec-fail");
+        assert_eq!(history_failed.sessions[0]["followUp"]["inCurrentList"], false);
+        assert_eq!(history_failed.sessions[0]["followUp"]["reason"], "execution_failed");
+
+        let exec_detail = get_session_projected(home, "sess-exec-fail", Some("report")).unwrap();
+        assert_eq!(exec_detail["report"]["failure"]["code"], "tool_not_projected");
+        assert!(exec_detail["report"].get("verification").is_none());
+
+        let vf_detail = get_session_projected(home, "sess-verify-fail", Some("report")).unwrap();
+        let ver = &vf_detail["report"]["verification"];
+        assert_eq!(ver["outcome"], "failed");
+        assert_eq!(ver["summary"], "Verifier could not locate test artifact");
+        let attempts = ver["reviewAttempts"].as_array().expect("reviewAttempts array");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0]["verifierRunId"], "vrun-1");
+        assert_eq!(attempts[0]["status"], "failed");
+        assert_eq!(attempts[0]["failureReason"], "CANCELLED");
+        assert_eq!(attempts[1]["verifierRunId"], "vrun-2");
+        assert_eq!(attempts[1]["failureReason"], "Missing test evidence");
+        assert_eq!(attempts[1]["failedCriteria"][0]["reason"], "No test log");
     }
 }

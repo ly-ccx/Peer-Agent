@@ -50,10 +50,13 @@ test('真实人工门未放行（close gate 未过）由主 Bot 先补齐', () =
   assert.equal(followUp('result_ready', { delegated: true, acceptance: 'confirm', humanGate: false }).owner, 'bot');
 });
 
-test('核验失败/缺证据保持 Bot 责任，不伪造 accepted', () => {
-  const result = followUp('failed', { delegated: true });
-  assert.deepEqual(result, { owner: 'bot', inCurrentList: true, reason: 'verification_failed' });
-  assert.notEqual(result.reason, 'settled');
+test('核验失败保持 Bot 责任，执行失败归入历史记录不再误标重验', () => {
+  const verifyFailed = followUp('result_ready', { delegated: true, verificationFailed: true });
+  assert.deepEqual(verifyFailed, { owner: 'bot', inCurrentList: true, reason: 'verification_failed' });
+  assert.notEqual(verifyFailed.reason, 'settled');
+
+  const execFailed = followUp('failed', { delegated: true });
+  assert.deepEqual(execFailed, { owner: 'none', inCurrentList: false, reason: 'execution_failed' });
 });
 
 test('技术阻塞（父代理等待）留在 Bot 责任，不当人工门槛', () => {
@@ -162,7 +165,7 @@ test('交叉事实：承接不能盖掉真实人工请求', () => {
 });
 
 test('交叉事实：历史签收不掩盖新的核验失败', () => {
-  assert.deepEqual(followUp('failed', { accepted: true }), {
+  assert.deepEqual(followUp('result_ready', { accepted: true, verificationFailed: true }), {
     owner: 'bot',
     inCurrentList: true,
     reason: 'verification_failed',
@@ -213,5 +216,5 @@ test('local persistence diagnosis cannot bypass live, human, stop or supersessio
   assert.equal(followUp('awaiting_outcome', blocked).reason, 'stop_unconfirmed');
   assert.equal(followUp('cancelled', { ...blocked, cancellationPhase: 'completed' }).reason, 'stop_confirmed');
   assert.equal(followUp('superseded', { ...blocked, superseded: true }).reason, 'superseded');
-  assert.equal(followUp('failed', { blockedReason: 'text mentions conversation_persistence_failed' }).reason, 'verification_failed');
+  assert.equal(followUp('failed', { blockedReason: 'text mentions conversation_persistence_failed' }).reason, 'execution_failed');
 });

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
@@ -35,6 +35,10 @@ export function TaskEvidenceInspector({
   const isZh = i18n.locale.startsWith('zh');
   const [tab, setTab] = useState<InspectorTab>(initialTab);
   const panelRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [initialTab, open]);
 
   useInteractionLayer(open && overlay, {
     roots: [panelRef],

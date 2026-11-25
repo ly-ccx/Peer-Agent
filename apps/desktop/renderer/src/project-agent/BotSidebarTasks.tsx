@@ -14,7 +14,7 @@ function taskVisual(task: SidebarTaskEntry, isZh: boolean): {
   if (task.followUp?.owner === 'user' || task.status === 'waiting_user') {
     return { icon: 'warning', spin: false, tone: 'warn', tag: isZh ? '待批' : 'Action' };
   }
-  if (task.followUp?.reason === 'verification_failed') {
+  if (task.status === 'result_ready' && task.followUp?.reason === 'verification_failed') {
     return { icon: 'warning', spin: false, tone: 'danger', tag: isZh ? '重验' : 'Re-verify' };
   }
   if (task.status === 'failed') {

@@ -20,7 +20,10 @@ export function mergeTaskDetail(selected: DrawerSession | null, detail: DrawerSe
   if (!detail || detail.sessionId !== selected.sessionId) return selected;
   const current = (!selected.sourceRevision || selected.sourceRevision === detail.sourceRevision)
     && (!selected.observationRevision || selected.observationRevision === detail.observationRevision);
-  return { ...detail, ...selected, summary: detail.summary, evidenceRefs: detail.evidenceRefs,
+  return { ...detail, ...selected, summary: detail.summary,
+    workerOutput: detail.workerOutput ?? selected.workerOutput,
+    failure: detail.failure ?? selected.failure,
+    evidenceRefs: detail.evidenceRefs,
     verification: current ? detail.verification : undefined };
 }
 
