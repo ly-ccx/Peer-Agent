@@ -64,6 +64,35 @@
   background: color-mix(in srgb, var(--chrome-sunken) 78%, var(--control-composer));
 }
 
+.bot-touchbar-summary {
+  min-height: 34px;
+  padding-block: 3px;
+  background: transparent;
+}
+
+[data-theme="dark"] .bot-touchbar-summary {
+  background: transparent;
+}
+
+.bot-touchbar-summary .bot-tb-status,
+.bot-touchbar-summary .bot-tb-chip {
+  height: 26px;
+}
+
+.bot-touchbar-summary .bot-tb-chip {
+  background: transparent;
+  border-color: transparent;
+}
+
+.bot-touchbar-summary .bot-tb-chip:is(:hover, .is-open) {
+  background: var(--chrome-hover);
+}
+
+.bot-tray-row-title-line > svg {
+  flex: none;
+  color: var(--graphite-soft);
+}
+
 .bot-tb-left {
   display: flex;
   align-items: center;

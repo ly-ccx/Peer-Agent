@@ -1,9 +1,11 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
+import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import type { DrawerSession } from '../state/drawerState';
 import { formatDrawerSessionStatus } from '../state/drawerState';
 import { canCancelTask } from '../state/botWorkState';
 import { summarizeActiveSessions, type SidebarTaskEntry } from '../state/botNavigationState';
+import { workerStatus } from '../state/workerStatus';
 import type { TouchBarTrayMode } from './TouchBarTray';
 
 export interface BotChatTouchBarProps {
@@ -44,28 +46,29 @@ export function ComposerTouchBar(props: ComposerTouchBarProps) {
   if (props.kind === 'bot') {
     const summary = summarizeActiveSessions(props.activeTasks, isZh);
     const isIdle = summary.total === 0;
+    const running = props.activeTasks.filter(task => workerStatus(task.status, task.followUp, props.i18n).tone === 'active').length;
     const summaryText = isIdle
-      ? (isZh ? '当前空闲 · 无进行中任务' : 'Idle · No active tasks')
-      : summary.segments.join(' · ') + (summary.total > 2 ? (isZh ? ` · 共 ${summary.total} 项` : ` · ${summary.total} total`) : '');
+      ? (isZh ? '无进行中任务' : 'No active tasks')
+      : isZh ? `${summary.total} 个任务 · ${running} 个运行中`
+        : `${summary.total} ${summary.total === 1 ? 'worker' : 'workers'} · ${running} running`;
 
     return (
-      <div className="bot-touchbar-strip" role="toolbar" aria-label={isZh ? 'Bot 快捷栏' : 'Bot Touch Bar'}>
+      <div className="bot-touchbar-strip bot-touchbar-summary" role="toolbar" aria-label={isZh ? 'Bot 快捷栏' : 'Bot Touch Bar'}>
         <div className="bot-tb-left">
           <button
             ref={props.activeTriggerRef}
             type="button"
             className={`bot-tb-status${isIdle ? ' is-idle' : ''}${props.trayMode === 'active' ? ' is-open' : ''}`}
+            title={!isIdle ? summary.segments.join(' · ') : undefined}
             disabled={isIdle}
             aria-expanded={props.trayMode === 'active'}
             onClick={() => !isIdle && props.onToggleTray('active')}
           >
-            <span className="bot-tb-glyph" data-tone={summary.leadTone} aria-hidden="true">
-              <PeerIcon
-                name={isIdle ? 'check' : summary.leadTone === 'warn' || summary.leadTone === 'danger' ? 'warning' : summary.leadSpinning ? 'loader' : 'circle'}
-                size={13}
-                className={summary.leadSpinning ? 'motion-spin' : undefined}
-              />
-            </span>
+            {!isIdle ? (
+              <span className="bot-tb-glyph" data-tone={summary.leadTone}>
+                <ExecutorIcon size={13} title={executorDisplayName('peer', isZh)} />
+              </span>
+            ) : null}
             <span className="bot-tb-status-text">{summaryText}</span>
             {!isIdle ? (
               <PeerIcon name={props.trayMode === 'active' ? 'chevronDown' : 'chevronUp'} size={12} />

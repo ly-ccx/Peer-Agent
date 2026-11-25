@@ -456,6 +456,7 @@
 }
 
 .bot-reply {
+  --bot-reply-inline-padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -545,16 +546,86 @@
   max-width: 100%;
 }
 
-.bot-reply-task-references {
+.bot-reply-task-references.bot-inline-worker-feed {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px var(--bot-reply-inline-padding) 0;
   min-width: 0;
-  max-width: 100%;
+  width: calc(min(680px, 100%) - 2 * var(--bot-reply-inline-padding));
 }
 
-.bot-reply-task-references > button {
-  gap: var(--space-2);
+.bot-inline-worker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 12px);
+  margin-inline: -6px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-base);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-inline-worker-row:is(:hover, :focus-visible) {
+  background: var(--chrome-hover);
+}
+
+.bot-inline-worker-row:focus-visible {
+  outline: 1.5px solid var(--azure-seal);
+  outline-offset: -1px;
+}
+
+.bot-inline-worker-cli {
+  flex: none;
+  color: var(--graphite-soft);
+}
+
+.bot-inline-worker-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--graphite-base);
+  font-weight: 520;
+}
+
+.bot-inline-worker-status {
+  flex: none;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--graphite-fade);
+  white-space: nowrap;
+}
+
+.bot-inline-worker-row[data-tone="warn"] .bot-inline-worker-status { color: var(--state-confirm); }
+.bot-inline-worker-row[data-tone="danger"] .bot-inline-worker-status { color: var(--state-danger); }
+.bot-inline-worker-row[data-tone="active"] .bot-inline-worker-status { color: var(--graphite-soft); }
+.bot-inline-worker-row[data-tone="good"] .bot-inline-worker-status { color: var(--state-success); }
+
+.bot-inline-worker-arrow {
+  flex: none;
+  color: var(--graphite-fade);
+  transition: transform var(--za-motion-fast) ease, color var(--za-motion-fast) ease;
+}
+
+.bot-inline-worker-row:hover .bot-inline-worker-arrow {
+  color: var(--graphite-base);
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-inline-worker-arrow { transition: none; }
+  .bot-inline-worker-row:hover .bot-inline-worker-arrow { transform: none; }
 }
 
 .bot-reply-source {
@@ -697,7 +768,7 @@
   width: fit-content;
   max-width: min(680px, 100%);
   min-width: 0;
-  padding: 10px 14px;
+  padding: 10px var(--bot-reply-inline-padding, 14px);
   border-radius: var(--ui-radius-message);
   background: var(--bot-reply-background);
   overflow-wrap: anywhere;

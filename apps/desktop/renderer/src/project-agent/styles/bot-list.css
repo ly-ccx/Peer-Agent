@@ -332,9 +332,9 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  margin-bottom: 10px;
-  padding-inline-start: 10px;
-  background: color-mix(in srgb, var(--graphite-base) 5%, transparent);
+  margin-bottom: 6px;
+  padding-inline-start: 8px;
+  background: transparent;
   border: 1px solid color-mix(in srgb, var(--graphite-base) 8%, transparent);
   border-radius: var(--ui-radius-control);
   transition:
@@ -359,7 +359,7 @@
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 7px 10px 7px 0;
+  padding: 5px 8px 5px 0;
   color: var(--graphite-base);
   font: inherit;
   font-size: 12.5px;
@@ -518,7 +518,7 @@
 
 .bot-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 9px 8px;
@@ -649,164 +649,45 @@
   line-height: 1;
 }
 
-.bot-avatar-generated {
-  isolation: isolate;
-}
-
-.bot-avatar-generated svg {
+.bot-avatar-portrait {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
-  filter: drop-shadow(0 1.5px 2.5px rgba(15, 23, 42, 0.14));
 }
 
-[data-theme="dark"] .bot-avatar-generated svg {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.36));
+[data-theme="light"] :is([data-avatar-breed="calico"], [data-avatar-breed="tuxedo"], [data-avatar-breed="pearl-cat"]) .bot-avatar-portrait {
+  filter: drop-shadow(0 1px 1.5px color-mix(in srgb, var(--graphite-base) 8%, transparent));
 }
 
-.bot-avatar-stop-top {
-  stop-color: color-mix(in srgb, var(--bot-avatar-accent) 74%, white);
-}
-
-.bot-avatar-stop-mid {
-  stop-color: var(--bot-avatar-accent);
-}
-
-.bot-avatar-stop-bottom {
-  stop-color: color-mix(in srgb, var(--bot-avatar-accent) 80%, #0f172a);
-}
-
-.bot-avatar-body {
-  stroke: color-mix(in srgb, white 34%, var(--bot-avatar-accent));
-  stroke-width: 0.9;
-}
-
-.bot-avatar-stem {
-  fill: none;
-  stroke: color-mix(in srgb, var(--bot-avatar-accent) 74%, #0f172a);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.bot-avatar-orb {
-  fill: color-mix(in srgb, var(--bot-avatar-accent) 68%, white);
-  stroke: color-mix(in srgb, white 55%, var(--bot-avatar-accent));
-  stroke-width: 0.7;
-}
-
-.bot-avatar-pod {
-  fill: color-mix(in srgb, var(--bot-avatar-accent) 76%, #0f172a);
-}
-
-.bot-avatar-highlight {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.44);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-}
-
-.bot-avatar-visor {
-  stroke: rgba(255, 255, 255, 0.16);
-  stroke-width: 0.8;
-}
-
-.bot-avatar-visor-glint {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.22);
-  stroke-width: 1.1;
-  stroke-linecap: round;
+.bot-avatar-executor {
+  position: absolute;
+  inset-inline-end: 0;
+  bottom: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
 }
 
 .bot-avatar-face {
-  transform: translate(var(--bot-gaze-x, 0), var(--bot-gaze-y, 0));
-  transition: transform 160ms ease-out;
-}
-
-.bot-avatar-eye {
-  fill: #f4f8ff;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.bot-avatar-eye-arc {
-  fill: none;
-  stroke: #f4f8ff;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.bot-avatar-sleep-eye {
-  fill: none;
-  stroke: rgba(226, 236, 252, 0.8);
-  stroke-width: 1.75;
-  stroke-linecap: round;
+  transform: translate(var(--bot-gaze-x, 0px), var(--bot-gaze-y, 0px));
+  transition: transform var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-avatar[data-avatar-sleeping="true"] .bot-avatar-face {
   transform: none;
 }
 
-.bot-avatar-thought {
-  fill: color-mix(in srgb, var(--bot-avatar-accent) 65%, white);
-  stroke: var(--paper-sheet);
-  stroke-width: 1.2;
-  opacity: 0;
+.bot-avatar[data-avatar-animated="true"]:is([data-avatar-mood="working"], [data-avatar-mood="thinking"], [data-avatar-mood="waiting_provider"]) .bot-avatar-portrait {
+  animation: bot-avatar-breathe 4.2s ease-in-out infinite;
 }
 
-.bot-avatar[data-avatar-mood="working"] svg {
-  animation: bot-avatar-thinking 4.2s ease-in-out infinite;
+.bot-avatar[data-avatar-animated="true"][data-avatar-mood="needs_you"] .bot-avatar-portrait {
+  animation: bot-avatar-attention 900ms ease-in-out;
 }
 
-.bot-avatar[data-avatar-mood="thinking"] svg {
-  animation: bot-avatar-thinking 1.9s ease-in-out infinite;
-}
-
-.bot-avatar[data-avatar-mood="waiting_provider"] svg {
-  animation: bot-avatar-thinking 2.6s ease-in-out infinite;
-}
-
-.bot-avatar[data-avatar-mood="thinking"] .bot-avatar-thought,
-.bot-avatar[data-avatar-mood="waiting_provider"] .bot-avatar-thought {
-  opacity: 0.9;
-  animation: bot-avatar-thought 1.8s ease-in-out infinite;
-}
-
-.bot-avatar[data-avatar-mood="needs_you"] svg {
-  animation: bot-avatar-attention 900ms ease-in-out 1;
-}
-
-.bot-avatar[data-avatar-mood="reply"] svg {
-  animation: bot-avatar-reply 700ms cubic-bezier(0.2, 0.8, 0.2, 1) 1;
-}
-
-.bot-avatar[data-avatar-mood="error"] svg,
-.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye,
-.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye-arc {
-  animation: none;
-}
-
-.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye {
-  fill: #fca5a5;
-  transform: scaleY(0.55);
-}
-
-.bot-avatar[data-avatar-mood="error"] .bot-avatar-eye-arc {
-  stroke: #fca5a5;
-  transform: scaleY(0.55);
-}
-
-.bot-avatar:hover svg,
-.bot-row:hover .bot-avatar svg {
-  opacity: 0.94;
-}
-
-.bot-avatar:active svg,
-.bot-row:active .bot-avatar svg {
-  transform: scale(0.88) rotate(-7deg);
-  animation-play-state: paused;
+.bot-avatar[data-avatar-animated="true"][data-avatar-mood="reply"] .bot-avatar-portrait {
+  animation: bot-avatar-reply 700ms var(--za-ease-standard);
 }
 
 .bot-avatar-image {
@@ -817,19 +698,19 @@
   border: 1px solid var(--chrome-hairline);
 }
 
-.bot-avatar-image[data-avatar-mood="thinking"],
-.bot-avatar-image[data-avatar-mood="waiting_provider"] {
+.bot-avatar-image[data-avatar-animated="true"]:is([data-avatar-mood="thinking"], [data-avatar-mood="waiting_provider"]) {
   animation: bot-avatar-thinking 2.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bot-avatar,
-  .bot-avatar svg,
-  .bot-avatar .bot-avatar-eye,
-  .bot-avatar .bot-avatar-thought {
+  .bot-avatar-portrait,
+  .bot-avatar-face {
     animation: none !important;
     transition: none !important;
   }
+
+  .bot-avatar-face { transform: none; }
 }
 
 .bot-avatar-image img {
@@ -903,70 +784,15 @@
   outline-offset: 2px;
 }
 
-/* ─── Sidebar Nested Active Tasks (ADR 134 — pure indentation, zero tree pipes) ─── */
 .bot-group {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.bot-row-avatar-wrap {
-  position: relative;
-  display: inline-flex;
-  width: 40px;
-  height: 40px;
-}
-
-.bot-avatar-pip {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--chrome-raised);
-  background: var(--azure-seal);
-}
-
-.bot-avatar-pip.is-warn {
-  background: var(--state-confirm);
-}
-
-.bot-row-preview {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.bot-row-preview-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.bot-thinking-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-}
-
-.bot-thinking-dots i {
-  display: block;
-  width: 3.5px;
-  height: 3.5px;
-  border-radius: 50%;
-  background: var(--azure-seal);
-  animation: bot-dot-pulse 1.2s ease-in-out infinite;
-}
-
-.bot-thinking-dots i:nth-child(2) { animation-delay: 160ms; }
-.bot-thinking-dots i:nth-child(3) { animation-delay: 320ms; }
-
-@keyframes bot-dot-pulse {
-  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
-  40% { opacity: 1; transform: scale(1.1); }
+.bot-row-avatar-wrap > .bot-avatar {
+  width: 36px;
+  height: 36px;
 }
 
 .bot-expand-chevron {
@@ -994,103 +820,101 @@
 }
 
 .bot-sidebar-tasks {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 2px 4px 4px 36px;
+  padding: 2px 4px 6px 32px;
+}
+.bot-sidebar-tasks::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 2px;
+  bottom: 10px;
+  width: 1px;
+  background: color-mix(in srgb, var(--graphite-base) 8%, transparent);
+  pointer-events: none;
 }
 
 .bot-sidebar-task {
   display: grid;
-  grid-template-columns: 15px minmax(0, 1fr) auto;
+  grid-template-columns: 12px 15px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   width: 100%;
-  min-height: 29px;
-  padding: 4px 9px;
-  border: 1px solid transparent;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 0;
   border-radius: var(--ui-radius-row);
   background: transparent;
   color: var(--graphite-soft);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.2px;
   text-align: left;
   cursor: pointer;
-  transition:
-    background var(--za-motion-fast) ease,
-    border-color var(--za-motion-fast) ease,
-    color var(--za-motion-fast) ease,
-    box-shadow var(--za-motion-fast) ease;
+  transition: background var(--za-motion-fast) ease, color var(--za-motion-fast) ease;
 }
-
 .bot-sidebar-task:hover:not(.is-selected) {
-  background: var(--chrome-glass-hover);
+  background: var(--chrome-glass-hover, var(--chrome-hover));
   color: var(--graphite-base);
 }
-
-/* A × G 黄金分层：单行精准任务锚点使用 G 银白键帽 */
 .bot-sidebar-task.is-selected {
-  background: var(--chrome-keycap-bg);
-  border-color: var(--chrome-keycap-border);
-  color: var(--chrome-keycap-fg);
-  font-weight: 600;
-  box-shadow: var(--chrome-keycap-shadow);
+  background: color-mix(in srgb, var(--graphite-base) 8%, transparent);
+  color: var(--graphite-base);
+  font-weight: 560;
 }
-
-.bot-sidebar-task.is-selected .bot-sidebar-task-glyph {
-  color: var(--chrome-keycap-fg);
-  opacity: 0.78;
+[data-theme="dark"] .bot-sidebar-task.is-selected {
+  background: color-mix(in srgb, var(--graphite-base) 11%, transparent);
+  color: var(--graphite-base);
 }
-[data-theme="dark"] .bot-sidebar-task.is-selected .bot-sidebar-task-glyph[data-tone="azure"] {
-  color: var(--bot-keycap-azure);
+.bot-sidebar-task-cli {
+  color: var(--graphite-soft);
+  opacity: 0.85;
+}
+.bot-sidebar-task.is-selected .bot-sidebar-task-cli,
+.bot-sidebar-task:hover .bot-sidebar-task-cli {
+  color: var(--graphite-base);
   opacity: 1;
 }
-[data-theme="dark"] .bot-sidebar-task.is-selected .bot-sidebar-task-glyph[data-tone="danger"] {
-  color: var(--bot-keycap-danger);
-  opacity: 1;
-}
-.bot-sidebar-task.is-selected .bot-sidebar-task-tag {
-  background: color-mix(in srgb, var(--chrome-keycap-fg) 12%, transparent);
-  color: var(--chrome-keycap-fg);
+
+.bot-sidebar-task:focus-visible,
+.bot-sidebar-task-more:focus-visible {
+  outline: 1.5px solid var(--azure-seal);
+  outline-offset: -1px;
 }
 
-.bot-sidebar-task-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--graphite-fade);
+.bot-sidebar-task-state {
+  justify-self: center;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ui-radius-circle);
+  background: var(--graphite-fade);
 }
-.bot-sidebar-task-glyph[data-tone="azure"] { color: var(--azure-seal); }
-.bot-sidebar-task-glyph[data-tone="warn"] { color: var(--state-confirm); }
-.bot-sidebar-task-glyph[data-tone="danger"] { color: var(--state-danger); }
+
+.bot-sidebar-task[data-task-tone="active"] .bot-sidebar-task-state {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-top-color: var(--bot-tone-amber);
+  border-right-color: var(--bot-tone-amber);
+}
+
+.bot-sidebar-task[data-task-tone="warn"] .bot-sidebar-task-state { background: var(--bot-tone-amber); }
+.bot-sidebar-task[data-task-tone="danger"] .bot-sidebar-task-state { background: var(--state-danger); }
+.bot-sidebar-task[data-task-tone="good"] .bot-sidebar-task-state { background: var(--state-success); }
+.bot-sidebar-task[data-task-tone="queued"] .bot-sidebar-task-state {
+  background: transparent;
+  border: 1.4px solid var(--graphite-fade);
+}
 
 .bot-sidebar-task-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
-}
-
-.bot-sidebar-task-tag {
-  font-size: 10.5px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: var(--ui-radius-detail);
-  background: var(--control-fill);
-  color: var(--graphite-soft);
-  white-space: nowrap;
-}
-.bot-sidebar-task-tag[data-tone="warn"] {
-  background: var(--state-warn-soft);
-  color: var(--state-confirm);
-}
-.bot-sidebar-task-tag[data-tone="danger"] {
-  background: var(--state-danger-soft);
-  color: var(--state-danger);
-}
-.bot-sidebar-task-tag[data-tone="azure"] {
-  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
-  color: var(--azure-seal);
 }
 
 .bot-sidebar-task-more {
@@ -1349,6 +1173,11 @@
 .bot-crumb-sep {
   flex: none;
   color: var(--graphite-mute);
+}
+
+.bot-crumb-cli {
+  flex: none;
+  color: var(--graphite-soft);
 }
 
 .bot-crumb-current {
@@ -2080,11 +1909,6 @@
   outline: var(--ui-focus-width) solid var(--ui-focus-color);
   outline-offset: var(--ui-focus-offset);
 }
-
-.bot-avatar[data-avatar-animated="false"],
-.bot-avatar[data-avatar-animated="false"] svg,
-.bot-avatar[data-avatar-animated="false"] .bot-avatar-eye,
-.bot-avatar[data-avatar-animated="false"] .bot-avatar-thought { animation: none; }
 
 /* ── macOS 毛玻璃壳层 ──
  * html[data-vibrancy] 由 main.tsx 仅在 darwin 且 bootstrap 正常时打标；

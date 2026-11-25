@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { InputDraftTaskRef } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
+import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import { PeerIcon } from '../../ui/icons';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import {
@@ -207,6 +208,7 @@ export function TouchBarTray({
                 </span>
                 <div className="bot-tray-row-main">
                   <div className="bot-tray-row-title-line">
+                    <ExecutorIcon title={executorDisplayName('peer', isZh)} />
                     <span className="bot-tray-row-title">{task.title}</span>
                   </div>
                   <span className="bot-tray-row-sub">
@@ -326,6 +328,7 @@ export function TouchBarTray({
                       </span>
                       <div className="bot-tray-row-main">
                         <div className="bot-tray-row-title-line">
+                          <ExecutorIcon title={executorDisplayName('peer', isZh)} />
                           <span className="bot-tray-row-title">{title}</span>
                         </div>
                         <span className="bot-tray-row-sub">{subtitle}</span>

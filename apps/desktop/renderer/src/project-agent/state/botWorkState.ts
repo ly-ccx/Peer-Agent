@@ -25,7 +25,7 @@ export function replyTaskReferences(messages: readonly Pick<BotChatMessage, 'kin
   for (const message of messages) {
     if (message.kind !== 'agent_reply') continue;
     for (const id of message.sources) {
-      const state = message.meta.sessionStates?.find(state => state.sessionId === id);
+      const state = message.meta?.sessionStates?.find(state => state.sessionId === id);
       const status = state && WORK_SESSION_STATUSES.some(status => status === state.status) ? state.status : null;
       references.set(id, { id, session: index.byId.get(id), status });
     }

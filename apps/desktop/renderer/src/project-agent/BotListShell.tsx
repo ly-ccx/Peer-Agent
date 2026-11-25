@@ -10,6 +10,7 @@ import { VersionBadge } from '../app/components/VersionBadge';
 import { AttentionSheet } from './AttentionSheet';
 import { HistorySheet } from './HistorySheet';
 import { BotAvatar } from './BotAvatar';
+import { ExecutorIcon } from './ExecutorIcon';
 import { botAvatarMood, type BotAvatarMood } from './state/botAvatarState';
 import { BotList } from './BotList';
 import { AppMenu } from './AppMenu';
@@ -129,6 +130,10 @@ export function BotListShell({
   const revealPrimary = resources?.revealPrimary;
   const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const searchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const focusSearchPending = useRef(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const showSearchInput = searchOpen || list.query.length > 0;
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const inspectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
@@ -371,6 +376,24 @@ export function BotListShell({
     void clientApi.projectAgentMarkRead({ workspaceId }).catch(() => {});
   }, [lookingAtBot, opened?.workspaceId]);
 
+  const openListSearch = useCallback(() => {
+    setSearchOpen(true);
+    if (nav.sidebarCollapsed) setNav((current) => toggleSidebarCollapsed(current, false));
+    if (searchRef.current && !nav.sidebarCollapsed) {
+      searchRef.current.focus();
+      searchRef.current.select();
+    } else {
+      focusSearchPending.current = true;
+    }
+  }, [nav.sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!showSearchInput || nav.sidebarCollapsed || !focusSearchPending.current) return;
+    focusSearchPending.current = false;
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [showSearchInput, nav.sidebarCollapsed]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
@@ -410,14 +433,19 @@ export function BotListShell({
         list.setMenuOpen(false);
         return;
       }
-      if (shortcut?.action === 'list-search') {
+      const localSearchFallback = !onOpenSearch && !palette && meta && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k';
+      if ((shortcut?.action === 'list-search' && !palette) || localSearchFallback) {
+        if (list.sheetOpen) return;
         event.preventDefault();
         event.stopPropagation();
-        if (!list.sheetOpen) {
-          if (nav.sidebarCollapsed) setNav((current) => toggleSidebarCollapsed(current, false));
-          searchRef.current?.focus();
-          searchRef.current?.select();
-        }
+        openListSearch();
+        return;
+      }
+      if (event.key === 'Escape' && event.target === searchRef.current && !list.query) {
+        event.preventDefault();
+        event.stopPropagation();
+        setSearchOpen(false);
+        searchTriggerRef.current?.focus();
         return;
       }
       if (shortcut?.action === 'toggle-profile') {
@@ -456,7 +484,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, nav.sidebarCollapsed, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary, goBack, goForward, openBotView]);
+  }, [list, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary, goBack, goForward, openBotView, onOpenSearch, openListSearch]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -530,17 +558,14 @@ export function BotListShell({
           </button>
           <div className="bot-util-nav">
             <button
+              ref={searchTriggerRef}
               type="button"
               className="bot-util-btn"
-              aria-label={isZh ? '全局搜索 (⌘K)' : 'Search (⌘K)'}
-              title={isZh ? '搜索 Bot 与任务 (⌘K)' : 'Search bots & tasks (⌘K)'}
-              onClick={() => {
-                if (onOpenSearch) onOpenSearch();
-                else {
-                  searchRef.current?.focus();
-                  searchRef.current?.select();
-                }
-              }}
+              aria-label={onOpenSearch
+                ? (isZh ? '全局搜索 (⌘K)' : 'Search (⌘K)')
+                : i18n.t('projectAgent.list.searchPlaceholder')}
+              aria-expanded={onOpenSearch ? undefined : showSearchInput}
+              onClick={onOpenSearch ?? openListSearch}
             >
               <PeerIcon name="search" size={14} />
             </button>
@@ -593,7 +618,7 @@ export function BotListShell({
             </svg>
           </button>
         </div>
-        <div className="bot-search-frame">
+        {showSearchInput ? <div className="bot-search-frame">
           <PeerIcon name="search" size={13} className="bot-search-icon" />
           <input
             ref={searchRef}
@@ -604,8 +629,9 @@ export function BotListShell({
             placeholder={i18n.t('projectAgent.list.searchPlaceholder')}
             aria-label={i18n.t('projectAgent.list.searchPlaceholder')}
             onChange={(event) => list.setQuery(event.target.value)}
+            onBlur={() => setSearchOpen(false)}
           />
-        </div>
+        </div> : null}
         <BotList
           items={list.visible}
           avatarMoods={avatarMoods}
@@ -745,6 +771,7 @@ export function BotListShell({
                       <span>{opened.profile.displayName}</span>
                     </button>
                     <PeerIcon name="chevronRight" size={14} className="bot-crumb-sep" />
+                    <ExecutorIcon className="bot-crumb-cli" />
                     <span className="bot-crumb-current">{activeTaskTitle}</span>
                   </nav>
                   <BotCapabilitiesButton
