@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backgroundWork, indexBotWork, replyWork, replyTaskReferences, workProgress, canCancelTask } from './botWorkState.ts';
+import { backgroundWork, indexBotWork, liveReplyTaskReferences, replyWork, replyTaskReferences, workProgress, canCancelTask } from './botWorkState.ts';
 import { createI18n } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
 import type { DrawerSession } from './drawerState';
@@ -101,4 +101,37 @@ test('completed + 预算耗尽的决策在 UI 侧只认 cancelable，不自建�
   assert.equal(canCancelTask(decision.status, false), false);
   // 结果待核实/终态在任何路径下都没有取消入口。
   assert.equal(canCancelTask('result_ready', false), false);
+});
+
+test('liveReplyTaskReferences surfaces spawned and anchored tasks while waiting, then yields to delivered reply sources', () => {
+  const index = indexBotWork([
+    session('s-spawned', 'running', 'input-1'),
+    session('s-anchor', 'queued', 'input-1'),
+    session('s-other', 'running', 'input-other'),
+  ], true);
+  const waiting = liveReplyTaskReferences({
+    replyTo: ['input-1'],
+    messages: [{
+      kind: 'agent_turn',
+      sources: [],
+      meta: {},
+      rounds: [{
+        text: '',
+        toolCalls: [{ name: 'spawn_session', input: null, result: { ok: true, sessionId: 's-spawned' } }],
+      }],
+    }],
+  }, index);
+  assert.deepEqual(waiting.map(r => [r.id, r.status]), [['s-spawned', 'running'], ['s-anchor', 'queued']]);
+
+  const delivered = liveReplyTaskReferences({
+    replyTo: ['input-1'],
+    message: { kind: 'agent_reply' },
+    messages: [{
+      kind: 'agent_reply',
+      sources: ['s-spawned'],
+      meta: { sessionStates: [{ sessionId: 's-spawned', status: 'running' }] },
+      rounds: [],
+    }],
+  }, index);
+  assert.deepEqual(delivered.map(r => r.id), ['s-spawned']);
 });

@@ -13,7 +13,7 @@ import type { ReplyAnchor } from '../state/replyReferenceState';
 import { ReplyPresence } from './ReplyPresence';
 import { ReplyTaskReferences } from './ReplyTaskReferences';
 import { InlineInteractiveReplies } from './InlineInteractiveReplies';
-import type { BotWorkIndex } from '../state/botWorkState';
+import { liveReplyTaskReferences, type BotWorkIndex } from '../state/botWorkState';
 
 /** One DOM carrier from receipt to delivery, including yields, recovery and terminal cards. */
 export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, highlighted, i18n, onJump, onQuote, onReload, onOpenDetails, workIndex, onOpenWork }: {
@@ -67,7 +67,7 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     </div>)}
     </div>
     <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={inlineEvidenceRefs} isZh={Boolean(i18n.locale?.startsWith('zh'))} />
-    <ReplyTaskReferences messages={reply.messages} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
+    <ReplyTaskReferences messages={reply.messages} rows={liveReplyTaskReferences(reply, workIndex)} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
     <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
     {isAgentReply && cleanMessageContent.trim() ? <BotSelectionQuote root={body} label={i18n.t('projectAgent.chat.quote')} onQuote={excerpt => onQuote(message.id, excerpt)} /> : null}
     <ReplyPresence reply={reply} i18n={i18n} onReload={onReload} onOpenDetails={openDetails}

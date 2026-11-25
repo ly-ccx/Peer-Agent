@@ -127,6 +127,24 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
   assert.match(markup, /data-session-id="finished" data-tone="good" title="[^"]*已完成"/);
   assert.match(markup, /data-session-id="legacy" data-tone="muted"/);
   assert.equal((markup.match(/data-executor-kind="peer"/g) ?? []).length, 3);
+  assert.equal((markup.match(/class="bot-inline-worker-dot"/g) ?? []).length, 2);
+
+  // Explicit live rows (e.g. while awaiting worker execution) render active dot & live status.
+  const activeTask = readDrawerSession({
+    sessionId: 'live-research',
+    status: 'running',
+    title: '调研主流 Agent 的 ACP 支持',
+    followUp: { owner: 'bot', inCurrentList: true, reason: 'live_execution' },
+  })!;
+  const liveMarkup = renderToStaticMarkup(createElement(ReplyTaskReferences, {
+    messages: [],
+    rows: [{ id: 'live-research', session: activeTask, status: 'running' }],
+    i18n,
+    workIndex: indexBotWork([activeTask], true),
+    onOpen() {},
+  }));
+  assert.match(liveMarkup, /data-session-id="live-research" data-tone="active" title="调研主流 Agent 的 ACP 支持 · 执行中"/);
+  assert.match(liveMarkup, /class="bot-inline-worker-dot"/);
 });
 
 test('work panel rows and agent activity rows unify on Peer ExecutorIcon matching sidebar tasks', () => {

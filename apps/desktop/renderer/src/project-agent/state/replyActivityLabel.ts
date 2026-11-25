@@ -19,6 +19,9 @@ export function replyActivityLabel(activity: ProjectAgentActivity | undefined, i
       if (tool.name === 'git_query') {
         return i18n.t(preparing ? 'projectAgent.chat.activity.preparing' : 'projectAgent.chat.activity.git');
       }
+      if (tool.name === 'wait_for_sessions') {
+        return i18n.t(preparing ? 'projectAgent.chat.activity.preparing' : 'projectAgent.chat.activity.waitingSessions');
+      }
       if (tool.name === 'post_reply') {
         return i18n.t('projectAgent.chat.activity.responding');
       }

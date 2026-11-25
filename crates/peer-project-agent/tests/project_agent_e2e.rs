@@ -8399,6 +8399,18 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
         first_req_caps.contains(&"local.web.fetch".to_owned()),
         "web_research + readOnly=true must retain local.web.fetch: {first_req_caps:?}"
     );
+    // Delegation acknowledgment reply automatically attaches spawned session IDs to `sources`
+    // even when the model omits `sources`, so the inline task row renders right below the bubble.
+    let first_reply = host
+        .find_reply_for_input(&ws_id, "in-web-research-1")
+        .unwrap()
+        .expect("delegation reply should exist");
+    let first_reply_sources: Vec<String> =
+        serde_json::from_value(first_reply["sources"].clone()).unwrap_or_default();
+    assert!(
+        first_reply_sources.contains(&first_sid),
+        "delegation post_reply must auto-attach spawned session {first_sid} in sources: {first_reply_sources:?}"
+    );
 
     // 2. Worker receives `web_search` and `web_fetch` (without write/shell), deliberately calls an
     //    unprojected tool (`browser_open_panel`), recovers cleanly from the denied tool
@@ -8496,8 +8508,29 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
         .unwrap();
     assert_eq!(episode.status, "completed");
 
-    // 3. User clicks "基于此重跑" (normal user turn) and Main Bot calls
-    //    `spawn_session({"supersedes": first_sid})` without repeating title/brief/criteria.
+    // 3. Simulate a legacy web-research plan that only recorded `local.web.fetch` before
+    //    built-in `local.web.search` existed, then click "基于此重跑" (normal user turn) and
+    //    have Main Bot call `spawn_session({"supersedes": first_sid})`.
+    let mut legacy_plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &first_sid)
+        .unwrap();
+    legacy_plan["delegationOrigin"]["requiredCapabilities"] = json!([
+        "local.file.read",
+        "local.file.list",
+        "local.file.search",
+        "local.git.query",
+        "local.web.fetch"
+    ]);
+    let legacy_plan_path = home
+        .path()
+        .join("goal-plans")
+        .join(format!("{}.json", legacy_plan["planId"].as_str().unwrap()));
+    fs::write(
+        &legacy_plan_path,
+        serde_json::to_string_pretty(&legacy_plan).unwrap(),
+    )
+    .unwrap();
     let rerun_sid = first_sid.clone();
     let rerun_bot = start_mock_server(vec![
         Box::new(move |_| {

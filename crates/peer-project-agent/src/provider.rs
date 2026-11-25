@@ -298,7 +298,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "wait_for_sessions",
                 "local.delegation.wait_for_sessions",
-                "Yield this main bot turn quietly while waiting for delegated child sessions to report.",
+                "Yield a background wake turn quietly while waiting for delegated child sessions to report. On user turns after calling spawn_session, prefer post_reply (with the new sessionId in sources) so the user immediately sees your acknowledgment and live task row.",
                 json!({
                     "type": "object",
                     "required": ["sessionIds"],
@@ -1195,6 +1195,17 @@ fn execute_post_reply(
             sources.push(claim.session_id.clone());
         }
     }
+    // When this user turn spawned delegated work sessions and acknowledges via
+    // `post_reply` without manually listing every spawned session in `sources`,
+    // attach them automatically so the live inline task row renders right below
+    // the Bot's delegation reply.
+    if state.kind == "user" && !state.spawned_session_ids.is_empty() {
+        for sid in &state.spawned_session_ids {
+            if project_session_ids.contains(sid) && seen_sources.insert(sid.clone()) {
+                sources.push(sid.clone());
+            }
+        }
+    }
     let explicit_claim_ids: HashSet<String> =
         status_claims.iter().map(|c| c.session_id.clone()).collect();
     for sid in &sources {
@@ -1867,6 +1878,23 @@ fn spawn_from_args(
                     .collect()
             })
             .unwrap_or_default();
+        // Upgrade legacy web-research plans created before built-in `local.web.search`
+        // existed so rerunning them via `supersedes` immediately receives web search too.
+        let has_web_fetch = required_caps.iter().any(|c| {
+            matches!(
+                c.trim().to_ascii_lowercase().as_str(),
+                "local.web.fetch" | "web_fetch"
+            )
+        });
+        let has_web_search = required_caps.iter().any(|c| {
+            matches!(
+                c.trim().to_ascii_lowercase().as_str(),
+                "local.web.search" | "web_search"
+            )
+        });
+        if has_web_fetch && !has_web_search {
+            required_caps.push("local.web.search".to_owned());
+        }
     }
     let depends_on: Vec<String> = if let Some(arr) = args["dependsOn"].as_array() {
         arr.iter()

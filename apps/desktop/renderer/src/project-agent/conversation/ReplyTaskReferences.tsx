@@ -2,16 +2,17 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import type { BotChatMessage } from '../state/botConversationState';
-import { replyTaskReferences, type BotWorkIndex } from '../state/botWorkState';
+import { replyTaskReferences, type BotWorkIndex, type BotWorkRow } from '../state/botWorkState';
 import { workerStatus } from '../state/workerStatus';
 
-export function ReplyTaskReferences({ messages, workIndex, i18n, onOpen }: {
+export function ReplyTaskReferences({ messages, rows, workIndex, i18n, onOpen }: {
   readonly messages: readonly BotChatMessage[];
+  readonly rows?: readonly BotWorkRow[];
   readonly workIndex: BotWorkIndex;
   readonly i18n: I18nRuntime;
   readonly onOpen: (sessionId: string) => void;
 }) {
-  const references = replyTaskReferences(messages, workIndex);
+  const references = rows ?? replyTaskReferences(messages, workIndex);
   if (!references.length) return null;
   const executor = executorDisplayName('peer', Boolean(i18n.locale?.startsWith('zh')));
 
@@ -22,6 +23,7 @@ export function ReplyTaskReferences({ messages, workIndex, i18n, onOpen }: {
           ? row.session.title
           : i18n.t('projectAgent.chat.work.related');
         const status = workerStatus(row.session?.status ?? row.status, row.session?.followUp, i18n);
+        const showDot = status.tone !== 'muted';
         return (
           <button
             type="button"
@@ -34,7 +36,10 @@ export function ReplyTaskReferences({ messages, workIndex, i18n, onOpen }: {
           >
             <ExecutorIcon className="bot-inline-worker-cli" title={executor} />
             <span className="bot-inline-worker-title">{title}</span>
-            <span className="bot-inline-worker-status">{status.text}</span>
+            <span className="bot-inline-worker-status">
+              {showDot ? <span className="bot-inline-worker-dot" aria-hidden="true" /> : null}
+              <span>{status.text}</span>
+            </span>
             <PeerIcon name="chevronRight" size={13} className="bot-inline-worker-arrow" />
           </button>
         );

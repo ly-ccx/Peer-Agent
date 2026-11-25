@@ -255,6 +255,7 @@ export type TranslationKey =
   | 'projectAgent.chat.activity.edit'
   | 'projectAgent.chat.activity.verification'
   | 'projectAgent.chat.activity.delegating'
+  | 'projectAgent.chat.activity.waitingSessions'
   | 'projectAgent.chat.activity.work'
   | 'projectAgent.chat.activity.memory'
   | 'projectAgent.chat.activity.memoryUpdate'
@@ -2081,6 +2082,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.edit': '正在调整内容',
     'projectAgent.chat.activity.verification': '正在核对结果',
     'projectAgent.chat.activity.delegating': '正在安排执行',
+    'projectAgent.chat.activity.waitingSessions': '等待子任务完成',
     'projectAgent.chat.activity.work': '正在查看工作进展',
     'projectAgent.chat.activity.memory': '正在查阅项目记忆',
     'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
@@ -3645,6 +3647,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.edit': 'Making changes',
     'projectAgent.chat.activity.verification': 'Checking the results',
     'projectAgent.chat.activity.delegating': 'Arranging the work',
+    'projectAgent.chat.activity.waitingSessions': 'Waiting for delegated work',
     'projectAgent.chat.activity.work': 'Checking on the work',
     'projectAgent.chat.activity.memory': 'Looking through project memory',
     'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',

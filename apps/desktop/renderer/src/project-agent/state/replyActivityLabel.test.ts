@@ -27,7 +27,7 @@ test('uses the latest active operation without reusing a completed predecessor',
 test('only structured tool facts select action language', () => {
   const cases = [['search_files', '正在查找相关内容'], ['search_conversation', '正在查找相关内容'],
     ['edit_file', '正在调整内容'], ['view_image', '正在查看图片'],
-    ['verify_session', '正在核对结果'], ['spawn_session', '正在安排执行'], ['wait_for_sessions', '正在查看工作进展'],
+    ['verify_session', '正在核对结果'], ['spawn_session', '正在安排执行'], ['wait_for_sessions', '等待子任务完成'],
     ['memory_search', '正在查阅项目记忆'],
     ['memory_remember', '正在更新项目记忆'], ['memory_forget', '正在更新项目记忆'],
     ['list_directory', '正在查看文件目录'], ['list_files', '正在查看文件目录'],
