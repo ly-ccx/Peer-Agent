@@ -110,6 +110,7 @@ fn apply_gemini_runtime_dialect(body: &mut Value, input: &WireInput<'_>) {
             lower_gemini_unsigned_function_calls(contents);
         }
         merge_gemini_consecutive_roles(contents);
+        ensure_gemini_ends_with_user_turn(contents);
     }
     if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
         for tool in tools {
@@ -211,6 +212,24 @@ fn merge_gemini_consecutive_roles(contents: &mut Vec<Value>) {
         merged.push(entry);
     }
     *contents = merged;
+}
+
+/// Gemini `v1beta` unconditionally rejects requests whose final `contents` entry
+/// has `role: "model"` (`HTTP 400 INVALID_ARGUMENT: Requests ending with a model turn
+/// are not supported.`). As a wire-level safety net, append a minimal `user` continuation
+/// turn if an upstream caller ever passes a model-terminated history.
+fn ensure_gemini_ends_with_user_turn(contents: &mut Vec<Value>) {
+    if contents
+        .last()
+        .and_then(|entry| entry.get("role"))
+        .and_then(Value::as_str)
+        == Some("model")
+    {
+        contents.push(json!({
+            "role": "user",
+            "parts": [{"text": "Continue."}],
+        }));
+    }
 }
 
 fn is_legacy_gemini_schema(schema: &Value) -> bool {
@@ -594,5 +613,28 @@ mod tests {
         )
         .unwrap();
         assert!(g25.get("generationConfig").is_none());
+
+        // Gemini rejects requests ending with a `model` turn (`HTTP 400 INVALID_ARGUMENT`).
+        let assistant_ended = vec![
+            json!({"role": "user", "content": "first question"}),
+            json!({"role": "assistant", "content": "first answer"}),
+        ];
+        let guarded = encode(
+            Wire::Gemini,
+            &WireInput {
+                model: "gemini-4-hydrogen",
+                system: "sys",
+                stable_system: None,
+                messages: &assistant_ended,
+                tools: None,
+                options: &options,
+            },
+        )
+        .unwrap();
+        let guarded_contents = guarded["contents"].as_array().unwrap();
+        assert_eq!(guarded_contents.len(), 3);
+        assert_eq!(guarded_contents[1]["role"], "model");
+        assert_eq!(guarded_contents[2]["role"], "user");
+        assert_eq!(guarded_contents[2]["parts"][0]["text"], "Continue.");
     }
 }

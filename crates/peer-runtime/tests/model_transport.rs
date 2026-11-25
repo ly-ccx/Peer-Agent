@@ -199,3 +199,172 @@ async fn terminal_error_observation_binds_usage_to_the_actual_sent_bytes() {
     );
     thread.join().unwrap();
 }
+
+fn streaming_server(
+    chunks: Vec<(Duration, String)>,
+    stall_after_chunks: bool,
+) -> (
+    String,
+    tokio::sync::oneshot::Receiver<bool>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
+    let (send, recv) = tokio::sync::oneshot::channel();
+    let thread = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut header = Vec::new();
+        let mut b = [0];
+        while !header.ends_with(b"\r\n\r\n") {
+            socket.read_exact(&mut b).unwrap();
+            header.push(b[0]);
+            assert!(header.len() < 16384);
+        }
+        let header = String::from_utf8(header).unwrap();
+        let n = header
+            .lines()
+            .find_map(|l| {
+                l.to_lowercase()
+                    .strip_prefix("content-length:")
+                    .map(|s| s.trim().parse::<usize>().unwrap())
+            })
+            .unwrap();
+        let mut body = vec![0; n];
+        socket.read_exact(&mut body).unwrap();
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        socket.flush().unwrap();
+        for (delay, chunk) in chunks {
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+            if socket.write_all(chunk.as_bytes()).is_err() || socket.flush().is_err() {
+                let _ = send.send(true);
+                return;
+            }
+        }
+        if stall_after_chunks {
+            let closed = socket.read(&mut b).is_ok_and(|n| n == 0);
+            let _ = send.send(closed);
+        } else {
+            let _ = send.send(true);
+        }
+    });
+    (endpoint, recv, thread)
+}
+
+#[tokio::test]
+async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
+    let (url, done, thread) = streaming_server(
+        vec![
+            (
+                Duration::from_millis(40),
+                format!(
+                    "data: {}\n\n",
+                    json!({"choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}]})
+                ),
+            ),
+            (
+                Duration::from_millis(40),
+                format!(
+                    "data: {}\n\n",
+                    json!({"choices":[{"index":0,"delta":{"content":"long "},"finish_reason":null}]})
+                ),
+            ),
+            (
+                Duration::from_millis(40),
+                format!(
+                    "data: {}\n\n",
+                    json!({"choices":[{"index":0,"delta":{"content":"stream"},"finish_reason":"stop"}]})
+                ),
+            ),
+            (Duration::from_millis(40), "data: [DONE]\n\n".to_owned()),
+        ],
+        false,
+    );
+    // Total stream duration (~160ms) intentionally exceeds the single-wait idle timeout (90ms),
+    // proving active streaming resets the inactivity timer instead of being cut off mid-reply.
+    let model = NativeModel::new(
+        ModelConfig {
+            endpoint: url,
+            model: "model".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_millis(90),
+    )
+    .unwrap();
+    let turn = model
+        .turn(
+            "context",
+            &json!({"messages":[{"role":"user","content":"stream slowly"}]}),
+            &json!([]),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("actively streaming response must not be killed by wall-clock cutoff");
+    assert_eq!(turn.content, "hello long stream");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), done)
+            .await
+            .unwrap()
+            .unwrap()
+    );
+    thread.join().unwrap();
+}
+
+#[tokio::test]
+async fn mid_stream_stall_exceeding_inactivity_deadline_fails_with_model_timeout_and_closes_socket()
+{
+    let (url, closed, thread) = streaming_server(
+        vec![(
+            Duration::from_millis(10),
+            format!(
+                "data: {}\n\n",
+                json!({"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]})
+            ),
+        )],
+        true,
+    );
+    let model = NativeModel::new(
+        ModelConfig {
+            endpoint: url,
+            model: "model".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_millis(80),
+    )
+    .unwrap();
+    let error = match model
+        .turn(
+            "context",
+            &json!({"messages":[{"role":"user","content":"stall mid stream"}]}),
+            &json!([]),
+            &CancellationToken::new(),
+        )
+        .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("mid-stream stalled HTTP must not succeed"),
+    };
+    assert_eq!(error.code, "model_timeout");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), closed)
+            .await
+            .unwrap()
+            .unwrap(),
+        "stalled stream must release its socket on inactivity timeout"
+    );
+    thread.join().unwrap();
+}

@@ -327,7 +327,7 @@ pub async fn load_session_model(
             generation: resolved.generation,
         },
         secret,
-        Duration::from_secs(120),
+        Duration::from_secs(300),
     )
     .and_then(|model| {
         model

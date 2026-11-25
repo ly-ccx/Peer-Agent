@@ -360,9 +360,8 @@ impl NativeModel {
             .await
             .map_err(|e| ModelError::new(e.0))?
             .builder
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(30))
-            .timeout(self.deadline)
+            .connect_timeout(Duration::from_secs(15).min(self.deadline))
+            .read_timeout(self.deadline)
             .build()
             .map_err(|_| ModelError::new("model_transport_unavailable"))?;
         headers.insert(
@@ -393,33 +392,44 @@ impl PreparedRequest<'_> {
         let mut stream = Some(stream::Stream::new(model.wire));
         let mut final_observation = None;
         let read = async {
-            let mut response = match &model.compatibility {
-                Some(adapter) => adapter.send(model, &self.bytes, cancel).await?,
-                None => model
-                    .request_builder(
-                        model.endpoint.clone(),
-                        "text/event-stream",
-                        cancel,
-                        Some((&self.body, &self.bytes)),
-                    )
-                    .await?
-                    .body(self.bytes)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        let mut error = ModelError::new(if e.is_timeout() {
-                            "model_timeout"
-                        } else {
-                            "model_transport_failed"
-                        });
-                        if model.wire == wire::Wire::Qoder
-                            && (e.is_connect() || e.is_request() || e.is_timeout())
-                        {
-                            error.retry = Some(qoder_retry::Hint::Connection);
-                        }
-                        error
-                    })?,
+            let send_request = async {
+                match &model.compatibility {
+                    Some(adapter) => adapter.send(model, &self.bytes, cancel).await,
+                    None => model
+                        .request_builder(
+                            model.endpoint.clone(),
+                            "text/event-stream",
+                            cancel,
+                            Some((&self.body, &self.bytes)),
+                        )
+                        .await?
+                        .body(self.bytes)
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            let mut error = ModelError::new(if e.is_timeout() {
+                                "model_timeout"
+                            } else {
+                                "model_transport_failed"
+                            });
+                            if model.wire == wire::Wire::Qoder
+                                && (e.is_connect() || e.is_request() || e.is_timeout())
+                            {
+                                error.retry = Some(qoder_retry::Hint::Connection);
+                            }
+                            error
+                        }),
+                }
             };
+            let mut response = tokio::time::timeout(model.deadline, send_request)
+                .await
+                .map_err(|_| {
+                    let mut error = ModelError::new("model_timeout");
+                    if model.wire == wire::Wire::Qoder {
+                        error.retry = Some(qoder_retry::Hint::Connection);
+                    }
+                    error
+                })??;
             if !response.status().is_success() {
                 let status = response.status().as_u16();
                 // The status is sufficient for access rejection. An error body
@@ -428,10 +438,16 @@ impl PreparedRequest<'_> {
                     return Err(error);
                 }
                 let mut body = Vec::new();
-                while let Some(chunk) = response
-                    .chunk()
+                while let Some(chunk) = tokio::time::timeout(model.deadline, response.chunk())
                     .await
-                    .map_err(|_| ModelError::new("model_transport_failed"))?
+                    .map_err(|_| ModelError::new("model_timeout"))?
+                    .map_err(|e| {
+                        ModelError::new(if e.is_timeout() {
+                            "model_timeout"
+                        } else {
+                            "model_transport_failed"
+                        })
+                    })?
                 {
                     if body.len() + chunk.len() > 65536 {
                         return Err(ModelError::new("model_error_body_limit"));
@@ -450,13 +466,21 @@ impl PreparedRequest<'_> {
             let decoder = stream.as_mut().expect("one request decoder");
             let mut shown = 0;
             let mut shown_thinking = 0;
-            while let Some(chunk) = response.chunk().await.map_err(|e| {
-                let mut error = ModelError::new("model_stream_interrupted");
-                if model.wire == wire::Wire::Qoder && !e.is_timeout() {
-                    error.retry = Some(qoder_retry::Hint::Transient);
-                }
-                error
-            })? {
+            while let Some(chunk) = tokio::time::timeout(model.deadline, response.chunk())
+                .await
+                .map_err(|_| ModelError::new("model_timeout"))?
+                .map_err(|e| {
+                    let mut error = ModelError::new(if e.is_timeout() {
+                        "model_timeout"
+                    } else {
+                        "model_stream_interrupted"
+                    });
+                    if model.wire == wire::Wire::Qoder && !e.is_timeout() {
+                        error.retry = Some(qoder_retry::Hint::Transient);
+                    }
+                    error
+                })?
+            {
                 decoder.push(&chunk)?;
                 let thinking = decoder.preview_thinking();
                 if thinking.len() > shown_thinking {
@@ -483,7 +507,7 @@ impl PreparedRequest<'_> {
             }
             Ok(turn)
         };
-        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=tokio::time::timeout(model.deadline,read)=>r.unwrap_or_else(|_|Err(ModelError::new("model_timeout")))};
+        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=read=>r};
         let observation =
             final_observation.or_else(|| stream.as_ref().and_then(stream::Stream::observed_usage));
         result.map_err(|error| error.observed(request_fingerprint, observation))

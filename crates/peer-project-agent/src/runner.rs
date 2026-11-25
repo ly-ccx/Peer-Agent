@@ -960,6 +960,35 @@ fn load_bot_history(history_messages: &[Value]) -> LoadedBotHistory {
     }
 }
 
+/// If a pending `user_input` was persisted to the conversation log before an earlier
+/// turn's `agent_reply` finished, `live_messages` ends with that later `assistant` reply
+/// rather than the pending user message. Move the already-committed user message to the
+/// tail (preserving 1:1 `committed_message_ids` alignment) so the model directly sees and
+/// responds to the pending input, and providers that forbid assistant-terminated histories
+/// (e.g. Gemini `v1beta`) never reject the request with HTTP 400.
+fn reposition_committed_user_input_if_present(
+    live_messages: &mut Vec<Value>,
+    committed_message_ids: &mut Vec<Option<String>>,
+    anchor_id: &str,
+) -> bool {
+    let Some(pos) = committed_message_ids
+        .iter()
+        .position(|id| id.as_deref() == Some(anchor_id))
+    else {
+        return false;
+    };
+    let has_later_assistant = live_messages[pos + 1..]
+        .iter()
+        .any(|m| m["role"].as_str() == Some("assistant"));
+    if has_later_assistant {
+        let msg = live_messages.remove(pos);
+        let id = committed_message_ids.remove(pos);
+        live_messages.push(msg);
+        committed_message_ids.push(id);
+    }
+    true
+}
+
 fn prepare_summary_messages(messages: &[Value]) -> Vec<Value> {
     let mut expanded = Vec::new();
     let mut tool_calls_by_id = HashSet::new();
@@ -1921,10 +1950,11 @@ impl ProjectAgentRunner {
         if opts.kind == "user" && !opts.user_inputs.is_empty() {
             for inp in opts.user_inputs {
                 let anchor_id = format!("input-{}", inp.input_id);
-                if committed_message_ids
-                    .iter()
-                    .any(|id| id.as_deref() == Some(anchor_id.as_str()))
-                {
+                if reposition_committed_user_input_if_present(
+                    &mut live_messages,
+                    &mut committed_message_ids,
+                    &anchor_id,
+                ) {
                     continue;
                 }
                 let mut content = inp.text.clone();
@@ -1979,6 +2009,16 @@ impl ProjectAgentRunner {
                 )
             };
             live_messages.push(json!({"role": "user", "content": wake_text}));
+            committed_message_ids.push(None);
+        } else if live_messages
+            .last()
+            .and_then(|m| m["role"].as_str())
+            == Some("assistant")
+        {
+            live_messages.push(json!({
+                "role": "user",
+                "content": "Continue and respond to the pending user request via post_reply or wait_for_sessions.",
+            }));
             committed_message_ids.push(None);
         }
 
@@ -3500,6 +3540,49 @@ mod tests {
                 Some("in-1".to_owned()),
                 Some("in-2".to_owned()),
                 Some("reply-mixed".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn reposition_committed_user_input_moves_queued_inputs_past_late_assistant_reply() {
+        let messages = vec![
+            json!({ "id": "input-a", "role": "user", "kind": "user_input", "content": "long question" }),
+            json!({ "id": "input-b1", "role": "user", "kind": "user_input", "content": "？" }),
+            json!({ "id": "input-b2", "role": "user", "kind": "user_input", "content": "still there?" }),
+            json!({ "id": "reply-a", "role": "assistant", "kind": "agent_reply", "content": "detailed answer to A" }),
+        ];
+        let mut loaded = load_bot_history(&messages);
+        assert!(reposition_committed_user_input_if_present(
+            &mut loaded.live_messages,
+            &mut loaded.committed_message_ids,
+            "input-b1",
+        ));
+        assert!(reposition_committed_user_input_if_present(
+            &mut loaded.live_messages,
+            &mut loaded.committed_message_ids,
+            "input-b2",
+        ));
+        assert!(!reposition_committed_user_input_if_present(
+            &mut loaded.live_messages,
+            &mut loaded.committed_message_ids,
+            "input-missing",
+        ));
+        let roles: Vec<&str> = loaded
+            .live_messages
+            .iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(roles, vec!["user", "assistant", "user", "user"]);
+        assert_eq!(loaded.live_messages[2]["content"], "？");
+        assert_eq!(loaded.live_messages[3]["content"], "still there?");
+        assert_eq!(
+            loaded.committed_message_ids,
+            vec![
+                Some("input-a".to_owned()),
+                Some("reply-a".to_owned()),
+                Some("input-b1".to_owned()),
+                Some("input-b2".to_owned()),
             ]
         );
     }
