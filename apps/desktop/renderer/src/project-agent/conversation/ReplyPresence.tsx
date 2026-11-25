@@ -2,6 +2,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { ReplyContext } from './ReplyContext';
 import type { BotReplyRow } from '../state/botReplyContinuity';
 import { replyPresenceState } from '../state/replyPresenceState';
+import { useLiveToolReveal } from './useLiveToolReveal';
 import '../styles/bot-reply-presence.css';
 
 /** One status/details entry projects the current reply facts. */
@@ -10,7 +11,8 @@ export function ReplyPresence({ reply, i18n, onReload, onOpenDetails, onQuote }:
   readonly onReload: () => void; readonly onOpenDetails?: () => void;
   readonly onQuote?: () => void;
 }) {
-  const state = replyPresenceState(reply, i18n);
+  const showActiveTool = useLiveToolReveal(reply.activity);
+  const state = replyPresenceState(reply, i18n, { showActiveTool, includeProgress: true });
   return <ReplyContext i18n={i18n} statusLabel={state.label} busy={state.busy}
     replying={state.replying}
     onOpenDetails={onOpenDetails} onQuote={onQuote} onRefresh={state.refresh ? onReload : undefined} />;

@@ -196,7 +196,14 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   }
   // Active rows claim only their own anchors; another input keeps its own pending response.
   for (const group of groups) if (group.message?.kind !== 'agent_reply') for (const id of group.replyTo) claim(id);
-  const unclaimed = [...new Map([...restored, ...local])].filter(([id]) => !answeredId(id) && !claimed.has(id));
+  const botActive = groups.some(group => isActivityRunning(group.activity ?? null));
+  const unclaimed = [...new Map([...restored, ...local])].filter(([id]) => {
+    if (answeredId(id) || claimed.has(id)) return false;
+    // While the Bot already has a live running turn for an earlier queued input, do not
+    // stack a second Bot row displaying "unconfirmed" for a restarted queued input behind it.
+    if (botActive && !local.has(id)) return false;
+    return true;
+  });
   if (unclaimed.length) {
     unclaimed.sort((a, b) => (inputOrder.get(a[0]) ?? Number.MAX_SAFE_INTEGER) - (inputOrder.get(b[0]) ?? Number.MAX_SAFE_INTEGER)
       || a[1].createdAt.localeCompare(b[1].createdAt));
@@ -282,11 +289,13 @@ export function conversationRowShowsAuthor(row: BotConversationViewRow): boolean
   return messageBodyVisible(row.message, row.narration);
 }
 
-export function replyRowMood(row: BotReplyRow): BotAvatarMood {
+export function replyRowMood(row: BotReplyRow, options?: { readonly showToolMood?: boolean }): BotAvatarMood {
   if (row.activity?.phase === 'awaiting_permission') return 'needs_you';
   if (row.pending?.deliveryIssue || !isActivityRunning(row.activity ?? null) && row.message?.cards.some(card => card.kind === 'agent_unavailable')) return 'error';
   if (row.activity?.phase === 'error') return 'error';
   if (row.activity?.recovery || row.activity?.phase === 'waiting' || row.pending && !row.pending.restored) return 'waiting_provider';
-  if (isActivityRunning(row.activity ?? null)) return row.activity?.phase === 'tool' ? 'working' : 'thinking';
+  if (isActivityRunning(row.activity ?? null)) {
+    return row.activity?.phase === 'tool' && options?.showToolMood !== false ? 'working' : 'thinking';
+  }
   return 'idle';
 }
