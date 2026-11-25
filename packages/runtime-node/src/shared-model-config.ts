@@ -45,6 +45,11 @@ export interface StoredModelProvider {
   readonly modelOptionValues?: LlmModelOptionValues;
   /** Desktop-projected reasoning levels for this model (e.g. off/low/default/high/xhigh). */
   readonly reasoningEffortLevels?: readonly string[];
+  /**
+   * Canonical effort → provider wire value. When reasoningEffortLevels is absent,
+   * the map keys are the selectable levels (the model settings dialog persists only this).
+   */
+  readonly reasoningEffortMap?: Readonly<Record<string, unknown>>;
   readonly reasoningDefaultEffort?: string;
   readonly reasoningParamStyle?: string;
   readonly supportsReasoning?: boolean;
@@ -202,6 +207,7 @@ const MODEL_ONLY_FIELDS = new Set([
   'supportsReasoning',
   'supportsPromptCaching',
   'reasoningEffortLevels',
+  'reasoningEffortMap',
   'reasoningParamStyle',
   'enabled',
   'isDefault',
@@ -352,6 +358,14 @@ function selectedProvider(options: LoadSharedModelSelectionOptions): {
   return selected?.model ? { configFile, read, selected } : null;
 }
 
+function reasoningLevelsFromMap(
+  map: Readonly<Record<string, unknown>> | undefined,
+): readonly string[] | undefined {
+  if (!map) return undefined;
+  const keys = Object.keys(map).filter((key) => isModelReasoningEffort(key));
+  return keys.length > 0 ? keys : undefined;
+}
+
 function normalizeContextWindow(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
@@ -418,7 +432,9 @@ function metadataFromSelected(
   const contextWindow = normalizeContextWindow(selected.contextWindow);
   const modelLabel = selected.modelLabel?.trim() || undefined;
   const supportedReasoningEfforts = normalizeReasoningEffortLevels(
-    selected.reasoningEffortLevels,
+    selected.reasoningEffortLevels?.length
+      ? selected.reasoningEffortLevels
+      : reasoningLevelsFromMap(selected.reasoningEffortMap),
   );
   const defaultReasoningEffort = resolveDefaultReasoningEffort(
     supportedReasoningEfforts,
