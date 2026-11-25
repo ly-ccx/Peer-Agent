@@ -129,3 +129,46 @@ test('lanePhaseLabel localizes completed phase', () => {
   assert.equal(lanePhaseLabel('completed', false), 'done');
   assert.equal(lanePhaseLabel('running', true), '检索中');
 });
+
+test('offloaded Rust local_tool_result_ref recovers status, complete lanes, and never hangs in running', () => {
+  const truncatedPreview = '{"status":"success","laneCount":4,"completedCount":4,"failedCount":0,"lanes":[{"id":"lane-1","label":"available_commands","query":"available_commands","status":"completed","matchCount":3,"truncated":false},{"id":"lane-2","label":"mcp_servers","query":"mcp_servers","status":"completed","matchCount":7,"truncated":false},{"id":"lane-3","label":"skill","query":"skill","status":"comple';
+  const view = buildBatchSearchView(
+    {
+      queries: [
+        { id: 'lane-1', label: 'available_commands', query: 'available_commands' },
+        { id: 'lane-2', label: 'mcp_servers', query: 'mcp_servers' },
+        { id: 'lane-3', label: 'skill', query: 'skill' },
+        { id: 'lane-4', label: 'acp', query: 'acp' },
+      ],
+    },
+    JSON.stringify({
+      kind: 'local_tool_result_ref',
+      chars: 6591,
+      preview: truncatedPreview,
+      truncated: true,
+      envelopeStatus: 'success',
+    }),
+  );
+  assert.equal(view.status, 'success');
+  assert.equal(view.lanes.length, 4);
+  assert.equal(view.lanes[0].phase, 'completed');
+  assert.equal(view.lanes[0].resultCount, 3);
+  assert.equal(view.lanes[1].phase, 'completed');
+  assert.equal(view.lanes[1].resultCount, 7);
+  // Lanes cut off by preview truncation settle to completed instead of pending/running.
+  assert.equal(view.lanes[2].phase, 'completed');
+  assert.equal(view.lanes[3].phase, 'completed');
+  assert.equal(view.aggregate?.totalUniqueMatches, 10);
+  assert.equal(view.aggregate?.truncated, true);
+});
+
+test('failed/blocked batch_search without lanes settles all lanes with error reason', () => {
+  const view = buildBatchSearchView(
+    { queries: [{ id: 'a', query: 'x' }, { id: 'b', query: 'y' }] },
+    JSON.stringify({ status: 'blocked', reason: 'tool_arguments_invalid' }),
+  );
+  assert.equal(view.status, 'blocked');
+  assert.equal(view.lanes[0].phase, 'failed');
+  assert.equal(view.lanes[0].errorMessage, 'tool_arguments_invalid');
+  assert.equal(view.lanes[1].phase, 'failed');
+});

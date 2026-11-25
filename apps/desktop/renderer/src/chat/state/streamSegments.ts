@@ -532,26 +532,73 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * - `output.lanes`（batch_search）保持 JSON 字符串，供 BatchSearchToolCard 还原分路检索视图。
  * - 其余对象优先提取 preview / content / stdout+stderr，缺省序列化为缩进 JSON，避免 React 直接渲染对象崩溃。
  */
-export function normalizeToolCallResultForDesktop(rawResult: unknown): string | undefined {
+export function normalizeToolCallResultForDesktop(
+  rawResult: unknown,
+  toolName?: string,
+): string | undefined {
   if (rawResult === undefined || rawResult === null) return undefined;
   if (typeof rawResult === 'string') return rawResult;
   if (!isPlainObject(rawResult)) return String(rawResult);
 
-  if (isPlainObject(rawResult.error)) {
-    const code = typeof rawResult.error.code === 'string' ? rawResult.error.code.trim() : '';
-    const message = typeof rawResult.error.message === 'string' ? rawResult.error.message.trim() : '';
-    if (message) return code ? `[${code}] ${message}` : message;
-    if (code) return code;
-  } else if (typeof rawResult.error === 'string' && rawResult.error.trim()) {
-    return rawResult.error.trim();
-  }
+  const errorText = ((): string => {
+    if (isPlainObject(rawResult.error)) {
+      const code = typeof rawResult.error.code === 'string' ? rawResult.error.code.trim() : '';
+      const message = typeof rawResult.error.message === 'string' ? rawResult.error.message.trim() : '';
+      if (message) return code && code !== message ? `[${code}] ${message}` : message;
+      if (code) return code;
+    } else if (typeof rawResult.error === 'string' && rawResult.error.trim()) {
+      return rawResult.error.trim();
+    }
+    return '';
+  })();
 
   const output = rawResult.output;
+  if (isPlainObject(output)) {
+    // batch_search 结构化输出优先保留（包含 all_search_lanes_failed 时每个子路的 errorMessage），
+    // 让 BatchSearchToolCard 能还原真实分路状态而非掉进「检索中…」。
+    if (Array.isArray(output.lanes)) {
+      const allFailed = rawResult.status === 'failed'
+        && (output.completedCount === 0 || output.status === 'failed');
+      const enriched = allFailed || errorText
+        ? {
+            ...output,
+            ...(allFailed ? { status: 'failed' } : {}),
+            ...(errorText ? { errorMessage: errorText } : {}),
+          }
+        : output;
+      return JSON.stringify(enriched, null, 2);
+    }
+    // Rust 落盘的大结果卸载引用（local_tool_result_ref）：
+    // 若为 batch_search 截断 JSON 预览，保留外壳供 buildBatchSearchView 解析已落盘的 lanes/status；
+    // 其余工具（如 web_search/read_file）直接展平为可读 preview。
+    if (output.kind === 'local_tool_result_ref' && typeof output.preview === 'string') {
+      const isBatchSearch = toolName === 'batch_search'
+        || rawResult.capabilityId === 'local.file.batch_search'
+        || (output.preview.trimStart().startsWith('{') && output.preview.includes('"lanes"'));
+      if (isBatchSearch) {
+        return JSON.stringify({
+          ...output,
+          ...(typeof rawResult.status === 'string' ? { envelopeStatus: rawResult.status } : {}),
+          ...(errorText ? { errorMessage: errorText } : {}),
+        });
+      }
+      return output.preview;
+    }
+  }
+
+  if (errorText) {
+    if (toolName === 'batch_search' || rawResult.capabilityId === 'local.file.batch_search') {
+      return JSON.stringify({
+        status: rawResult.status === 'denied' ? 'blocked' : 'failed',
+        reason: errorText,
+        errorMessage: errorText,
+      });
+    }
+    return errorText;
+  }
+
   if (typeof output === 'string') return output;
   if (isPlainObject(output)) {
-    if (Array.isArray(output.lanes)) {
-      return JSON.stringify(output, null, 2);
-    }
     if (output.kind === 'text' && typeof output.preview === 'string') {
       return output.preview;
     }
@@ -582,7 +629,8 @@ function normalizeRawSegmentForDesktop(rawSeg: unknown): Record<string, unknown>
   if (rawSeg.type !== 'tool-call') {
     return { ...rawSeg };
   }
-  const normalizedResult = normalizeToolCallResultForDesktop(rawSeg.result);
+  const toolName = typeof rawSeg.tool === 'string' ? rawSeg.tool : undefined;
+  const normalizedResult = normalizeToolCallResultForDesktop(rawSeg.result, toolName);
   const startedAtMs = typeof rawSeg.startedAtMs === 'number' && Number.isFinite(rawSeg.startedAtMs)
     ? rawSeg.startedAtMs
     : undefined;
