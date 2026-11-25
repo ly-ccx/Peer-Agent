@@ -1,7 +1,7 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES, type TaskOverviewItem } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
-import { agentIdentity } from '../state/agentActivityState';
+import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import { formatDrawerSessionStatus, type DrawerSession } from '../state/drawerState';
 import { workPanelNeedsUser } from '../state/botWorkPanelState';
 
@@ -30,13 +30,15 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
     ? session.verificationProgress ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
       : i18n.t('projectAgent.chat.work.verifyingHint')
     : overview?.currentGoalTitle || (statusDetail === session.status ? status : statusDetail || status));
-  const identity = agentIdentity(session.sessionId);
+  const isZh = Boolean(i18n.locale?.startsWith('zh'));
   const progressLabel = knownProgress ? i18n.t('projectAgent.workPanel.progress', {
     completed: knownProgress.completed, total: knownProgress.total,
   }) : '';
   return <button type="button" className={`bot-work-panel-session is-${variant}`} data-needs-user={needsUser}
     data-blocked={blocked} data-session-id={session.sessionId} onClick={() => onOpen(session.sessionId)}>
-    <span className="bot-work-panel-agent-icon"><PeerIcon name={identity.icon} size={variant === 'agent' ? 14 : 17} /></span>
+    <span className="bot-work-panel-agent-icon">
+      <ExecutorIcon size={variant === 'agent' ? 14 : 16} title={executorDisplayName('peer', isZh)} />
+    </span>
     <span className="bot-work-panel-session-copy">
       <span className="bot-work-panel-session-heading"><strong>{title}</strong>
         <span className="bot-work-panel-status"><PeerIcon name={needsUser ? 'info' : blocked ? 'warning' : 'circle'} size={11} />

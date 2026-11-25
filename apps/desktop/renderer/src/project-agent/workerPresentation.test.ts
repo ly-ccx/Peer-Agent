@@ -14,9 +14,15 @@ import type { BotListItem } from '@peer-agent/protocol';
 import { normalizeBotMessage } from './state/botConversationState.ts';
 import { readDrawerSession } from './state/drawerState.ts';
 import * as status from './state/workerStatus.ts';
+import * as drawerState from './state/drawerState.ts';
+import * as workPanelState from './state/botWorkPanelState.ts';
+import * as agentActivityState from './state/agentActivityState.ts';
+import * as protocol from '@peer-agent/protocol';
 import type { ExecutorIcon as Executor } from './ExecutorIcon';
 import type { ReplyTaskReferences as InlineFeed } from './conversation/ReplyTaskReferences';
 import type { BotSidebarTasks as SidebarTree } from './BotSidebarTasks';
+import type { BotWorkSessionRow as WorkPanelRow } from './conversation/BotWorkSessionRow';
+import type { AgentActivityRow as ActivityRow } from './conversation/AgentActivityRow';
 
 function loadComponent<T>(file: string, imports: Record<string, unknown> = {}): T {
   const exports = {};
@@ -46,6 +52,19 @@ const { ReplyTaskReferences } = loadComponent<{ ReplyTaskReferences: typeof Inli
   '../ExecutorIcon': executors,
   '../state/botWorkState': { replyTaskReferences },
   '../state/workerStatus': status,
+});
+const { BotWorkSessionRow } = loadComponent<{ BotWorkSessionRow: typeof WorkPanelRow }>('./conversation/BotWorkSessionRow.tsx', {
+  '@peer-agent/protocol': protocol,
+  '../../ui/icons': { PeerIcon: () => null },
+  '../ExecutorIcon': executors,
+  '../state/drawerState': drawerState,
+  '../state/botWorkPanelState': workPanelState,
+});
+const { AgentActivityRow } = loadComponent<{ AgentActivityRow: typeof ActivityRow }>('./conversation/AgentActivityRow.tsx', {
+  '../../ui/icons': { PeerIcon: () => null },
+  '../ExecutorIcon': executors,
+  '../state/agentActivityState': agentActivityState,
+  '../state/drawerState': drawerState,
 });
 const i18n = createI18n('zh-CN');
 
@@ -108,4 +127,39 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
   assert.match(markup, /data-session-id="finished" data-tone="good" title="[^"]*已完成"/);
   assert.match(markup, /data-session-id="legacy" data-tone="muted"/);
   assert.equal((markup.match(/data-executor-kind="peer"/g) ?? []).length, 3);
+});
+
+test('work panel rows and agent activity rows unify on Peer ExecutorIcon matching sidebar tasks', () => {
+  const taskSession = readDrawerSession({
+    sessionId: 'acp-research',
+    status: 'running',
+    title: '调研主流 Agent 的 ACP 支持',
+    followUp: { owner: 'bot', inCurrentList: true, reason: 'live_execution' },
+  })!;
+  const taskMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
+    session: taskSession,
+    variant: 'task',
+    i18n,
+    onOpen() {},
+  }));
+  assert.match(taskMarkup, /bot-work-panel-agent-icon.*data-executor-kind="peer"/);
+  assert.match(taskMarkup, /width="16" height="16"/);
+
+  const subagentMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
+    session: taskSession,
+    variant: 'agent',
+    i18n,
+    onOpen() {},
+  }));
+  assert.match(subagentMarkup, /bot-work-panel-agent-icon.*data-executor-kind="peer"/);
+  assert.match(subagentMarkup, /width="14" height="14"/);
+
+  const activityMarkup = renderToStaticMarkup(createElement(AgentActivityRow, {
+    messageId: 'm-1',
+    activity: { eventId: 'ev-1', sessionId: 'acp-research', name: '调研主流 Agent 的 ACP 支持', state: 'started' },
+    workIndex: indexBotWork([taskSession], true),
+    i18n,
+    onOpen() {},
+  }));
+  assert.match(activityMarkup, /bot-agent-marker[^>]*data-agent-icon="[^"]+".*data-executor-kind="peer"/);
 });
