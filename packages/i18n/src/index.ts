@@ -243,6 +243,8 @@ export type TranslationKey =
   | 'projectAgent.chat.reply.deliveryIssue'
   | 'projectAgent.chat.activity.preparing'
   | 'projectAgent.chat.activity.thinking'
+  | 'projectAgent.chat.activity.thinkingWithOneStep'
+  | 'projectAgent.chat.activity.thinkingWithSteps'
   | 'projectAgent.chat.activity.responding'
   | 'projectAgent.chat.activity.settling'
   | 'projectAgent.chat.activity.advancing'
@@ -2073,6 +2075,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.deliveryIssue': '消息已保存，后续处理尚未完成',
     'projectAgent.chat.activity.preparing': '正在准备下一步',
     'projectAgent.chat.activity.thinking': '正在整理思路',
+    'projectAgent.chat.activity.thinkingWithOneStep': '正在整理思路 · 已推进 1 步',
+    'projectAgent.chat.activity.thinkingWithSteps': '正在整理思路 · 已推进 {count} 步',
     'projectAgent.chat.activity.responding': '正在整理回复',
     'projectAgent.chat.activity.settling': '正在整理结果',
     'projectAgent.chat.activity.advancing': '正在一点一点推进',
@@ -3641,6 +3645,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.deliveryIssue': 'The message was saved, but follow-up processing did not finish',
     'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
     'projectAgent.chat.activity.thinking': 'Thinking it through',
+    'projectAgent.chat.activity.thinkingWithOneStep': 'Thinking it through · 1 step',
+    'projectAgent.chat.activity.thinkingWithSteps': 'Thinking it through · {count} steps',
     'projectAgent.chat.activity.responding': 'Putting the reply together',
     'projectAgent.chat.activity.settling': 'Putting the results together',
     'projectAgent.chat.activity.advancing': 'Working through the next step',

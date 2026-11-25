@@ -18,6 +18,8 @@ import { ConversationRow as ConversationRowView } from './ConversationRow';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
 import { ContinuousReply } from './ContinuousReply';
 import { conversationRowShowsAuthor, replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
+import { isActivityRunning } from '../state/botActivityState';
+import { useLiveToolReveal } from './useLiveToolReveal';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
@@ -80,6 +82,8 @@ export function BotMessageList({
   /** Sits with the latest line. Kept inside the thread so the unused scroll area cannot open a gap above it. */
   readonly trailing?: ReactNode;
 }) {
+  const activeReplyActivity = rows.find(row => row.type === 'reply' && isActivityRunning(row.activity ?? null));
+  const showToolMood = useLiveToolReveal(activeReplyActivity?.type === 'reply' ? activeReplyActivity.activity : undefined);
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const previousRows = useRef({ keys: new Set(rows.map(conversationRowKey)), followRequestId });
@@ -172,7 +176,7 @@ export function BotMessageList({
           className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
         {conversationRowShowsAuthor(row) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
-            animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row) : 'idle'} /><span>{label}</span></div>
+            animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row, { showToolMood }) : 'idle'} /><span>{label}</span></div>
         ) : null}
         {row.type === 'reply' ? <ContinuousReply workspaceId={workspaceId} reply={row} referenceIds={references.get(row) ?? []}
           i18n={i18n} anchors={anchors} highlighted={replyRowContains(row, highlighted)} onJump={onJump} onQuote={onQuote}

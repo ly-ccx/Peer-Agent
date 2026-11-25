@@ -250,3 +250,40 @@ test('a historical input before a later agent_reply is never resurrected as an u
   assert.equal(settled.length, 1);
   assert.equal(settled[0]!.message?.id, proactiveWake.id);
 });
+
+test('running activity for an earlier queued input suppresses duplicate unconfirmed restored row', () => {
+  const older = message('input-old', 'user_input', { inputId: 'old', content: '写方案' });
+  const prevFailure = message('turn-fail-card', 'system_card', {
+    turnId: 'turn-fail',
+    replyTo: [older.id],
+    cards: [{ cardId: 'card:agent_unavailable:turn-fail', kind: 'agent_unavailable', content: '失败', resolvedState: 'resolved' }],
+  });
+  const newer = message('input-new', 'user_input', { inputId: 'new', content: '？' });
+  const liveForOlder = activity({ turnId: 'turn-older-retry', replyTo: [older.id], phase: 'thinking' });
+  const all = [older, prevFailure, newer];
+  const runningRows = continuousReplyRows(
+    [row(older), row(prevFailure), row(newer), { type: 'activity', activity: liveForOlder }],
+    all,
+    [],
+    [],
+  );
+  const runningReplies = replies(runningRows);
+  assert.equal(runningReplies.length, 1, 'should not stack a second restored unconfirmed row while Bot is actively running');
+  assert.equal(runningReplies[0]!.activity?.turnId, 'turn-older-retry');
+  assert.equal(runningReplies[0]!.pending, undefined);
+
+  // Smooth avatar mood stays on `thinking` when showToolMood is false (transient local tool).
+  const transientToolReply: BotReplyRow = {
+    ...runningReplies[0]!,
+    activity: { ...liveForOlder, phase: 'tool' },
+  };
+  assert.equal(replyRowMood(transientToolReply, { showToolMood: false }), 'thinking');
+  assert.equal(replyRowMood(transientToolReply, { showToolMood: true }), 'working');
+
+  // Once no live activity is running, the unanswered restored input surfaces truthfully.
+  const idleRows = continuousReplyRows([row(older), row(prevFailure), row(newer)], all, [], []);
+  const idleReplies = replies(idleRows);
+  assert.equal(idleReplies.length, 1);
+  assert.equal(idleReplies[0]!.pending?.restored, true);
+  assert.deepEqual(idleReplies[0]!.replyTo, [newer.id]);
+});
