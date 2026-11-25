@@ -246,6 +246,21 @@ export function createSessionSupervisor({
     });
   }
 
+  function delegatedPlansForWorkspace(workspaceId) {
+    const id = text(workspaceId);
+    if (!id) return delegatedPlans();
+    if (readQuery.has('delegated-plans')) {
+      return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === id);
+    }
+    return readQuery.memo(`delegated-plans:workspace:${id}`, () => {
+      const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
+      if (reconcileDepth > 0 && reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) {
+        return reconcilePlans.plans.filter(plan => plan.delegationOrigin.workspaceId === id);
+      }
+      return planCatalog.read({ workspaceId: id });
+    });
+  }
+
   /** A closed claim stays visible with its retained unknown calls; it is never a live blocker. */
   function claimClosureFacts(plan) {
     const closure = plan.delegationOrigin?.executionClaimClosure;
@@ -288,8 +303,16 @@ export function createSessionSupervisor({
   });
 
   function findBySession(sessionId) {
-    if (!sessionId) return null;
-    return delegatedPlans().find((plan) => plan.delegationOrigin.sessionId === sessionId) ?? null;
+    const id = text(sessionId);
+    if (!id) return null;
+    if (readQuery.has('delegated-plans')) {
+      return delegatedPlans().find((plan) => plan.delegationOrigin.sessionId === id) ?? null;
+    }
+    const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
+    if (reconcileDepth > 0 && reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) {
+      return reconcilePlans.plans.find((plan) => plan.delegationOrigin.sessionId === id) ?? null;
+    }
+    return readQuery.memo(`delegated-plan:session:${id}`, () => planCatalog.read({ sessionId: id })[0] ?? null);
   }
 
   function findByKey(key, parentConversationId, input) {
@@ -382,7 +405,7 @@ export function createSessionSupervisor({
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
-        ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, ...(blocker ? { resourceBlocker: blocker } : {}) }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
+        ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, ...(blocker ? { resourceBlocker: blocker } : {}) }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlansForWorkspace(origin.workspaceId))) : {}),
     });
     const report = buildReport(plan, session);
     if (sessionFactsFromPlan(plan).verificationActive) {
@@ -819,7 +842,7 @@ export function createSessionSupervisor({
     const related = plan => input.all === true || ids.has(plan.delegationOrigin.sessionId)
       || input.workId && plan.delegationOrigin.workId === input.workId || anchors.has(plan.delegationOrigin.anchorMessageId);
     const userFollowUp = plan => input.kind === 'user' && input.conversationId === plan.delegationOrigin.parentConversationId;
-    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
+    return delegatedPlansForWorkspace(input.workspaceId).filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
       .map(plan => {
         const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
         const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
@@ -852,11 +875,12 @@ export function createSessionSupervisor({
     const limit = Number.isInteger(input?.limit) && input.limit > 0 ? Math.min(input.limit, 50) : 50;
     const workspaceId = text(input?.workspaceId);
     const status = text(input?.status);
-    return delegatedPlans()
+    const scopedPlans = workspaceId ? delegatedPlansForWorkspace(workspaceId) : delegatedPlans();
+    return scopedPlans
       .filter((plan) => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId)
       .filter(plan => !input.workId && !input.sessionIds?.length || plan.delegationOrigin.workId === input.workId || input.sessionIds?.includes(plan.delegationOrigin.sessionId))
       .flatMap(plan => {
-        const session = presentSession(plan);
+        const session = presentSession(plan, scopedPlans);
         return session ? [session] : [];
       })
       .filter((session) => !status || session.status === status)
@@ -936,6 +960,15 @@ export function createSessionSupervisor({
   }
 
   function indexedRefs(plan) {
+    if (typeof goalPlanStore.listEvidenceIndexForPlan === 'function') {
+      try {
+        return (goalPlanStore.listEvidenceIndexForPlan(plan) || [])
+          .map((record) => record.evidenceRef)
+          .filter((ref) => typeof ref === 'string' && ref.trim());
+      } catch {
+        return [];
+      }
+    }
     if (typeof goalPlanStore.listEvidenceIndex !== 'function') return [];
     let records = [];
     try {
@@ -1432,7 +1465,9 @@ export function createSessionSupervisor({
       return readQuery.run(() => {
       const grouped = new Map(workspaceIds.map(id => [id, []]));
       if (!grouped.size) return grouped;
-      const plans = delegatedPlans();
+      const plans = readQuery.has('delegated-plans')
+        ? delegatedPlans()
+        : planCatalog.read({ workspaceIds: new Set(grouped.keys()) });
       for (const plan of plans) {
         const rows = grouped.get(plan.delegationOrigin.workspaceId);
         const session = rows && rows.length < 50 ? presentSession(plan, plans) : null;
@@ -1445,17 +1480,22 @@ export function createSessionSupervisor({
     sessionsForProject(workspaceId) {
       return readQuery.run(() => {
       const workspace = text(workspaceId);
-      return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).flatMap(plan => {
-        const session = presentSession(plan);
+      if (!workspace) return [];
+      const plans = delegatedPlansForWorkspace(workspace);
+      return plans.flatMap(plan => {
+        const session = presentSession(plan, plans);
         return session ? [session] : [];
-      }) : [];
+      });
       });
     },
     get: input => readQuery.run(() => get(input)),
     /** Verification input is canonical content, independent of acceptance/session projection. */
-    readReportSummary(sessionId) {
+    readReportSummary(sessionId, knownPlan = null) {
       return readQuery.run(() => {
-        const plan = findBySession(text(sessionId));
+        const wanted = text(sessionId);
+        const plan = knownPlan && typeof knownPlan === 'object' && knownPlan.delegationOrigin?.sessionId === wanted
+          ? knownPlan
+          : findBySession(wanted);
         return plan ? buildReport(plan, {sessionId:plan.delegationOrigin.sessionId}).summary : '';
       });
     },

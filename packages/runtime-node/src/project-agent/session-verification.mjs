@@ -5,7 +5,7 @@ import { currentModelReview, criterionSourceRevision } from './criterion-review.
  * 把桌面宿主的计划、证据索引和 verifier 运行入口收成委托工具的 verification 端口。
  * 工具每次调用时再读取当前端口，所以启动顺序不必先于 Local Tool Host。
  */
-import { readdirSync } from 'node:fs';
+import { createDelegatedPlanCatalog } from './delegated-plan-catalog.mjs';
 import { verificationContentHash } from './verification-completion.mjs';
 import { verificationFailure } from './verification-failure.mjs';
 import { verificationHistory } from './verification-history.mjs';
@@ -18,31 +18,29 @@ export function createSessionVerification({
   completeRecheck = null,
 } = {}) {
   const active = new Map();
+  const planCatalog = typeof goalPlanStore?.getStoreDir === 'function' && typeof goalPlanStore?.getPlan === 'function'
+    ? createDelegatedPlanCatalog({
+      directory: () => goalPlanStore.getStoreDir(),
+      readPlan: id => goalPlanStore.getPlan(id),
+      incremental: true,
+    })
+    : null;
   function findPlan(sessionId) {
     const id = typeof sessionId === 'string' ? sessionId.trim() : '';
-    if (!id || typeof goalPlanStore?.getStoreDir !== 'function' || typeof goalPlanStore?.getPlan !== 'function') {
+    if (!id || !planCatalog) {
       return null;
     }
-    let names = [];
-    try {
-      names = readdirSync(goalPlanStore.getStoreDir());
-    } catch {
-      return null;
-    }
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      let plan = null;
-      try {
-        plan = goalPlanStore.getPlan(name.slice(0, -'.json'.length));
-      } catch {
-        plan = null;
-      }
-      if (plan?.delegationOrigin?.sessionId === id) return plan;
-    }
-    return null;
+    return planCatalog.read({ sessionId: id })[0] ?? null;
   }
 
   function evidenceRecords(plan) {
+    if (typeof goalPlanStore?.listEvidenceIndexForPlan === 'function') {
+      try {
+        return goalPlanStore.listEvidenceIndexForPlan(plan) || [];
+      } catch {
+        return [];
+      }
+    }
     if (typeof goalPlanStore?.listEvidenceIndex !== 'function') return [];
     let records = [];
     try {
@@ -122,8 +120,11 @@ export function createSessionVerification({
       return { status: 'inactive', workspaceId, parentConversationId, sessionId,
         planId: plan.planId, sourceRevision: criterionSourceRevision(plan) };
     },
-    facts(sessionId) {
-      const plan = findPlan(sessionId);
+    facts(sessionId, knownPlan = null) {
+      const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+      const plan = knownPlan && typeof knownPlan === 'object' && knownPlan.delegationOrigin?.sessionId === id
+        ? knownPlan
+        : findPlan(id);
       if (!plan) return null;
       return { ...factsFor(plan), verificationInProgress: sessionFactsFromPlan(plan).verificationActive };
     },

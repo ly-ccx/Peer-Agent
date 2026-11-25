@@ -2,6 +2,10 @@
 export function createSessionReadQuery() {
   let current = null;
   return {
+    /** @param {string} key */
+    has(key) {
+      return Boolean(current && current.has(key));
+    },
     /** @template T @param {string} key @param {() => T} load @returns {T} */
     memo(key, load) {
       if (!current) return load();

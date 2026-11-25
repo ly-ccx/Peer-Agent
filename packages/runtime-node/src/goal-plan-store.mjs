@@ -418,7 +418,7 @@ export function createGoalPlanStore({
 } = {}) {
   const { supersedeContextCheckpoint, markContextCheckpointConsumed, markContextCompactionPersisted, commitContextCheckpoint, prepareContextCheckpoint } = createGoalPlanCheckpoints({ getPlan, persist, appendRunEvent });
 
-  const { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible } = createGoalPlanEvidence({ storeDir, getActivePlanByConversation });
+  const { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, listEvidenceIndexForPlan, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible } = createGoalPlanEvidence({ storeDir, getActivePlanByConversation });
 
   const transactions = createGoalPlanTransactions(storeDir);
   const { subscribeChanges, notifyChanged, publishPersistedChange, setOnChange } = createGoalPlanEvents({ storeDir, onChange, afterCommit: transactions.afterCommit });
@@ -459,7 +459,7 @@ export function createGoalPlanStore({
     if (uiCompletionGuarding.has(plan.planId)) return plan;
     uiCompletionGuarding.add(plan.planId);
     try {
-      return projectUiCompletion(plan, readUiDelivery, readEvidenceIndex);
+      return projectUiCompletion(plan, readUiDelivery, () => listEvidenceIndexForPlan(plan));
     } finally {
       uiCompletionGuarding.delete(plan.planId);
     }
@@ -1024,7 +1024,9 @@ export function createGoalPlanStore({
   function listPlansByConversation(conversationId) {
     const normalizedConversationId = normalizeConversationId(conversationId);
     if (normalizedConversationId === null) return [];
-    return listPlans().filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId);
+    return readPlanMetadata()
+      .filter((m) => normalizeConversationId(m.conversationId) === normalizedConversationId)
+      .map(projectUiMeta);
   }
 
   /**
@@ -2863,6 +2865,7 @@ export function createGoalPlanStore({
     recordEvidenceRefs,
     assertInteractiveEvidenceCompatible,
     listEvidenceIndex: readEvidenceIndex,
+    listEvidenceIndexForPlan,
     hasDesktopPreviewEvidence,
     isUiDeliveryRequired,
     findEvidenceIndexRecords,

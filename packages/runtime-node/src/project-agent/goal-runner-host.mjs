@@ -582,7 +582,7 @@ export function createProjectGoalRunnerHost({
         const routed = delegated ? null : routeRole('verifier', plan);
         if (delegated?.error) throw new Error(delegated.error.missing || '没有可用的模型');
         if (!delegated && !routed.ok) throw new Error(routed.missing || '没有可用的模型');
-        const evidenceSnapshots = [...verifierEvidenceSnapshots(plan, goalPlanStore.listEvidenceIndex?.() || []),
+        const evidenceSnapshots = [...verifierEvidenceSnapshots(plan, goalPlanStore.listEvidenceIndexForPlan?.(plan) || goalPlanStore.listEvidenceIndex?.() || []),
           ...admitVerifierCommunicationEvidence(plan, goalPlanStore,
             conversationStore?.getPersistedConversationHistory?.(plan.conversationId)?.messages || [],
             plan.delegationOrigin?.parentConversationId ? conversationStore?.getPersistedConversationHistory?.(plan.delegationOrigin.parentConversationId)?.messages || [] : [])];

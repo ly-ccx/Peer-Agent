@@ -162,7 +162,7 @@ export function createTuiProjectHost(options: {
   const goalRunner = goalHost.goalRunner as typeof goalHost.goalRunner & { verifyDelegatedSession(input: object): Promise<any> };
   const verification = createSessionVerification({goalPlanStore: plans,
     verifySession: (plan: any, focus: string, context: any) => goalRunner.verifyDelegatedSession({plan, focus, workId: context?.workId}),
-    readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
+    readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId, plan),
     completeRecheck: (input: any) => goalRunner.completeRecheck(input)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     readDelegationCapabilities: (input: { readOnly: boolean; workspaceId: string }) => executor.readDelegationCapabilities(input),
@@ -174,7 +174,7 @@ export function createTuiProjectHost(options: {
     resolveModel: (input: any) => turns.resolveGoalRole({...input, workerModelProviderId: input.workerModel?.modelProviderId, projectPolicy: profiles.read(input.workspaceId)?.modelPolicy}),
     resolveAcceptancePolicy: (id: string, plan: any) => plan?.delegationOrigin?.objectiveId ? objectives.acceptancePolicy(id, plan.delegationOrigin.objectiveId) : profiles.read(id)?.acceptancePolicy,
     readSessionFacts: (plan: any) => ({autoHandoffOnPolicyAccept: profiles.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true,
-      hostAuthority: verification.facts(plan.delegationOrigin.sessionId)}),
+      hostAuthority: verification.facts(plan.delegationOrigin.sessionId, plan)}),
     readPlanApproval: (id: string) => profiles.read(id)?.planApproval,
     emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || supervisorEventId(event)}]); changed();},
   } as never);
