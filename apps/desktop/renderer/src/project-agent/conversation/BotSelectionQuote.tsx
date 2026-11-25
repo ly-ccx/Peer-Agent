@@ -1,53 +1,128 @@
 import { MotionSurface } from '../../app/components/MotionSurface';
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { PeerIcon } from '../../ui/icons';
 import '../styles/bot-selection-quote.css';
 
+interface QuoteEntry {
+  readonly root: RefObject<HTMLDivElement | null>;
+  readonly toolbar: RefObject<HTMLButtonElement | null>;
+  readonly selecting: { current: boolean };
+  readonly active: { current: boolean };
+  readonly setSelected: (value: { range: Range; text: string } | null) => void;
+}
+
+const quoteEntries = new Set<QuoteEntry>();
+let hubAttached = false;
+
+function isTextFieldActive(): boolean {
+  const active = document.activeElement;
+  return Boolean(active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT'));
+}
+
+function inspectAllEntries() {
+  if (isTextFieldActive()) {
+    for (const entry of quoteEntries) {
+      if (entry.active.current && !entry.selecting.current) entry.setSelected(null);
+    }
+    return;
+  }
+  const selection = window.getSelection();
+  const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
+  if (!range || range.collapsed) {
+    for (const entry of quoteEntries) {
+      if (entry.active.current && !entry.selecting.current && !entry.toolbar.current?.contains(document.activeElement)) {
+        entry.setSelected(null);
+      }
+    }
+    return;
+  }
+  const text = selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
+  for (const entry of quoteEntries) {
+    if (entry.selecting.current || entry.toolbar.current?.contains(document.activeElement)) continue;
+    const body = entry.root.current;
+    if (body && text && body.contains(range.startContainer) && body.contains(range.endContainer)) {
+      entry.setSelected({ range: range.cloneRange(), text });
+    } else if (entry.active.current) {
+      entry.setSelected(null);
+    }
+  }
+}
+
+function onHubPointerDown(event: PointerEvent) {
+  const target = event.target as Node | null;
+  for (const entry of quoteEntries) {
+    if (entry.toolbar.current?.contains(target)) continue;
+    entry.selecting.current = Boolean(entry.root.current?.contains(target));
+    if (entry.active.current) entry.setSelected(null);
+  }
+}
+
+function onHubMouseUp(event: MouseEvent) {
+  const target = event.target as Node | null;
+  let shouldInspect = false;
+  for (const entry of quoteEntries) {
+    if (entry.toolbar.current?.contains(target)) continue;
+    const inside = entry.selecting.current || Boolean(entry.root.current?.contains(target));
+    entry.selecting.current = false;
+    if (inside) shouldInspect = true;
+    else if (entry.active.current) entry.setSelected(null);
+  }
+  if (shouldInspect) inspectAllEntries();
+}
+
+function onHubPointerCancel() {
+  for (const entry of quoteEntries) {
+    entry.selecting.current = false;
+    if (entry.active.current) entry.setSelected(null);
+  }
+}
+
+function attachQuoteHub() {
+  if (hubAttached) return;
+  hubAttached = true;
+  document.addEventListener('selectionchange', inspectAllEntries);
+  document.addEventListener('pointerdown', onHubPointerDown, true);
+  document.addEventListener('mouseup', onHubMouseUp);
+  document.addEventListener('pointercancel', onHubPointerCancel);
+}
+
+function detachQuoteHubIfEmpty() {
+  if (!hubAttached || quoteEntries.size > 0) return;
+  hubAttached = false;
+  document.removeEventListener('selectionchange', inspectAllEntries);
+  document.removeEventListener('pointerdown', onHubPointerDown, true);
+  document.removeEventListener('mouseup', onHubMouseUp);
+  document.removeEventListener('pointercancel', onHubPointerCancel);
+}
+
 /** Keep the action beside a body-owned selection, outside the scrolling message layout. */
-export function BotSelectionQuote({ root, label, onQuote }: {
+export const BotSelectionQuote = memo(function BotSelectionQuote({ root, label, onQuote }: {
   readonly root: RefObject<HTMLDivElement | null>;
   readonly label: string;
   readonly onQuote: (excerpt: string) => void;
 }) {
   const toolbar = useRef<HTMLButtonElement>(null);
   const selecting = useRef(false);
-  const [selected, setSelected] = useState<{ range: Range; text: string } | null>(null);
+  const active = useRef(false);
+  const [selected, setSelectedState] = useState<{ range: Range; text: string } | null>(null);
+  const [portalMounted, setPortalMounted] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const setSelected = useRef((value: { range: Range; text: string } | null) => {
+    active.current = value !== null;
+    if (value !== null) setPortalMounted(true);
+    setSelectedState(value);
+  }).current;
 
   useEffect(() => {
-    const inspect = () => {
-      if (selecting.current || toolbar.current?.contains(document.activeElement)) return;
-      const selection = window.getSelection(), body = root.current;
-      const range = selection?.rangeCount === 1 ? selection.getRangeAt(0) : null;
-      const text = selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
-      setSelected(body && range && !range.collapsed && text
-        && body.contains(range.startContainer) && body.contains(range.endContainer)
-        ? { range: range.cloneRange(), text } : null);
-    };
-    const start = (event: PointerEvent) => {
-      if (toolbar.current?.contains(event.target as Node)) return;
-      selecting.current = Boolean(root.current?.contains(event.target as Node));
-      setSelected(null);
-    };
-    const finish = (event: MouseEvent) => {
-      if (toolbar.current?.contains(event.target as Node)) return;
-      const inside = selecting.current || root.current?.contains(event.target as Node);
-      selecting.current = false;
-      if (inside) inspect(); else setSelected(null);
-    };
-    const cancel = () => { selecting.current = false; setSelected(null); };
-    document.addEventListener('selectionchange', inspect);
-    document.addEventListener('pointerdown', start, true);
-    document.addEventListener('mouseup', finish);
-    document.addEventListener('pointercancel', cancel);
+    const entry: QuoteEntry = { root, toolbar, selecting, active, setSelected };
+    quoteEntries.add(entry);
+    attachQuoteHub();
     return () => {
-      document.removeEventListener('selectionchange', inspect);
-      document.removeEventListener('pointerdown', start, true);
-      document.removeEventListener('mouseup', finish);
-      document.removeEventListener('pointercancel', cancel);
+      quoteEntries.delete(entry);
+      detachQuoteHubIfEmpty();
     };
-  }, [root]);
+  }, [root, setSelected]);
 
   useLayoutEffect(() => {
     if (!selected) { setPosition(null); return; }
@@ -91,6 +166,7 @@ export function BotSelectionQuote({ root, label, onQuote }: {
     };
   }, [selected, root]);
 
+  if (!portalMounted && !selected) return null;
   return createPortal(<MotionSurface kind="fade">{selected ? (<button ref={toolbar} type="button" className="bot-quote-action bot-selection-quote"
     style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
     onMouseDown={event => event.preventDefault()}
@@ -101,4 +177,4 @@ export function BotSelectionQuote({ root, label, onQuote }: {
     }}>
     <PeerIcon name="back" size={14} />{label}
   </button>) : null}</MotionSurface>, document.body);
-}
+});

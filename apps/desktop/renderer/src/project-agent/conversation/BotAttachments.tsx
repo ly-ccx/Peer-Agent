@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { ChatAttachment } from '../../chat/state/types';
 import { ImageLightbox, imageLightboxSourceFromAttachment } from '../../chat/components/thread/ImageLightbox';
 import { Overlay } from '../../app/components/Overlay';
@@ -7,7 +7,7 @@ import { PeerIcon } from '../../ui/icons';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 /** Drafts and durable messages share one preview; metadata never implies an available body. */
-export function BotAttachments({ attachments, i18n, onRemove }: {
+export const BotAttachments = memo(function BotAttachments({ attachments, i18n, onRemove }: {
   readonly attachments: readonly ChatAttachment[];
   readonly i18n: I18nRuntime;
   readonly onRemove?: (id: string) => void;
@@ -45,4 +45,4 @@ export function BotAttachments({ attachments, i18n, onRemove }: {
       </section>}
     </Overlay> : null}
   </>;
-}
+});

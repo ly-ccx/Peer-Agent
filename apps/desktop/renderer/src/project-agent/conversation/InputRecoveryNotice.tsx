@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { InputRecoveryView, ProjectInputRecovery } from '@peer-agent/runtime-core';
 /** Recovery feedback is separate from permission, execution and result facts. */
-export function InputRecoveryNotice({ state, session, i18n, pending = false }: {
+export const InputRecoveryNotice = memo(function InputRecoveryNotice({ state, session, i18n, pending = false }: {
   readonly state: Pick<InputRecoveryView, 'ready' | 'error' | 'pending' | 'sending'>;
   readonly session: ProjectInputRecovery; readonly i18n: I18nRuntime; readonly pending?: boolean;
 }) {
@@ -16,4 +17,4 @@ export function InputRecoveryNotice({ state, session, i18n, pending = false }: {
       <button type="button" disabled={state.sending.includes(input.inputId)} onClick={() => void session.retry(input.inputId)}>{i18n.t('projectAgent.chat.retrySameInput')}</button>
     </div>) : null}
   </>;
-}
+});

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotRoleModelView, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy, ProjectAgentActivity } from '@peer-agent/protocol';
 import { ModelPicker } from '../ui/model-picker/ModelPicker';
@@ -61,7 +61,7 @@ function botPanelGroups(
   ];
 }
 
-export function BotModelControls({ role, policy, models, view, busy, replying = false, compact = false, hideSource = false, activeSelection, feedback, i18n, onChange }: {
+export const BotModelControls = memo(function BotModelControls({ role, policy, models, view, busy, replying = false, compact = false, hideSource = false, activeSelection, feedback, i18n, onChange }: {
   readonly role: ModelRole;
   readonly policy?: ProjectModelPolicy | null;
   readonly models: readonly ModelRoutingMenuOption[];
@@ -155,4 +155,4 @@ export function BotModelControls({ role, policy, models, view, busy, replying = 
     </div>
     {!compact && !hideSource && view?.resolution.ok && setting?.mode !== 'fixed' && source !== label ? <p className="bot-model-source">{source}</p> : null}
   </div>;
-}
+});

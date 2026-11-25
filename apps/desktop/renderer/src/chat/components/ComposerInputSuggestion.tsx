@@ -1,19 +1,20 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { InputCandidate } from '@peer-agent/protocol';
 import type { useInputPrediction } from '../hooks/useInputPrediction';
 import './input-prediction.css';
 
-export function ComposerInputSuggestion({ prediction, text, i18n }: {
+function ComposerInputSuggestionOverlay({ prediction, candidate, text, i18n }: {
   readonly prediction: ReturnType<typeof useInputPrediction>;
+  readonly candidate: InputCandidate;
   readonly text: string;
   readonly i18n: I18nRuntime;
 }) {
   const mirror = useRef<HTMLDivElement>(null), suffix = useRef<HTMLSpanElement>(null);
   const [fits, setFits] = useState(false);
-  const candidate = prediction.view.candidate;
   useLayoutEffect(() => {
     const node = prediction.textareaRef.current, overlay = mirror.current;
-    if (!node || !overlay || !candidate || typeof ResizeObserver !== 'function') {
+    if (!node || !overlay || typeof ResizeObserver !== 'function') {
       prediction.markPresented(false); setFits(false); return;
     }
     let frame = 0;
@@ -81,7 +82,6 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
     return () => { observer.disconnect(); appearance?.disconnect(); cancelAnimationFrame(frame); node.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule); document.fonts?.removeEventListener('loadingdone', schedule); prediction.markPresented(false); };
   }, [candidate, prediction.view.status, text, prediction.textareaRef]);
-  if (!candidate) return null;
   return <>
     <div ref={mirror} className="input-prediction-mirror" aria-hidden="true">
       <span className="input-prediction-prefix">{text}</span><span ref={suffix}>{candidate.insertionText}</span>
@@ -97,3 +97,13 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
     </> : null}
   </>;
 }
+
+export const ComposerInputSuggestion = memo(function ComposerInputSuggestion({ prediction, text, i18n }: {
+  readonly prediction: ReturnType<typeof useInputPrediction>;
+  readonly text: string;
+  readonly i18n: I18nRuntime;
+}) {
+  const candidate = prediction.view.candidate;
+  if (!candidate) return null;
+  return <ComposerInputSuggestionOverlay prediction={prediction} candidate={candidate} text={text} i18n={i18n} />;
+});

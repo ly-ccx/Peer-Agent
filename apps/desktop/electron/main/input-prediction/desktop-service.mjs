@@ -43,11 +43,20 @@ export function createDesktopInputPrediction({ getSettings, listModels, conversa
   const registry = createPromptSourceRegistry({ sources: [createInputPredictionPromptSource(), createProjectInstructionsPromptSource()] });
   const readHistory = conversationStore.createHistoryProjection?.(publicHistory, {
     immutableInput: true, immutableOutput: true, maxEntries: 64, maxBytes: 256 * 1024,
+    tailLimit: 64, headLimit: 16,
   }) ?? (id => publicHistory(conversationStore.getPersistedConversationHistory(id)));
+  function readConversationMeta(conversationId) {
+    if (typeof conversationStore.readSessionMeta === 'function') {
+      const meta = conversationStore.readSessionMeta(conversationId);
+      if (meta && (!meta.role || ['default', 'project_agent', 'work_session'].includes(meta.role))) return meta;
+      return null;
+    }
+    return conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false })
+      .find(row => row.id === conversationId) ?? null;
+  }
   function readSnapshot(request) {
     const settings = getSettings();
-    const meta = conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false })
-      .find(row => row.id === request.conversationId);
+    const meta = readConversationMeta(request.conversationId);
     if (!meta || meta.status === 'archived' || meta.role === 'work_session') return null;
     const bot = getProjectAgent()?.projectAccess?.directory?.get(request.workspaceId);
     let workspacePath, policy;

@@ -18,6 +18,25 @@ export interface PredictionView {
   readonly candidate: InputCandidate | null;
 }
 
+const IDLE_VIEW: PredictionView = Object.freeze({ status: 'idle', candidate: null });
+const WAITING_VIEW: PredictionView = Object.freeze({ status: 'waiting', candidate: null });
+const REQUESTING_VIEW: PredictionView = Object.freeze({ status: 'requesting', candidate: null });
+
+function samePredictionInput(a: PredictionInput | null, b: PredictionInput): boolean {
+  return a !== null
+    && a.workspaceId === b.workspaceId
+    && a.conversationId === b.conversationId
+    && a.surface === b.surface
+    && a.text === b.text
+    && a.selectionStart === b.selectionStart
+    && a.selectionEnd === b.selectionEnd
+    && a.contextVersion === b.contextVersion
+    && a.quoteMessageId === b.quoteMessageId
+    && a.eligible === b.eligible
+    && a.active === b.active
+    && a.composing === b.composing;
+}
+
 /** Owns every asynchronous generation; the editor retains all draft ownership. */
 export function createInputPredictionController({ port, createId, now = Date.now,
   apply, debounceMs = { next_turn: 300, continuation: 500 }, validationMs = INPUT_PREDICTION_LIMITS.validationMs,
@@ -25,18 +44,25 @@ export function createInputPredictionController({ port, createId, now = Date.now
   apply: (text: string, input: PredictionInput) => void;
   debounceMs?: { next_turn: number; continuation: number }; validationMs?: number;
 }) {
-  let input: PredictionInput | null = null, fingerprint = '', dismissed = '', acceptedText: string | null = null;
+  let input: PredictionInput | null = null, dismissed = '', acceptedText: string | null = null;
   let version = 0, generation = 0, requestId: string | null = null, disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined, expiry: ReturnType<typeof setTimeout> | undefined;
-  let view: PredictionView = { status: 'idle', candidate: null };
+  let view: PredictionView = IDLE_VIEW;
   const listeners = new Set<() => void>();
-  function publish(next: PredictionView) { view = next; for (const listener of listeners) listener(); }
-  function cancel() {
+  function publish(next: PredictionView) {
+    if (view.status === next.status && view.candidate === next.candidate) return;
+    view = next;
+    for (const listener of listeners) listener();
+  }
+  function stopPending() {
     generation++;
     clearTimeout(timer); clearTimeout(expiry);
     if (requestId) void port.cancel({ requestId, composerInstanceId }).catch(() => {});
     requestId = null;
-    publish({ status: 'idle', candidate: null });
+  }
+  function cancel() {
+    stopPending();
+    publish(IDLE_VIEW);
   }
   const composerInstanceId = createId();
   const eligible = (value: PredictionInput) => value.eligible && value.active && !value.composing
@@ -48,7 +74,7 @@ export function createInputPredictionController({ port, createId, now = Date.now
     const captured = input, ticket = generation, draftVersion = version;
     requestId = createId();
     const id = requestId;
-    publish({ status: 'requesting', candidate: null });
+    publish(REQUESTING_VIEW);
     try {
       const result = await port.request({ requestId: id, composerInstanceId,
         workspaceId: captured.workspaceId, conversationId: captured.conversationId, surface: captured.surface,
@@ -63,22 +89,25 @@ export function createInputPredictionController({ port, createId, now = Date.now
         || candidate.draftVersion !== draftVersion || candidate.mode !== (captured.text ? 'continuation' : 'next_turn')
         || typeof candidate.insertionText !== 'string' || !candidate.insertionText.trim()
         || !Number.isFinite(Date.parse(candidate.expiresAt)) || Date.parse(candidate.expiresAt) <= now()) {
-        publish({ status: 'idle', candidate: null }); return;
+        publish(IDLE_VIEW); return;
       }
       publish({ status: 'visible', candidate });
       expiry = setTimeout(cancel, Math.max(0, Date.parse(candidate.expiresAt) - now()));
-    } catch { if (!disposed && generation === ticket) publish({ status: 'idle', candidate: null }); }
+    } catch { if (!disposed && generation === ticket) publish(IDLE_VIEW); }
   }
   function update(next: PredictionInput) {
     if (disposed) return;
-    const key = JSON.stringify(next);
-    if (key === fingerprint) return;
+    if (samePredictionInput(input, next)) return;
     const sameContext = input?.contextVersion === next.contextVersion && input?.conversationId === next.conversationId;
     if (!sameContext || (next.text !== input?.text && next.text !== acceptedText)) acceptedText = null;
-    input = next; fingerprint = key; version++; cancel();
+    input = next; version++;
+    stopPending();
     const semanticKey = JSON.stringify([next.workspaceId, next.conversationId, next.contextVersion, next.text, next.quoteMessageId]);
-    if (!eligible(next) || dismissed === semanticKey || acceptedText === next.text) return;
-    publish({ status: 'waiting', candidate: null });
+    if (!eligible(next) || dismissed === semanticKey || acceptedText === next.text) {
+      publish(IDLE_VIEW);
+      return;
+    }
+    publish(WAITING_VIEW);
     timer = setTimeout(() => { void request(); }, next.text ? debounceMs.continuation : debounceMs.next_turn);
   }
   async function accept(): Promise<boolean> {

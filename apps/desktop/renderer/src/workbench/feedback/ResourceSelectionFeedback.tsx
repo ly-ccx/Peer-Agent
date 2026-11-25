@@ -21,10 +21,15 @@ export function ResourceSelectionFeedback({ container, resource, version, digest
   useEffect(() => {
     if (!port || !resource || !active) return;
     const changed = () => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
+        setCapture(current => (current === null ? null : null));
+        return;
+      }
       const node = container.current;
       const value = node ? captureResourceSelection(node, window.getSelection(), sourceContent, discussionPath) : null;
       if (value) setCapture({ identity, value });
-      else if (!document.activeElement?.closest('.resource-selection-feedback')) setCapture(null);
+      else if (!active?.closest('.resource-selection-feedback')) setCapture(current => (current === null ? null : null));
     };
     document.addEventListener('selectionchange', changed);
     return () => document.removeEventListener('selectionchange', changed);

@@ -73,7 +73,19 @@ export function useInputPrediction(options: Options) {
       },
     });
     controller.current = instance;
-    const unsubscribe = instance.subscribe(() => { presented.current = false; setPresented(false); setView(instance.getSnapshot()); });
+    const unsubscribe = instance.subscribe(() => {
+      const next = instance.getSnapshot();
+      if (presented.current && !next.candidate) {
+        presented.current = false;
+        setPresented(false);
+      }
+      setView(prev => {
+        if (prev.candidate === next.candidate && (next.candidate === null || prev.status === next.status)) {
+          return prev;
+        }
+        return next;
+      });
+    });
     const beforeInput = (event: Event) => {
       const input = event as InputEvent;
       if (input.inputType === 'historyUndo' || input.inputType === 'historyRedo') {
@@ -109,14 +121,20 @@ export function useInputPrediction(options: Options) {
   useEffect(sync, [options.text, options.contextVersion, options.eligible, options.quoteMessageId, preferences]);
   return {
     view, isPresented, textareaRef: options.textareaRef,
-    markPresented(value: boolean) { presented.current = value; setPresented(value); },
+    markPresented(value: boolean) {
+      if (presented.current === value) return;
+      presented.current = value;
+      setPresented(value);
+    },
     onChange(event: ChangeEvent<HTMLTextAreaElement>) {
       const node = event.currentTarget;
       knownText.current = node.value;
       if (!composition.current) history.current.record(before.current ?? { text: current.current.text,
         start: current.current.text.length, end: current.current.text.length }, read(node),
         (event.nativeEvent as InputEvent).inputType === 'insertText' ? 'typing' : 'edit');
-      before.current = null; controller.current?.invalidate(); current.current.setText(node.value); sync();
+      before.current = null;
+      current.current.setText(node.value);
+      sync();
     },
     onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
       if (isImeKey(event.nativeEvent)) return false;

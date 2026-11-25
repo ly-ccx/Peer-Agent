@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LlmProviderConfigView } from '@peer-agent/protocol';
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Drawer } from '../../app/components/Drawer';
 import { ChatSurface } from '../../app/components/deferredPanels';
 import { clientApi } from '../../clientApi';
@@ -9,7 +9,9 @@ import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
 import { BotDocumentPreview } from '../conversation/BotDocumentPreview';
 import { PeerIcon } from '../../ui/icons';
 
-export function ConversationSceneDrawer({
+const noopSettings = () => {};
+
+export const ConversationSceneDrawer = memo(function ConversationSceneDrawer({
   workspaceId,
   workspacePath,
   conversationId,
@@ -61,15 +63,23 @@ export function ConversationSceneDrawer({
     };
   }, [conversationId]);
 
+  const workspaces = useMemo(
+    () => (workspacePath ? [{ path: workspacePath, name: title }] : []),
+    [workspacePath, title],
+  );
+  const handleProvidersRefresh = useCallback(async () => {
+    setProviders(await clientApi.llmListProviders());
+  }, []);
+
   const content = (requestClose: () => void) => <WorkbenchProvider conversationId={conversationId}
     isPageActive={active} layoutHost="local">
     <div className="conversation-chat-drawer-shell" data-seam="user_intervened">
       <div className="conversation-chat-drawer__body">
         <ChatSurface showComposer={false} showHeader={!seamless} externalStreaming={isLive} onOpenPermissionBot={onOpenBot} i18n={i18n} providers={providers}
           conversationId={conversationId} conversationRevision={conversationRevision} conversationTitle={title} systemInstructions={systemInstructions}
-          replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={() => {}}
-          onProvidersRefresh={async () => { setProviders(await clientApi.llmListProviders()); }}
-          workspacePath={workspacePath} workspaces={workspacePath ? [{ path: workspacePath, name: title }] : []}
+          replyLanguage={replyLanguage} gitBranchPrefix={gitBranchPrefix} onOpenSettings={noopSettings}
+          onProvidersRefresh={handleProvidersRefresh}
+          workspacePath={workspacePath} workspaces={workspaces}
           isPageActive={active} onClose={requestClose} />
       </div>
       {!embedded ? <WorkbenchPanel isZh={isZh} workspacePath={workspacePath} /> : null}
@@ -91,4 +101,4 @@ export function ConversationSceneDrawer({
     panelClassName="conversation-result-drawer conversation-chat-drawer conversation-chat-drawer--nested" softBackdrop>
     {({ requestClose }) => content(requestClose)}
   </Drawer>;
-}
+});

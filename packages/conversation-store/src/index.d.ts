@@ -189,9 +189,9 @@ export interface ConversationStore {
    * immutableInput opts a pure callback into deeply frozen shared input.
    * immutableOutput shares deeply frozen plain derived facts; default results remain isolated copies. */
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
+    options: { maxEntries?: number; maxBytes?: number; tailLimit?: number; headLimit?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
+    options?: { maxEntries?: number; maxBytes?: number; tailLimit?: number; headLimit?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   /** Internal canonical message guard. The host attests Bot ownership and releases after commit. */
