@@ -324,6 +324,9 @@ impl RuntimeProjection {
             .find(|t| t.alias == alias)
             .map(|t| t.capability.as_str())
     }
+    pub(crate) fn tool_names(&self) -> Vec<&str> {
+        self.tools.iter().map(|t| t.alias.as_str()).collect()
+    }
     pub(crate) fn skill_names(&self) -> Vec<&str> {
         self.tools
             .iter()

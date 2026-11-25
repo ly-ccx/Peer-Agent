@@ -138,7 +138,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "spawn_session",
                 "local.delegation.spawn_session",
-                "Delegate a new task from a current user input with title, brief, kind, readOnly and successCriteria. On wake, supply only supersedes to retry an eligible failed task with its original specification.",
+                "Delegate a new task from a current user input with title, brief, kind, readOnly and successCriteria. To rerun or supersede an existing task with its original specification, supply supersedes (on user turns, any omitted fields are inherited from the superseded task; on wake turns, supply only supersedes).",
                 json!({
                     "type": "object",
                     "anyOf": [{"required": ["title", "brief", "successCriteria", "kind", "readOnly"]}, {"required": ["supersedes"]}],
@@ -156,7 +156,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                         "capabilityPreset": {
                             "type": "string",
                             "enum": ["read_only", "code_edit", "code_edit_and_shell", "web_research"],
-                            "description": "High-level capability intent preset (preferred over raw requiredCapabilities). Ignored for write/shell when readOnly=true."
+                            "description": "High-level capability intent preset (preferred over raw requiredCapabilities). `web_research` grants read-only `local.web.fetch` even when readOnly=true; write/shell presets remain ignored when readOnly=true."
                         },
                         "requiredCapabilities": {
                             "type": "array",
@@ -1729,13 +1729,38 @@ fn spawn_from_args(
         return Err(ProjectError::code("invalid_anchor").into());
     }
     let anchors = resolve_anchors_for_state(&raw_anchors, state)?;
-    if let Some(sup) = args["supersedes"].as_str() {
-        check_quote_scope(state, sup)?;
-    }
-    let mut criteria: Vec<SpawnCriterion> = serde_json::from_value(args["successCriteria"].clone())
+    let superseded_id = args["supersedes"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let superseded_plan = match superseded_id {
+        Some(sup) => {
+            check_quote_scope(state, sup)?;
+            supervisor
+                .plan_for_bot(&state.workspace_id, &state.conversation_id, sup)
+                .ok()
+        }
+        None => None,
+    };
+    let criteria_inherited =
+        args.get("successCriteria").is_none_or(Value::is_null) && superseded_plan.is_some();
+    let mut criteria: Vec<SpawnCriterion> = if criteria_inherited {
+        serde_json::from_value(
+            superseded_plan
+                .as_ref()
+                .expect("checked superseded_plan")
+                .get("successCriteria")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )
         .map_err(|err| {
             ProjectError::new("invalid_input", format!("invalid successCriteria: {err}"))
-        })?;
+        })?
+    } else {
+        serde_json::from_value(args["successCriteria"].clone()).map_err(|err| {
+            ProjectError::new("invalid_input", format!("invalid successCriteria: {err}"))
+        })?
+    };
     let anchor_text = supervisor.anchor_text_for_ids(&state.conversation_id, &anchors);
     let user_requested_manual = crate::acceptance::anchor_requests_review(&anchor_text);
     for c in &mut criteria {
@@ -1743,7 +1768,7 @@ fn spawn_from_args(
         // the user's anchor message explicitly requested manual review/confirmation
         // (mirrors `criterion-authority.mjs`). Promote unauthorized `manual` -> `model_review`
         // so the independent verifier checks it automatically.
-        if c.kind.eq_ignore_ascii_case("manual") && !user_requested_manual {
+        if !criteria_inherited && c.kind.eq_ignore_ascii_case("manual") && !user_requested_manual {
             c.kind = "model_review".to_owned();
         }
         if c.description.trim().is_empty() {
@@ -1761,7 +1786,13 @@ fn spawn_from_args(
             };
         }
     }
-    let read_only = args["readOnly"].as_bool().unwrap_or(true);
+    let inherited_read_only = superseded_plan
+        .as_ref()
+        .and_then(|p| p["delegationOrigin"]["readOnly"].as_bool());
+    let read_only = args["readOnly"]
+        .as_bool()
+        .or(inherited_read_only)
+        .unwrap_or(true);
     let mut required_caps: Vec<String> = args["requiredCapabilities"]
         .as_array()
         .map(|a| {
@@ -1799,13 +1830,7 @@ fn spawn_from_args(
                 "local.shell.exec",
                 "local.shell.stop",
             ],
-            ("web_research", true) => &[
-                "local.file.read",
-                "local.file.list",
-                "local.file.search",
-                "local.git.query",
-            ],
-            ("web_research", false) => &[
+            ("web_research", _) => &[
                 "local.file.read",
                 "local.file.list",
                 "local.file.search",
@@ -1815,16 +1840,101 @@ fn spawn_from_args(
             _ => return Err(ProjectError::code("invalid_input").into()),
         };
         required_caps = preset_caps.iter().map(|s| (*s).to_owned()).collect();
+    } else if required_caps.is_empty()
+        && args["capabilityPreset"].is_null()
+        && let Some(old_plan) = superseded_plan.as_ref()
+    {
+        required_caps = old_plan["delegationOrigin"]["requiredCapabilities"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|cap| {
+                        !read_only
+                            || !matches!(
+                                cap.trim().to_ascii_lowercase().as_str(),
+                                "local.file.write"
+                                    | "local.file.edit"
+                                    | "write_file"
+                                    | "edit_file"
+                                    | "local.shell.exec"
+                                    | "local.shell.stop"
+                                    | "run_command"
+                            )
+                    })
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
     }
-    let depends_on: Vec<String> = args["dependsOn"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
+    let depends_on: Vec<String> = if let Some(arr) = args["dependsOn"].as_array() {
+        arr.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    } else if let Some(old_plan) = superseded_plan.as_ref() {
+        old_plan["delegationOrigin"]["dependsOn"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let title = args["title"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| superseded_plan.as_ref().and_then(|p| p["title"].as_str()))
+        .unwrap_or("")
+        .to_owned();
+    let brief = args["brief"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| superseded_plan.as_ref().and_then(|p| p["goal"].as_str()))
+        .unwrap_or("")
+        .to_owned();
+    let kind = args["kind"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            superseded_plan
+                .as_ref()
+                .and_then(|p| p["delegationOrigin"]["kind"].as_str())
         })
-        .unwrap_or_default();
+        .unwrap_or("other")
+        .to_owned();
+    let priority = args["priority"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            superseded_plan
+                .as_ref()
+                .and_then(|p| p["delegationOrigin"]["priority"].as_str())
+        })
+        .unwrap_or("normal")
+        .to_owned();
+    let objective_id = args["objectiveId"]
+        .as_str()
+        .or_else(|| {
+            superseded_plan
+                .as_ref()
+                .and_then(|p| p["delegationOrigin"]["objectiveId"].as_str())
+        })
+        .map(str::to_owned);
+    let isolation = args["isolation"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            superseded_plan
+                .as_ref()
+                .and_then(|p| p["deliveryBinding"]["executionIsolation"].as_str())
+        })
+        .unwrap_or("auto")
+        .to_owned();
     let spawned = supervisor.spawn_session(
         SpawnSessionRequest {
             workspace_id: state.workspace_id.clone(),
@@ -1833,17 +1943,17 @@ fn spawn_from_args(
             anchor_message_ids: anchors,
             input_id: state.current_input_id.clone(),
             surface: supervisor.surface_str().to_owned(),
-            title: args["title"].as_str().unwrap_or("").to_owned(),
-            brief: args["brief"].as_str().unwrap_or("").to_owned(),
-            kind: args["kind"].as_str().unwrap_or("other").to_owned(),
+            title,
+            brief,
+            kind,
             read_only,
             required_capabilities: required_caps,
             success_criteria: criteria,
-            priority: args["priority"].as_str().unwrap_or("normal").to_owned(),
+            priority,
             depends_on,
-            supersedes: args["supersedes"].as_str().map(str::to_owned),
-            objective_id: args["objectiveId"].as_str().map(str::to_owned),
-            isolation: args["isolation"].as_str().unwrap_or("auto").to_owned(),
+            supersedes: superseded_id.map(str::to_owned),
+            objective_id,
+            isolation,
             worker_model_selection: state.worker_model_selection.clone(),
         },
         state.holds_lease,
@@ -2479,7 +2589,12 @@ fn execute_project_capability(
             let updated = if autonomous_cleanup && state.current_input_anchors.is_empty() {
                 supervisor.cleanup_session(&state.workspace_id, sid, "bot_cleanup", true)?
             } else if action == "cancel" {
-                supervisor.cancel_session_by_agent(&state.workspace_id, sid, "user_control", true)?
+                supervisor.cancel_session_by_agent(
+                    &state.workspace_id,
+                    sid,
+                    "user_control",
+                    true,
+                )?
             } else {
                 supervisor.control_session(
                     &state.workspace_id,

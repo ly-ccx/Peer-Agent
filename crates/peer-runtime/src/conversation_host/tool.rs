@@ -26,6 +26,21 @@ impl Host<'_> {
         let delegated_args = projection
             .has_capability(interaction::PARENT_QUESTION_CAPABILITY)
             .then(|| call.arguments.clone());
+        let unprojected_detail = delegated_args.as_ref().map(|_| {
+            let names = projection.tool_names();
+            if names.is_empty() {
+                format!(
+                    "Tool `{}` is not projected in this session (no tools are projected).",
+                    call.name
+                )
+            } else {
+                format!(
+                    "Tool `{}` is not projected in this session. Available projected tools: {}. Do not retry unprojected tool names; use only the projected tools or report the missing capability.",
+                    call.name,
+                    names.join(", ")
+                )
+            }
+        });
         let effect = match self.providers.prepare(
             projection,
             &call.name,
@@ -45,13 +60,15 @@ impl Host<'_> {
                         raw_args_for_automation.expect("checked raw_args_for_automation"),
                         "automation_high_risk_blocked",
                         Some(risk_error),
+                        None,
                     )
                     .await;
             }
             Err(HostError("tool_arguments_invalid"))
-                if let Some(args) = delegated_args
+                if delegated_args.is_some()
                     && let Some(capability) = projection.capability(&call.name) =>
             {
+                let args = delegated_args.expect("checked delegated_args");
                 let capability = capability.to_owned();
                 return self
                     .deny_unprepared_tool(
@@ -60,6 +77,28 @@ impl Host<'_> {
                         args,
                         "tool_arguments_invalid",
                         None,
+                        None,
+                    )
+                    .await;
+            }
+            Err(HostError("tool_not_projected"))
+                if delegated_args.is_some()
+                    && !call.name.trim().is_empty()
+                    && call.name.len() <= 200 =>
+            {
+                let args = delegated_args.expect("checked delegated_args");
+                let capability = projection
+                    .capability(&call.name)
+                    .unwrap_or("local.unprojected")
+                    .to_owned();
+                return self
+                    .deny_unprepared_tool(
+                        &call.name,
+                        &capability,
+                        args,
+                        "tool_not_projected",
+                        None,
+                        unprojected_detail.as_deref(),
                     )
                     .await;
             }
@@ -623,6 +662,7 @@ impl Host<'_> {
         args: Value,
         reason: &'static str,
         risk_error: Option<&'static str>,
+        detail_message: Option<&str>,
     ) -> Result<ToolStep, HostError> {
         let _args_digest = peer_protocol::approval_args_digest(&args)
             .map_err(|_| HostError("permission_arguments_invalid"))?;
@@ -654,7 +694,7 @@ impl Host<'_> {
             "completedAt": now(),
             "error": {
                 "code": reason,
-                "message": reason,
+                "message": detail_message.unwrap_or(reason),
                 "recoverable": true,
             },
             "evidence": {

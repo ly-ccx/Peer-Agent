@@ -1315,10 +1315,7 @@ impl SessionSupervisor {
     }
 
     pub fn interactive_bridge(&self) -> Option<Arc<dyn InteractiveContentBridge>> {
-        self.interactive_bridge
-            .read()
-            .ok()
-            .and_then(|g| g.clone())
+        self.interactive_bridge.read().ok().and_then(|g| g.clone())
     }
 
     pub fn set_interactive_enabled_override(&self, enabled: Option<bool>) {
@@ -1379,8 +1376,6 @@ impl SessionSupervisor {
                         | "local.shell.exec"
                         | "local.shell.stop"
                         | "run_command"
-                        | "local.web.fetch"
-                        | "web_fetch"
                 )
             {
                 return Err(ProjectError::new(
@@ -2439,6 +2434,15 @@ impl SessionSupervisor {
                  - Turn budget: {effective_max_turns} turns. Batch independent read/search/check tool calls into the same turn whenever possible instead of issuing one small lookup per turn.\n\
                  - Once all required edits and verification commands succeed, stop calling tools and deliver a concise factual final report citing exact file paths, line numbers, and observed command results.\n"
             ));
+            if session_profile
+                .allowlist
+                .iter()
+                .any(|c| c == "local.web.fetch")
+            {
+                prompt.push_str(
+                    "- `web_fetch` IS projected in this session for read-only HTTP/HTTPS URL fetching (note: no built-in search-engine `web_search` tool exists unless an MCP search tool is listed in your projected tools). Fetch authoritative documentation/repository URLs directly via `web_fetch` and never call unprojected tool names or fabricate unverified claims.\n",
+                );
+            }
             let mat_dir = self
                 .data_home
                 .join("project-runtime")

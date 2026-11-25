@@ -8311,3 +8311,241 @@ async fn autonomy_resume_only_continues_host_confirmed_technical_interruptions()
     );
     host.close();
 }
+
+#[tokio::test]
+async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool_and_supports_user_supersedes_rerun()
+ {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "ACP local spec notes").unwrap();
+    fs::write(
+        home.path().join("settings.json"),
+        json!({
+            "schemaVersion": 3,
+            "projectAgent": { "shell": "bots", "managedRoot": ws.path().join("managed") }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _profile) = host.bind_workspace(ws.path(), Some("ResearchBot")).unwrap();
+    let ws_id = entry.workspace_id;
+    host.ensure_lease(&ws_id).unwrap();
+    let cancel = CancellationToken::new();
+
+    // 1. User requests read-only web research. Main Bot must NOT have `web_fetch`,
+    //    and spawns a `readOnly: true, capabilityPreset: "web_research"` worker.
+    let spawn_bot = start_mock_server(vec![
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(
+                !tools.contains(&"web_fetch".to_string()),
+                "main bot must remain offline: {tools:?}"
+            );
+            sse_tool_call(
+                "spawn-web",
+                "spawn_session",
+                &json!({
+                    "title": "调研主流 Agent 的 ACP 支持",
+                    "brief": "核对官方文档与本地源码中的 ACP 支持情况。",
+                    "kind": "research",
+                    "readOnly": true,
+                    "capabilityPreset": "web_research",
+                    "successCriteria": [
+                        {"kind": "model_review", "description": "基于一手证据总结 ACP 支持矩阵"}
+                    ]
+                }),
+            )
+        }),
+        Box::new(|req| {
+            let result = latest_autonomy_tool_result(req);
+            assert!(result.contains(r#""ok":true"#), "spawn failed: {result}");
+            sse_tool_call(
+                "ack-spawn",
+                "post_reply",
+                &json!({"text": "已安排只读联网调研任务。"}),
+            )
+        }),
+    ]);
+    host.submit_user_input(
+        &ws_id,
+        "in-web-research-1",
+        "去调研主流 Agent 的 ACP 支持",
+        None,
+    )
+    .unwrap();
+    let tick1 = host
+        .tick_foreground(&ws_id, &mock_model(&spawn_bot.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick1.promoted_session_ids.len(), 1);
+    let first_sid = tick1.promoted_session_ids[0].clone();
+    let first_plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, &first_sid)
+        .unwrap();
+    assert_eq!(first_plan["delegationOrigin"]["readOnly"], true);
+    let first_anchors: Vec<String> =
+        serde_json::from_value(first_plan["delegationOrigin"]["anchorMessageIds"].clone()).unwrap();
+    let first_req_caps: Vec<String> =
+        serde_json::from_value(first_plan["delegationOrigin"]["requiredCapabilities"].clone())
+            .unwrap();
+    assert!(
+        first_req_caps.contains(&"local.web.fetch".to_owned()),
+        "web_research + readOnly=true must retain local.web.fetch: {first_req_caps:?}"
+    );
+
+    // 2. Worker receives `web_fetch` (without write/shell), deliberately calls an
+    //    unprojected tool (`web_search`), recovers cleanly from the denied tool
+    //    result listing available tools, reads `readme.md`, and completes.
+    let worker_server = start_mock_server(vec![
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(
+                tools.contains(&"web_fetch".to_string()),
+                "read-only web_research worker must receive web_fetch: {tools:?}"
+            );
+            assert!(tools.contains(&"read_file".to_string()));
+            for forbidden in ["write_file", "edit_file", "bash", "run_command"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "read-only web_research worker must not receive {forbidden}: {tools:?}"
+                );
+            }
+            sse_tool_call(
+                "hallucinated-search",
+                "web_search",
+                &json!({"query": "Agent Client Protocol"}),
+            )
+        }),
+        Box::new(|req| {
+            let denied = latest_autonomy_tool_result(req);
+            assert!(
+                denied.contains("tool_not_projected"),
+                "expected recoverable tool_not_projected denial, got: {denied}"
+            );
+            assert!(
+                denied.contains("web_fetch"),
+                "expected denial to list available projected tools including web_fetch, got: {denied}"
+            );
+            sse_tool_call("fallback-read", "read_file", &json!({"path": "readme.md"}))
+        }),
+        Box::new(|req| {
+            let read_res = latest_autonomy_tool_result(req);
+            assert!(read_res.contains("ACP local spec notes"), "{read_res}");
+            sse_text("Completed read-only research after falling back from unprojected web_search.")
+        }),
+    ]);
+    let verifier_server = start_mock_server(vec![Box::new(|req| {
+        let tools = tool_names_from_request(req);
+        assert!(
+            !tools.contains(&"web_fetch".to_string()),
+            "independent verifier must never receive web_fetch: {tools:?}"
+        );
+        assert!(!tools.iter().any(|t| matches!(
+            t.as_str(),
+            "write_file" | "edit_file" | "bash" | "run_command"
+        )));
+        let prompt = req["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|msg| msg["role"] == "user")
+            .and_then(|msg| msg["content"].as_str())
+            .unwrap_or("");
+        let ev_ref = prompt
+            .split('"')
+            .find(|s| s.starts_with("tool-result://"))
+            .unwrap_or("tool-result://fallback")
+            .to_owned();
+        sse_text(
+            &json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [ev_ref],
+                "summary": "Verified read-only research completion."
+            })
+            .to_string(),
+        )
+    })]);
+    let mut perm = AutoAllowPermission;
+    let episode = host
+        .run_promoted_session(
+            &ws_id,
+            &first_sid,
+            &mock_model(&worker_server.endpoint),
+            Some(&mock_model(&verifier_server.endpoint)),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(episode.status, "completed");
+
+    // 3. User clicks "基于此重跑" (normal user turn) and Main Bot calls
+    //    `spawn_session({"supersedes": first_sid})` without repeating title/brief/criteria.
+    let rerun_sid = first_sid.clone();
+    let rerun_bot = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "rerun-supersedes",
+                "spawn_session",
+                &json!({"supersedes": rerun_sid}),
+            )
+        }),
+        Box::new(|req| {
+            let result = latest_autonomy_tool_result(req);
+            assert!(
+                result.contains(r#""ok":true"#),
+                "user-turn supersedes-only spawn_session must inherit spec: {result}"
+            );
+            sse_tool_call(
+                "ack-rerun",
+                "post_reply",
+                &json!({"text": "已基于原任务范围重新派发调研。"}),
+            )
+        }),
+    ]);
+    host.submit_user_input(
+        &ws_id,
+        "in-web-research-rerun",
+        "请基于「调研主流 Agent 的 ACP 支持」的范围与验收标准重新执行。",
+        None,
+    )
+    .unwrap();
+    let tick2 = host
+        .tick_foreground(&ws_id, &mock_model(&rerun_bot.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick2.promoted_session_ids.len(), 1);
+    let second_sid = &tick2.promoted_session_ids[0];
+    assert_ne!(second_sid, &first_sid);
+    let second_plan = host
+        .supervisor()
+        .find_plan_by_session(&ws_id, second_sid)
+        .unwrap();
+    assert_eq!(second_plan["title"], "调研主流 Agent 的 ACP 支持");
+    assert_eq!(
+        second_plan["goal"],
+        "核对官方文档与本地源码中的 ACP 支持情况。"
+    );
+    assert_eq!(second_plan["delegationOrigin"]["readOnly"], true);
+    assert_eq!(second_plan["delegationOrigin"]["supersedes"], first_sid);
+    assert_eq!(
+        second_plan["delegationOrigin"]["inputId"],
+        "in-web-research-rerun"
+    );
+    let second_caps: Vec<String> =
+        serde_json::from_value(second_plan["delegationOrigin"]["requiredCapabilities"].clone())
+            .unwrap();
+    assert!(second_caps.contains(&"local.web.fetch".to_owned()));
+    let second_anchors: Vec<String> =
+        serde_json::from_value(second_plan["delegationOrigin"]["anchorMessageIds"].clone())
+            .unwrap();
+    assert_eq!(second_anchors.len(), 1);
+    assert_ne!(second_anchors, first_anchors);
+    host.close();
+}
