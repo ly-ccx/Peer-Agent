@@ -286,6 +286,7 @@ mod tests {
             "local.shell.exec",
             "local.shell.stop",
             "local.web.fetch",
+            "local.web.search",
             "local.memory.write",
         ];
         for cap in CORE_CAPABILITIES {

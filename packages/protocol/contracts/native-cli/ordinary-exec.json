@@ -569,6 +569,12 @@
     "web_fetch": [
       "local.web.fetch"
     ],
+    "local.web.search": [
+      "local.web.search"
+    ],
+    "web_search": [
+      "local.web.search"
+    ],
     "local.interaction.request_user_input": [
       "local.interaction.request_user_input"
     ],

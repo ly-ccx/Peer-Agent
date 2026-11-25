@@ -260,8 +260,12 @@ export type TranslationKey =
   | 'projectAgent.chat.activity.memoryUpdate'
   | 'projectAgent.chat.activity.directory'
   | 'projectAgent.chat.activity.git'
+  | 'projectAgent.chat.activity.webSearch'
+  | 'projectAgent.chat.activity.webFetch'
   | 'projectAgent.chat.toolLabel.read'
   | 'projectAgent.chat.toolLabel.search'
+  | 'projectAgent.chat.toolLabel.webSearch'
+  | 'projectAgent.chat.toolLabel.webFetch'
   | 'projectAgent.chat.toolLabel.edit'
   | 'projectAgent.chat.toolLabel.command'
   | 'projectAgent.chat.toolRunning'
@@ -2082,8 +2086,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
     'projectAgent.chat.activity.directory': '正在查看文件目录',
     'projectAgent.chat.activity.git': '正在查看仓库状态',
+    'projectAgent.chat.activity.webSearch': '正在联网搜索',
+    'projectAgent.chat.activity.webFetch': '正在查阅网页',
     'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
+    'projectAgent.chat.toolLabel.webSearch': '联网搜索',
+    'projectAgent.chat.toolLabel.webFetch': '网页读取',
     'projectAgent.chat.toolLabel.edit': '编辑文件',
     'projectAgent.chat.toolLabel.command': '执行命令',
     'projectAgent.chat.toolRunning': '正在进行{tool}',
@@ -3642,8 +3650,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',
     'projectAgent.chat.activity.directory': 'Looking through the folder',
     'projectAgent.chat.activity.git': 'Checking repository status',
+    'projectAgent.chat.activity.webSearch': 'Searching the web',
+    'projectAgent.chat.activity.webFetch': 'Reading web page',
     'projectAgent.chat.toolLabel.read': 'file reading',
     'projectAgent.chat.toolLabel.search': 'project search',
+    'projectAgent.chat.toolLabel.webSearch': 'web search',
+    'projectAgent.chat.toolLabel.webFetch': 'web fetch',
     'projectAgent.chat.toolLabel.edit': 'file editing',
     'projectAgent.chat.toolLabel.command': 'command execution',
     'projectAgent.chat.toolRunning': 'Running {tool}',

@@ -156,7 +156,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                         "capabilityPreset": {
                             "type": "string",
                             "enum": ["read_only", "code_edit", "code_edit_and_shell", "web_research"],
-                            "description": "High-level capability intent preset (preferred over raw requiredCapabilities). `web_research` grants read-only `local.web.fetch` even when readOnly=true; write/shell presets remain ignored when readOnly=true."
+                            "description": "High-level capability intent preset (preferred over raw requiredCapabilities). `web_research` grants built-in read-only `local.web.search` and `local.web.fetch` even when readOnly=true; write/shell presets remain ignored when readOnly=true."
                         },
                         "requiredCapabilities": {
                             "type": "array",
@@ -1835,6 +1835,7 @@ fn spawn_from_args(
                 "local.file.list",
                 "local.file.search",
                 "local.git.query",
+                "local.web.search",
                 "local.web.fetch",
             ],
             _ => return Err(ProjectError::code("invalid_input").into()),

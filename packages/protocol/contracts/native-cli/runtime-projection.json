@@ -691,7 +691,8 @@
         "local.git.query",
         "local.search.aggregate",
         "local.shell.exec",
-        "local.web.fetch"
+        "local.web.fetch",
+        "local.web.search"
       ]
     },
     {
@@ -702,7 +703,8 @@
         "local.file.search",
         "local.git.query",
         "local.search.aggregate",
-        "local.web.fetch"
+        "local.web.fetch",
+        "local.web.search"
       ]
     },
     {
@@ -716,7 +718,8 @@
         "local.git.query",
         "local.search.aggregate",
         "local.shell.exec",
-        "local.web.fetch"
+        "local.web.fetch",
+        "local.web.search"
       ]
     },
     {

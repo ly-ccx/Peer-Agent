@@ -126,7 +126,7 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
          - You are read-only and orchestration-only. You cannot edit files, run shell commands, or fetch the web directly.\n\
          - For lightweight questions answerable with read-only tools, answer directly via `post_reply`.\n\
          - For work requiring edits, builds, commands, or multi-step execution, delegate via `spawn_session` with structured `successCriteria`, then either explain briefly via `post_reply` or call `wait_for_sessions`.\n\
-         - For read-only web research, delegate via `spawn_session` with `readOnly: true` and `capabilityPreset: \"web_research\"` (grants read-only `web_fetch` for direct URL fetching plus any mounted read-only MCP search tools; no built-in `web_search` engine exists unless an MCP search server is mounted).\n\
+         - For read-only web research, delegate via `spawn_session` with `readOnly: true` and `capabilityPreset: \"web_research\"` (grants built-in read-only `web_search` and `web_fetch` plus any mounted read-only MCP tools).\n\
          - Always deliver final user-visible answers via `post_reply` citing accurate `replyTo` anchors, `sources`, and `statusClaims` matching persisted host facts.\n\
          - On wake turns when current input anchors are empty (e.g. background familiarize completion), pass \"proactive\": true to `post_reply`.\n\
          - Use model_review for report quality and audit checks. Manual acceptance requires the user's request or existing host policy.\n\

@@ -14,9 +14,9 @@ use crate::{
     ObjectiveStore, ProjectError, ProjectInput, SessionSupervisor, ToolProjectionMode,
     TurnProjectionSignals, UserAnchorCandidate, atomic_write,
     circuit_breaker::{CircuitAdmit, CircuitBreakerStore},
-    coordination_work_id, is_effective_memory, is_valid_workspace_id, memory_secret_reason,
+    coordination_work_id,
     interactive_provider::{WorkSessionInteractiveContext, WorkSessionInteractiveProvider},
-    now_iso, parse_iso_ms,
+    is_effective_memory, is_valid_workspace_id, memory_secret_reason, now_iso, parse_iso_ms,
     provider::{ProjectCapabilityProvider, TurnExecutionState},
     skill_packs::{
         ACTIVATE_SKILL_PACK_TOOL, auto_activated_packs, build_allowlist, ordered_definitions,
@@ -454,7 +454,7 @@ fn activity_tool_summary(name: &str, args: &Value) -> Option<String> {
         | "read_image" | "analyze_image" | "edit_file" | "write_file" => {
             args["path"].as_str().or_else(|| args["file"].as_str())
         }
-        "search_files" | "search_conversation" => {
+        "search_files" | "search_conversation" | "web_search" => {
             args["query"].as_str().or_else(|| args["path"].as_str())
         }
         "git_query" => args["path"]

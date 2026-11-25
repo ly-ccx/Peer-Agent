@@ -49,7 +49,7 @@ pub const READ_ONLY_CAPABILITY_CEILING: [&str; 6] = [
     "local.tool-result.read",
 ];
 
-pub const WORKER_CAPABILITY_CEILING: [&str; 11] = [
+pub const WORKER_CAPABILITY_CEILING: [&str; 12] = [
     "local.file.read",
     "local.file.list",
     "local.file.search",
@@ -61,6 +61,7 @@ pub const WORKER_CAPABILITY_CEILING: [&str; 11] = [
     "local.shell.exec",
     "local.shell.stop",
     "local.web.fetch",
+    "local.web.search",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,8 +110,14 @@ fn expand_requested_capabilities(raw: &str) -> Vec<&'static str> {
         | "exec" | "terminal" | "run_command" => {
             vec!["local.shell.exec", "local.shell.stop"]
         }
-        "local.web.fetch" | "web_fetch" | "web-fetch" | "web" | "fetch" | "web_research" => {
+        "local.web.fetch" | "web_fetch" | "web-fetch" | "fetch" => {
             vec!["local.web.fetch"]
+        }
+        "local.web.search" | "web_search" | "web-search" | "search_web" | "internet_search" => {
+            vec!["local.web.search"]
+        }
+        "web_research" | "web" => {
+            vec!["local.web.search", "local.web.fetch"]
         }
         "local.interactive.publish" | "publish_interactive_result" => {
             vec![
@@ -159,6 +166,7 @@ pub fn resolve_work_session_profile_with_interactive(
     let mut requested_interactive_publish = false;
     let mut requested_interactive_inspect = false;
     let mut requested_web_fetch = false;
+    let mut requested_web_search = false;
     let requested: Vec<String> = origin
         .get("requiredCapabilities")
         .and_then(Value::as_array)
@@ -178,6 +186,10 @@ pub fn resolve_work_session_profile_with_interactive(
             }
             if *c == "local.web.fetch" {
                 requested_web_fetch = true;
+                return !read_only;
+            }
+            if *c == "local.web.search" {
+                requested_web_search = true;
                 return !read_only;
             }
             ceiling.contains(c)
@@ -237,12 +249,17 @@ pub fn resolve_work_session_profile_with_interactive(
         }
     }
 
-    // Read-only web research workers may explicitly request `local.web.fetch`
-    // (read-only HTTP GET only; writes, shell, and `local.web.control.*` remain
-    // forbidden). Independent verifiers, explorers, and default read-only
-    // workers never receive `local.web.fetch`.
-    if agent_kind == "worker" && requested_web_fetch {
-        push_unique("local.web.fetch".to_owned(), &mut allowlist, &mut seen);
+    // Read-only web research workers may explicitly request `local.web.search`
+    // and/or `local.web.fetch` (read-only HTTP only; writes, shell, and
+    // `local.web.control.*` remain forbidden). Independent verifiers, explorers,
+    // and default read-only workers never receive either web capability.
+    if agent_kind == "worker" {
+        if requested_web_search {
+            push_unique("local.web.search".to_owned(), &mut allowlist, &mut seen);
+        }
+        if requested_web_fetch {
+            push_unique("local.web.fetch".to_owned(), &mut allowlist, &mut seen);
+        }
     }
 
     // ADR 118 §9.1: When interactive results are enabled on Desktop, workers (including
@@ -1634,7 +1651,7 @@ mod tests {
     }
 
     #[test]
-    fn read_only_web_research_grants_web_fetch_to_worker_only() {
+    fn read_only_web_research_grants_web_search_and_fetch_to_worker_only() {
         let web_research_plan = json!({
             "delegationOrigin": {
                 "readOnly": true,
@@ -1643,6 +1660,7 @@ mod tests {
                     "local.file.list",
                     "local.file.search",
                     "local.git.query",
+                    "local.web.search",
                     "local.web.fetch"
                 ]
             }
@@ -1652,6 +1670,7 @@ mod tests {
                 .expect("worker profile");
         assert!(worker.read_only);
         assert_eq!(worker.access_level, LocalAccessLevel::SessionLocal);
+        assert!(worker.allowlist.contains(&"local.web.search".to_owned()));
         assert!(worker.allowlist.contains(&"local.web.fetch".to_owned()));
         assert!(worker.allowlist.contains(&"local.file.read".to_owned()));
         for forbidden in [
@@ -1666,7 +1685,7 @@ mod tests {
             );
         }
 
-        // Shorthand `web_research` only still keeps local read-only tools + web_fetch.
+        // Shorthand `web_research` only still keeps local read-only tools + web_search + web_fetch.
         let shorthand_plan = json!({
             "delegationOrigin": {
                 "readOnly": true,
@@ -1679,6 +1698,11 @@ mod tests {
         assert!(
             shorthand_worker
                 .allowlist
+                .contains(&"local.web.search".to_owned())
+        );
+        assert!(
+            shorthand_worker
+                .allowlist
                 .contains(&"local.web.fetch".to_owned())
         );
         assert!(
@@ -1687,7 +1711,7 @@ mod tests {
                 .contains(&"local.file.read".to_owned())
         );
 
-        // Independent verifier and explorer NEVER receive `local.web.fetch`.
+        // Independent verifier and explorer NEVER receive `local.web.search` or `local.web.fetch`.
         for role in ["verifier", "explorer"] {
             let role_profile =
                 resolve_work_session_profile(&web_research_plan, role, LocalAccessLevel::FullLocal)
@@ -1696,12 +1720,18 @@ mod tests {
             assert!(
                 !role_profile
                     .allowlist
+                    .contains(&"local.web.search".to_owned()),
+                "{role} must never receive local.web.search"
+            );
+            assert!(
+                !role_profile
+                    .allowlist
                     .contains(&"local.web.fetch".to_owned()),
                 "{role} must never receive local.web.fetch"
             );
         }
 
-        // Default read-only worker (no web_fetch requested) stays strictly local.
+        // Default read-only worker (no web tools requested) stays strictly local.
         let plain_ro_plan = json!({
             "delegationOrigin": {
                 "readOnly": true,
@@ -1711,6 +1741,11 @@ mod tests {
         let plain_ro_worker =
             resolve_work_session_profile(&plain_ro_plan, "worker", LocalAccessLevel::FullLocal)
                 .expect("plain read-only worker");
+        assert!(
+            !plain_ro_worker
+                .allowlist
+                .contains(&"local.web.search".to_owned())
+        );
         assert!(
             !plain_ro_worker
                 .allowlist

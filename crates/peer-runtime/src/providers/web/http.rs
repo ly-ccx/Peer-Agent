@@ -79,7 +79,7 @@ pub(super) fn normalize(raw: &str, base: Option<&Url>) -> Result<Url, &'static s
     };
     Ok(url)
 }
-async fn wait<T>(
+pub(super) async fn wait<T>(
     future: impl Future<Output = T>,
     port: &EffectAdmission,
     cancel: &CancellationToken,

@@ -8,12 +8,17 @@ use std::{
 use tokio::sync::Semaphore;
 mod http;
 mod publication;
+mod search;
 mod text;
 static MEMORY: OnceLock<Arc<Semaphore>> = OnceLock::new();
 pub(super) struct WebProvider;
 struct Fetch {
     args: Value,
     home: PathBuf,
+    port: Option<EffectAdmission>,
+}
+struct Search {
+    args: Value,
     port: Option<EffectAdmission>,
 }
 struct Guard {
@@ -54,11 +59,18 @@ impl Guard {
 }
 impl CapabilityProvider for WebProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
-        let v: Value = serde_json::from_str(include_str!(
+        let fetch: Value = serde_json::from_str(include_str!(
             "../../../../packages/protocol/contracts/native-cli/web-fetch.json"
         ))
-        .expect("compiled web manifest");
-        vec![("web_fetch".into(), v["manifest"].clone())]
+        .expect("compiled web-fetch manifest");
+        let search: Value = serde_json::from_str(include_str!(
+            "../../../../packages/protocol/contracts/native-cli/web-search.json"
+        ))
+        .expect("compiled web-search manifest");
+        vec![
+            ("web_fetch".into(), fetch["manifest"].clone()),
+            ("web_search".into(), search["manifest"].clone()),
+        ]
     }
     fn prepare(
         &mut self,
@@ -67,25 +79,61 @@ impl CapabilityProvider for WebProvider {
         _workspace: &Path,
         home: &Path,
     ) -> Result<Box<dyn PreparedEffect>, HostError> {
-        if capability != "local.web.fetch" {
-            return Err(HostError("tool_not_projected"));
-        };
-        validate_shape(&args, &["url", "waitForRender", "timeoutMs"])?;
-        if args["url"].as_str().is_none() {
-            return Err(HostError("invalid_url"));
+        match capability {
+            "local.web.fetch" => {
+                validate_shape(&args, &["url", "waitForRender", "timeoutMs"])?;
+                if args["url"].as_str().is_none() {
+                    return Err(HostError("invalid_url"));
+                }
+                if args.get("waitForRender").is_some_and(|v| !v.is_boolean())
+                    || args.get("timeoutMs").is_some_and(|v| !v.is_number())
+                {
+                    return Err(HostError("tool_arguments_invalid"));
+                }
+                if args["url"].as_str().unwrap().len() > 16384 {
+                    return Err(HostError("web_url_limit"));
+                }
+                Ok(Box::new(Fetch {
+                    args,
+                    home: home.into(),
+                    port: None,
+                }))
+            }
+            "local.web.search" => {
+                search::validate_args(&args)?;
+                Ok(Box::new(Search { args, port: None }))
+            }
+            _ => Err(HostError("tool_not_projected")),
         }
-        if args.get("waitForRender").is_some_and(|v| !v.is_boolean())
-            || args.get("timeoutMs").is_some_and(|v| !v.is_number())
-        {
-            return Err(HostError("tool_arguments_invalid"));
-        }
-        if args["url"].as_str().unwrap().len() > 16384 {
-            return Err(HostError("web_url_limit"));
-        }
-        Ok(Box::new(Fetch {
-            args,
-            home: home.into(),
-            port: None,
+    }
+}
+impl PreparedEffect for Search {
+    fn args(&self) -> &Value {
+        &self.args
+    }
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::Read
+    }
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        Ok(vec![])
+    }
+    fn admission(&mut self, port: EffectAdmission) {
+        self.port = Some(port)
+    }
+    fn evidence(&self) -> Option<Value> {
+        Some(json!({"operation":"web_search"}))
+    }
+    fn start(
+        mut self: Box<Self>,
+        _call: ProviderCall,
+        cancel: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .port
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        Ok(Box::pin(async move {
+            search::execute(&self.args, port, cancel).await
         }))
     }
 }

@@ -21,6 +21,7 @@ async fn correlation_facts_without_host_admission_cannot_start_any_local_effect(
         ),
         ("git_query", json!({"path":"."})),
         ("web_fetch", json!({"url":"http://127.0.0.1:9"})),
+        ("web_search", json!({"query":"agent client protocol"})),
         (
             "bash",
             json!({"command":"printf forbidden > never-shell.txt"}),

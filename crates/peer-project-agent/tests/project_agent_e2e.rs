@@ -8333,13 +8333,14 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
     host.ensure_lease(&ws_id).unwrap();
     let cancel = CancellationToken::new();
 
-    // 1. User requests read-only web research. Main Bot must NOT have `web_fetch`,
-    //    and spawns a `readOnly: true, capabilityPreset: "web_research"` worker.
+    // 1. User requests read-only web research. Main Bot must NOT have `web_fetch`
+    //    or `web_search`, and spawns a `readOnly: true, capabilityPreset: "web_research"` worker.
     let spawn_bot = start_mock_server(vec![
         Box::new(|req| {
             let tools = tool_names_from_request(req);
             assert!(
-                !tools.contains(&"web_fetch".to_string()),
+                !tools.contains(&"web_fetch".to_string())
+                    && !tools.contains(&"web_search".to_string()),
                 "main bot must remain offline: {tools:?}"
             );
             sse_tool_call(
@@ -8391,16 +8392,24 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
         serde_json::from_value(first_plan["delegationOrigin"]["requiredCapabilities"].clone())
             .unwrap();
     assert!(
+        first_req_caps.contains(&"local.web.search".to_owned()),
+        "web_research + readOnly=true must retain local.web.search: {first_req_caps:?}"
+    );
+    assert!(
         first_req_caps.contains(&"local.web.fetch".to_owned()),
         "web_research + readOnly=true must retain local.web.fetch: {first_req_caps:?}"
     );
 
-    // 2. Worker receives `web_fetch` (without write/shell), deliberately calls an
-    //    unprojected tool (`web_search`), recovers cleanly from the denied tool
+    // 2. Worker receives `web_search` and `web_fetch` (without write/shell), deliberately calls an
+    //    unprojected tool (`browser_open_panel`), recovers cleanly from the denied tool
     //    result listing available tools, reads `readme.md`, and completes.
     let worker_server = start_mock_server(vec![
         Box::new(|req| {
             let tools = tool_names_from_request(req);
+            assert!(
+                tools.contains(&"web_search".to_string()),
+                "read-only web_research worker must receive web_search: {tools:?}"
+            );
             assert!(
                 tools.contains(&"web_fetch".to_string()),
                 "read-only web_research worker must receive web_fetch: {tools:?}"
@@ -8413,9 +8422,9 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
                 );
             }
             sse_tool_call(
-                "hallucinated-search",
-                "web_search",
-                &json!({"query": "Agent Client Protocol"}),
+                "hallucinated-browser",
+                "browser_open_panel",
+                &json!({"url": "https://agentclientprotocol.com"}),
             )
         }),
         Box::new(|req| {
@@ -8425,22 +8434,24 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
                 "expected recoverable tool_not_projected denial, got: {denied}"
             );
             assert!(
-                denied.contains("web_fetch"),
-                "expected denial to list available projected tools including web_fetch, got: {denied}"
+                denied.contains("web_search") && denied.contains("web_fetch"),
+                "expected denial to list available projected tools including web_search & web_fetch, got: {denied}"
             );
             sse_tool_call("fallback-read", "read_file", &json!({"path": "readme.md"}))
         }),
         Box::new(|req| {
             let read_res = latest_autonomy_tool_result(req);
             assert!(read_res.contains("ACP local spec notes"), "{read_res}");
-            sse_text("Completed read-only research after falling back from unprojected web_search.")
+            sse_text(
+                "Completed read-only research after falling back from unprojected browser_open_panel.",
+            )
         }),
     ]);
     let verifier_server = start_mock_server(vec![Box::new(|req| {
         let tools = tool_names_from_request(req);
         assert!(
-            !tools.contains(&"web_fetch".to_string()),
-            "independent verifier must never receive web_fetch: {tools:?}"
+            !tools.contains(&"web_fetch".to_string()) && !tools.contains(&"web_search".to_string()),
+            "independent verifier must never receive web_fetch or web_search: {tools:?}"
         );
         assert!(!tools.iter().any(|t| matches!(
             t.as_str(),
@@ -8541,6 +8552,7 @@ async fn web_research_readonly_projects_web_fetch_recovers_from_unprojected_tool
     let second_caps: Vec<String> =
         serde_json::from_value(second_plan["delegationOrigin"]["requiredCapabilities"].clone())
             .unwrap();
+    assert!(second_caps.contains(&"local.web.search".to_owned()));
     assert!(second_caps.contains(&"local.web.fetch".to_owned()));
     let second_anchors: Vec<String> =
         serde_json::from_value(second_plan["delegationOrigin"]["anchorMessageIds"].clone())

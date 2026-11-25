@@ -83,6 +83,8 @@ export function toolPresentation(name: string): { labelKey: TranslationKey; icon
   if (name === 'view_image') return { labelKey: 'projectAgent.process.image', icon: 'image' };
   if (/^(read_file|read_files|list_files|list_directory)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.read', icon: 'fileText' };
   if (/^(search_files|search_text|search|rg|search_conversation)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.search', icon: 'fileText' };
+  if (name === 'web_search') return { labelKey: 'projectAgent.chat.toolLabel.webSearch', icon: 'globe' };
+  if (name === 'web_fetch') return { labelKey: 'projectAgent.chat.toolLabel.webFetch', icon: 'globe' };
   if (/^(write_file|edit_file|apply_patch)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.edit', icon: 'fileText' };
   if (/^(bash|run_command|exec_command|shell)$/.test(name)) return { labelKey: 'projectAgent.chat.toolLabel.command', icon: 'terminal' };
   return { labelKey: 'projectAgent.process.tool', icon: 'terminal' };

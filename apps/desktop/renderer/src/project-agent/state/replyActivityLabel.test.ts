@@ -32,6 +32,7 @@ test('only structured tool facts select action language', () => {
     ['memory_remember', '正在更新项目记忆'], ['memory_forget', '正在更新项目记忆'],
     ['list_directory', '正在查看文件目录'], ['list_files', '正在查看文件目录'],
     ['git_query', '正在查看仓库状态'],
+    ['web_search', '正在联网搜索'], ['web_fetch', '正在查阅网页'],
     ['unrecognized_tool', '正在一点一点推进']] as const;
   for (const [name, expected] of cases) {
     assert.equal(label([tool(name)]), expected);

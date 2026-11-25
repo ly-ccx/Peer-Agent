@@ -34,6 +34,8 @@ export function replyActivityLabel(activity: ProjectAgentActivity | undefined, i
       switch (operation) {
         case 'projectAgent.chat.toolLabel.command': return i18n.t('projectAgent.chat.activity.command');
         case 'projectAgent.chat.toolLabel.search': return i18n.t('projectAgent.chat.activity.search');
+        case 'projectAgent.chat.toolLabel.webSearch': return i18n.t('projectAgent.chat.activity.webSearch');
+        case 'projectAgent.chat.toolLabel.webFetch': return i18n.t('projectAgent.chat.activity.webFetch');
         case 'projectAgent.chat.toolLabel.edit': return i18n.t('projectAgent.chat.activity.edit');
         case 'projectAgent.process.verification': return i18n.t('projectAgent.chat.activity.verification');
         case 'projectAgent.process.start': return i18n.t('projectAgent.chat.activity.delegating');
