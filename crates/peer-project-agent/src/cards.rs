@@ -893,15 +893,18 @@ pub fn project_workspace_cards(
                 && p["runner"]["blockedReason"].as_str() == Some("manual_dod_confirmation_required")
             {
                 let empty_msgs = Vec::new();
-                let child_msgs =
-                    if let Some(cid) = p["conversationId"].as_str().filter(|s| !s.is_empty()) {
-                        child_msgs_cache
-                            .entry(cid.to_owned())
-                            .or_insert_with(|| supervisor.child_conversation_messages(cid))
-                            .as_slice()
-                    } else {
-                        empty_msgs.as_slice()
-                    };
+                let child_msgs = if let Some(cid) = p["delegationOrigin"]["workerConversationId"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| p["conversationId"].as_str().filter(|s| !s.is_empty()))
+                {
+                    child_msgs_cache
+                        .entry(cid.to_owned())
+                        .or_insert_with(|| supervisor.child_conversation_messages(cid))
+                        .as_slice()
+                } else {
+                    empty_msgs.as_slice()
+                };
                 let report = build_session_report(p, sid, status, child_msgs);
                 if let Some(mut review) = project_completion_review_for_plan(p, &report) {
                     if let Some(obj) = review.as_object_mut() {

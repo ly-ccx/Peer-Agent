@@ -192,6 +192,7 @@ export function ChatSurface({
   onPendingSendConsumed,
   banner,
   showComposer = true,
+  showHeader = true,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -206,6 +207,8 @@ export function ChatSurface({
   readonly banner?: React.ReactNode;
   /** 流程查看保留状态与批准入口，不提供输入、编辑或排队发送。 */
   readonly showComposer?: boolean;
+  /** 是否显示内置顶部标题栏；无缝嵌入子任务页时由外层紧凑状态条替代。 */
+  readonly showHeader?: boolean;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly automationOrigin?: {
@@ -2370,30 +2373,32 @@ export function ChatSurface({
           </div>
         </div>
       ) : null}
-      <ChatHeader
-        title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
-        automationOrigin={automationOrigin}
-        onOpenAutomationRun={onOpenAutomationRun}
-        isZh={isZh}
-        i18n={i18n}
-        isStreaming={isStreaming}
-        hasScroll={threadScrolled}
-        localAccessLevel={localAccessLevel}
-        taskLine={gitChrome.taskLine}
-        editTriggerRef={headerEditTriggerRef}
-        onOpenTools={onOpenTools}
-        onRename={!isDraftConversation && onRenameConversation && conversationId
-          ? (newTitle) => onRenameConversation(conversationId, newTitle)
-          : undefined}
-        onArchive={!isDraftConversation && onArchiveConversation && conversationId
-          ? () => onArchiveConversation(conversationId)
-          : undefined}
-        onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
-        onFind={() => setFindOpen(true)}
-        onClose={onClose}
-        taskMonitorOpen={taskMonitorOpen}
-        onToggleTaskMonitor={toggleTaskMonitor}
-      />
+      {showHeader ? (
+        <ChatHeader
+          title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
+          automationOrigin={automationOrigin}
+          onOpenAutomationRun={onOpenAutomationRun}
+          isZh={isZh}
+          i18n={i18n}
+          isStreaming={isStreaming}
+          hasScroll={threadScrolled}
+          localAccessLevel={localAccessLevel}
+          taskLine={gitChrome.taskLine}
+          editTriggerRef={headerEditTriggerRef}
+          onOpenTools={onOpenTools}
+          onRename={!isDraftConversation && onRenameConversation && conversationId
+            ? (newTitle) => onRenameConversation(conversationId, newTitle)
+            : undefined}
+          onArchive={!isDraftConversation && onArchiveConversation && conversationId
+            ? () => onArchiveConversation(conversationId)
+            : undefined}
+          onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
+          onFind={() => setFindOpen(true)}
+          onClose={onClose}
+          taskMonitorOpen={taskMonitorOpen}
+          onToggleTaskMonitor={toggleTaskMonitor}
+        />
+      ) : null}
       <ChatFindBar
         open={findOpen}
         containerRef={threadRef}

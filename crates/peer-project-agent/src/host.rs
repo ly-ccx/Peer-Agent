@@ -227,10 +227,7 @@ impl NativeProjectHost {
     pub fn interactive_results(&self) -> &InteractiveResultStore {
         &self.interactive_results
     }
-    pub fn set_interactive_bridge(
-        &self,
-        bridge: Option<Arc<dyn crate::InteractiveContentBridge>>,
-    ) {
+    pub fn set_interactive_bridge(&self, bridge: Option<Arc<dyn crate::InteractiveContentBridge>>) {
         self.supervisor.set_interactive_bridge(bridge);
     }
     pub fn set_interactive_enabled_override(&self, enabled: Option<bool>) {
@@ -2290,9 +2287,12 @@ impl NativeProjectHost {
             .as_str()
             .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?
             .to_owned();
-        let child_msgs = self
-            .supervisor
-            .child_conversation_messages(plan["conversationId"].as_str().unwrap_or(session_id));
+        let child_conv_id = plan["delegationOrigin"]["workerConversationId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| plan["conversationId"].as_str())
+            .unwrap_or(session_id);
+        let child_msgs = self.supervisor.child_conversation_messages(child_conv_id);
         let report = build_session_report(
             &plan,
             session_id,

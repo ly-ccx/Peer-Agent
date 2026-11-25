@@ -854,13 +854,13 @@ pub fn build_session_report(
     out.insert("keyFindings".into(), json!(findings));
     out.insert("changedFiles".into(), json!(changed_files));
     out.insert("evidenceRefs".into(), json!(evidence_refs));
-    if let Some(code) = opt_str(&plan["failure"]["code"])
-        .or_else(|| opt_str(&plan["delegationOrigin"]["error"]))
+    if let Some(code) =
+        opt_str(&plan["failure"]["code"]).or_else(|| opt_str(&plan["delegationOrigin"]["error"]))
     {
         let mut fail = Map::new();
         fail.insert("code".into(), json!(code));
-        if let Some(msg) = opt_str(&plan["failure"]["message"])
-            .or_else(|| opt_str(&plan["failure"]["detail"]))
+        if let Some(msg) =
+            opt_str(&plan["failure"]["message"]).or_else(|| opt_str(&plan["failure"]["detail"]))
         {
             fail.insert("message".into(), json!(msg));
         }
@@ -882,7 +882,10 @@ pub fn build_session_report(
         if let Some(msg) = worker {
             src.insert(
                 "conversationId".into(),
-                plan.get("conversationId").cloned().unwrap_or(Value::Null),
+                opt_str(&plan["delegationOrigin"]["workerConversationId"])
+                    .or_else(|| opt_str(&plan["conversationId"]))
+                    .map(|s| json!(s))
+                    .unwrap_or(Value::Null),
             );
             src.insert(
                 "messageId".into(),
@@ -1213,7 +1216,12 @@ fn build_review_attempts(plan: &Value) -> Vec<Value> {
     let finished_indices: Vec<usize> = runs
         .iter()
         .enumerate()
-        .filter(|(_, r)| matches!(r["status"].as_str(), Some("passed" | "failed" | "interrupted")))
+        .filter(|(_, r)| {
+            matches!(
+                r["status"].as_str(),
+                Some("passed" | "failed" | "interrupted")
+            )
+        })
         .map(|(i, _)| i)
         .collect();
     let last_finished = finished_indices.last().copied();
@@ -1238,7 +1246,9 @@ fn build_review_attempts(plan: &Value) -> Vec<Value> {
                 .or_else(|| opt_str(&run["startedAt"]))
                 .unwrap_or("")
                 .to_owned();
-            let fallback_report = (Some(idx) == last_finished).then_some(current_report).flatten();
+            let fallback_report = (Some(idx) == last_finished)
+                .then_some(current_report)
+                .flatten();
             let embedded_report = run.get("report").filter(|v| v.is_object());
             let report_src = embedded_report.or(fallback_report);
 
@@ -1253,10 +1263,14 @@ fn build_review_attempts(plan: &Value) -> Vec<Value> {
                     .unwrap_or("verification_failed")
                     .to_owned()
             };
-            let failed_criteria =
-                normalize_diagnostic_criteria(report_src.and_then(|r| r.get("failedCriteria")), "criterionId");
-            let missing_evidence =
-                normalize_diagnostic_criteria(report_src.and_then(|r| r.get("missingEvidence")), "taskId");
+            let failed_criteria = normalize_diagnostic_criteria(
+                report_src.and_then(|r| r.get("failedCriteria")),
+                "criterionId",
+            );
+            let missing_evidence = normalize_diagnostic_criteria(
+                report_src.and_then(|r| r.get("missingEvidence")),
+                "taskId",
+            );
             let risks: Vec<String> = report_src
                 .and_then(|r| r["risks"].as_array())
                 .into_iter()
@@ -1710,10 +1724,11 @@ fn project_session_value(
     let source_rev = verification_content_hash(plan, &report_without_status);
     let obs_rev = session_observation_revision(plan, &source_rev);
 
-    let conv_created_at = if summary.conversation_id.is_empty() {
+    let spawn_conv_id = opt_str(&plan["conversationId"]).unwrap_or(&summary.conversation_id);
+    let conv_created_at = if spawn_conv_id.is_empty() {
         String::new()
     } else {
-        supervisor.conversation_created_at(&summary.conversation_id)
+        supervisor.conversation_created_at(spawn_conv_id)
     };
     let spawned_at = if !conv_created_at.is_empty() {
         conv_created_at
@@ -2630,7 +2645,10 @@ mod tests {
         );
         assert_eq!(active.total_count, 1);
         assert_eq!(active.sessions[0]["sessionId"], "sess-verify-fail");
-        assert_eq!(active.sessions[0]["followUp"]["reason"], "verification_failed");
+        assert_eq!(
+            active.sessions[0]["followUp"]["reason"],
+            "verification_failed"
+        );
 
         let history_failed = list_sessions_paged(
             home,
@@ -2644,18 +2662,29 @@ mod tests {
         );
         assert_eq!(history_failed.total_count, 1);
         assert_eq!(history_failed.sessions[0]["sessionId"], "sess-exec-fail");
-        assert_eq!(history_failed.sessions[0]["followUp"]["inCurrentList"], false);
-        assert_eq!(history_failed.sessions[0]["followUp"]["reason"], "execution_failed");
+        assert_eq!(
+            history_failed.sessions[0]["followUp"]["inCurrentList"],
+            false
+        );
+        assert_eq!(
+            history_failed.sessions[0]["followUp"]["reason"],
+            "execution_failed"
+        );
 
         let exec_detail = get_session_projected(home, "sess-exec-fail", Some("report")).unwrap();
-        assert_eq!(exec_detail["report"]["failure"]["code"], "tool_not_projected");
+        assert_eq!(
+            exec_detail["report"]["failure"]["code"],
+            "tool_not_projected"
+        );
         assert!(exec_detail["report"].get("verification").is_none());
 
         let vf_detail = get_session_projected(home, "sess-verify-fail", Some("report")).unwrap();
         let ver = &vf_detail["report"]["verification"];
         assert_eq!(ver["outcome"], "failed");
         assert_eq!(ver["summary"], "Verifier could not locate test artifact");
-        let attempts = ver["reviewAttempts"].as_array().expect("reviewAttempts array");
+        let attempts = ver["reviewAttempts"]
+            .as_array()
+            .expect("reviewAttempts array");
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0]["verifierRunId"], "vrun-1");
         assert_eq!(attempts[0]["status"], "failed");
@@ -2663,5 +2692,150 @@ mod tests {
         assert_eq!(attempts[1]["verifierRunId"], "vrun-2");
         assert_eq!(attempts[1]["failureReason"], "Missing test evidence");
         assert_eq!(attempts[1]["failedCriteria"][0]["reason"], "No test log");
+    }
+
+    #[test]
+    fn worker_conversation_id_takes_precedence_over_plan_stub_conversation() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let ws_dir = dir.path().join("repo");
+        fs::create_dir_all(&ws_dir).unwrap();
+        let reg = ProjectRegistry::new(home)
+            .register(&ws_dir.to_string_lossy(), None)
+            .unwrap();
+        let ws_id = reg.workspace_id;
+
+        let conv_store = ConversationStore::new(home);
+        let parent_conv = conv_store
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Bot",
+                    workspace_id: &ws_id,
+                    workspace_path: Some(&reg.path),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: "2026-11-25T02:00:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let parent_id = parent_conv["id"].as_str().unwrap().to_owned();
+        let stub_conv = conv_store
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Stub Task",
+                    workspace_id: &ws_id,
+                    workspace_path: Some(&reg.path),
+                    role: "work_session",
+                    parent_conversation_id: Some(&parent_id),
+                    mode: "goal",
+                    created_at: "2026-11-25T02:01:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let stub_id = stub_conv["id"].as_str().unwrap().to_owned();
+        conv_store
+            .append_message_idempotent(
+                &stub_id,
+                &json!({
+                    "id": format!("brief-{stub_id}"),
+                    "role": "user",
+                    "content": "Brief only",
+                    "createdAt": "2026-11-25T02:01:00.000Z",
+                }),
+                "2026-11-25T02:01:00.000Z",
+                None,
+            )
+            .unwrap();
+
+        let worker_conv = conv_store
+            .create_with_model(
+                &peer_store::NewConversation {
+                    title: "Stub Task",
+                    workspace_path: Some(&reg.path),
+                    mode: "chat",
+                    created_at: "2026-11-25T02:01:02.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let worker_id = worker_conv["id"].as_str().unwrap().to_owned();
+        conv_store
+            .append_message_idempotent(
+                &worker_id,
+                &json!({
+                    "id": "worker-msg-1",
+                    "role": "assistant",
+                    "content": "Verified real worker findings.",
+                    "createdAt": "2026-11-25T02:02:00.000Z",
+                }),
+                "2026-11-25T02:02:00.000Z",
+                None,
+            )
+            .unwrap();
+
+        let plan_dir = home.join("goal-plans");
+        fs::create_dir_all(&plan_dir).unwrap();
+        let plan = json!({
+            "planId": "plan-worker-conv",
+            "conversationId": stub_id,
+            "title": "Research ACP",
+            "goal": "Investigate ACP",
+            "status": "completed",
+            "createdAt": "2026-11-25T02:01:00.000Z",
+            "updatedAt": "2026-11-25T02:02:00.000Z",
+            "tasks": [{ "taskId": "task-1", "title": "Research ACP", "status": "completed", "evidenceRefs": [] }],
+            "delegationOrigin": {
+                "workspaceId": ws_id,
+                "sessionId": stub_id,
+                "parentConversationId": parent_id,
+                "workerConversationId": worker_id,
+                "phase": "completed"
+            }
+        });
+        fs::write(
+            plan_dir.join("plan-worker-conv.json"),
+            serde_json::to_string(&plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            plan_dir.join("index.jsonl"),
+            "{\"planId\":\"plan-worker-conv\"}\n",
+        )
+        .unwrap();
+
+        let sup = SessionSupervisor::new(home, None);
+        let listed = sup.list_sessions(&ws_id);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].session_id, stub_id);
+        assert_eq!(listed[0].conversation_id, worker_id);
+
+        let bot_listed = sup.list_bot_sessions(&ws_id);
+        assert_eq!(bot_listed.len(), 1);
+        assert_eq!(bot_listed[0].session_id, stub_id);
+        assert_eq!(
+            bot_listed[0].conversation_id.as_deref(),
+            Some(worker_id.as_str())
+        );
+
+        let detail = get_session_projected(home, &stub_id, Some("report")).unwrap();
+        assert_eq!(detail["sessionId"], stub_id);
+        assert_eq!(detail["conversationId"], worker_id);
+        assert_eq!(detail["spawnedAt"], "2026-11-25T02:01:00.000Z");
+        assert_eq!(
+            detail["report"]["summary"],
+            "Verified real worker findings."
+        );
+        assert_eq!(
+            detail["report"]["contentSource"]["conversationId"],
+            worker_id
+        );
     }
 }
