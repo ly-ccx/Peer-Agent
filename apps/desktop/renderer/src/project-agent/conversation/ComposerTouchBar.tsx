@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
@@ -40,7 +41,7 @@ export interface TaskWorkspaceTouchBarProps {
 
 export type ComposerTouchBarProps = BotChatTouchBarProps | TaskWorkspaceTouchBarProps;
 
-export function ComposerTouchBar(props: ComposerTouchBarProps) {
+export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTouchBarProps) {
   const isZh = props.i18n.locale.startsWith('zh');
 
   if (props.kind === 'bot') {
@@ -222,4 +223,4 @@ export function ComposerTouchBar(props: ComposerTouchBarProps) {
       </div>
     </div>
   );
-}
+});

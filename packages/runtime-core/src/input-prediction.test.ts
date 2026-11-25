@@ -82,3 +82,29 @@ test('continuation carries the exact prefix; stale owner, mode and invalid expir
     assert.equal(f.controller.getSnapshot().candidate, null);
   }
 });
+
+test('repeated idle cancels and rapid waiting keystrokes do not emit redundant view publications', t => {
+  let notifications = 0;
+  const controller = createInputPredictionController({
+    createId: () => 'id-1',
+    debounceMs: { next_turn: 300, continuation: 500 },
+    apply: () => {},
+    port: {
+      request: async () => ({ kind: 'unavailable', reason: 'noop' }),
+      cancel: async () => {},
+      validate: async () => ({ kind: 'unavailable' }),
+    },
+  });
+  t.after(controller.dispose);
+  controller.subscribe(() => { notifications += 1; });
+  controller.invalidate();
+  controller.invalidate();
+  assert.equal(notifications, 0, 'invalidating an already-idle controller must not publish');
+  controller.update({ ...input, text: 'a', selectionStart: 1, selectionEnd: 1 });
+  assert.equal(notifications, 1, 'entering waiting publishes once, not idle+waiting');
+  controller.update({ ...input, text: 'a', selectionStart: 1, selectionEnd: 1 });
+  assert.equal(notifications, 1, 'identical input updates must be ignored');
+  controller.update({ ...input, text: 'ab', selectionStart: 2, selectionEnd: 2 });
+  controller.update({ ...input, text: 'abc', selectionStart: 3, selectionEnd: 3 });
+  assert.equal(notifications, 1, 'consecutive waiting keystrokes must not emit redundant notifications');
+});

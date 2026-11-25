@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile, InputDraftTaskRef } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
@@ -89,6 +89,119 @@ function formatFailureReason(
   return isZh ? `执行中止（${failure.code}）` : `Execution failed (${failure.code})`;
 }
 
+interface TaskFollowUpFeedback {
+  readonly text: string;
+  readonly error?: boolean;
+}
+
+/** Leaf composer owning followUpText so per-keystroke updates never re-render TaskWorkspaceView or ChatSurface. */
+const TaskFollowUpComposer = memo(function TaskFollowUpComposer({
+  workspaceId,
+  sessionId,
+  title,
+  botDisplayName,
+  answerTo,
+  i18n,
+  isZh,
+  onFeedback,
+}: {
+  readonly workspaceId: string;
+  readonly sessionId: string;
+  readonly title: string;
+  readonly botDisplayName: string;
+  readonly answerTo?: string;
+  readonly i18n: I18nRuntime;
+  readonly isZh: boolean;
+  readonly onFeedback: (feedback: TaskFollowUpFeedback | null) => void;
+}) {
+  const [followUpText, setFollowUpText] = useState('');
+  const [sendingFollowUp, setSendingFollowUp] = useState(false);
+  const [permissionSaving, setPermissionSaving] = useState(false);
+  const composition = useCompositionGuard();
+
+  useEffect(() => {
+    setFollowUpText('');
+    setSendingFollowUp(false);
+  }, [sessionId]);
+
+  const handleSendFollowUp = useCallback(async () => {
+    const trimmed = followUpText.trim();
+    if (!trimmed || sendingFollowUp) return;
+    setSendingFollowUp(true);
+    onFeedback(null);
+    try {
+      const result = await clientApi.projectAgentSubmitInput({
+        workspaceId,
+        inputId: crypto.randomUUID(),
+        text: trimmed,
+        surface: 'desktop',
+        taskRefs: [sessionId],
+        ...(answerTo ? { answerTo } : {}),
+      });
+      if (!result?.ok) {
+        onFeedback({
+          text: isZh ? `发送失败（${result?.code || 'FAILED'}），原输入已保留。` : `Failed to send (${result?.code || 'FAILED'}).`,
+          error: true,
+        });
+      } else {
+        setFollowUpText('');
+        onFeedback({
+          text: isZh ? `已发送给 ${botDisplayName}` : `Sent to ${botDisplayName}`,
+        });
+      }
+    } finally {
+      setSendingFollowUp(false);
+    }
+  }, [followUpText, sendingFollowUp, answerTo, workspaceId, sessionId, isZh, botDisplayName, onFeedback]);
+
+  return (
+    <form
+      className="bot-task-followup-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleSendFollowUp();
+      }}
+    >
+      <textarea
+        rows={1}
+        value={followUpText}
+        disabled={sendingFollowUp}
+        placeholder={isZh ? `围绕「${title}」追问或补充说明…` : `Ask a follow-up about "${title}"…`}
+        aria-label={isZh ? '围绕当前任务追问' : 'Task follow-up'}
+        onChange={(e) => setFollowUpText(e.target.value)}
+        onCompositionStart={(e) => composition.start(e.currentTarget)}
+        onCompositionEnd={(e) => composition.end(e.currentTarget)}
+        onKeyUp={(e) => composition.keyUp(e.nativeEvent)}
+        onBlur={() => composition.reset()}
+        onKeyDown={(e) => {
+          if (composition.keyDown(e.nativeEvent)) return;
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            void handleSendFollowUp();
+          }
+        }}
+      />
+      <div className="bot-task-followup-foot bot-composer-bar">
+        <div className="bot-task-followup-leading">
+          <BotAccessControl workspaceId={workspaceId} i18n={i18n} onSavingChange={setPermissionSaving} />
+          <span className="bot-task-followup-hint">
+            {isZh ? `围绕当前任务发送给 ${botDisplayName}` : `Sends to ${botDisplayName} with task context`}
+          </span>
+        </div>
+        <button
+          type="submit"
+          className="bot-task-send-btn"
+          disabled={sendingFollowUp || permissionSaving || !followUpText.trim()}
+          aria-label={i18n.t('projectAgent.chat.send')}
+          title={i18n.t('projectAgent.chat.send')}
+        >
+          <PeerIcon name="send" size={16} />
+        </button>
+      </div>
+    </form>
+  );
+});
+
 export function TaskWorkspaceView({
   workspaceId,
   workspacePath,
@@ -115,12 +228,8 @@ export function TaskWorkspaceView({
   const [pendingApproval, setPendingApproval] = useState<PendingTaskApproval | null>(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [verifyBusy, setVerifyBusy] = useState(false);
-  const [feedback, setFeedback] = useState<{ readonly text: string; readonly error?: boolean } | null>(null);
-  const [followUpText, setFollowUpText] = useState('');
-  const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [permissionSaving, setPermissionSaving] = useState(false);
+  const [feedback, setFeedback] = useState<TaskFollowUpFeedback | null>(null);
   const [liveTick, setLiveTick] = useState(0);
-  const composition = useCompositionGuard();
   const cancellation = useTaskCancellation();
 
   const reportRead = useTaskReport(
@@ -268,36 +377,15 @@ export function TaskWorkspaceView({
     }
   }, [verifyBusy, workspaceId, sessionId, isZh, onRefreshSessions, reportRead]);
 
-  const handleSendFollowUp = useCallback(async () => {
-    const trimmed = followUpText.trim();
-    if (!trimmed || sendingFollowUp) return;
-    setSendingFollowUp(true);
-    setFeedback(null);
-    try {
-      const answerTo = context?.question?.cardId;
-      const result = await clientApi.projectAgentSubmitInput({
-        workspaceId,
-        inputId: crypto.randomUUID(),
-        text: trimmed,
-        surface: 'desktop',
-        taskRefs: [sessionId],
-        ...(answerTo ? { answerTo } : {}),
-      });
-      if (!result?.ok) {
-        setFeedback({
-          text: isZh ? `发送失败（${result?.code || 'FAILED'}），原输入已保留。` : `Failed to send (${result?.code || 'FAILED'}).`,
-          error: true,
-        });
-      } else {
-        setFollowUpText('');
-        setFeedback({
-          text: isZh ? `已发送给 ${profile.displayName}` : `Sent to ${profile.displayName}`,
-        });
-      }
-    } finally {
-      setSendingFollowUp(false);
-    }
-  }, [followUpText, sendingFollowUp, context?.question?.cardId, workspaceId, sessionId, isZh, profile.displayName]);
+  const originMessageId = context?.messageId || session?.anchorMessageId || undefined;
+  const sceneTask = useMemo(
+    () => (session?.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined),
+    [session?.sessionId, session?.planId],
+  );
+  const handleBackFromScene = useCallback(
+    () => onBackToBot(originMessageId),
+    [onBackToBot, originMessageId],
+  );
 
   if (!session) {
     return (
@@ -334,7 +422,6 @@ export function TaskWorkspaceView({
       : ended
         ? (session.status === 'accepted' ? 'good' : 'muted')
         : 'azure';
-  const originMessageId = context?.messageId || session.anchorMessageId || undefined;
   const cancelState = cancellation?.states[`${workspaceId}:${sessionId}`];
 
   const taskRefPayload: InputDraftTaskRef = {
@@ -449,7 +536,7 @@ export function TaskWorkspaceView({
             <ConversationSceneDrawer
               embedded
               seamless
-              task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined}
+              task={sceneTask}
               workspaceId={workspaceId}
               workspacePath={workspacePath}
               conversationId={session.conversationId}
@@ -458,8 +545,8 @@ export function TaskWorkspaceView({
               title={title}
               i18n={i18n}
               isZh={isZh}
-              onClose={() => onBackToBot(originMessageId)}
-              onOpenBot={() => onBackToBot(originMessageId)}
+              onClose={handleBackFromScene}
+              onOpenBot={handleBackFromScene}
             />
           ) : (
             <div className="bot-task-empty-stage">
@@ -510,50 +597,16 @@ export function TaskWorkspaceView({
                 isZh ? `请基于「${title}」的范围与验收标准重新执行。` : `Please re-run based on "${title}".`,
               )}
             />
-            <form
-              className="bot-task-followup-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void handleSendFollowUp();
-              }}
-            >
-              <textarea
-                rows={1}
-                value={followUpText}
-                disabled={sendingFollowUp}
-                placeholder={isZh ? `围绕「${title}」追问或补充说明…` : `Ask a follow-up about "${title}"…`}
-                aria-label={isZh ? '围绕当前任务追问' : 'Task follow-up'}
-                onChange={(e) => setFollowUpText(e.target.value)}
-                onCompositionStart={(e) => composition.start(e.currentTarget)}
-                onCompositionEnd={(e) => composition.end(e.currentTarget)}
-                onKeyUp={(e) => composition.keyUp(e.nativeEvent)}
-                onBlur={() => composition.reset()}
-                onKeyDown={(e) => {
-                  if (composition.keyDown(e.nativeEvent)) return;
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void handleSendFollowUp();
-                  }
-                }}
-              />
-              <div className="bot-task-followup-foot bot-composer-bar">
-                <div className="bot-task-followup-leading">
-                  <BotAccessControl workspaceId={workspaceId} i18n={i18n} onSavingChange={setPermissionSaving} />
-                  <span className="bot-task-followup-hint">
-                    {isZh ? `围绕当前任务发送给 ${profile.displayName}` : `Sends to ${profile.displayName} with task context`}
-                  </span>
-                </div>
-                <button
-                  type="submit"
-                  className="bot-task-send-btn"
-                  disabled={sendingFollowUp || permissionSaving || !followUpText.trim()}
-                  aria-label={i18n.t('projectAgent.chat.send')}
-                  title={i18n.t('projectAgent.chat.send')}
-                >
-                  <PeerIcon name="send" size={16} />
-                </button>
-              </div>
-            </form>
+            <TaskFollowUpComposer
+              workspaceId={workspaceId}
+              sessionId={sessionId}
+              title={title}
+              botDisplayName={profile.displayName}
+              answerTo={context?.question?.cardId}
+              i18n={i18n}
+              isZh={isZh}
+              onFeedback={setFeedback}
+            />
           </div>
         </div>
       </div>

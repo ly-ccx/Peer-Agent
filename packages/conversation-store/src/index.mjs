@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFi
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
-import { readPersistedHistoryFiles } from './persisted-history.mjs';
+import { readPersistedHistoryFiles, readPersistedHistoryTailFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
 import { createInteractionReader } from './interaction-reader.mjs';
 import { createHistorySourceReader, createListPreviewSource } from './history-source-reader.mjs';
@@ -1183,9 +1183,17 @@ export function createConversationStore(options = {}) {
       return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
         version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
     };
+    const tailLimit = Number.isInteger(options.tailLimit) && options.tailLimit > 0 ? options.tailLimit : 0;
+    const headLimit = Number.isInteger(options.headLimit) && options.headLimit >= 0 ? options.headLimit : 16;
     return createHistoryProjectionReader({ ...options, project, describe,
-      load: description => historySources(description, { immutableInput: options.immutableInput === true,
-        isCurrent: () => describe(description.conversationId)?.version === description.version }),
+      load: tailLimit > 0
+        ? description => readPersistedHistoryTailFiles({
+          ...description,
+          tailLimit,
+          headLimit,
+        })
+        : description => historySources(description, { immutableInput: options.immutableInput === true,
+          isCurrent: () => describe(description.conversationId)?.version === description.version }),
     });
   }
 

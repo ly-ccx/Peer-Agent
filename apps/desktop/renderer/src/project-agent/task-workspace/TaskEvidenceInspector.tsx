@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
@@ -21,7 +21,7 @@ export interface TaskEvidenceInspectorProps {
   readonly onSelectSession?: (sessionId: string) => void;
 }
 
-export function TaskEvidenceInspector({
+export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
   open,
   overlay,
   workspaceId,
@@ -180,4 +180,4 @@ export function TaskEvidenceInspector({
       </div>
     </aside>
   );
-}
+});
