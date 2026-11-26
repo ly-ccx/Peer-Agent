@@ -187,6 +187,7 @@ export function BotMessageList({
           <UserBubble
             key={conversationRowKey(row)}
             message={row.message}
+            workspaceId={workspaceId}
             replied={replied.has(row.message.id)}
             workIndex={workIndex}
             anchors={anchors}

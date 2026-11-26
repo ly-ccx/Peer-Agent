@@ -313,6 +313,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:mark-read',
   'project-agent:read-avatar',
   'project-agent:read-conversation',
+  'project-agent:read-input-image',
   'project-agent:read-evidence',
   'project-agent:rebind-folder',
   'project-agent:search',

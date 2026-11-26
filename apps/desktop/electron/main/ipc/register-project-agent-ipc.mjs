@@ -24,6 +24,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     readInputDraft: assertFunction(projectAgent?.readInputDraft, 'projectAgent.readInputDraft'),
     writeInputDraft: assertFunction(projectAgent?.writeInputDraft, 'projectAgent.writeInputDraft'),
     readConversation: assertFunction(projectAgent?.readConversation, 'projectAgent.readConversation'),
+    readInputImage: assertFunction(projectAgent?.readInputImage, 'projectAgent.readInputImage'),
     stopResponse: assertFunction(projectAgent?.stopResponse, 'projectAgent.stopResponse'),
     readEvidence: assertFunction(projectAgent?.readEvidence, 'projectAgent.readEvidence'),
     listSessions: assertFunction(projectAgent?.listSessions, 'projectAgent.listSessions'),
@@ -68,6 +69,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:read-input-draft', (_event, payload) => ports.readInputDraft(payload));
       ipc.handle('project-agent:write-input-draft', (_event, payload) => ports.writeInputDraft(payload));
       ipc.handle('project-agent:read-conversation', (_event, payload) => ports.readConversation(payload));
+      ipc.handle('project-agent:read-input-image', (_event, payload) => ports.readInputImage(payload));
       ipc.handle('project-agent:stop-response', (_event, payload) => ports.stopResponse(payload));
       ipc.handle('project-agent:read-evidence', (_event, payload) => ports.readEvidence(payload));
       ipc.handle('project-agent:list-sessions', (_event, payload) => ports.listSessions(payload));

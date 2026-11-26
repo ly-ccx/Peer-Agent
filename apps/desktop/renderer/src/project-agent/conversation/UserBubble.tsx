@@ -11,6 +11,7 @@ import type { BotWorkIndex } from '../state/botWorkState';
 
 export function UserBubble({
   message,
+  workspaceId,
   replied,
   highlighted = false,
   workIndex,
@@ -21,6 +22,7 @@ export function UserBubble({
   onLocateSession,
 }: {
   readonly message: BotChatMessage;
+  readonly workspaceId: string;
   readonly replied: boolean;
   readonly highlighted?: boolean;
   readonly workIndex?: BotWorkIndex;
@@ -65,7 +67,7 @@ export function UserBubble({
           <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
             excerpt={excerpt} className="bot-user-quote" i18n={i18n} onJump={onJump} />
         ) : null}
-        {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
+        {message.attachments?.length ? <BotAttachments attachments={message.attachments} workspaceId={workspaceId} i18n={i18n} /> : message.images?.length ? (
           <div className="bot-user-images">
             {message.images.map((image) => (
               <img key={image.id} src={image.dataUrl} alt={image.name} />
