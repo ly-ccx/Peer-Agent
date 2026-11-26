@@ -19,8 +19,20 @@ html[data-vibrancy='true'] .bot-resource-pane > .resource-workspace-resizer { to
 .bot-resource-pane[data-resource-exit-full='true'] { position: absolute; right: 0; max-width: 100% !important; z-index: 1; }
 .resource-workspace[data-resource-exiting='true'] { width: var(--resource-retained-width) !important; min-width: var(--resource-retained-width); flex-shrink: 0; transition: none; }
 .bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-column { display: none; }
-.bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-main { margin-inline-start: 0; }
-/* 列表收起后对话贴到窗口左缘。交通灯仍在左上，标题行只右移，不增加高度。 */
+/* 毛玻璃壳已有外侧留白，收起列表时不再叠加列间距。实色壳只在折叠态补左缘间距。 */
+.bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-main {
+  margin-inline-start: var(--resource-collapsed-inline-gap);
+}
+:root:not([data-vibrancy='true']) .bot-resource-layout {
+  --resource-collapsed-inline-gap: var(--space-2, 8px);
+}
+html[data-vibrancy='true'] .bot-resource-layout {
+  --resource-collapsed-inline-gap: 0px;
+}
+:root:not([data-vibrancy='true']) .bot-resource-layout[data-resource-navigation-collapsed='true'] .bot-shell {
+  background: var(--chrome-canvas);
+}
+/* 交通灯仍在窗口左上，折叠后的标题行只右移，不增加高度。 */
 :root[data-os='darwin'] .bot-resource-layout[data-resource-navigation-collapsed='true']:not([data-resource-full='true']) .bot-main-head {
   padding-left: 78px;
 }

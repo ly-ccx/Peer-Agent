@@ -540,6 +540,23 @@ export function BotListShell({
     setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
   }, [opened, openBotView, revealPrimary]);
 
+  const sidebarExpandButton = nav.sidebarCollapsed || resources?.navigationCollapsed ? (
+    <button
+      type="button"
+      className="bot-profile is-icon bot-sidebar-expand"
+      aria-label={isZh ? '展开侧栏' : 'Expand sidebar'}
+      title={resources?.navigationCollapsed
+        ? (isZh ? '收起资源并显示机器人列表' : 'Close resources and show Bot list')
+        : (isZh ? '展开侧栏' : 'Expand sidebar')}
+      onClick={() => {
+        if (resources?.navigationCollapsed) resources.close();
+        setNav((current) => toggleSidebarCollapsed(current, false));
+      }}
+    >
+      <PeerIcon name="panelLeft" size={16} />
+    </button>
+  ) : null;
+
   return (
     <TaskCancellationProvider workspaceId={opened?.workspaceId ?? null} onRefresh={work.reload}>
     <div
@@ -553,7 +570,6 @@ export function BotListShell({
         aria-hidden={nav.sidebarCollapsed}
         inert={nav.sidebarCollapsed || undefined}
       >
-        <UpgradeBanner i18n={i18n} />
         <div className="bot-sidebar-utilbar">
           <button
             type="button"
@@ -626,6 +642,7 @@ export function BotListShell({
             </svg>
           </button>
         </div>
+        <UpgradeBanner i18n={i18n} />
         {showSearchInput ? <div className="bot-search-frame">
           <PeerIcon name="search" size={13} className="bot-search-icon" />
           <input
@@ -732,6 +749,9 @@ export function BotListShell({
         />
       </aside>
       <section className="bot-main" aria-label={opened?.profile.displayName ?? i18n.t('projectAgent.list.mainEmptyTitle')}>
+        {(pageOverride || !opened) && sidebarExpandButton ? (
+          <header className="bot-main-head">{sidebarExpandButton}</header>
+        ) : null}
         {pageOverride ? (
           <div className="bot-main-page">
             <button type="button" className="bot-back" onClick={onClosePage}>
@@ -751,17 +771,7 @@ export function BotListShell({
         ) : opened ? (
           <div className="bot-main-thread motion-enter-fade" key={opened.workspaceId}>
             <header className="bot-main-head">
-              {nav.sidebarCollapsed ? (
-                <button
-                  type="button"
-                  className="bot-profile is-icon bot-sidebar-expand"
-                  aria-label={isZh ? '展开侧栏' : 'Expand sidebar'}
-                  title={isZh ? '展开侧栏 (⌘\\)' : 'Expand sidebar (⌘\\)'}
-                  onClick={() => setNav((current) => toggleSidebarCollapsed(current, false))}
-                >
-                  <PeerIcon name="panelLeft" size={16} />
-                </button>
-              ) : null}
+              {sidebarExpandButton}
               {activeTaskSessionId ? (
                 <>
                   <nav className="bot-main-crumbs" aria-label={isZh ? '当前位置' : 'Breadcrumb'}>

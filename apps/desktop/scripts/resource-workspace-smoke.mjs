@@ -320,7 +320,7 @@ try {
   await separator.focus(); await separator.press('End');
   assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-maximized'), 'false');
   assert.equal(await draft.isVisible(), true);
-  await page.getByRole('button', { name: '显示机器人列表', exact: true }).click();
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
   await page.locator('.bot-column').waitFor({ state: 'visible' });
   assert.equal(await draft.inputValue(), 'COMPOSER_DRAFT_OK');
   await workspaceButton.click();

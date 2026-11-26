@@ -124,10 +124,12 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     const measure = () => {
       if (!element.isConnected || element.clientWidth <= 0) return;
       const columnElement = element.querySelector('.bot-column');
-      // display:none must not erase the preferred width and cause a collapse/expand loop.
-      const column = columnElement ? Number.parseFloat(getComputedStyle(columnElement).width) || 0 : 0;
-      const gap = Number.parseFloat(getComputedStyle(element).getPropertyValue('--bot-float-gap')) || 0;
-      const next = { ...resourceLayoutBounds(element.clientWidth, column, gap, MAIN_MIN_WIDTH + profileWidth, WORKBENCH_MIN_WIDTH), viewport: element.clientWidth };
+      // Both display:none and the manual width transition must preserve the preferred width.
+      const column = columnElement ? Number.parseFloat(getComputedStyle(columnElement).getPropertyValue('--peer-bot-list-width')) || 0 : 0;
+      const chrome = getComputedStyle(element);
+      const gap = Number.parseFloat(chrome.getPropertyValue('--bot-float-gap')) || 0;
+      const collapsedInlineGap = Number.parseFloat(chrome.getPropertyValue('--resource-collapsed-inline-gap')) || 0;
+      const next = { ...resourceLayoutBounds(element.clientWidth, column, gap, MAIN_MIN_WIDTH + profileWidth, WORKBENCH_MIN_WIDTH, collapsedInlineGap), viewport: element.clientWidth };
       if (next.navigationCollapsed && element.dataset.resourceOpen === 'true' && columnElement?.contains(document.activeElement)) {
         focusAfterIntent.current = true; setFocusRequest(value => value + 1); setFocusArea('primary');
       }
@@ -291,12 +293,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
 
 export function BotResourceButton({ isZh }: { readonly isZh: boolean }) {
   const workspace = useResourceWorkspace();
-  return <>{workspace?.navigationCollapsed ? <button type="button" className="bot-profile is-icon" onClick={() => workspace.close()}
-    title={isZh ? '收起资源并显示机器人列表' : 'Close resources and show Bot list'}
-    aria-label={isZh ? '显示机器人列表' : 'Show Bot list'}><PeerIcon name="panelLeft" size={16} /></button> : null}
-    <button type="button" className="bot-profile is-icon" disabled={!workspace?.ready} onClick={() => workspace?.open && !workspace.detailActive ? workspace.close() : workspace?.launch()}
+  return <button type="button" className="bot-profile is-icon" disabled={!workspace?.ready} onClick={() => workspace?.open && !workspace.detailActive ? workspace.close() : workspace?.launch()}
     aria-label={isZh ? '工作区' : 'Workspace'} aria-expanded={!!workspace?.open && !workspace.detailActive}
     title={!workspace?.ready ? (isZh ? '正在确认机器人会话与来源' : 'Resolving the Bot conversation and source') : workspace.open ? (isZh ? '收起工作区' : 'Collapse workspace') : (isZh ? '打开工作区' : 'Open workspace')}>
     <PeerIcon name="panelRight" size={16} />
-  </button></>;
+  </button>;
 }

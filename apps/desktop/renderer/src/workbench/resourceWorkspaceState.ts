@@ -6,9 +6,9 @@ export interface ResourceWorkspacePreferences {
 export const LAUNCHER_TAB = 'launcher';
 
 /** Collapse navigation before sacrificing either reading surface. No persisted preference changes. */
-export function resourceLayoutBounds(viewport: number, navigation: number, gap: number, mainMin: number, resourceMin: number) {
+export function resourceLayoutBounds(viewport: number, navigation: number, gap: number, mainMin: number, resourceMin: number, collapsedInlineGap: number) {
   const navigationCollapsed = viewport < mainMin + navigation + resourceMin + 3 * gap;
-  const primaryMin = mainMin + (navigationCollapsed ? 0 : navigation) + 2 * gap;
+  const primaryMin = mainMin + (navigationCollapsed ? collapsedInlineGap : navigation) + 2 * gap;
   return { navigationCollapsed, primaryMin, compact: viewport < primaryMin + resourceMin + gap,
     sideMax: Math.max(resourceMin, viewport - primaryMin - gap) };
 }
