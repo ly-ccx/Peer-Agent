@@ -1,5 +1,5 @@
 import type { TranslationKey } from '@peer-agent/i18n';
-import { buildModelMenuGroups, modelMenuChannelName, modelReasoningLevels,
+import { buildModelMenuGroups, modelMenuChannelName, modelReasoningLevels, modelSupportsFastMode, routingParameters,
   type ModelReasoningEffort, type ModelTierBinding, type RoleSetting } from '@peer-agent/protocol';
 
 export const MODEL_TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
@@ -34,12 +34,18 @@ export interface RoutingModelOption {
   readonly defaultReasoningEffort?: ModelReasoningEffort;
 }
 
+export function routingParameterSupport(candidates: readonly RoutingModelOption[]) {
+  const [first] = candidates;
+  return {
+    levels: first ? modelReasoningLevels(first).filter(level => candidates.every(option => modelReasoningLevels(option).includes(level))) : [],
+    supportsFast: candidates.length > 0 && candidates.every(modelSupportsFastMode),
+  };
+}
+
 /** A role override must be usable by every eligible candidate without changing its routing mode. */
 export function routingReasoningLevels(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
   options: readonly RoutingModelOption[], role: ModelRoleName): readonly ModelReasoningEffort[] {
-  const candidates = routingParameterCandidates(setting, tiers, options, { kind: 'role', role });
-  if (!candidates.length) return [];
-  return modelReasoningLevels(candidates[0]!).filter(level => candidates.every(option => modelReasoningLevels(option).includes(level)));
+  return routingParameterSupport(routingParameterCandidates(setting, tiers, options, { kind: 'role', role })).levels;
 }
 
 export function routingParameterCandidates(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
@@ -49,8 +55,40 @@ export function routingParameterCandidates(setting: RoleSetting, tiers: Partial<
     : binding ? [binding.primary, ...(binding.fallbacks ?? [])] : [];
   return ids.flatMap(id => {
     const option = options.find(item => item.id === id);
-    return option && !optionRejectReason(option, target) ? [option] : [];
+    // The service validates tier parameters against all known bindings, even a stale, ineligible vision binding.
+    return option && (target.kind === 'tier' || !optionRejectReason(option, target)) ? [option] : [];
   });
+}
+
+export function changeTierCandidates(tier: ModelTierName, previous: ModelTierBinding, primary: string,
+  fallbacks: readonly string[], options: readonly RoutingModelOption[]): ModelTierBinding {
+  const binding = { ...previous, primary, fallbacks };
+  const { levels, supportsFast } = routingParameterSupport(
+    routingParameterCandidates({ mode: 'tier', tier }, { [tier]: binding }, options, { kind: 'tier', tier }),
+  );
+  const { reasoningEffort, fastMode, ...route } = binding;
+  return {
+    ...route,
+    ...(reasoningEffort !== undefined && levels.includes(reasoningEffort) ? { reasoningEffort } : {}),
+    ...(fastMode !== undefined && (fastMode === false || supportsFast) ? { fastMode } : {}),
+  };
+}
+
+export function compatibleRoleRoute(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
+  options: readonly RoutingModelOption[], role: ModelRoleName): RoleSetting {
+  const { levels, supportsFast } = routingParameterSupport(routingParameterCandidates(setting, tiers, options, { kind: 'role', role }));
+  const effective = routingParameters(setting, tiers);
+  const resetEffort = effective.reasoningEffort !== undefined && !levels.includes(effective.reasoningEffort);
+  const resetFast = effective.fastMode && !supportsFast;
+  const { reasoningEffort, fastMode, ...route } = setting;
+  // On tier routes, omitting a field can reintroduce an incompatible inherited value.
+  return {
+    ...route,
+    ...(resetEffort ? (setting.mode === 'tier' ? { reasoningEffort: null } : {})
+      : reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(resetFast ? (setting.mode === 'tier' ? { fastMode: false } : {})
+      : fastMode !== undefined ? { fastMode } : {}),
+  };
 }
 
 export function setRoutingReasoning(setting: RoleSetting, effort?: ModelReasoningEffort | null): RoleSetting {
