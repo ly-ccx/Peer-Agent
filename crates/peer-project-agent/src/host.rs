@@ -119,6 +119,7 @@ pub struct MaintenanceReport {
     pub curator_learned_ids: Vec<String>,
     pub flushed_digest: bool,
     pub recovered_verifications: usize,
+    pub settled_deliveries: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -764,8 +765,9 @@ impl NativeProjectHost {
             return Ok(None);
         }
         let sessions = self.supervisor.list_sessions(workspace_id);
-        let ready =
-            self.reconcile_deliveries(workspace_id, conv_id, now_ms, false, &batch.events)?;
+        let ready = self
+            .reconcile_deliveries(workspace_id, conv_id, now_ms, false, &batch.events)?
+            .due;
         let mut unrelated_events = Vec::new();
         for event in &batch.events {
             if event["kind"] == "session_verified" && event["payload"]["acceptedBy"] == "policy" {
@@ -1821,13 +1823,15 @@ impl NativeProjectHost {
             })?;
 
         if let Some(conversation_id) = &profile.agent_conversation_id {
-            self.reconcile_deliveries(
-                workspace_id,
-                conversation_id,
-                parse_iso_ms(at_iso).unwrap_or(0),
-                true,
-                &[],
-            )?;
+            report.settled_deliveries = self
+                .reconcile_deliveries(
+                    workspace_id,
+                    conversation_id,
+                    parse_iso_ms(at_iso).unwrap_or(0),
+                    true,
+                    &[],
+                )?
+                .settled;
         }
 
         // 1. Watchdog & delegation facts -> inbox (deduped against supervisor terminal events)

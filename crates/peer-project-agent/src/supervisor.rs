@@ -3978,7 +3978,10 @@ impl SessionSupervisor {
             _ => return Err(ProjectError::code("invalid_action")),
         }
         if action == "cancel" {
-            self.cancel_live_verification(session_id);
+            let canonical_session_id = plan["delegationOrigin"]["sessionId"]
+                .as_str()
+                .unwrap_or(session_id);
+            self.cancel_live_verification(canonical_session_id);
             self.persist_terminal_transition(
                 &mut plan,
                 if initiated_by_agent {

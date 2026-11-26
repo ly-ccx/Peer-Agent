@@ -736,7 +736,9 @@ impl ProjectHostRuntime {
                 .host
                 .run_background_maintenance(&ws_id, &at, model_opt.as_ref(), cancel)
                 .await
-                && (report.flushed_digest || report.recovered_verifications > 0)
+                && (report.flushed_digest
+                    || report.recovered_verifications > 0
+                    || report.settled_deliveries > 0)
             {
                 self.emit_conversation_changed(&ws_id, None);
                 self.emit_changed(vec![ws_id]);
@@ -924,6 +926,7 @@ impl ProjectHostRuntime {
             Some(bot_model.clone())
         };
         let had_failure_hold = self.host.failure_hold(workspace_id).is_some();
+        let inbox_cursor = self.host.inbox().read_cursor(workspace_id).seq;
         let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
             workspace_id,
             &bot_model,
@@ -972,6 +975,9 @@ impl ProjectHostRuntime {
                     || !report.promoted_session_ids.is_empty()
                 {
                     self.emit_conversation_changed(workspace_id, conv_id.as_deref());
+                    self.emit_changed(vec![workspace_id.to_owned()]);
+                } else if self.host.inbox().read_cursor(workspace_id).seq > inbox_cursor {
+                    // Policy-settlement events can be reconciled without a Bot response.
                     self.emit_changed(vec![workspace_id.to_owned()]);
                 }
             }

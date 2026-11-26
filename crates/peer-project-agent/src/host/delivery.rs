@@ -12,6 +12,12 @@ use std::collections::BTreeMap;
 
 const MAX_DELIVERY_EVENTS_PER_WAKE: usize = 24;
 
+#[derive(Default)]
+pub(super) struct DeliveryReconciliation {
+    pub due: Vec<WorkSessionSummary>,
+    pub settled: usize,
+}
+
 impl NativeProjectHost {
     pub(super) fn has_due_delivery(&self, workspace_id: &str, now_ms: i64) -> bool {
         self.inbox
@@ -31,7 +37,7 @@ impl NativeProjectHost {
         now_ms: i64,
         discover_all: bool,
         events: &[Value],
-    ) -> Result<Vec<WorkSessionSummary>, ProjectError> {
+    ) -> Result<DeliveryReconciliation, ProjectError> {
         let epoch = self
             .lease_epoch(workspace_id)
             .ok_or_else(|| ProjectError::code("LEASE_REQUIRED"))?;
@@ -55,9 +61,10 @@ impl NativeProjectHost {
             .collect();
 
         if sessions.is_empty() && previous.is_empty() {
-            return Ok(Vec::new());
+            return Ok(DeliveryReconciliation::default());
         }
 
+        let mut settled = 0;
         let mut next = BTreeMap::new();
         let mut due = Vec::new();
         if !sessions.is_empty() {
@@ -95,7 +102,10 @@ impl NativeProjectHost {
                             revision,
                             owns_lease(),
                         ) {
-                            Ok(decision) if decision.accepted_by.is_some() => continue,
+                            Ok(decision) if decision.accepted_by.is_some() => {
+                                settled += 1;
+                                continue;
+                            }
                             Ok(_) => delivery.next_attempt_ms = None,
                             Err(error) if error.code == "session_state_changed" => continue,
                             Err(error) if error.code == "LEASE_REQUIRED" => return Err(error),
@@ -129,11 +139,14 @@ impl NativeProjectHost {
             })?;
         }
         due.sort_by_key(|(next, session)| (*next, session.session_id.clone()));
-        Ok(due
-            .into_iter()
-            .take(MAX_DELIVERY_EVENTS_PER_WAKE)
-            .map(|(_, session)| session)
-            .collect())
+        Ok(DeliveryReconciliation {
+            due: due
+                .into_iter()
+                .take(MAX_DELIVERY_EVENTS_PER_WAKE)
+                .map(|(_, session)| session)
+                .collect(),
+            settled,
+        })
     }
 
     pub(super) fn finish_delivery_attempt(
@@ -285,11 +298,16 @@ mod tests {
         )));
         drop(index_lock);
 
-        assert!(
-            host.reconcile_deliveries(&ws, &conv, 10, true, &[])
-                .unwrap()
-                .is_empty()
-        );
+        let recovered = host
+            .run_background_maintenance(
+                &ws,
+                "2026-11-26T08:00:00.000Z",
+                None,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered.settled_deliveries, 1);
         assert_eq!(
             host.supervisor.read_plan(&child.plan_id).unwrap()["resultAcceptance"]["acceptedBy"],
             "policy"
@@ -326,7 +344,8 @@ mod tests {
         let now = 1_000;
         let attempts = host
             .reconcile_deliveries(&ws, &conv, now, true, &[])
-            .unwrap();
+            .unwrap()
+            .due;
         assert_eq!(attempts.len(), 1);
         host.inbox
             .append(
@@ -371,6 +390,7 @@ mod tests {
         assert!(
             host.reconcile_deliveries(&ws, &conv, i64::MAX, true, &[])
                 .unwrap()
+                .due
                 .is_empty()
         );
         let mut revised = plan;
@@ -379,6 +399,7 @@ mod tests {
         assert_eq!(
             host.reconcile_deliveries(&ws, &conv, now, true, &[])
                 .unwrap()
+                .due
                 .len(),
             1
         );
