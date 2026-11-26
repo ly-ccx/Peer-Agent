@@ -173,7 +173,13 @@ fn invalid_saved_images_and_request_pressure_make_no_model_request_and_preserve_
             seed(&f, "data:image/png;base64,%%%");
         }
         let before = f.history();
-        let out = f.run();
+        let out = if pressure {
+            let mut cmd = f.command("exec", "p");
+            cmd.env("PEER_NATIVE_TEST_REQUEST_LIMIT_BYTES", "2097152");
+            cmd.output().unwrap()
+        } else {
+            f.run()
+        };
         assert!(!out.status.success());
         assert!(
             String::from_utf8_lossy(&out.stderr).contains(if pressure {

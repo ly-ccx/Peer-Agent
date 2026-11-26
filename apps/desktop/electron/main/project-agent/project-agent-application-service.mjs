@@ -8,7 +8,8 @@ import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 
 function isExistingDirectory(candidate) {
   try {
@@ -29,6 +30,7 @@ import {
   projectHistory,
 } from '@peer-agent/runtime-node';
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { pathOf } from '@peer-agent/runtime-node/storage';
 import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
 import { obligationDisplayTitle, selectPendingGrants } from '@peer-agent/runtime-node/execution-obligation';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../runtime-gateway/local-permission-gate.mjs';
@@ -122,6 +124,7 @@ export function createProjectAgentApplicationService({
   diagnostics = null,
   accessAuthority = null,
   classicCoreBridge = null,
+  draftRootDir = null,
 } = {}) {
   const imageAuthority = createImageReadAuthority({ approvalStore: approvals });
   let corpusToken = null;
@@ -568,6 +571,55 @@ export function createProjectAgentApplicationService({
     return result;
   }
 
+  function compactDraftBackedAttachments(workspaceId, surface, attachments) {
+    if (!Array.isArray(attachments) || attachments.length === 0) return attachments;
+    if (
+      typeof workspaceId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)
+      || !['desktop', 'quick_chat', 'tui'].includes(surface)
+    ) {
+      return attachments;
+    }
+    let uploads = null;
+    let wsRoot = '';
+    try {
+      wsRoot = path.join(draftRootDir || pathOf('projectRuntime'), workspaceId);
+      const draftFile = path.join(wsRoot, 'input-drafts', `${surface}.json`);
+      if (!existsSync(draftFile)) return attachments;
+      const parsed = JSON.parse(readFileSync(draftFile, 'utf8'));
+      if (parsed && typeof parsed.uploads === 'object' && !Array.isArray(parsed.uploads)) {
+        uploads = parsed.uploads;
+      }
+    } catch {
+      return attachments;
+    }
+    if (!uploads) return attachments;
+    return attachments.map(att => {
+      if (
+        !att
+        || typeof att !== 'object'
+        || att.kind !== 'image'
+        || typeof att.id !== 'string'
+        || typeof att.dataUrl !== 'string'
+      ) {
+        return att;
+      }
+      const digest = uploads[att.id];
+      if (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) return att;
+      const blobFile = path.join(wsRoot, 'input-draft-blobs', `${digest}.json`);
+      if (!existsSync(blobFile)) return att;
+      return {
+        id: att.id,
+        name: att.name,
+        mimeType: att.mimeType,
+        size: att.size,
+        ...(typeof att.sourceKind === 'string' ? { sourceKind: att.sourceKind } : {}),
+        kind: att.kind,
+        draftBlobDigest: digest,
+      };
+    });
+  }
+
   function draftRequest(payload, operation) {
     if (!open()) return disabled();
     if (classicCoreBridge?.isAvailable?.()) {
@@ -577,6 +629,7 @@ export function createProjectAgentApplicationService({
         : classicCoreBridge.projectBotWriteInputDraft(payload);
       return rpc.then(res => (
         res?.code === 'RESOURCE_FEEDBACK_HOST_REQUIRED'
+          || (operation === 'read' && res?.code === 'DRAFT_TOO_LARGE_FOR_RPC')
           ? ((!directory || directory.hasActiveBot(payload?.workspaceId)) ? inputDrafts[operation](payload) : { ok: false, code: 'NOT_FOUND' })
           : res
       ));
@@ -630,29 +683,37 @@ export function createProjectAgentApplicationService({
             createdAt: payload.createdAt,
             ...(answerTo ? { answerTo } : {}),
           });
+          const rpcSurface = persisted.surface || 'desktop';
+          const rpcAttachments = payload.attachments
+            ? compactDraftBackedAttachments(payload.workspaceId, rpcSurface, payload.attachments)
+            : undefined;
           return classicCoreBridge.projectBotSubmitInput({
             workspaceId: payload.workspaceId,
             inputId: persisted.inputId,
-            surface: persisted.surface || 'desktop',
+            surface: rpcSurface,
             text: persisted.text || '',
             ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
             ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
             ...(taskRefs.length ? { taskRefs } : {}),
             ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
-            ...(payload.attachments ? { attachments: payload.attachments } : {}),
+            ...(rpcAttachments ? { attachments: rpcAttachments } : {}),
             ...(answerTo ? { answerTo } : {}),
           });
         }
+        const rpcSurface = payload.surface || 'desktop';
+        const rpcAttachments = payload.attachments
+          ? compactDraftBackedAttachments(payload.workspaceId, rpcSurface, payload.attachments)
+          : undefined;
         return classicCoreBridge.projectBotSubmitInput({
           workspaceId: payload.workspaceId,
           ...(payload.inputId ? { inputId: payload.inputId } : {}),
-          surface: payload.surface || 'desktop',
+          surface: rpcSurface,
           text: payload.text,
           ...(payload.anchorRefs ? { anchorRefs: payload.anchorRefs } : {}),
           ...(payload.quoteRefs ? { quoteRefs: payload.quoteRefs } : {}),
           ...(taskRefs.length ? { taskRefs } : {}),
           ...(payload.attachmentRefs ? { attachmentRefs: payload.attachmentRefs } : {}),
-          ...(payload.attachments ? { attachments: payload.attachments } : {}),
+          ...(rpcAttachments ? { attachments: rpcAttachments } : {}),
           ...(answerTo ? { answerTo } : {}),
         });
       }

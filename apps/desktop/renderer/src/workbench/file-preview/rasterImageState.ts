@@ -1,6 +1,6 @@
-export const RASTER_MAX_BYTES = 8 * 1024 * 1024;
+export const RASTER_MAX_BYTES = 32 * 1024 * 1024;
 export const RASTER_MAX_DIMENSION = 16_384;
-export const RASTER_MAX_PIXELS = 32_000_000;
+export const RASTER_MAX_PIXELS = 60_000_000;
 export type RasterInspection = { readonly ok: true; readonly mime: string; readonly width: number; readonly height: number }
   | { readonly ok: false; readonly reason: 'format' | 'size' | 'dimensions' };
 function ascii(bytes: Uint8Array, start: number, length: number) { return String.fromCharCode(...bytes.subarray(start, start + length)); }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const PEER_CORE_PROTOCOL_VERSION = 1;
-export const PEER_CORE_MAX_FRAME_BYTES = 2 * 1024 * 1024;
+export const PEER_CORE_MAX_FRAME_BYTES = 64 * 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const FORCE_KILL_GRACE_MS = 1_000;
@@ -377,7 +377,21 @@ export function createPeerCoreClient(options = {}) {
     }
     if (!Object.hasOwn(msg, 'method')) {
       const waiter = pending.get(msg.id);
-      if (!waiter) return;
+      if (!waiter) {
+        if (msg.error) {
+          logger?.warn?.('[peer-core] unmatched JSON-RPC error frame:', msg.error.message || msg.error);
+          if (msg.id == null && pending.size === 1) {
+            const [[onlyId, onlyWaiter]] = pending.entries();
+            pending.delete(onlyId);
+            clearTimeout(onlyWaiter.timer);
+            const rpcError = new Error(msg.error.message || `Peer Core RPC error (${onlyWaiter.method})`);
+            rpcError.code = msg.error.code;
+            rpcError.data = msg.error.data;
+            onlyWaiter.reject(rpcError);
+          }
+        }
+        return;
+      }
       pending.delete(msg.id);
       clearTimeout(waiter.timer);
       if (msg.error) {

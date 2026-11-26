@@ -898,7 +898,11 @@ struct LoadedBotHistory {
     committed_message_ids: Vec<Option<String>>,
 }
 
-fn load_bot_history(history_messages: &[Value]) -> LoadedBotHistory {
+fn load_bot_history(
+    data_home: &Path,
+    workspace_id: &str,
+    history_messages: &[Value],
+) -> LoadedBotHistory {
     let mut continuity_summary = None;
     let mut compaction_epoch = 0u64;
     let selected: Vec<&Value> = if let Some(boundary) = history_messages
@@ -958,7 +962,11 @@ fn load_bot_history(history_messages: &[Value]) -> LoadedBotHistory {
     let mut committed_message_ids = Vec::with_capacity(filtered.len());
     for m in filtered {
         if m["role"].as_str() == Some("user") {
-            if let Some(projected) = crate::attachments::project_user_message_for_model(m) {
+            if let Some(projected) = crate::attachments::project_user_message_for_model_in_workspace(
+                data_home,
+                workspace_id,
+                m,
+            ) {
                 live_messages.push(projected);
                 committed_message_ids.push(m["id"].as_str().map(str::to_owned));
             }
@@ -2012,7 +2020,7 @@ impl ProjectAgentRunner {
             mut compaction_epoch,
             mut live_messages,
             mut committed_message_ids,
-        } = load_bot_history(&history_messages);
+        } = load_bot_history(&self.data_home, opts.workspace_id, &history_messages);
 
         if opts.kind == "user" && !opts.user_inputs.is_empty() {
             for inp in opts.user_inputs {
@@ -2054,7 +2062,11 @@ impl ProjectAgentRunner {
                     "attachments": inp.attachments,
                 });
                 if let Some(projected) =
-                    crate::attachments::project_user_message_for_model(&synthetic)
+                    crate::attachments::project_user_message_for_model_in_workspace(
+                        &self.data_home,
+                        opts.workspace_id,
+                        &synthetic,
+                    )
                 {
                     live_messages.push(projected);
                     committed_message_ids.push(Some(anchor_id));
@@ -3648,7 +3660,7 @@ mod tests {
                 "content": "Part one done.\n\n<｜DSML｜ calls>\n<｜DSML｜ invoke name=\"search_files\"></｜DSML｜ invoke>\n</｜DSML｜ calls>"
             }),
         ];
-        let loaded = load_bot_history(&messages);
+        let loaded = load_bot_history(Path::new("."), "ws-test", &messages);
         assert_eq!(loaded.live_messages.len(), 3);
         assert_eq!(loaded.live_messages[0]["content"], "hi");
         assert_eq!(loaded.live_messages[1]["content"], "next?");
@@ -3671,7 +3683,7 @@ mod tests {
             json!({ "id": "input-b2", "role": "user", "kind": "user_input", "content": "still there?" }),
             json!({ "id": "reply-a", "role": "assistant", "kind": "agent_reply", "content": "detailed answer to A" }),
         ];
-        let mut loaded = load_bot_history(&messages);
+        let mut loaded = load_bot_history(Path::new("."), "ws-test", &messages);
         assert!(reposition_committed_user_input_if_present(
             &mut loaded.live_messages,
             &mut loaded.committed_message_ids,

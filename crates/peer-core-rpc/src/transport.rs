@@ -9,7 +9,7 @@ use tokio::{
 };
 
 const WRITER_CHANNEL_CAPACITY: usize = 512;
-const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) struct BoundedLineReader<R> {
     inner: BufReader<R>,

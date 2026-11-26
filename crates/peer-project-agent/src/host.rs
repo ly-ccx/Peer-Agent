@@ -1345,11 +1345,14 @@ impl NativeProjectHost {
                             }
                             "watch" => {
                                 let plans = self.supervisor.list_workspace_plans(workspace_id);
-                                let wd = self.watch_publisher.publish(
+                                let wd = self.filter_duplicate_watchdog_events(
                                     workspace_id,
-                                    &plans,
-                                    &now_iso(),
-                                    None,
+                                    self.watch_publisher.publish(
+                                        workspace_id,
+                                        &plans,
+                                        &now_iso(),
+                                        None,
+                                    ),
                                 );
                                 if !wd.is_empty() {
                                     let _ = self.inbox.append(workspace_id, &wd)?;
@@ -1589,11 +1592,13 @@ impl NativeProjectHost {
 
         let mut report = MaintenanceReport::default();
 
-        // 1. Watchdog & delegation facts -> inbox
+        // 1. Watchdog & delegation facts -> inbox (deduped against supervisor terminal events)
         let plans = self.supervisor.list_workspace_plans(workspace_id);
-        let wd_events = self
-            .watch_publisher
-            .publish(workspace_id, &plans, at_iso, None);
+        let wd_events = self.filter_duplicate_watchdog_events(
+            workspace_id,
+            self.watch_publisher
+                .publish(workspace_id, &plans, at_iso, None),
+        );
         if !wd_events.is_empty() {
             report.watchdog_events = wd_events.len();
             let _ = self.inbox.append(workspace_id, &wd_events)?;
@@ -2541,6 +2546,43 @@ impl NativeProjectHost {
         res?;
         Ok(json!({ "ok": true, "userIntervened": true }))
     }
+    /// Suppress watchdog `failed` / `cancelled` transition echoes when the supervisor has already
+    /// appended an authoritative `session_ended` event for the same session and terminal status.
+    fn filter_duplicate_watchdog_events(
+        &self,
+        workspace_id: &str,
+        events: Vec<Value>,
+    ) -> Vec<Value> {
+        if events.is_empty() {
+            return events;
+        }
+        let has_terminal_candidates = events
+            .iter()
+            .any(|ev| matches!(ev["kind"].as_str(), Some("failed" | "cancelled")));
+        if !has_terminal_candidates {
+            return events;
+        }
+        let recent = self.inbox.list_recent(workspace_id, 200);
+        events
+            .into_iter()
+            .filter(|ev| {
+                let kind = ev["kind"].as_str().unwrap_or("");
+                if !matches!(kind, "failed" | "cancelled") {
+                    return true;
+                }
+                let Some(sid) = ev["sessionId"].as_str().filter(|s| !s.is_empty()) else {
+                    return true;
+                };
+                let already_ended = recent.iter().any(|existing| {
+                    existing["sessionId"].as_str() == Some(sid)
+                        && ((existing["kind"].as_str() == Some("session_ended")
+                            && existing["payload"]["status"].as_str() == Some(kind))
+                            || existing["kind"].as_str() == Some(kind))
+                });
+                !already_ended
+            })
+            .collect()
+    }
 }
 
 impl Drop for NativeProjectHost {
@@ -2555,14 +2597,6 @@ impl Drop for NativeProjectHost {
 /// itself, and no session currently requires user or parent attention.
 fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSummary]) -> bool {
     if events.is_empty() {
-        return false;
-    }
-    if sessions.iter().any(|row| {
-        matches!(
-            row.status.as_str(),
-            "waiting_user" | "waiting_agent" | "result_ready" | "interrupted"
-        )
-    }) {
         return false;
     }
     let mut active_referenced = Vec::new();
@@ -2595,6 +2629,23 @@ fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSum
         } else {
             return false;
         }
+    }
+    // Self-initiated cancellation echoes never need a fresh wake turn even if unrelated
+    // historical sessions are waiting or result_ready.
+    if active_referenced.is_empty() && !cancelled_referenced.is_empty() {
+        return cancelled_referenced.iter().all(|sid| {
+            sessions
+                .iter()
+                .any(|row| row.session_id == *sid && row.status == "cancelled")
+        });
+    }
+    if sessions.iter().any(|row| {
+        matches!(
+            row.status.as_str(),
+            "waiting_user" | "waiting_agent" | "result_ready" | "interrupted"
+        )
+    }) {
+        return false;
     }
     active_referenced.iter().all(|sid| {
         sessions.iter().any(|row| {
@@ -3055,5 +3106,47 @@ mod tests {
             &external_cancel,
             std::slice::from_ref(&cancelled_session)
         ));
+
+        // Pure self-initiated cancellation still absorbs even when an unrelated older session is result_ready.
+        let unrelated_ready = crate::WorkSessionSummary {
+            session_id: "sess-old".to_owned(),
+            status: "result_ready".to_owned(),
+            phase: "result_ready".to_owned(),
+            ..cancelled_session.clone()
+        };
+        assert!(is_routine_host_wake_wait(
+            &agent_cancel,
+            &[cancelled_session, unrelated_ready]
+        ));
+    }
+
+    #[test]
+    fn filter_duplicate_watchdog_events_suppresses_echo_after_session_ended() {
+        let dir = tempdir().unwrap();
+        let host = NativeProjectHost::new(dir.path(), "0.1.0-test", None).unwrap();
+        let ws = "ws-dedup";
+        host.inbox
+            .append(
+                ws,
+                &[json!({
+                    "eventId": "ev-ended-1",
+                    "kind": "session_ended",
+                    "sessionId": "sess-1",
+                    "payload": { "status": "failed" }
+                })],
+            )
+            .unwrap();
+
+        let filtered = host.filter_duplicate_watchdog_events(
+            ws,
+            vec![
+                json!({ "kind": "failed", "sessionId": "sess-1" }),
+                json!({ "kind": "failed", "sessionId": "sess-2" }),
+                json!({ "kind": "result_ready", "sessionId": "sess-1" }),
+            ],
+        );
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0]["sessionId"], "sess-2");
+        assert_eq!(filtered[1]["kind"], "result_ready");
     }
 }

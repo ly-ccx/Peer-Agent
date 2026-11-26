@@ -43,7 +43,7 @@ test('frozen conditions reserve a legacy attachment slot before editing the exis
     result: { owner: feedback.recipient, resultId: 'result', contentVersion: hash }, specHash: hash, stateRevision: 1,
     stateDigest: hash, selectionDigest: hash, values: { $x: 4 }, dataLevel: 'D3_private', capturedAt: feedback.capturedAt, excerpt: 'Conditions' })!;
   const h = harness(), session = h.session('bot-a');
-  session.edit({ attachments: Array.from({ length: 8 }, (_, i) => ({ id: `upload-${i}` })) });
+  session.edit({ attachments: Array.from({ length: 100 }, (_, i) => ({ id: `upload-${i}` })) });
   const original = JSON.stringify(session.getSnapshot().draft), edits = h.edits.length;
   assert.equal((await h.prepare(row)).code, 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
   assert.equal(h.edits.length, edits); assert.equal(JSON.stringify(session.getSnapshot().draft), original);

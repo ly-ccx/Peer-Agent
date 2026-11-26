@@ -979,24 +979,47 @@ impl BotDirectory {
                 familiarize_offer,
             });
         };
-        let snapshot = match self
-            .conversations
-            .read_committed(conv_id, None, 8 * 1024 * 1024)
-        {
-            Ok(s) => s,
-            Err(peer_store::StoreError::NotFound) => {
-                return Ok(InteractionPage {
-                    messages: Vec::new(),
-                    next_cursor: None,
-                    source_version: "0".to_owned(),
-                    familiarize_offer,
-                });
-            }
-            Err(e) => return Err(e.into()),
-        };
-        let visible: Vec<Value> = snapshot
-            .history
-            .messages
+        let (all_messages, source_version) =
+            match self
+                .conversations
+                .read_committed(conv_id, None, 8 * 1024 * 1024)
+            {
+                Ok(s) => (s.history.messages, s.source_revision),
+                Err(peer_store::StoreError::NotFound) => {
+                    return Ok(InteractionPage {
+                        messages: Vec::new(),
+                        next_cursor: None,
+                        source_version: "0".to_owned(),
+                        familiarize_offer,
+                    });
+                }
+                Err(peer_store::StoreError::HistoryLimit) => {
+                    match self
+                        .conversations
+                        .read_conversation_window(conv_id, None, None, true)
+                    {
+                        Ok(Some(page)) => {
+                            let msgs = page["window"].as_array().cloned().unwrap_or_default();
+                            let rev = page["meta"]["contentRevision"]
+                                .as_u64()
+                                .map(|r| format!("window-rev-{r}"))
+                                .unwrap_or_else(|| format!("window-len-{}", msgs.len()));
+                            (msgs, rev)
+                        }
+                        Ok(None) => {
+                            return Ok(InteractionPage {
+                                messages: Vec::new(),
+                                next_cursor: None,
+                                source_version: "0".to_owned(),
+                                familiarize_offer,
+                            });
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            };
+        let visible: Vec<Value> = all_messages
             .into_iter()
             .filter(is_visible_bot_message)
             .collect();
@@ -1020,7 +1043,7 @@ impl BotDirectory {
         Ok(InteractionPage {
             messages: page,
             next_cursor,
-            source_version: snapshot.source_revision,
+            source_version,
             familiarize_offer,
         })
     }
@@ -1035,6 +1058,16 @@ impl BotDirectory {
         {
             Ok(s) => Ok(s.history.messages),
             Err(peer_store::StoreError::NotFound) => Ok(Vec::new()),
+            Err(peer_store::StoreError::HistoryLimit) => {
+                match self
+                    .conversations
+                    .read_conversation_window(cid, None, None, true)
+                {
+                    Ok(Some(page)) => Ok(page["window"].as_array().cloned().unwrap_or_default()),
+                    Ok(None) => Ok(Vec::new()),
+                    Err(e) => Err(e.into()),
+                }
+            }
             Err(e) => Err(e.into()),
         }
     }

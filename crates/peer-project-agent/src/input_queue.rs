@@ -19,7 +19,7 @@ use std::{
     time::Duration,
 };
 
-const MAX_QUEUE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_QUEUE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 200_000;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -250,7 +250,8 @@ impl InputQueue {
             let normalized_attachments = if request.attachments.is_empty() {
                 None
             } else {
-                Some(crate::attachments::normalize_input_attachments(
+                Some(crate::attachments::persist_input_attachments(
+                    &self.runtime_root.join(ws),
                     &request.attachments,
                 )?)
             };

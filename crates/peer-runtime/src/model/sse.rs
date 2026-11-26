@@ -43,7 +43,7 @@ impl ChatStream {
         }
         let v = decode(bytes, 1024 * 1024)?;
         if v.get("error").is_some() {
-            return Err(ModelError::new("model_provider_error"));
+            return Err(ModelError::provider_event(&v));
         }
         if let Some(u) = v.get("usage").filter(|v| !v.is_null()) {
             if self.usage.is_some() {

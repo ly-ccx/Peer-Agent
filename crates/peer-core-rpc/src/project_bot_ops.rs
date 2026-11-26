@@ -709,7 +709,14 @@ pub fn handle_bot_read_input_draft(
         return Ok(ok_fail("NOT_FOUND"));
     };
     match InputDraftStore::new(&ctx.config.data_home).read_hydrated(ws, surface, false) {
-        Ok(snapshot) => Ok(json!({ "ok": true, "snapshot": snapshot })),
+        Ok(snapshot) => {
+            let reply = json!({ "ok": true, "snapshot": snapshot });
+            let approx_bytes = serde_json::to_vec(&reply).map(|v| v.len()).unwrap_or(0);
+            if approx_bytes + (1024 * 1024) >= crate::protocol::MAX_FRAME_BYTES {
+                return Ok(ok_fail("DRAFT_TOO_LARGE_FOR_RPC"));
+            }
+            Ok(reply)
+        }
         Err(err) => Ok(ok_fail(err.code)),
     }
 }

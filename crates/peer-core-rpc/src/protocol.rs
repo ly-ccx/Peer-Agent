@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, time::Duration};
 
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_EXTERNAL_CAPABILITIES: usize = 128;
 pub const MAX_PENDING_HOST_CALLS: usize = 256;
 pub const DEFAULT_REVERSE_TIMEOUT: Duration = Duration::from_secs(30);

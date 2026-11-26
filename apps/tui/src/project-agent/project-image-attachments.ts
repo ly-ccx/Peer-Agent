@@ -4,8 +4,8 @@ import type { ProjectInputAttachment } from '@peer-agent/protocol';
 import { loadLocalImageAttachments } from '../composer-image-paths.ts';
 
 /** Mirrors the durable boundary in runtime-node input-attachments.mjs. */
-export const PROJECT_INPUT_ATTACHMENT_LIMIT = 8;
-const IMAGE_BYTES = 8 * 1024 * 1024;
+export const PROJECT_INPUT_ATTACHMENT_LIMIT = 100;
+const IMAGE_BYTES = 32 * 1024 * 1024;
 
 /** The protocol's upload shape, restricted to the image variant this module produces. */
 export type ProjectImageAttachment = Extract<ProjectInputAttachment, { kind: 'image' }>;

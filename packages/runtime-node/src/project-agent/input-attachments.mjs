@@ -1,7 +1,7 @@
 // User uploads share the classic composer's limits. Validate again at the durable
 // boundary: renderer metadata cannot authorize filesystem reads or extra context.
-export const INPUT_ATTACHMENT_LIMIT = 8;
-const IMAGE_BYTES = 8 * 1024 * 1024;
+export const INPUT_ATTACHMENT_LIMIT = 100;
+const IMAGE_BYTES = 32 * 1024 * 1024;
 const TEXT_BYTES = 512 * 1024;
 
 export function normalizeUserUpload(item) {
@@ -18,7 +18,7 @@ export function normalizeUserUpload(item) {
       throw new TypeError('attachment image data is invalid');
     }
     if (size > IMAGE_BYTES || match[2].length > Math.ceil(IMAGE_BYTES / 3) * 4
-      || Buffer.from(match[2], 'base64').byteLength > IMAGE_BYTES) throw new TypeError('attachment image exceeds 8 MiB');
+      || Buffer.from(match[2], 'base64').byteLength > IMAGE_BYTES) throw new TypeError('attachment image exceeds 32 MiB');
     return { ...base, kind: 'image', dataUrl: url };
   }
   if (item.kind === 'text') {

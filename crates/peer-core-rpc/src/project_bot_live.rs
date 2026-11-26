@@ -516,11 +516,46 @@ pub async fn handle_submit_input(ctx: &ServerContext, params: Value) -> Result<V
         }
     }
     let attachment_refs = string_vec(params.get("attachmentRefs"));
-    let attachments = params
+    let raw_attachments = params
         .get("attachments")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let mut attachments = Vec::with_capacity(raw_attachments.len());
+    for item in raw_attachments {
+        let missing_data_url = item
+            .get("dataUrl")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_none_or(str::is_empty);
+        if missing_data_url
+            && let Some(digest) = item.get("draftBlobDigest").and_then(Value::as_str)
+        {
+            match host.drafts().read_blob_by_digest(workspace_id, digest) {
+                Ok(hydrated) => {
+                    if let Some(expected_id) = item.get("id").and_then(Value::as_str)
+                        && hydrated.get("id").and_then(Value::as_str) != Some(expected_id)
+                    {
+                        return Ok(json!({
+                            "ok": false,
+                            "code": "INVALID_INPUT",
+                            "message": "INVALID_ATTACHMENT",
+                        }));
+                    }
+                    attachments.push(hydrated);
+                }
+                Err(err) => {
+                    return Ok(json!({
+                        "ok": false,
+                        "code": "INVALID_INPUT",
+                        "message": err.detail,
+                    }));
+                }
+            }
+        } else {
+            attachments.push(item);
+        }
+    }
 
     let input = match host.submit_user_input_full(&SubmitInputRequest {
         workspace_id,

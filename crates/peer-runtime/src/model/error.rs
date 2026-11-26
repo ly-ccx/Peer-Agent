@@ -43,6 +43,11 @@ impl ModelError {
         self.http_detail = sanitize_provider_error_text(detail.as_ref());
         self
     }
+    pub(super) fn provider_event(value: &serde_json::Value) -> Self {
+        let mut err = Self::new("model_provider_error");
+        err.http_detail = extract_safe_value_detail(value);
+        err
+    }
     pub(super) fn http_access_rejection(status: u16) -> Option<Self> {
         matches!(status, 401 | 403).then(|| Self {
             http_status: Some(status),
@@ -159,15 +164,29 @@ impl std::error::Error for ModelError {}
 
 fn extract_safe_http_detail(body: &[u8]) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_slice(body).ok()?;
-    let root = match &parsed {
+    extract_safe_value_detail(&parsed)
+}
+
+fn extract_safe_value_detail(parsed: &serde_json::Value) -> Option<String> {
+    let root = match parsed {
         serde_json::Value::Array(items) => items.first()?,
         other => other,
     };
-    let err = root.get("error").unwrap_or(root);
+    let response_err = root
+        .get("response")
+        .and_then(|r| r.get("error").or_else(|| r.get("incomplete_details")));
+    let err = root
+        .get("error")
+        .filter(|v| !v.is_null())
+        .or_else(|| response_err.filter(|v| !v.is_null()))
+        .or_else(|| root.get("promptFeedback").filter(|v| !v.is_null()))
+        .unwrap_or(root);
     let status = err
         .get("status")
         .or_else(|| err.get("type"))
         .or_else(|| err.get("code"))
+        .or_else(|| err.get("reason"))
+        .or_else(|| err.get("blockReason"))
         .and_then(|v| match v {
             serde_json::Value::String(s) => Some(s.trim().to_owned()),
             _ => None,
@@ -278,5 +297,47 @@ mod tests {
             max_tokens.format_diagnostic().as_deref(),
             Some("model_stream_incomplete (finishReason=MAX_TOKENS)")
         );
+    }
+
+    #[test]
+    fn provider_event_extracts_safe_detail_and_scrubs_secrets() {
+        let responses_failed = serde_json::json!({
+            "type": "response.failed",
+            "response": {
+                "error": { "code": "rate_limit_exceeded", "message": "Too many requests" }
+            }
+        });
+        let err = ModelError::provider_event(&responses_failed);
+        assert_eq!(err.code, "model_provider_error");
+        assert_eq!(
+            err.format_diagnostic().as_deref(),
+            Some("model_provider_error (rate_limit_exceeded: Too many requests)")
+        );
+
+        let anthropic_err = serde_json::json!({
+            "type": "error",
+            "error": { "type": "overloaded_error", "message": "Overloaded" }
+        });
+        assert_eq!(
+            ModelError::provider_event(&anthropic_err)
+                .format_diagnostic()
+                .as_deref(),
+            Some("model_provider_error (overloaded_error: Overloaded)")
+        );
+
+        let gemini_blocked = serde_json::json!({
+            "promptFeedback": { "blockReason": "SAFETY" }
+        });
+        assert_eq!(
+            ModelError::provider_event(&gemini_blocked)
+                .format_diagnostic()
+                .as_deref(),
+            Some("model_provider_error (prompt_blocked: SAFETY)")
+        );
+
+        let secret_event = serde_json::json!({
+            "error": { "code": "invalid_api_key", "message": "Incorrect key sk-live-secret123" }
+        });
+        assert_eq!(ModelError::provider_event(&secret_event).http_detail, None);
     }
 }

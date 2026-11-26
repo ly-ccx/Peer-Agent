@@ -46,7 +46,7 @@ pub fn decode_json_bounded(
     if bytes.len() > limits.bytes
         || limits.depth > 64
         || limits.nodes > 65_536
-        || limits.string_bytes > 64 * 1024 * 1024
+        || limits.string_bytes > 256 * 1024 * 1024
     {
         return Err(JsonDecodeError::LimitExceeded);
     }
