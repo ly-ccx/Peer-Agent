@@ -1346,7 +1346,7 @@
     color: var(--graphite-fade);
   }
   .skill-marketplace-install-targets {
-    @apply flex min-w-0 max-w-full items-center gap-2;
+    @apply flex min-w-0 max-w-full flex-wrap items-center gap-2;
   }
   .skill-marketplace-install-scope {
     @apply inline-flex max-w-full shrink-0 items-center gap-1 rounded-[var(--ui-radius-pill)] p-1;
@@ -1355,32 +1355,22 @@
     border: 1px solid var(--chrome-hairline);
   }
   .skill-marketplace-install-scope button {
-    @apply min-w-0 rounded-[var(--ui-radius-pill)] px-3 py-1.5 text-[12px] font-medium transition-colors;
+    @apply min-w-0 text-[12px] font-medium transition-colors;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--graphite-soft);
-    background: transparent;
     border: 0;
     cursor: pointer;
   }
   .skill-marketplace-install-scope button:last-child {
     max-width: min(320px, 52vw);
   }
-  .skill-marketplace-install-scope button:hover:not(:disabled) {
-    color: var(--graphite-base);
-  }
-  .skill-marketplace-install-scope button.is-active {
-    color: var(--chrome-keycap-fg);
-    background: var(--chrome-keycap-bg);
-    box-shadow: var(--chrome-keycap-shadow);
-  }
   .skill-marketplace-install-scope button:disabled {
     @apply cursor-not-allowed opacity-45;
   }
   .skill-marketplace-workspace-picker {
     min-width: 0;
-    width: min(260px, 34vw);
+    width: min(260px, 60vw);
   }
   .skill-marketplace-workspace-picker .pa-dropdown {
     min-width: 0;
@@ -1389,6 +1379,40 @@
   .skill-marketplace-workspace-picker .pa-dropdown-trigger {
     min-height: 36px;
     border-radius: var(--ui-radius-pill);
+  }
+  .skill-marketplace-install-note,
+  .skill-marketplace-install-receipt {
+    flex: 1 0 100%;
+    min-width: 0;
+    margin: 0;
+    font-size: var(--ui-font-control);
+    overflow-wrap: anywhere;
+  }
+  .skill-marketplace-install-note {
+    color: var(--graphite-soft);
+  }
+  .skill-marketplace-install-success {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--ui-radius-panel);
+    color: var(--state-success);
+    background: var(--state-success-soft);
+  }
+  .skill-marketplace-install-success svg {
+    flex-shrink: 0;
+  }
+  .skill-marketplace-install-success + .skill-marketplace-install-error {
+    margin-top: var(--space-2);
+  }
+  .skill-marketplace-install-error p,
+  .skill-marketplace-install-error ul {
+    margin: 0;
+  }
+  .skill-marketplace-install-error .ui-button {
+    margin: var(--space-2) var(--space-2) 0 0;
   }
   /* 安装失败提示：在弹窗安装区单独占满一行，避免再被 Overlay 挡住 */
   .skill-marketplace-install-error {
@@ -1659,4 +1683,31 @@
 .capability-tabs-row .skill-upload-btn.ui-button:hover:not(:disabled) {
   background: var(--paper-hover);
   border-color: var(--chrome-hairline-strong);
+}
+
+.skill-marketplace-install-scope.ui-choice-strip > button {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--ui-radius-pill);
+  color: var(--graphite-soft);
+  background: transparent;
+}
+.skill-marketplace-install-scope.ui-choice-strip > button:hover:not(:disabled) {
+  color: var(--graphite-base);
+}
+.skill-marketplace-install-scope.ui-choice-strip > button[aria-checked="true"] {
+  color: var(--chrome-keycap-fg);
+  background: var(--chrome-keycap-bg);
+  box-shadow: var(--chrome-keycap-shadow);
+}
+
+.skill-marketplace-workspace-dropdown .pa-dropdown-item-hint {
+  color: var(--graphite-soft);
+}
+.skill-marketplace-workspace-dropdown .pa-dropdown-item:disabled,
+.skill-marketplace-workspace-dropdown .pa-dropdown-item:disabled .pa-dropdown-item-hint {
+  opacity: 1;
+  color: var(--graphite-fade);
+}
+.skill-marketplace-workspace-dropdown .pa-dropdown-list:focus-visible {
+  border-radius: var(--ui-radius-row);
 }
