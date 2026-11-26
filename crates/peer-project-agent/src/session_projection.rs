@@ -1765,6 +1765,9 @@ fn project_session_value(
         session.insert("conversationId".into(), json!(summary.conversation_id));
     }
     session.insert("origin".into(), origin.clone());
+    if let Some(epoch) = summary.follow_up_epoch {
+        session.insert("followUpEpoch".into(), json!(epoch));
+    }
     if let Some(closure) = origin
         .get("executionClaimClosure")
         .filter(|v| v.is_object())

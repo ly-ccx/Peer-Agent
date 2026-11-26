@@ -31,6 +31,9 @@ pub(crate) trait CognitionHost {
     fn check_request(&self) -> Result<(), HostError>;
     fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError>;
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError>;
+    fn workspace_image_resolver(&self) -> Option<crate::canonical_history::WorkspaceImageResolver> {
+        None
+    }
     fn request_input(&self, _projected: &Value) -> Option<(usize, &str)> {
         None
     }
@@ -219,7 +222,21 @@ impl ContextPipeline {
             if history.history.excluded_from_message_id.is_some() {
                 return Err(HostError("native_execution_recovery_required"));
             }
-            let mut projected = project_history(&history.history.messages).map_err(HostError)?;
+            let mut projected = if let Some(resolve) = host.workspace_image_resolver() {
+                let rows = history.history.messages.clone();
+                let projection = tokio::task::spawn_blocking(move || {
+                    crate::canonical_history::project_history_with_workspace_images(
+                        &rows,
+                        Some(&resolve),
+                    )
+                });
+                host.wait(projection, f.owned, f.external)
+                    .await?
+                    .map_err(|_| HostError("history_projection_failed"))?
+                    .map_err(HostError)?
+            } else {
+                project_history(&history.history.messages).map_err(HostError)?
+            };
             let continuity = projected
                 .get("continuity")
                 .cloned()

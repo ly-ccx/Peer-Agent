@@ -1,3 +1,4 @@
+import { parseQuietReply } from '@peer-agent/protocol';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import type { BotChatMessage, ConversationDisplayRow, ConversationRow, PendingBotInput } from './botConversationState';
 import { answeredInputIds, isActivityRunning } from './botActivityState.ts';
@@ -151,6 +152,8 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       continue;
     }
     const message = row.message;
+    const finalText = message.kind === 'agent_reply' ? parseQuietReply(message.content) : undefined;
+    if (finalText?.isPureQuiet) continue;
     const failure = message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind));
     if (!['agent_reply', 'agent_turn'].includes(message.kind) && !failure || isRetiredRecovery(message.cards)) {
       result.push(row); continue;
@@ -177,7 +180,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       ?? (row.activity ? (row.activity.segments ?? []).flatMap(segment => segment.kind === 'text' ? [segment] : []) : undefined) ?? row.narration ?? []);
     if (turn?.displayContract === 2 || message.displayContract === 2) group.segmented = true;
     if (message.kind === 'agent_reply') {
-      appendConclusion(group, turnId, message.content);
+      appendConclusion(group, turnId, finalText?.leadingText ?? message.content);
       // The delivered canonical reply is the reading-column body; streamed public text
       // becomes process (ADR87 D6; legacy delivered records collapse the same way, D7.3).
       if (group.paragraphs.length > 1) {

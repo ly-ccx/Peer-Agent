@@ -55,6 +55,8 @@ use std::{
 
 mod approval_recovery;
 pub(crate) mod autonomy;
+mod followup;
+pub use followup::{MessageSessionOutcome, MessageSessionRequest};
 mod verification;
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -99,6 +101,7 @@ struct DelegationOriginSummary {
     agent_wait_message_id: Option<String>,
     cancellation: Option<PhaseSummary>,
     takeover: Option<PhaseSummary>,
+    follow_up_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -384,6 +387,7 @@ fn summarize_doc(doc: &PlanSummaryDoc) -> Option<WorkSessionSummary> {
         approval_id: origin.plan_approval_id.clone(),
         handoff_status: doc.delivery_handoff.as_ref().and_then(|h| h.status.clone()),
         anchor_message_ids,
+        follow_up_epoch: origin.follow_up_epoch,
     })
 }
 
@@ -529,6 +533,8 @@ pub struct WorkSessionSummary {
     pub handoff_status: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub anchor_message_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_up_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1762,6 +1768,7 @@ impl SessionSupervisor {
                 .as_str()
                 .map(str::to_owned),
             anchor_message_ids,
+            follow_up_epoch: origin["followUpEpoch"].as_u64(),
         }
     }
 
@@ -1818,6 +1825,70 @@ impl SessionSupervisor {
         );
     }
 
+    /// Persist the terminal transition and its replayable inbox event together.
+    /// Callers hold the transition lock until both writes have been attempted.
+    fn persist_terminal_transition(
+        &self,
+        plan: &mut Value,
+        initiated_by: &str,
+    ) -> Result<(), ProjectError> {
+        let origin = &plan["delegationOrigin"];
+        let workspace = origin["workspaceId"]
+            .as_str()
+            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?
+            .to_owned();
+        let session = origin["sessionId"]
+            .as_str()
+            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?
+            .to_owned();
+        let epoch = origin["followUpEpoch"].as_u64().unwrap_or(0);
+        let status = plan["status"].as_str().unwrap_or_default();
+        let revision = plan["updatedAt"].as_str().unwrap_or_default();
+        let token = format!("{status}:e{epoch}:{revision}");
+        let mut payload = json!({
+            "planId": plan["planId"], "status": status, "followUpEpoch": epoch,
+            "initiatedBy": initiated_by, "sameCauseCount": 0, "stopAutoRetry": false,
+        });
+        if matches!(status, "failed" | "interrupted")
+            && let Some(mut facts) = crate::watchdog::watch_facts_from_plan(plan)
+        {
+            let code = plan["failure"]["code"]
+                .as_str()
+                .or_else(|| plan["runner"]["interruption"]["reason"].as_str())
+                .or_else(|| origin["error"].as_str())
+                .unwrap_or("WORKER_FAILED");
+            facts.interruption_code = code.to_owned();
+            facts.interruption_reason = code.to_owned();
+            if let Some(detail) = plan["failure"]["message"].as_str() {
+                facts.last_error = detail.chars().take(500).collect();
+            }
+            let failure = crate::watchdog::describe_failure(&facts);
+            let same = crate::watchdog::assess_same_cause(&facts, Some(&failure));
+            payload["failureCode"] = json!(code);
+            payload["failureSummary"] = json!(failure.summary);
+            payload["sameCauseCount"] = json!(same.count);
+            payload["stopAutoRetry"] = json!(same.stop_auto_retry);
+            let mut log = facts.failure_log;
+            log.push(json!({
+                "taskId": same.task_key, "cause": same.cause, "causeClass": same.cause_class,
+                "followUpEpoch": epoch,
+            }));
+            let excess = log.len().saturating_sub(64);
+            log.drain(..excess);
+            plan["failureLog"] = json!(log);
+        }
+        let at = plan["updatedAt"].clone();
+        let event_id = crate::watchdog::delegation_event_id(&session, "session_ended", &token);
+        let event = json!({
+            "eventId": event_id, "kind": "session_ended", "workspaceId": workspace,
+            "sessionId": session, "at": at, "payload": payload,
+        });
+        plan["delegationOrigin"]["terminalEvent"] = event.clone();
+        self.write_plan(plan)?;
+        self.inbox.append(&workspace, &[event])?;
+        Ok(())
+    }
+
     /// Spawn a delegated work session: freezes memory snapshot, creates child conversation
     /// + canonical GoalPlan + optional isolated worktree + optional plan approval gate.
     pub fn spawn_session(
@@ -1829,13 +1900,14 @@ impl SessionSupervisor {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
         let _transition = self.transition_lock()?;
-        self.spawn_session_impl(req, None)
+        self.spawn_session_impl(req, None, None)
     }
 
     fn spawn_session_impl(
         &self,
         req: SpawnSessionRequest,
         retry: Option<(u64, &Value)>,
+        fresh_followup_attachments: Option<&[Value]>,
     ) -> Result<WorkSessionSummary, ProjectError> {
         if req.anchor_message_ids.is_empty() {
             return Err(ProjectError::new(
@@ -1849,7 +1921,14 @@ impl SessionSupervisor {
                 "title is required and must be at most 60 characters",
             ));
         }
-        if req.brief.trim().is_empty() || req.brief.chars().count() > 4000 {
+        if req.brief.trim().is_empty()
+            || req.brief.chars().count()
+                > if fresh_followup_attachments.is_some() {
+                    11_000
+                } else {
+                    4_000
+                }
+        {
             return Err(ProjectError::new(
                 "invalid_input",
                 "brief is required and must be at most 4000 characters",
@@ -1906,7 +1985,9 @@ impl SessionSupervisor {
                         "baselineCommit": handle.baseline_commit,
                     })
                 }
-                Err(error) if retry.is_some() => return Err(error),
+                Err(error) if retry.is_some() || fresh_followup_attachments.is_some() => {
+                    return Err(error);
+                }
                 Err(_) => json!({
                     "executionIsolation": "none",
                     "targetWorkspacePath": req.workspace_path,
@@ -1945,6 +2026,7 @@ impl SessionSupervisor {
                 "id": format!("brief-{session_id}"),
                 "role": "user",
                 "content": req.brief,
+                "attachments": fresh_followup_attachments.unwrap_or_default(),
                 "createdAt": at,
             }),
             &at,
@@ -2034,6 +2116,9 @@ impl SessionSupervisor {
         if let Some(ref predecessor) = req.supersedes {
             origin["supersedes"] = json!(predecessor);
         }
+        if fresh_followup_attachments.is_some() {
+            origin["startedFreshFollowUp"] = json!(true);
+        }
         if let Some((count, predecessor)) = retry {
             origin["autoRetryCount"] = json!(count);
             origin["autonomousRetry"] = json!(true);
@@ -2115,6 +2200,7 @@ impl SessionSupervisor {
         // A predecessor only leaves the current list after its successor is durable.
         if let Some(ref old_sid) = req.supersedes
             && let Some(mut old_plan) = self.find_plan_by_session(&req.workspace_id, old_sid)
+            && fresh_followup_attachments.is_none()
             && (retry.is_some()
                 || !matches!(
                     derive_session_status(&old_plan).as_str(),
@@ -2188,7 +2274,6 @@ impl SessionSupervisor {
         ) {
             return Ok(false);
         }
-        let plan_id = plan["planId"].as_str().unwrap_or("").to_owned();
         let at = now_iso();
         plan["status"] = json!("failed");
         plan["updatedAt"] = json!(at);
@@ -2212,18 +2297,8 @@ impl SessionSupervisor {
         if let Some(progress) = plan.get_mut("progress").and_then(Value::as_object_mut) {
             progress.insert("failed".to_owned(), json!(failed_tasks));
         }
-        self.write_plan(&plan)?;
-        self.emit_event(
-            workspace_id,
-            "session_ended",
-            session_id,
-            json!({
-                "planId": plan_id,
-                "status": "failed",
-                "error": code,
-                "detail": detail,
-            }),
-        );
+        plan["runner"]["status"] = json!("failed");
+        self.persist_terminal_transition(&mut plan, "worker")?;
         Ok(true)
     }
 
@@ -2232,6 +2307,7 @@ impl SessionSupervisor {
         workspace_id: &str,
         session_id: &str,
     ) -> Result<(), ProjectError> {
+        let _transition = self.transition_lock()?;
         let Some(mut plan) = self.find_plan_by_session(workspace_id, session_id) else {
             return Ok(());
         };
@@ -2241,7 +2317,6 @@ impl SessionSupervisor {
         ) {
             return Ok(());
         }
-        let plan_id = plan["planId"].as_str().unwrap_or("").to_owned();
         let at = now_iso();
         plan["status"] = json!("cancelled");
         plan["updatedAt"] = json!(at);
@@ -2263,16 +2338,7 @@ impl SessionSupervisor {
                 }
             }
         }
-        self.write_plan(&plan)?;
-        self.emit_event(
-            workspace_id,
-            "session_ended",
-            session_id,
-            json!({
-                "planId": plan_id,
-                "status": "cancelled",
-            }),
-        );
+        self.persist_terminal_transition(&mut plan, "worker")?;
         Ok(())
     }
 
@@ -2492,12 +2558,6 @@ impl SessionSupervisor {
                     "- `web_fetch` IS projected in this session for read-only HTTP/HTTPS URL fetching. Fetch authoritative documentation/repository URLs directly via `web_fetch` and never fabricate unverified claims.\n",
                 );
             }
-            let mat_dir = self
-                .data_home
-                .join("project-runtime")
-                .join(workspace_id)
-                .join("session-attachments")
-                .join(session_id);
             let anchor_ids: Vec<String> = plan["delegationOrigin"]["anchorMessageIds"]
                 .as_array()
                 .map(|arr| {
@@ -2507,7 +2567,17 @@ impl SessionSupervisor {
                         .collect()
                 })
                 .unwrap_or_default();
-            let image_paths: Vec<PathBuf> = if let (Some(parent_cid), false) = (
+            let input_attachments = if plan["delegationOrigin"]["startedFreshFollowUp"] == true {
+                crate::read_full_conversation_messages(&self.conversations, session_id)
+                    .ok()
+                    .and_then(|messages| {
+                        messages
+                            .into_iter()
+                            .find(|message| message["id"] == format!("brief-{session_id}"))
+                    })
+                    .and_then(|message| message["attachments"].as_array().cloned())
+                    .unwrap_or_default()
+            } else if let (Some(parent_cid), false) = (
                 plan["delegationOrigin"]["parentConversationId"].as_str(),
                 anchor_ids.is_empty(),
             ) {
@@ -2516,15 +2586,6 @@ impl SessionSupervisor {
                     .and_then(|msgs| {
                         crate::attachments::attachments_from_messages_persisted(&msgs, &anchor_ids)
                             .ok()
-                    })
-                    .and_then(|atts| {
-                        crate::attachments::materialize_image_attachments_in_workspace(
-                            &self.data_home,
-                            workspace_id,
-                            &mat_dir,
-                            &atts,
-                        )
-                        .ok()
                     })
                     .unwrap_or_default()
             } else {
@@ -2538,7 +2599,10 @@ impl SessionSupervisor {
                             && run.attribution["model"] == worker_model.model_id()
                     })
                     .ok_or_else(|| ProjectError::code("worker_checkpoint_unavailable"))?;
-                prompt = "Continue the existing delegated task using the recorded work and any answer from the parent project agent. Preserve its original scope and account for effects already completed.".to_owned();
+                prompt = match plan["delegationOrigin"]["followUpPrompt"].as_str() {
+                    Some(_) => "Continue on your existing work and workspace using the latest follow-up instruction recorded above. Do not redo already completed steps unless asked.".to_owned(),
+                    None => "Continue the existing delegated task using the recorded work and any answer from the parent project agent. Preserve its original scope and account for effects already completed.".to_owned(),
+                };
                 Some(continuation)
             } else {
                 None
@@ -2631,8 +2695,53 @@ impl SessionSupervisor {
             } else {
                 None
             };
+            let mailbox = ConversationStore::new(&self.data_home);
+            let plan_path = self.plan_file(&plan_id);
+            let mailbox_id = plan["conversationId"]
+                .as_str()
+                .unwrap_or(session_id)
+                .to_owned();
+            let epoch = plan["delegationOrigin"]["followUpEpoch"]
+                .as_u64()
+                .unwrap_or(0);
+            let image_home = self.data_home.clone();
+            let image_workspace = workspace_id.to_owned();
             let runtime = NativeConversationRuntime::new(&self.data_home, access)
-                .with_capability_overrides(worker_cap_overrides);
+                .with_capability_overrides(worker_cap_overrides)
+                .with_delegated_attachments(input_attachments, move |attachment| {
+                    crate::attachments::resolve_workspace_image_data_url(
+                        &image_home,
+                        &image_workspace,
+                        attachment,
+                    )
+                })
+                .with_delegated_inputs(move |after| {
+                    let plan: Value = fs::read(&plan_path)
+                        .ok()
+                        .and_then(|data| serde_json::from_slice(&data).ok())
+                        .ok_or(peer_runtime::capability::CapabilityError(
+                            "delegation_plan_unavailable",
+                        ))?;
+                    let through = plan["delegationOrigin"]["pendingSteerSeq"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    if through <= after {
+                        return Ok(Vec::new());
+                    }
+                    let rows = crate::read_full_conversation_messages(&mailbox, &mailbox_id)
+                        .map_err(|e| peer_runtime::capability::CapabilityError(e.code()))?;
+                    let mut pending: Vec<_> = rows
+                        .into_iter()
+                        .filter(|message| {
+                            message["followUpEpoch"].as_u64() == Some(epoch)
+                                && message["steerSeq"]
+                                    .as_u64()
+                                    .is_some_and(|seq| seq > after && seq <= through)
+                        })
+                        .collect();
+                    pending.sort_by_key(|message| message["steerSeq"].as_u64());
+                    Ok(pending)
+                });
             let conv_res = Box::pin(
                 runtime.execute_delegated_with_extensions(
                     &ConversationOptions {
@@ -2643,11 +2752,7 @@ impl SessionSupervisor {
                             .or(precreated_worker_cid.as_deref()),
                         resume_from: continuation.as_ref(),
                         prompt: &prompt,
-                        image_paths: if continuation.is_some() {
-                            &[]
-                        } else {
-                            &image_paths
-                        },
+                        image_paths: &[],
                         provider_id: worker_model.provider(),
                         mode: RuntimeMode::Chat,
                         effort: "default",
@@ -2663,7 +2768,6 @@ impl SessionSupervisor {
                 ),
             )
             .await;
-            let _ = fs::remove_dir_all(&mat_dir);
             let mut conv_out = match conv_res {
                 Ok(out) => out,
                 Err(err) => {
@@ -2746,6 +2850,42 @@ impl SessionSupervisor {
             ) {
                 return Ok(outcome);
             }
+            // A steer may arrive after the last provider response, but before
+            // this episode acquires the state-transition lock. Keep that input
+            // on the same Worker instead of settling an obsolete result.
+            let origin = &updated["delegationOrigin"];
+            let committed_already = origin["terminalEvent"]["payload"]["followUpEpoch"].as_u64()
+                == Some(origin["followUpEpoch"].as_u64().unwrap_or(0))
+                && matches!(
+                    updated["status"].as_str(),
+                    Some("completed" | "failed" | "cancelled" | "interrupted")
+                );
+            if committed_already {
+                return Ok(outcome);
+            }
+            if outcome.status == "completed"
+                && origin["pendingSteerEpoch"].as_u64()
+                    == Some(origin["followUpEpoch"].as_u64().unwrap_or(0))
+                && let Some(seq) = origin["pendingSteerSeq"].as_u64()
+                && let Some(conversation) = worker_conv_id.as_deref()
+                && self.load_worker_checkpoint(&updated)?.is_some()
+                && !crate::read_full_conversation_messages(&self.conversations, conversation)?
+                    .iter()
+                    .any(|message| message["steerSeq"] == seq)
+            {
+                updated["delegationOrigin"]["continueWorkerConversation"] = json!(true);
+                updated["delegationOrigin"]["phase"] = json!("queued");
+                updated["runner"]["status"] = json!("running");
+                updated["updatedAt"] = json!(at);
+                self.write_plan(&updated)?;
+                self.emit_event(
+                    workspace_id,
+                    "session_resumed",
+                    session_id,
+                    json!({"planId": plan_id}),
+                );
+                return Ok(outcome);
+            }
             let turns_used = updated["delegationOrigin"]["workerTurnsUsed"]
                 .as_u64()
                 .unwrap_or(0)
@@ -2789,6 +2929,7 @@ impl SessionSupervisor {
                 updated["runner"]["status"] = json!(final_status);
             }
             updated["delegationOrigin"]["continueWorkerConversation"] = Value::Null;
+            updated["delegationOrigin"]["followUpPrompt"] = Value::Null;
             if final_status == "failed"
                 && outcome.stop["error"]
                     .as_str()
@@ -2808,7 +2949,6 @@ impl SessionSupervisor {
                 });
                 updated["runner"]["status"] = json!("paused");
             }
-            let mut failure_code: Option<String> = None;
             if final_status == "completed" {
                 self.evaluate_deterministic_criteria(&mut updated);
                 let mut ev_refs = self.indexed_evidence_refs_for_plan(&updated);
@@ -2853,7 +2993,6 @@ impl SessionSupervisor {
                         .as_str()
                         .unwrap_or("WORKER_FAILED")
                         .to_owned();
-                    failure_code = Some(err_code.clone());
                     updated["delegationOrigin"]["error"] = json!(err_code);
                     updated["failure"] = json!({
                         "code": err_code,
@@ -2885,22 +3024,8 @@ impl SessionSupervisor {
                     });
                 }
             }
-            self.write_plan(&updated)?;
-            drop(transition);
-            let mut event_payload = json!({"planId": plan_id, "status": final_status});
-            if let Some(ref code) = failure_code {
-                event_payload["error"] = json!(code);
-            }
-            self.emit_event(
-                workspace_id,
-                if final_status == "completed" {
-                    "report_available"
-                } else {
-                    "session_ended"
-                },
-                session_id,
-                event_payload,
-            );
+            let _transition = transition;
+            self.persist_terminal_transition(&mut updated, "worker")?;
         }
         Ok(outcome)
     }
@@ -3212,7 +3337,10 @@ impl SessionSupervisor {
         let already_accepted = plan["resultAcceptance"]["acceptedAt"].as_str().is_some();
         let at = now_iso();
         plan["delegationOrigin"]["independentVerifier"] = json!(verifier_state);
-        if !already_accepted && let Some(ref by) = decision.accepted_by {
+        if !already_accepted
+            && derive_session_status(&plan) == "result_ready"
+            && let Some(ref by) = decision.accepted_by
+        {
             plan["resultAcceptance"] = json!({
                 "acceptedAt": at,
                 "acceptedBy": by,
@@ -3523,7 +3651,11 @@ impl SessionSupervisor {
             });
         }
         plan["updatedAt"] = json!(at);
-        self.write_plan(&plan)?;
+        if approve {
+            self.write_plan(&plan)?;
+        } else {
+            self.persist_terminal_transition(&mut plan, "user")?;
+        }
         Ok(self.summarize(&plan))
     }
 
@@ -3679,6 +3811,11 @@ impl SessionSupervisor {
         if current == "accepted" || (action != "cancel" && current == "result_ready") {
             return Err(ProjectError::code("session_already_completed"));
         }
+        if current == "cancelled"
+            && plan["delegationOrigin"]["cancellation"]["phase"] == "completed"
+        {
+            return Ok(self.summarize(&plan));
+        }
         let at = now_iso();
         match action {
             "pause" => {
@@ -3724,13 +3861,17 @@ impl SessionSupervisor {
             }
             _ => return Err(ProjectError::code("invalid_action")),
         }
-        self.write_plan(&plan)?;
         if action == "cancel" {
-            let mut payload = json!({"status": "cancelled", "reason": reason});
-            if initiated_by_agent {
-                payload["initiatedBy"] = json!("project_agent");
-            }
-            self.emit_event(workspace_id, "session_ended", session_id, payload);
+            self.persist_terminal_transition(
+                &mut plan,
+                if initiated_by_agent {
+                    "project_agent"
+                } else {
+                    "user"
+                },
+            )?;
+        } else {
+            self.write_plan(&plan)?;
         }
         Ok(self.summarize(&plan))
     }
@@ -3757,62 +3898,6 @@ impl SessionSupervisor {
         Ok(self.summarize(&plan))
     }
 
-    pub fn message_session(
-        &self,
-        workspace_id: &str,
-        session_id: &str,
-        text: &str,
-        intent: &str,
-        holds_lease: bool,
-    ) -> Result<WorkSessionSummary, ProjectError> {
-        if !holds_lease {
-            return Err(ProjectError::code("LEASE_REQUIRED"));
-        }
-        if !matches!(intent, "answer" | "amend") || text.trim().is_empty() {
-            return Err(ProjectError::code("invalid_input"));
-        }
-        let _transition = self.transition_lock()?;
-        let mut plan = self
-            .find_plan_by_session(workspace_id, session_id)
-            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
-        let status = derive_session_status(&plan);
-        if matches!(
-            status.as_str(),
-            "accepted" | "cancelled" | "failed" | "superseded"
-        ) {
-            return Err(ProjectError::code("session_terminal"));
-        }
-        let conv_id = plan["conversationId"]
-            .as_str()
-            .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?
-            .to_owned();
-        let at = now_iso();
-        let content = if intent == "amend" {
-            format!("来自项目代理转达：{text}")
-        } else {
-            text.to_owned()
-        };
-        self.conversations.append_message_idempotent(
-            &conv_id,
-            &json!({
-                "id": format!("msg-{}", uuid::Uuid::new_v4()),
-                "role": "user",
-                "kind": if intent == "amend" { "user_correction" } else { "user_input" },
-                "content": content,
-                "createdAt": at,
-            }),
-            &at,
-            None,
-        )?;
-        if plan["runner"]["status"] == "waiting_user" {
-            plan["runner"]["status"] = json!("running");
-            plan["delegationOrigin"]["phase"] = json!("queued");
-        }
-        plan["updatedAt"] = json!(at);
-        self.write_plan(&plan)?;
-        Ok(self.summarize(&plan))
-    }
-
     /// Startup recovery for an owned workspace: marks orphaned `open` approvals as `stale`/`expired`,
     /// reconciles scheduler queue, and runs native plan recovery on interrupted delegated plans.
     pub async fn recover_workspace(
@@ -3832,7 +3917,8 @@ impl SessionSupervisor {
             .iter()
             .filter_map(|plan| {
                 let origin = &plan["delegationOrigin"];
-                (origin["autonomousRetry"] == true).then_some(())?;
+                (origin["autonomousRetry"] == true || origin["startedFreshFollowUp"] == true)
+                    .then_some(())?;
                 Some((
                     origin["supersedes"].as_str()?.to_owned(),
                     origin["sessionId"].clone(),
@@ -3840,28 +3926,25 @@ impl SessionSupervisor {
             })
             .collect();
         for plan in &mut plans {
-            if self.recover_verification(plan)? {
-                if let Some(sid) = plan["delegationOrigin"]["sessionId"].as_str() {
-                    self.emit_event(
-                        workspace_id,
-                        "report_available",
-                        sid,
-                        json!({
-                            "planId": plan["planId"], "status": "completed",
-                        }),
-                    );
+            {
+                let _transition = self.transition_lock()?;
+                let event = &plan["delegationOrigin"]["terminalEvent"];
+                if event["kind"] == "session_ended" && event["workspaceId"] == workspace_id {
+                    self.inbox
+                        .append(workspace_id, std::slice::from_ref(event))?;
                 }
-                recovered += 1;
-                continue;
+                if self.recover_verification(plan)? {
+                    recovered += 1;
+                    continue;
+                }
             }
             if let Some(successor) = plan["delegationOrigin"]["sessionId"]
                 .as_str()
                 .and_then(|sid| successors.get(sid))
                 && plan["delegationOrigin"]["supersededBy"].is_null()
-                && plan["resultAcceptance"]["acceptedAt"].is_null()
                 && matches!(
                     derive_session_status(plan).as_str(),
-                    "result_ready" | "failed"
+                    "result_ready" | "failed" | "accepted" | "interrupted"
                 )
             {
                 self.retire_replaced_session(plan, successor)?;
@@ -4389,7 +4472,7 @@ mod tests {
             e["kind"] == "session_ended"
                 && e["sessionId"] == spawned.session_id
                 && e["payload"]["status"] == "failed"
-                && e["payload"]["error"] == "WORKSPACE_NOT_FOUND"
+                && e["payload"]["failureCode"] == "WORKSPACE_NOT_FOUND"
         }));
     }
 
@@ -4599,3 +4682,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod followup_tests;

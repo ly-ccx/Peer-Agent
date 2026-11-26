@@ -73,7 +73,7 @@ pub const SKILL_PACKS: [SkillPackSpec; 7] = [
                 - Use `get_verification_detail` to inspect verdict checks, evidence refs, and changed files before claiming verification passed.\n\
                 - Use `verify_session` on completed, unaccepted work after verifier failure. It runs a bounded independent read-only check. Supply focus only for a relevant review question.\n\
                 - Use `cancel_session` to cancel/dismiss active, queued, unaccepted `result_ready`, `failed`, `verification_failed`, or stale `cancelled` sessions; you may cancel dead `failed` / `verification_failed` / stale-cancelled sessions autonomously even during wake turns.\n\
-                - On wake, use `message_session(intent=answer)` for a pending technical question addressed to this Bot and `resume_session` for a host-confirmed recoverable interruption. Human decisions, amendments, and user pauses need a current user input.",
+                - On wake, use `message_session(intent=answer)` for a pending technical question addressed to this Bot and `resume_session` for a host-confirmed recoverable interruption. Use `message_session(intent=followup)` for in-scope fixes to a finished Worker result. Human decisions and active amendments need a current user input.",
     },
     SkillPackSpec {
         id: "memory",

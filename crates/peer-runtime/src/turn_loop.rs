@@ -11,6 +11,10 @@ pub(crate) trait TurnHost {
         false
     }
 
+    fn ingest_pending_user_input(&mut self) -> Result<bool, CapabilityError> {
+        Ok(false)
+    }
+
     /// Prepare/send through the actual model/Context seam and capture usage,
     /// including errors. Revalidate the live principal before returning calls.
     async fn request(&mut self) -> Result<ModelTurn, CapabilityError>;
@@ -88,6 +92,9 @@ pub(crate) async fn run(
             content = std::mem::take(&mut turn.content);
         }
         if turn.calls.is_empty() {
+            if max_turns.is_none_or(|limit| turns < limit) && host.ingest_pending_user_input()? {
+                continue;
+            }
             return Ok(LoopOutcome {
                 stop: LoopStop::Replied,
                 content,

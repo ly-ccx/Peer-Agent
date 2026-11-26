@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import * as jsxRuntime from 'react/jsx-runtime';
+import { parseQuietReply } from '@peer-agent/protocol';
 import ts from 'typescript';
 import { stripHistoricalLocalRecordForDisplay } from '../../chat/state/historicalLocalRecord.ts';
 
@@ -27,6 +28,7 @@ function loadReplyBubble() {
   };
 
   const dependencies: Record<string, unknown> = {
+    '@peer-agent/protocol': { parseQuietReply },
     react: { useRef: (current: unknown) => ({ current }) },
     'react/jsx-runtime': jsxRuntime,
     '../../chat/components/markdown/MarkdownMessage': { MarkdownMessage: stubComponent('MarkdownMessage') },
@@ -103,6 +105,7 @@ function loadReplyBubble() {
           quotedValues.push(excerpt);
         },
         workIndex: { sessions: new Map(), tasks: new Map(), resources: new Map() },
+        taskRows: [],
         onOpenWork() {},
         narration,
       });

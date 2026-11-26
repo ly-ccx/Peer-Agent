@@ -6,6 +6,7 @@ import { ReplyAnchors } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import { botNarration } from '../state/botNarrationState';
+import { displayActivity } from '../state/botActivityState';
 import { ReplyContext } from './ReplyContext';
 
 export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, onOpenDetails, avatar, workspaceId, botLabel }: {
@@ -14,8 +15,10 @@ export function LiveReply({ activity, referenceIds, i18n, anchors, onJump, onOpe
   readonly onJump: (id: string) => void; readonly onOpenDetails?: () => void;
   readonly avatar: BotAvatarModel; readonly workspaceId: string; readonly botLabel: string;
 }) {
-  const cleanReplyText = activity.replyText ? stripHistoricalLocalRecordForDisplay(activity.replyText) : '';
-  const cleanSegments = (activity.segments ?? []).flatMap((segment) => {
+  const visible = displayActivity(activity);
+  if (!visible) return null;
+  const cleanReplyText = stripHistoricalLocalRecordForDisplay(visible.replyText);
+  const cleanSegments = (visible.segments ?? []).flatMap((segment) => {
     if (segment.kind !== 'text') return [];
     const text = stripHistoricalLocalRecordForDisplay(segment.text);
     return text ? [{ ...segment, text }] : [];

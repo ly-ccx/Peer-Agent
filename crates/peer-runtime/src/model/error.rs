@@ -13,6 +13,7 @@ pub struct ModelError {
     pub observation: Option<Box<ModelRequestObservation>>,
     pub context_overflow_status: Option<u16>,
     pub http_status: Option<u16>,
+    pub retry_after_seconds: Option<u64>,
     /// Bounded, credential-scrubbed structured error summary extracted from a JSON provider error.
     pub http_detail: Option<String>,
 }
@@ -36,6 +37,7 @@ impl ModelError {
             observation: None,
             context_overflow_status: None,
             http_status: None,
+            retry_after_seconds: None,
             http_detail: None,
         }
     }
@@ -91,6 +93,24 @@ impl ModelError {
             usage,
         }));
         self
+    }
+
+    pub fn is_usage_limit(&self) -> bool {
+        self.http_status == Some(429)
+            || self.code.contains("rate_limit")
+            || self.http_detail.as_deref().is_some_and(|detail| {
+                let lower = detail.to_ascii_lowercase();
+                [
+                    "rate_limit",
+                    "rate limit",
+                    "quota",
+                    "overloaded",
+                    "resource_exhausted",
+                    "too many requests",
+                ]
+                .iter()
+                .any(|marker| lower.contains(marker))
+            })
     }
 
     pub fn is_transient_retryable(&self) -> bool {
@@ -181,12 +201,14 @@ fn extract_safe_value_detail(parsed: &serde_json::Value) -> Option<String> {
         .or_else(|| response_err.filter(|v| !v.is_null()))
         .or_else(|| root.get("promptFeedback").filter(|v| !v.is_null()))
         .unwrap_or(root);
+    if let Some(reason) = err.get("blockReason").and_then(serde_json::Value::as_str) {
+        return sanitize_provider_error_text(&format!("prompt_blocked: {reason}"));
+    }
     let status = err
         .get("status")
         .or_else(|| err.get("type"))
         .or_else(|| err.get("code"))
         .or_else(|| err.get("reason"))
-        .or_else(|| err.get("blockReason"))
         .and_then(|v| match v {
             serde_json::Value::String(s) => Some(s.trim().to_owned()),
             _ => None,

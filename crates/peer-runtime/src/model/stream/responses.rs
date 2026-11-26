@@ -16,6 +16,10 @@ pub(super) struct Responses {
     pub done: bool,
 }
 impl Responses {
+    pub(super) fn has_tool_intent(&self) -> bool {
+        !self.items.is_empty()
+    }
+
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         match v["type"].as_str() {
             Some("response.failed" | "response.incomplete" | "error") => {

@@ -1,3 +1,7 @@
+#[path = "support/project_agent_model.rs"]
+mod test_model;
+use test_model::*;
+
 use peer_project_agent::{
     CircuitBreakerStore, CreateObjectiveRequest, LeaseStatus, MemoryEpisode, MemoryFilter,
     NativeProjectHost, ObjectiveBudget, ProjectCapabilityProvider, PublishInteractiveRequest,
@@ -24,61 +28,12 @@ use peer_runtime::{
 use peer_store::{ApprovalState, EvidenceIndexStore, ExecutionResourceStore, ResourceReservation};
 use serde_json::{Value, json};
 use std::{
-    collections::VecDeque,
     fs,
-    io::{Read, Write},
-    net::TcpListener,
+    io::Write,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tempfile::tempdir;
-
-struct AutoAllowPermission;
-
-impl PermissionInput for AutoAllowPermission {
-    fn decide<'a>(
-        &'a mut self,
-        _prompt: Value,
-        _cancel: &'a CancellationToken,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LocalPermissionDecision> + 'a>> {
-        Box::pin(async { LocalPermissionDecision::Approve })
-    }
-}
-
-type ScriptHandler = Box<dyn Fn(&Value) -> String + Send>;
-type HttpScriptHandler = Box<dyn Fn(&Value) -> (u16, &'static str, String) + Send>;
-
-struct MockModelServer {
-    endpoint: String,
-    requests: Arc<Mutex<Vec<Value>>>,
-    _thread: std::thread::JoinHandle<()>,
-}
-
-fn sse_tool_call(id: &str, name: &str, args: &Value) -> String {
-    let args_str = serde_json::to_string(args).unwrap();
-    let chunk = json!({
-        "choices": [{
-            "index": 0,
-            "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "id": id,
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": args_str
-                    }
-                }]
-            },
-            "finish_reason": "tool_calls"
-        }]
-    });
-    let usage = json!({
-        "choices": [],
-        "usage": {"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25}
-    });
-    format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n")
-}
 
 fn responses_sse_tool_call(call_id: &str, name: &str, args: &Value) -> String {
     let args_str = serde_json::to_string(args).unwrap();
@@ -131,103 +86,6 @@ fn responses_sse_tool_call(call_id: &str, name: &str, args: &Value) -> String {
     )
 }
 
-fn sse_text(text: &str) -> String {
-    let chunk = json!({
-        "choices": [{
-            "index": 0,
-            "delta": {"content": text},
-            "finish_reason": "stop"
-        }]
-    });
-    let usage = json!({
-        "choices": [],
-        "usage": {"prompt_tokens": 15, "completion_tokens": 4, "total_tokens": 19}
-    });
-    format!("data: {chunk}\n\ndata: {usage}\n\ndata: [DONE]\n\n")
-}
-
-fn start_http_mock_server(handlers: Vec<HttpScriptHandler>) -> MockModelServer {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let captured = Arc::clone(&requests);
-    let mut queue: VecDeque<HttpScriptHandler> = handlers.into();
-    let thread = std::thread::spawn(move || {
-        while let Some(handler) = queue.pop_front() {
-            let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut header = Vec::new();
-            let mut b = [0u8; 1];
-            while !header.ends_with(b"\r\n\r\n") {
-                socket.read_exact(&mut b).unwrap();
-                header.push(b[0]);
-                assert!(header.len() < 65536);
-            }
-            let header_str = String::from_utf8(header).unwrap();
-            let len: usize = header_str
-                .lines()
-                .find_map(|l| {
-                    let lower = l.to_ascii_lowercase();
-                    lower
-                        .strip_prefix("content-length:")
-                        .and_then(|v| v.trim().parse().ok())
-                })
-                .unwrap_or(0);
-            let mut body = vec![0u8; len];
-            if len > 0 {
-                socket.read_exact(&mut body).unwrap();
-            }
-            let req_json: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
-            captured.lock().unwrap().push(req_json.clone());
-            let (status, content_type, resp_body) = handler(&req_json);
-            let reason = if status == 200 { "OK" } else { "Error" };
-            let resp = format!(
-                "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                resp_body.len(),
-                resp_body
-            );
-            socket.write_all(resp.as_bytes()).unwrap();
-            let _ = socket.flush();
-        }
-    });
-    MockModelServer {
-        endpoint,
-        requests,
-        _thread: thread,
-    }
-}
-
-fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer {
-    let wrapped = handlers
-        .into_iter()
-        .map(|h| {
-            Box::new(move |req: &Value| (200u16, "text/event-stream", h(req))) as HttpScriptHandler
-        })
-        .collect();
-    start_http_mock_server(wrapped)
-}
-
-fn mock_model_with_wire(endpoint: &str, wire: Wire) -> NativeModel {
-    NativeModel::new(
-        ModelConfig {
-            endpoint: endpoint.to_owned(),
-            model: "mock-e2e-model".into(),
-            provider: "openai".into(),
-            wire,
-            generation: GenerationOptions::default(),
-        },
-        None,
-        Duration::from_secs(10),
-    )
-    .unwrap()
-}
-
-fn mock_model(endpoint: &str) -> NativeModel {
-    mock_model_with_wire(endpoint, Wire::Chat)
-}
-
 fn tool_names_from_request(req: &Value) -> Vec<String> {
     req["tools"]
         .as_array()
@@ -235,19 +93,6 @@ fn tool_names_from_request(req: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|t| t["function"]["name"].as_str().map(str::to_owned))
         .collect()
-}
-
-fn extract_spawned_session_id(req: &Value) -> Option<String> {
-    req["messages"]
-        .as_array()?
-        .iter()
-        .rev()
-        .filter(|m| m["role"] == "tool")
-        .find_map(|m| {
-            let content = m["content"].as_str()?;
-            let parsed: Value = serde_json::from_str(content).ok()?;
-            parsed["sessionId"].as_str().map(str::to_owned)
-        })
 }
 
 fn extract_session_id_from_wake(req: &Value) -> Option<String> {
@@ -1305,7 +1150,10 @@ async fn transient_retry_recovers_without_tripping_breaker_and_auth_error_never_
     }
     let server_trip = start_http_mock_server(extra_handlers);
     let trip_model = mock_model(&server_trip.endpoint);
-    for _ in 0..4 {
+    let trial_ids: Vec<_> = (0..4).map(|i| format!("auth-trial-{i}")).collect();
+    for id in &trial_ids {
+        host.submit_user_input(&entry.workspace_id, id, "Try the provider again", None)
+            .unwrap();
         let _ = host
             .tick(
                 &entry.workspace_id,
@@ -1335,10 +1183,12 @@ async fn transient_retry_recovers_without_tripping_breaker_and_auth_error_never_
             })],
         )
         .unwrap();
-    // Clear pending user inputs to isolate wake-turn circuit block on fresh_host
+    // Clear pending user inputs to isolate wake-turn circuit block on fresh_host.
+    let mut all_inputs = vec![input_auth.to_owned()];
+    all_inputs.extend(trial_ids);
     fresh_host
         .inputs()
-        .mark_executed(&entry.workspace_id, &[input_auth.to_owned()], &[], true)
+        .mark_executed(&entry.workspace_id, &all_inputs, &[], true)
         .unwrap();
     let tick_blocked = fresh_host
         .tick(
@@ -1734,16 +1584,6 @@ fn extract_objective_id_from_tools(req: &Value) -> Option<String> {
         })
 }
 
-fn last_tool_result_json(req: &Value) -> Option<Value> {
-    let raw = req["messages"]
-        .as_array()?
-        .iter()
-        .rev()
-        .find(|m| m["role"] == "tool")?["content"]
-        .as_str()?;
-    serde_json::from_str(raw).ok()
-}
-
 fn git_cmd(cwd: &std::path::Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .args(args)
@@ -2106,7 +1946,20 @@ async fn stopped_turn_persists_agent_stopped_card_and_retry_carries_retry_contin
         .find(|m| m["kind"] == "system_card" && m["card"] == "agent_stopped")
         .expect("agent_stopped system_card persisted");
     assert_eq!(stopped_card["replyTo"], json!(["input-in-stop-1"]));
-    assert_eq!(stopped_card["partialReply"], "Partial work before stop");
+    assert!(
+        stopped_card["partialReply"].is_null(),
+        "tool-round prose stays out of the stop card"
+    );
+    let mut trace = messages
+        .iter()
+        .find(|message| {
+            message["kind"] == "agent_turn" && message["turnId"] == stopped_card["turnId"]
+        })
+        .unwrap()
+        .clone();
+    hydrate_agent_turn_record(home.path(), &entry.workspace_id, &mut trace);
+    assert_eq!(trace["rounds"][0]["text"], "Partial work before stop");
+    assert_eq!(trace["publicUpdates"], json!([]));
 
     let continuity = read_retry_continuity(&messages, &["input-in-stop-1".into()], None)
         .expect("read_retry_continuity reconstructs stopped turn");
@@ -2678,6 +2531,12 @@ async fn working_context_notes_handoff_and_work_history_redaction_via_coordinati
     host.close();
 }
 
+fn opt_into_independent_verifier(supervisor: &SessionSupervisor, plan_id: &str) {
+    let mut plan = supervisor.read_plan(plan_id).unwrap();
+    plan["delegationOrigin"]["requireIndependentVerifier"] = json!(true);
+    supervisor.save_plan_json(&plan).unwrap();
+}
+
 #[tokio::test]
 async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifier_evaluates_model_review()
  {
@@ -2757,6 +2616,7 @@ async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifie
         .supervisor()
         .spawn_session(request(vec!["local.file.read".into()]), true)
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
 
     let plan = host
         .supervisor()
@@ -2959,6 +2819,8 @@ async fn delegated_verifier_corrects_an_invalid_line_range_and_returns_a_verdict
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     assert_eq!(
         host.supervisor()
             .promote_queued(&entry.workspace_id, true)
@@ -3151,6 +3013,8 @@ async fn delegated_verifier_unprojected_tool_name_still_ends_the_run() {
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     assert_eq!(
         host.supervisor()
             .promote_queued(&entry.workspace_id, true)
@@ -3757,7 +3621,7 @@ async fn watchdog_detects_running_and_result_ready_stalls_and_stops_auto_retry_o
     assert!(!running_wait_assess.stalled);
     assert!(running_wait_assess.waiting);
 
-    // 3. result_ready past STALL_WINDOW_MS emits both result_ready and verification_pending stall.
+    // 3. Watchdog still observes a stalled delivery without emitting a terminal report.
     let plan_verify = json!({
         "planId": "plan-wd-1",
         "status": "completed",
@@ -3779,7 +3643,7 @@ async fn watchdog_detects_running_and_result_ready_stalls_and_stops_auto_retry_o
         "2026-11-20T10:16:00.000Z",
         None,
     );
-    assert!(ev_verify.iter().any(|e| e["kind"] == "result_ready"));
+    assert!(!ev_verify.iter().any(|e| e["kind"] == "result_ready"));
     assert!(ev_verify.iter().any(|e| {
         e["kind"] == "stalled"
             && e["payload"]["stallId"] == "stall:verify:sess-wd-1:2026-11-20T10:00:00.000Z"
@@ -3819,12 +3683,7 @@ async fn watchdog_detects_running_and_result_ready_stalls_and_stops_auto_retry_o
         "2026-11-20T10:18:00.000Z",
         None,
     );
-    assert!(ev_fail.iter().any(|e| {
-        e["kind"] == "failed"
-            && e["payload"]["sameCauseCount"] == 3
-            && e["payload"]["stopAutoRetry"] == true
-            && e["payload"]["askUser"] == true
-    }));
+    assert!(ev_fail.is_empty(), "{ev_fail:?}");
     host.close();
 }
 
@@ -5191,58 +5050,6 @@ async fn conversation_search_index_fts5_trigram_chinese_and_redaction_with_memor
 
 #[tokio::test]
 async fn interactive_result_slash_result_lookup_from_task_evidence_refs() {
-    struct StubBridge;
-    impl peer_project_agent::InteractiveContentBridge for StubBridge {
-        fn validate_draft(
-            &self,
-            draft: Value,
-            bindings: Value,
-            _cancel: CancellationToken,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<Value, peer_project_agent::InteractiveValidationError>,
-                    > + Send,
-            >,
-        > {
-            Box::pin(async move {
-                Ok(json!({
-                    "schemaVersion": 1,
-                    "libraryVersion": "peer-basic-1",
-                    "title": draft["title"],
-                    "textFallback": draft["textFallback"],
-                    "program": draft["program"],
-                    "specHash": "sha256:37505cc28779ca4e18facf09edb86db7a01a64d58b0acc22841b168707dc3d24",
-                    "stateSchemaHash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-                    "stateSchema": {},
-                    "initialValues": {},
-                    "bindings": bindings,
-                }))
-            })
-        }
-
-        fn evaluate_content(
-            &self,
-            _content: Value,
-            _values: Value,
-            _cancel: CancellationToken,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<Value, peer_project_agent::InteractiveValidationError>,
-                    > + Send,
-            >,
-        > {
-            Box::pin(async move {
-                Ok(json!({ "projection": { "text": "metric=99", "truncated": false } }))
-            })
-        }
-
-        fn catalog_prompt(&self) -> Option<String> {
-            Some("Peer interactive catalog stub".to_owned())
-        }
-    }
-
     let data_dir = tempdir().unwrap();
     let ws = tempdir().unwrap();
     fs::write(
@@ -6203,7 +6010,7 @@ async fn phase1_ergonomics_auto_anchor_spawn_preset_and_post_reply_session_prefi
 }
 
 #[tokio::test]
-async fn wake_turn_host_fallback_reports_failed_session_when_model_yields_without_post_reply() {
+async fn wake_turn_host_fallback_reports_unreported_failure_when_model_tries_to_stay_quiet() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
     let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
@@ -6295,11 +6102,7 @@ async fn wake_turn_host_fallback_reports_failed_session_when_model_yields_withou
             .unwrap()
     );
 
-    // Mock model returns plain text without calling post_reply on both initial wake round and delivery repair round.
-    let server = start_mock_server(vec![
-        Box::new(|_| sse_text("I see the task failed.")),
-        Box::new(|_| sse_text("Still not calling post_reply.")),
-    ]);
+    let server = start_mock_server(vec![Box::new(|_| sse_text("NO_REPLY"))]);
     let model = mock_model(&server.endpoint);
     let cancel = CancellationToken::new();
 
@@ -6413,6 +6216,7 @@ async fn worker_exhausting_turn_budget_synthesizes_final_report_and_resolves_mul
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
 
     let promoted = host.supervisor().promote_queued(&ws_id, true).unwrap();
     assert_eq!(promoted.start, vec![spawned.session_id.clone()]);
@@ -6725,6 +6529,8 @@ async fn independent_verifier_handles_missing_parent_read_and_repairs_unindexed_
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     let promoted = host
         .supervisor()
         .promote_queued(&entry.workspace_id, true)
@@ -6937,6 +6743,8 @@ async fn independent_verifier_rejects_fabricated_refs_after_repair_and_records_c
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     host.supervisor()
         .promote_queued(&entry.workspace_id, true)
         .unwrap();
@@ -7088,6 +6896,8 @@ async fn command_and_manual_criteria_reach_human_gate_and_confirm_cleanly() {
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     host.supervisor()
         .promote_queued(&entry.workspace_id, true)
         .unwrap();
@@ -7336,6 +7146,8 @@ async fn command_and_model_review_session_auto_accepts_under_auto_policy() {
             true,
         )
         .unwrap();
+    opt_into_independent_verifier(host.supervisor(), &spawned.plan_id);
+
     host.supervisor()
         .promote_queued(&entry.workspace_id, true)
         .unwrap();
@@ -7887,59 +7699,6 @@ async fn cancel_session_retires_verification_failed_and_stale_cancelled_autonomo
     host.close();
 }
 
-fn spawn_autonomy_fixture(
-    host: &NativeProjectHost,
-    workspace_id: &str,
-    parent_id: &str,
-    workspace_path: &std::path::Path,
-) -> peer_project_agent::WorkSessionSummary {
-    host.submit_user_input(
-        workspace_id,
-        "auto-input",
-        "Check the project readme.",
-        None,
-    )
-    .unwrap();
-    host.inputs()
-        .consume(workspace_id, parent_id, host.conversations(), true)
-        .unwrap();
-    host.inputs()
-        .mark_executed(workspace_id, &["auto-input".to_owned()], &[], true)
-        .unwrap();
-    host.supervisor()
-        .spawn_session(
-            SpawnSessionRequest {
-                workspace_id: workspace_id.into(),
-                workspace_path: workspace_path.into(),
-                parent_conversation_id: parent_id.into(),
-                anchor_message_ids: vec![input_message_id("auto-input").unwrap()],
-                input_id: "auto-input".into(),
-                surface: "desktop".into(),
-                title: "Check the readme".into(),
-                brief: "Check whether readme.md exists.".into(),
-                kind: "research".into(),
-                read_only: true,
-                required_capabilities: vec!["local.file.read".into()],
-                success_criteria: vec![SpawnCriterion {
-                    id: Some("readme".into()),
-                    kind: "file-exists".into(),
-                    description: "readme.md exists".into(),
-                    path: Some("readme.md".into()),
-                    expect: None,
-                    command: None,
-                }],
-                priority: "normal".into(),
-                depends_on: vec![],
-                supersedes: None,
-                objective_id: None,
-                isolation: "auto".into(),
-                worker_model_selection: json!({}),
-            },
-            true,
-        )
-        .unwrap()
-}
-
 fn latest_autonomy_tool_result(req: &Value) -> &str {
     req["messages"]
         .as_array()
@@ -8275,6 +8034,7 @@ async fn autonomy_wake_reverification_runs_readonly_role_and_auto_accepts_after_
         &profile.agent_conversation_id.unwrap(),
         ws.path(),
     );
+    opt_into_independent_verifier(host.supervisor(), &child.plan_id);
     let sid = &child.session_id;
     host.supervisor().promote_queued(&ws_id, true).unwrap();
     let worker = start_mock_server(vec![
@@ -9420,4 +9180,460 @@ async fn open_circuit_blocks_stale_user_input_repolls_and_surfaces_http_400_deta
         recovery_tick.last_turn.as_ref().map(|t| &t.end)
     );
     assert_eq!(recovery_tick.bot_turns_run, 2);
+}
+
+#[tokio::test]
+async fn wake_envelope_delivers_natural_completion_in_one_model_request() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Demo").unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("Wake Delivery"))
+        .unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&ws_id, "inline-wake", "Check that the README exists", None)
+        .unwrap();
+    let server = start_mock_server(vec![
+        Box::new(|_| spawn_readme_for_natural_reply()),
+        Box::new(|req| {
+            assert!(extract_spawned_session_id(req).is_some());
+            sse_text("I’ll check the README.")
+        }),
+        Box::new(|_| sse_text("INLINE_WORKER_RESULT: The workspace README exists.")),
+        Box::new(|req| {
+            let messages = req["messages"].as_array().unwrap();
+            let sys = messages.iter().find(|m| m["role"] == "system").unwrap()["content"]
+                .as_str()
+                .unwrap();
+            assert!(!sys.contains("INLINE_WORKER_RESULT"));
+            assert!(!sys.contains("\"payload\":"));
+            let wake = messages.iter().rev().find(|m| m["role"] == "user").unwrap()["content"]
+                .as_str()
+                .unwrap();
+            assert!(wake.contains("Host Wake Event Payload"));
+            assert!(wake.contains("\"status\":\"result_ready\""));
+            assert!(wake.contains("INLINE_WORKER_RESULT: The workspace README exists."));
+            sse_text("I checked the workspace. The README is there.")
+        }),
+    ]);
+    let tick = host
+        .tick(
+            &ws_id,
+            &mock_model(&server.endpoint),
+            json!({}),
+            &mut AutoAllowPermission,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick.wake_turns_run, 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 4);
+    let turn = tick.last_turn.unwrap();
+    assert!(matches!(turn.end, TurnEndKind::ReplyCommitted { .. }));
+    assert_eq!(turn.tool_calls, 0);
+    let sessions = host.supervisor().list_sessions(&ws_id);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, "accepted");
+    let mut replies: Vec<_> = host
+        .conversations()
+        .read_committed(&conv_id, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages
+        .into_iter()
+        .filter(|m| m["kind"] == "agent_reply")
+        .collect();
+    assert_eq!(replies.len(), 2);
+    let wake_reply = replies.pop().unwrap();
+    assert_eq!(
+        wake_reply["content"],
+        "I checked the workspace. The README is there."
+    );
+    assert_eq!(wake_reply["sources"], json!([sessions[0].session_id]));
+    assert_eq!(
+        wake_reply["meta"]["sessionStates"][0]["status"],
+        "result_ready"
+    );
+}
+
+#[tokio::test]
+async fn supervisor_is_the_only_terminal_publisher_and_recovery_replay_is_idempotent() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("Terminal")).unwrap();
+    let ws_id = entry.workspace_id;
+    let parent = profile.agent_conversation_id.unwrap();
+    host.ensure_lease(&ws_id).unwrap();
+    let supervisor = host.supervisor();
+    let completed = spawn_autonomy_fixture(&host, &ws_id, &parent, ws.path());
+    supervisor.promote_queued(&ws_id, true).unwrap();
+    let worker = start_mock_server(vec![Box::new(|_| sse_text("Final output."))]);
+    let cancel = CancellationToken::new();
+    host.run_promoted_session(
+        &ws_id,
+        &completed.session_id,
+        &mock_model(&worker.endpoint),
+        None,
+        &mut AutoAllowPermission,
+        8,
+        &cancel,
+    )
+    .await
+    .unwrap();
+    let failed = spawn_autonomy_fixture(&host, &ws_id, &parent, ws.path());
+    assert!(
+        supervisor
+            .fail_session(
+                &ws_id,
+                &failed.session_id,
+                "model_timeout",
+                "Provider timed out",
+                true
+            )
+            .unwrap()
+    );
+    assert!(
+        !supervisor
+            .fail_session(
+                &ws_id,
+                &failed.session_id,
+                "model_timeout",
+                "Provider timed out",
+                true
+            )
+            .unwrap()
+    );
+    let cancelled = spawn_autonomy_fixture(&host, &ws_id, &parent, ws.path());
+    for _ in 0..2 {
+        supervisor
+            .control_session(
+                &ws_id,
+                &cancelled.session_id,
+                "cancel",
+                "User stopped",
+                true,
+            )
+            .unwrap();
+    }
+    supervisor
+        .recover_workspace(&ws_id, &cancel, true)
+        .await
+        .unwrap();
+    let all = host.inbox().take_batch(&ws_id, i64::MAX, true).events;
+    for (session, expected, initiated) in [
+        (&completed, "completed", "worker"),
+        (&failed, "failed", "worker"),
+        (&cancelled, "cancelled", "user"),
+    ] {
+        let events: Vec<_> = all
+            .iter()
+            .filter(|e| e["sessionId"] == session.session_id && e["kind"] == "session_ended")
+            .collect();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0]["payload"]["status"], expected);
+        assert_eq!(events[0]["payload"]["initiatedBy"], initiated);
+        assert_eq!(events[0]["payload"]["followUpEpoch"], 0);
+        assert_eq!(events[0]["payload"]["planId"], session.plan_id);
+        if expected == "failed" {
+            assert_eq!(events[0]["payload"]["failureCode"], "model_timeout");
+            assert_eq!(events[0]["payload"]["sameCauseCount"], 1);
+            assert!(
+                events[0]["payload"]["failureSummary"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Provider timed out")
+            );
+        }
+    }
+    assert!(!all.iter().any(|e| matches!(
+        e["kind"].as_str(),
+        Some("result_ready" | "failed" | "cancelled" | "interrupted" | "report_available")
+    )));
+}
+
+#[tokio::test]
+async fn bot_followup_reuses_worker_and_publishes_one_terminal_wake_per_epoch() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Demo").unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("Follow-up Delivery"))
+        .unwrap();
+    let ws_id = entry.workspace_id;
+    let slot = Arc::new(Mutex::new(String::new()));
+    let save_session = Arc::clone(&slot);
+    let read_session = Arc::clone(&slot);
+    let server = start_mock_server(vec![
+        Box::new(|_| spawn_readme_for_natural_reply()),
+        Box::new(move |req| {
+            *save_session.lock().unwrap() = extract_spawned_session_id(req).unwrap();
+            sse_text("I’ll check the README.")
+        }),
+        Box::new(|_| sse_text("FIRST RESULT: README exists.")),
+        Box::new(|req| {
+            assert!(
+                req["messages"]
+                    .to_string()
+                    .contains("FIRST RESULT: README exists.")
+            );
+            sse_text("The README is present.")
+        }),
+        Box::new(move |req| {
+            assert!(
+                tool_names_from_request(req)
+                    .iter()
+                    .any(|tool| tool == "message_session")
+            );
+            sse_tool_call(
+                "worker-followup",
+                "message_session",
+                &json!({
+                    "sessionId": *read_session.lock().unwrap(),
+                    "text": "Add the title to the report.",
+                    "intent": "followup",
+                    "expectedEpoch": 0,
+                }),
+            )
+        }),
+        Box::new(|req| {
+            let result = last_tool_result_json(req).unwrap();
+            assert_eq!(result["delivery"], "resumed_followup");
+            assert_eq!(result["followUpEpoch"], 1);
+            sse_text("I’ll add the title.")
+        }),
+        Box::new(|req| {
+            let messages = req["messages"].to_string();
+            assert!(messages.contains("FIRST RESULT: README exists."));
+            assert!(messages.contains("Add the title to the report."));
+            sse_text("SECOND RESULT: Its title is Demo.")
+        }),
+        Box::new(|req| {
+            let wake = req["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap();
+            assert!(wake.contains("SECOND RESULT: Its title is Demo."));
+            assert!(wake.contains("\"followUpEpoch\":1"));
+            sse_text("The README is titled Demo.")
+        }),
+    ]);
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let selection = json!({"providerName":"openai", "modelId":"mock-e2e-model"});
+    host.submit_user_input(&ws_id, "work-first", "Check the README", None)
+        .unwrap();
+    let first = host
+        .tick(
+            &ws_id,
+            &model,
+            selection.clone(),
+            &mut AutoAllowPermission,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.wake_turns_run, 1);
+    let original = host.supervisor().list_sessions(&ws_id).pop().unwrap();
+    assert_eq!(original.status, "accepted");
+    host.submit_user_input(&ws_id, "work-followup", "Please add its title", None)
+        .unwrap();
+    let second = host
+        .tick(&ws_id, &model, selection, &mut AutoAllowPermission, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(second.wake_turns_run, 1);
+    assert_eq!(second.last_turn.unwrap().tool_calls, 0);
+    let children = host.supervisor().list_sessions(&ws_id);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].session_id, original.session_id);
+    assert_eq!(children[0].conversation_id, original.conversation_id);
+    assert_eq!(children[0].follow_up_epoch, Some(1));
+    assert_eq!(children[0].status, "accepted");
+    let events = host.inbox().list_recent(&ws_id, 100);
+    let ended: Vec<_> = events
+        .iter()
+        .filter(|event| event["kind"] == "session_ended")
+        .collect();
+    assert_eq!(ended.len(), 2, "{ended:?}");
+    assert_eq!(ended[0]["payload"]["followUpEpoch"], 0);
+    assert_eq!(ended[1]["payload"]["followUpEpoch"], 1);
+    assert_ne!(ended[0]["eventId"], ended[1]["eventId"]);
+    assert_eq!(server.requests.lock().unwrap().len(), 8);
+}
+
+fn write_8k_png(path: &std::path::Path, mut seed: u32) {
+    fn chunk(out: &mut Vec<u8>, name: &[u8; 4], payload: &[u8]) {
+        let mut crc = flate2::Crc::new();
+        crc.update(name);
+        crc.update(payload);
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(name);
+        out.extend_from_slice(payload);
+        out.extend_from_slice(&crc.sum().to_be_bytes());
+    }
+
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut header = Vec::new();
+    header.extend(7680_u32.to_be_bytes());
+    header.extend(4320_u32.to_be_bytes());
+    header.extend([8, 2, 0, 0, 0]);
+    chunk(&mut png, b"IHDR", &header);
+    let mut compressed = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut row = vec![0u8; 1 + 7680 * 3];
+    // Produce enough variation to force out-of-line storage. The remaining
+    // scanlines compress cheaply while preserving the real image dimensions.
+    for _ in 0..400 {
+        for pixel in &mut row[1..] {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            *pixel = seed as u8;
+        }
+        compressed.write_all(&row).unwrap();
+    }
+    row.fill(0);
+    for _ in 400..4320 {
+        compressed.write_all(&row).unwrap();
+    }
+    chunk(&mut png, b"IDAT", &compressed.finish().unwrap());
+    chunk(&mut png, b"IEND", &[]);
+    assert!(png.len() > 8 * 1024 * 1024);
+    assert!(png.len() < peer_project_agent::MAX_IMAGE_ATTACHMENT_BYTES);
+    fs::write(path, png).unwrap();
+}
+
+#[tokio::test]
+async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("Parallel Media"))
+        .unwrap();
+    let ws_id = entry.workspace_id;
+    let parent = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+    host.ensure_lease(&ws_id).unwrap();
+    host.recover_workspace_barrier(&ws_id, &cancel)
+        .await
+        .unwrap();
+    let child = spawn_autonomy_fixture(&host, &ws_id, &parent, ws.path());
+    host.supervisor().promote_queued(&ws_id, true).unwrap();
+
+    let attachments = [("first.png", 138), ("second.png", 139)]
+        .into_iter()
+        .map(|(name, seed)| {
+            let path = ws.path().join(name);
+            write_8k_png(&path, seed);
+            load_local_image_attachment(ws.path(), name, None).unwrap()
+        })
+        .collect::<Vec<_>>();
+    let sizes: Vec<_> = attachments
+        .iter()
+        .map(|image| image["size"].as_u64().unwrap())
+        .collect();
+    let (worker_started, started) = tokio::sync::oneshot::channel();
+    let started_sender = Mutex::new(Some(worker_started));
+    let (finish_worker, finish) = std::sync::mpsc::channel();
+    let finish = Mutex::new(finish);
+    let worker = start_mock_server(vec![Box::new(move |_| {
+        started_sender
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .send(())
+            .unwrap();
+        finish
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap();
+        sse_text("Worker completed separately.")
+    })]);
+    let worker_model = mock_model(&worker.endpoint);
+    let bot = start_mock_server(vec![Box::new(move |req| {
+        let messages = req["messages"].as_array().unwrap();
+        let content = messages
+            .iter()
+            .rev()
+            .find(|message| message["role"] == "user")
+            .unwrap()["content"]
+            .as_array()
+            .unwrap();
+        let received: Vec<_> = content
+            .iter()
+            .filter(|part| part["type"] == "image_url")
+            .collect();
+        assert_eq!(received.len(), 2);
+        assert!(received.iter().zip(&sizes).all(|(image, size)| {
+            image["image_url"]["url"].as_str().is_some_and(|url| {
+                url.starts_with("data:image/png;base64,") && url.len() as u64 > *size
+            })
+        }));
+        sse_text("I received both images.")
+    })]);
+    let model = mock_model(&bot.endpoint);
+    let mut permission = AutoAllowPermission;
+    let (worker_outcome, tick) = tokio::join!(
+        host.run_promoted_session(
+            &ws_id,
+            &child.session_id,
+            &worker_model,
+            None,
+            &mut permission,
+            8,
+            &cancel
+        ),
+        async {
+            tokio::time::timeout(Duration::from_secs(10), started)
+                .await
+                .unwrap()
+                .unwrap();
+            let sent_at = std::time::Instant::now();
+            let input_id = "parallel-8k-images";
+            let input = host
+                .submit_user_input_with_attachments(
+                    &ws_id,
+                    input_id,
+                    "Please look at both attachments",
+                    None,
+                    attachments,
+                )
+                .unwrap();
+            assert!(
+                input
+                    .attachments
+                    .as_deref()
+                    .unwrap()
+                    .iter()
+                    .all(|image| image["blobDigest"].is_string() && image["dataUrl"].is_null())
+            );
+            let tick = host
+                .tick_foreground(&ws_id, &model, json!({}), &cancel)
+                .await
+                .unwrap();
+            let elapsed = sent_at.elapsed();
+            assert_eq!(host.supervisor().list_sessions(&ws_id)[0].status, "running");
+            finish_worker.send(()).unwrap();
+            eprintln!(
+                "received two 8K images while worker active in {} ms",
+                elapsed.as_millis()
+            );
+            assert!(elapsed < Duration::from_secs(10));
+            assert_eq!(
+                host.find_reply_for_input(&ws_id, input_id)
+                    .unwrap()
+                    .unwrap()["content"],
+                "I received both images."
+            );
+            tick
+        },
+    );
+    assert_eq!(worker_outcome.unwrap().status, "completed");
+    assert_eq!(tick.bot_turns_run, 1);
+    assert_eq!(bot.requests.lock().unwrap().len(), 1);
 }

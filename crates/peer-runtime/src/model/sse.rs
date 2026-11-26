@@ -18,6 +18,10 @@ pub(super) struct ChatStream {
     pub(super) thought: String,
 }
 impl ChatStream {
+    pub(super) fn has_tool_intent(&self) -> bool {
+        !self.calls.is_empty()
+    }
+
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
         let mut frames = std::mem::take(&mut self.frames);
         let result = frames.push(chunk, |bytes| {

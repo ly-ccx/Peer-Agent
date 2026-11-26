@@ -15,7 +15,7 @@ use crate::{
     WatchHost, WatchPublisher, build_session_report, collect_conversation_search_documents,
     get_session_projected, handoff_question_id, is_handoff_conflict, now_iso, parse_iso_ms,
     project_completion_review_for_plan,
-    runner::{ProjectAgentRunner, RunTurnOptions},
+    runner::{FailureHoldSignal, ProjectAgentRunner, RunTurnOptions, TurnEndKind},
     task_result_references,
 };
 use peer_protocol::interactive_result::{
@@ -33,9 +33,10 @@ use peer_store::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 pub const FAMILIARIZE_READ_CAPABILITIES: [&str; 5] = [
@@ -117,6 +118,28 @@ pub struct MaintenanceReport {
     pub flushed_digest: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailureHold {
+    pub reason: String,
+    pub hold_until_ms: i64,
+    pub consecutive_holds: u32,
+    pub last_error: String,
+}
+
+struct WakeAdmission<'a> {
+    active: &'a Mutex<HashSet<String>>,
+    workspace_id: &'a str,
+}
+
+impl Drop for WakeAdmission<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(self.workspace_id);
+        }
+    }
+}
+
 pub struct NativeProjectHost {
     data_home: PathBuf,
     host_identity: HostIdentity,
@@ -138,6 +161,8 @@ pub struct NativeProjectHost {
     watches: WatchHost,
     supervisor: Arc<SessionSupervisor>,
     runner: ProjectAgentRunner,
+    failure_holds: Mutex<HashMap<String, FailureHold>>,
+    active_wake_trials: Mutex<HashSet<String>>,
     directory: BotDirectory,
     conversations: ConversationStore,
     digests: DigestQueue,
@@ -204,6 +229,8 @@ impl NativeProjectHost {
             interactive_results: InteractiveResultStore::new(&home),
             supervisor,
             runner,
+            failure_holds: Mutex::new(HashMap::new()),
+            active_wake_trials: Mutex::new(HashSet::new()),
             host_identity,
             data_home: home,
         })
@@ -553,6 +580,14 @@ impl NativeProjectHost {
 
         // Step 2: Run main Bot turn for each pending user input (user input priority).
         let has_newly_consumed = !consumed.consumed.is_empty();
+        if has_newly_consumed {
+            self.clear_failure_hold(workspace_id);
+        }
+        if self.is_wake_held(workspace_id, parse_iso_ms(&now_iso()).unwrap_or(0))
+            && !consumed.pending_execution.is_empty()
+        {
+            return Ok(Some((conv_id, ws_path, report, true)));
+        }
         for (idx, input) in consumed.pending_execution.iter().enumerate() {
             if cancel.is_cancelled() {
                 break;
@@ -578,6 +613,11 @@ impl NativeProjectHost {
                 cancel,
             ))
             .await?;
+            self.record_failure_hold(
+                workspace_id,
+                &outcome,
+                parse_iso_ms(&now_iso()).unwrap_or(0),
+            );
             report.bot_turns_run += 1;
             let should_mark_executed = !matches!(
                 outcome.end,
@@ -610,6 +650,71 @@ impl NativeProjectHost {
         Ok(Some((conv_id, ws_path, report, false)))
     }
 
+    pub fn failure_hold(&self, workspace_id: &str) -> Option<FailureHold> {
+        self.failure_holds.lock().ok()?.get(workspace_id).cloned()
+    }
+
+    pub fn clear_failure_hold(&self, workspace_id: &str) -> bool {
+        self.failure_holds
+            .lock()
+            .is_ok_and(|mut holds| holds.remove(workspace_id).is_some())
+    }
+
+    fn is_wake_held(&self, workspace_id: &str, now_ms: i64) -> bool {
+        self.failure_hold(workspace_id)
+            .is_some_and(|hold| now_ms < hold.hold_until_ms)
+    }
+
+    fn record_failure_hold(&self, workspace_id: &str, outcome: &AgentTurnOutcome, now_ms: i64) {
+        let Some(signal) = &outcome.failure_hold else {
+            if !matches!(
+                outcome.end,
+                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+            ) {
+                self.clear_failure_hold(workspace_id);
+            }
+            return;
+        };
+        let Ok(mut holds) = self.failure_holds.lock() else {
+            return;
+        };
+        let (reason, last_error) = match signal {
+            FailureHoldSignal::UsageLimit { last_error, .. } => {
+                ("usage_limit", last_error.as_str())
+            }
+            FailureHoldSignal::CircuitOpen { .. } => ("circuit_open", "model_circuit_open"),
+            FailureHoldSignal::AuthRejected => ("auth_rejected", "model_auth_rejected"),
+        };
+        let count = holds
+            .get(workspace_id)
+            .filter(|hold| hold.reason == reason)
+            .map_or(1, |hold| hold.consecutive_holds.saturating_add(1));
+        let hold_until_ms = match signal {
+            FailureHoldSignal::UsageLimit {
+                retry_after_seconds,
+                ..
+            } => {
+                let fallback_seconds = 60_u64 << (count - 1).min(4);
+                now_ms.saturating_add(
+                    retry_after_seconds.unwrap_or(fallback_seconds).min(600) as i64 * 1000,
+                )
+            }
+            FailureHoldSignal::CircuitOpen { open_until_ms } => {
+                open_until_ms.unwrap_or_else(|| now_ms.saturating_add(crate::CIRCUIT_COOLDOWN_MS))
+            }
+            FailureHoldSignal::AuthRejected => i64::MAX,
+        };
+        holds.insert(
+            workspace_id.to_owned(),
+            FailureHold {
+                reason: reason.to_owned(),
+                hold_until_ms,
+                consecutive_holds: count,
+                last_error: last_error.to_owned(),
+            },
+        );
+    }
+
     async fn maybe_run_wake_turn(
         &self,
         workspace_id: &str,
@@ -627,12 +732,41 @@ impl NativeProjectHost {
             return Ok(None);
         }
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        if self.is_wake_held(workspace_id, now_ms)
+            || !self
+                .active_wake_trials
+                .lock()
+                .is_ok_and(|mut active| active.insert(workspace_id.to_owned()))
+        {
+            return Ok(None);
+        }
+        let _admission = WakeAdmission {
+            active: &self.active_wake_trials,
+            workspace_id,
+        };
         let batch = self.inbox.take_batch(workspace_id, now_ms, true);
         if batch.events.is_empty() {
             return Ok(None);
         }
         let sessions = self.supervisor.list_sessions(workspace_id);
-        if is_routine_host_wake_wait(&batch.events, &sessions) {
+        let events: Vec<_> = batch
+            .events
+            .into_iter()
+            .filter(|event| {
+                if event["kind"] == "session_verified" && event["payload"]["acceptedBy"] == "policy"
+                {
+                    return false;
+                }
+                let current_epoch = crate::wake_envelope::wake_event_session_id(event)
+                    .and_then(|id| sessions.iter().find(|session| session.session_id == id))
+                    .and_then(|session| session.follow_up_epoch)
+                    .unwrap_or(0);
+                event["payload"]["followUpEpoch"]
+                    .as_u64()
+                    .is_none_or(|epoch| epoch >= current_epoch)
+            })
+            .collect();
+        if events.is_empty() || is_routine_host_wake_wait(&events, &sessions) {
             let _ = self
                 .inbox
                 .commit_batch(workspace_id, batch.through_seq, true);
@@ -646,7 +780,7 @@ impl NativeProjectHost {
                 conversation_id: conv_id,
                 kind: "wake",
                 user_inputs: &[],
-                wake_events: &batch.events,
+                wake_events: &events,
                 worker_model_selection,
                 holds_lease: true,
                 manual_trial: false,
@@ -656,7 +790,15 @@ impl NativeProjectHost {
             cancel,
         ))
         .await?;
-        let ok = !matches!(outcome.end, crate::runner::TurnEndKind::Failed { .. });
+        self.record_failure_hold(
+            workspace_id,
+            &outcome,
+            parse_iso_ms(&now_iso()).unwrap_or(now_ms),
+        );
+        let ok = !matches!(
+            outcome.end,
+            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+        );
         let _ = self.inbox.commit_batch(workspace_id, batch.through_seq, ok);
         Ok(Some(outcome))
     }
@@ -2495,6 +2637,7 @@ impl NativeProjectHost {
             }
         }
         self.runner.reset_circuit_breaker_for(workspace_id);
+        self.clear_failure_hold(workspace_id);
         let mut requeued = 0usize;
         if target_inputs.is_empty() {
             if self.retry_stopped_input(workspace_id, trimmed)? {
@@ -3066,6 +3209,7 @@ mod tests {
             approval_id: None,
             handoff_status: None,
             anchor_message_ids: vec![],
+            follow_up_epoch: None,
         };
         let agent_cancel = vec![json!({
             "kind": "session_ended",
@@ -3150,3 +3294,6 @@ mod tests {
         assert_eq!(filtered[1]["kind"], "result_ready");
     }
 }
+
+#[cfg(test)]
+mod failure_hold_tests;

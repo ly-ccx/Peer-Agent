@@ -84,6 +84,17 @@ fn communication_style_directive(style: &str) -> &'static str {
 }
 
 pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> String {
+    assemble_project_agent_context_with_delta(
+        input,
+        &crate::context_delta::SectionFingerprints::default(),
+    )
+    .0
+}
+
+pub(crate) fn assemble_project_agent_context_with_delta(
+    input: &ProjectAgentContextInput<'_>,
+    prior: &crate::context_delta::SectionFingerprints,
+) -> (String, crate::context_delta::SectionFingerprints) {
     let mut sections = Vec::new();
     sections.push(section(
         "project-agent.core",
@@ -103,8 +114,8 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         5,
         format!(
             "Human Communication & Dual-Channel Discipline:\n\
-             - Separate internal work from talking to the user: stay silent during intermediate read/check tool rounds — do NOT emit thinking-out-loud prose, scratchpad narration, or play-by-play tool logs before/between tool calls. Speak cleanly via `post_reply` only when you have something meaningful to tell or confirm with the user.\n\
-             - Always write `post_reply.text` from a human teammate's perspective centered on the user's goal, in the user's language.\n\
+             - Separate internal work from talking to the user: stay silent during intermediate read/check tool rounds — do NOT emit thinking-out-loud prose, scratchpad narration, or play-by-play tool logs before/between tool calls. Your final natural text is the official reply. Use `post_reply` only for structured quick-reply options or an explicit delivery override.\n\
+             - Write your final reply from a human teammate's perspective centered on the user's goal, in the user's language.\n\
              - NEVER expose internal runtime mechanics, tool names, JSON field names, raw session UUIDs, or protocol status enums to the user (unless the user explicitly asks about Peer Agent internals). Forbidden in user-facing prose: `workerOutput`, `sessionId`, `result_ready`, `verification_failed`, `waiting_agent`, `awaiting_outcome`, `statusClaims`, `replyTo`, `evidenceRefs`, `host Evidence`, `supersedes`, `anchor`, `wake_events`, `ADR 80`, `ADR 88`, `post_reply`, `spawn_session`, `get_session`, `verify_session`, `wait_for_sessions`, `model_review`.\n\
              - Translate internal state into natural everyday speech:\n\
                * Bad: \"那次已接受的「熟悉项目」会话报告正文是空的（workerOutput 为空），所以我还得自己读 README。\"\n\
@@ -124,13 +135,11 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         10,
         "Project Agent Role Rules (ADR 80 / ADR 88):\n\
          - You are read-only and orchestration-only. You cannot edit files, run shell commands, or fetch the web directly.\n\
-         - For lightweight questions answerable with read-only tools, answer directly via `post_reply`.\n\
-         - For work requiring edits, builds, commands, or multi-step execution, delegate via `spawn_session` with structured `successCriteria`, then in the SAME user turn give the user a brief, natural acknowledgment via `post_reply` (include the new `sessionId` in `sources` so the live task row appears right under your reply, and tell them you will share verified results once done). Reserve `wait_for_sessions` for background `wake` turns when active child sessions are still running without needing a new update.\n\
+         - Answer lightweight questions directly. Use at most a targeted single-file check for simple facts.\n\
+         - For edits, multi-file investigation, builds, tests, commands, or troubleshooting, delegate directly without first exploring the repository. Use `spawn_session` with structured `successCriteria` for new work. When the user asks to continue or fix an existing task, prefer `message_session` with intent=followup so the same Worker continues from its context and workspace. In the same user turn, end with a brief natural acknowledgment. The host attaches the live task row.\n\
          - For read-only web research, delegate via `spawn_session` with `readOnly: true` and `capabilityPreset: \"web_research\"` (grants built-in read-only `web_search` and `web_fetch` plus any mounted read-only MCP tools).\n\
-         - Always deliver final user-visible answers via `post_reply` citing accurate `replyTo` anchors, `sources`, and `statusClaims` matching persisted host facts.\n\
-         - On wake turns when current input anchors are empty (e.g. background familiarize completion), pass \"proactive\": true to `post_reply`.\n\
          - Use model_review for report quality and audit checks. Manual acceptance requires the user's request or existing host policy.\n\
-         - Own quality evaluation and routine delivery: delegated sub-agents report completed results directly back to you without a mandatory independent verifier. Review the worker's output and inspect key files/diffs with your read-only tools whenever needed; if satisfied, deliver cleanly via `post_reply` with `sources`, otherwise re-run or fix before replying. Only call `verify_session` with `force: true` if you explicitly want an extra independent read-only audit.\n\
+         - Own quality evaluation and routine delivery: delegated sub-agents report completed results directly back to you without a mandatory independent verifier. Review the worker's output and inspect key files/diffs with your read-only tools whenever needed; if satisfied, summarize the results directly in natural language. If the work needs a fix, use `message_session(intent=followup)` to ask the same Worker to continue. Only call `verify_session` with `force: true` if you explicitly want an extra independent read-only audit.\n\
          - Recover in scope: answer pending worker technical questions, resume confirmed technical interruptions, and retire dead tasks whose results are no longer needed.\n\
          - To rerun a previous task on a user turn, pass `supersedes` with the predecessor sessionId (omitted fields inherit the original specification); on wake, retry an eligible failed task with `spawn_session` and only `supersedes`. The host preserves the original specification and bounds retries.\n\
          - Ask the user for material ambiguity, expanded scope, irreversible actions, real human gates, or a recovery limit that blocks completion. Unknown effects require reconciliation.\n\
@@ -182,7 +191,7 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
 
     let interactive_status = if input.interactive_publishing_available {
         "Interactive Results (OpenUI): ENABLED on this Desktop host — you can reply interactively DIRECTLY.\n\
-         - When the user asks for an interactive card, filterable table, chart, comparison matrix, calculator, or interactive reply, call `publish_interactive_result` directly (following the `Peer Interactive Results Catalog & Rules` section below, `peer-basic-1` DSL) and then deliver a brief human summary via `post_reply`.\n\
+         - When the user asks for an interactive card, filterable table, chart, comparison matrix, calculator, or interactive reply, call `publish_interactive_result` directly (following the `Peer Interactive Results Catalog & Rules` section below, `peer-basic-1` DSL) and then deliver a brief natural summary.\n\
          - You do NOT need to spawn a worker session just to produce an interactive reply! Only delegate via `spawn_session` if the request also requires heavy file edits, shell commands, or multi-step repo work.\n\
          - The Desktop host automatically attaches cards you publish in this turn (as well as cards from cited worker `sources`) and renders them INLINE right inside your reply bubble — users can click/filter immediately, put their selected conditions back into the chat draft, or expand the card into the right panel.\n\
          - Never tell the user to hunt through reply details or mention internal tool names; refer naturally to the interactive card below."
@@ -217,27 +226,20 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
     if input.turn_kind == "wake" {
         let mut reminder = String::from(
             "Background Wake Mode Reminder:\n\
-             - This is a background wake turn triggered by host events, not a fresh user prompt.\n\
-             - Handle actionable events yourself. For completed worker output with a failed verifier, inspect the verdict and reverify first. For a recoverable worker failure, try an in-scope retry or retire obsolete work.\n\
-             - For a pending technical question addressed to you, answer via message_session with intent=answer, then wait for the worker. Use resume_session for a confirmed technical interruption.\n\
-             - If nothing actionable changed, keep the wake quiet.\n\
-             - If child sessions are still active and no report needs delivery yet, call `wait_for_sessions` instead of posting filler updates.\n\
-             - When reporting completed results or asking a blocking question with empty `current_input_anchors`, pass `\"proactive\": true` to `post_reply`.",
+             - This is a background wake driven by host events.\n\
+             - The host wake message already includes the relevant worker output, changed files, evidence, and failure details. Read a session report only if a missing or truncated detail is necessary.\n\
+             - Answer pending technical worker questions through message_session with intent=answer. For confirmed technical interruptions use resume_session.\n\
+             - When results, failures, or decisions warrant the user's attention, deliver the final reply directly in natural language. The host links the originating messages, tasks, and evidence.\n\
+             - If nothing needs communicating or your action is complete, keep the wake quiet and output exactly NO_REPLY.\n\
+             - Claim verification and acceptance only from persisted host Evidence.",
         );
-        let has_delivery_event = input.wake_events.iter().any(|ev| {
+        if input.wake_events.iter().any(|event| {
             matches!(
-                ev["kind"].as_str(),
+                event["kind"].as_str(),
                 Some("report_available" | "session_completed" | "session_failed")
-            ) || (ev["kind"].as_str() == Some("session_ended")
-                && ev["payload"]["status"].as_str() != Some("cancelled"))
-        });
-        if has_delivery_event {
-            reminder.push_str(
-                "\nTask Delivery Reminder:\n\
-                 - Inspect the updated report/evidence with `get_session` if details are missing.\n\
-                 - Deliver verified conclusions via `post_reply`, citing the `sessionId` in `sources` and accurate `statusClaims`.\n\
-                 - Never claim work is completed or verified beyond persisted host Evidence.",
-            );
+            ) || (event["kind"] == "session_ended" && event["payload"]["status"] != "cancelled")
+        }) {
+            reminder.push_str("\nTask Delivery Reminder: Review the result or failure before deciding whether to reply.");
         }
         sections.push(section(
             "project-agent.mode-reminder",
@@ -355,12 +357,42 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
             40,
             format!(
                 "Wake events triggering this turn (factual host events):\n{}",
-                serde_json::to_string(input.wake_events).unwrap_or_else(|_| "[]".into())
+                serde_json::to_string(&crate::wake_envelope::wake_event_index(input.wake_events))
+                    .unwrap_or_else(|_| "[]".into())
             ),
             "factual",
         ));
     }
 
+    let working_items = input.working_context.map_or(0, |wc| {
+        wc.as_object()
+            .into_iter()
+            .flat_map(|fields| fields.values())
+            .filter_map(Value::as_array)
+            .map(Vec::len)
+            .sum()
+    });
+    let fingerprints = crate::context_delta::render_delta(
+        &mut sections,
+        prior,
+        &[
+            ("memories", input.memories.len().min(64)),
+            ("objectives", input.objectives.len().min(16)),
+            ("working_context", working_items),
+            (
+                "skill_packs",
+                input.skill_pack_catalog.map_or(0, |text| {
+                    text.lines().filter(|line| line.starts_with("- ")).count()
+                }),
+            ),
+            (
+                "mounted_capabilities",
+                input.mounted_capabilities_summary.map_or(0, |text| {
+                    text.lines().filter(|line| line.starts_with("- ")).count()
+                }),
+            ),
+        ],
+    );
     sections.sort_by(|a, b| {
         layer_rank(a["layer"].as_str().unwrap_or(""))
             .cmp(&layer_rank(b["layer"].as_str().unwrap_or("")))
@@ -391,7 +423,7 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
         }
         rendered.truncate(end);
     }
-    rendered
+    (rendered, fingerprints)
 }
 
 #[cfg(test)]
