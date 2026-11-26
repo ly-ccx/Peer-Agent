@@ -1,5 +1,5 @@
 import type { DrawerSession } from './drawerState';
-import { formatDrawerSessionStatus, readDrawerSession } from './drawerState.ts';
+import { formatDrawerSessionStatus, isActivelyVerifying, isAwaitingBotReport, isVerificationFailed, readDrawerSession } from './drawerState.ts';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { TaskConversationContext } from './taskConversationState';
@@ -21,6 +21,8 @@ export function mergeTaskDetail(selected: DrawerSession | null, detail: DrawerSe
   const current = (!selected.sourceRevision || selected.sourceRevision === detail.sourceRevision)
     && (!selected.observationRevision || selected.observationRevision === detail.observationRevision);
   return { ...detail, ...selected, summary: detail.summary,
+    verificationActive: selected.verificationActive,
+    verificationProgress: selected.verificationProgress ?? (current && isActivelyVerifying(selected) ? detail.verificationProgress : undefined),
     workerOutput: detail.workerOutput ?? selected.workerOutput,
     failure: detail.failure ?? selected.failure,
     evidenceRefs: detail.evidenceRefs,
@@ -33,9 +35,10 @@ export function taskProgressPreview(session: DrawerSession, context: TaskConvers
   if (session.resourceBlocker || session.queuedBehind?.length || session.queueReason
     || session.coordination?.phase === 'stopping'
     || ['queued', 'starting', 'stopping', 'awaiting_outcome', 'cancelled', 'accepted', 'failed', 'unavailable'].includes(session.status)) return current;
-  if (session.status === 'verifying' && session.verificationProgress) return i18n.t('projectAgent.chat.agent.verificationProgress', {
-    count: session.verificationProgress.observationCount,
-  });
+  if (isActivelyVerifying(session)) return session.verificationProgress
+    ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
+    : current;
+  if (isAwaitingBotReport(session) || isVerificationFailed(session)) return current;
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
   if (status && session.statusLabel && session.statusLabel !== i18n.t(`projectAgent.chat.sessionState.${status}`)) return current;
   const related = context?.sessionId === session.sessionId ? context : null;
@@ -46,6 +49,6 @@ export function taskProgressPreview(session: DrawerSession, context: TaskConvers
     const preview = text.length > 120 ? `${text.slice(0, 120)}…` : text;
     return needsYou ? preview : i18n.t('projectAgent.drawer.task.progressNote', { content: preview });
   }
-  if (needsYou || session.status === 'verifying' || session.status === 'result_ready') return current;
+  if (needsYou || session.status === 'result_ready') return current;
   return i18n.t('projectAgent.drawer.task.progressPending');
 }

@@ -443,7 +443,9 @@ export type TranslationKey =
   | 'projectAgent.chat.work.unavailable'
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
-  | 'projectAgent.chat.work.resultSettling'
+  | 'projectAgent.chat.work.awaitingReport'
+  | 'projectAgent.chat.work.awaitingReportCount'
+  | 'projectAgent.chat.work.verifyingCount'
   | 'projectAgent.chat.work.verificationFailed'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
@@ -452,6 +454,13 @@ export type TranslationKey =
   | 'projectAgent.task.cancel'
   | 'projectAgent.task.cancelling'
   | 'projectAgent.task.cancelFailed'
+  | 'projectAgent.task.stopping'
+  | 'projectAgent.task.withdraw'
+  | 'projectAgent.task.withdrawTitle'
+  | 'projectAgent.task.withdrawing'
+  | 'projectAgent.task.withdrawConfirm'
+  | 'projectAgent.task.keep'
+  | 'projectAgent.task.withdrawFailed'
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
@@ -2276,7 +2285,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
-    'projectAgent.chat.work.resultSettling': '正在核对结果',
+    'projectAgent.chat.work.awaitingReport': '等待主 Bot 汇报结果',
+    'projectAgent.chat.work.awaitingReportCount': '待汇报 {count}',
+    'projectAgent.chat.work.verifyingCount': '核验中 {count}',
     'projectAgent.chat.work.verificationFailed': '核验未通过',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
@@ -2285,6 +2296,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.cancel': '取消任务',
     'projectAgent.task.cancelling': '正在取消…',
     'projectAgent.task.cancelFailed': '取消未完成，请重试。已有结果会保留。',
+    'projectAgent.task.stopping': '正在停止…',
+    'projectAgent.task.withdraw': '撤回',
+    'projectAgent.task.withdrawTitle': '撤回任务',
+    'projectAgent.task.withdrawing': '正在撤回…',
+    'projectAgent.task.withdrawConfirm': '撤回「{title}」会将这项待签收任务移出当前列表。已生成的正文与证据会保留。',
+    'projectAgent.task.keep': '保留任务',
+    'projectAgent.task.withdrawFailed': '撤回未完成，请重试。已生成的正文与证据会保留。',
     'projectAgent.chat.work.background': '当前任务（{count}）',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
@@ -3847,7 +3865,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
-    'projectAgent.chat.work.resultSettling': 'Reviewing the result',
+    'projectAgent.chat.work.awaitingReport': 'Waiting for main bot report',
+    'projectAgent.chat.work.awaitingReportCount': 'Awaiting report {count}',
+    'projectAgent.chat.work.verifyingCount': 'Verifying {count}',
     'projectAgent.chat.work.verificationFailed': 'Verification failed',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
@@ -3856,6 +3876,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.cancel': 'Cancel task',
     'projectAgent.task.cancelling': 'Cancelling…',
     'projectAgent.task.cancelFailed': 'Could not cancel. Please retry. Existing results are preserved.',
+    'projectAgent.task.stopping': 'Stopping…',
+    'projectAgent.task.withdraw': 'Withdraw',
+    'projectAgent.task.withdrawTitle': 'Withdraw task',
+    'projectAgent.task.withdrawing': 'Withdrawing…',
+    'projectAgent.task.withdrawConfirm': 'Withdrawing “{title}” will remove this task from the current list. Its output and evidence will be kept.',
+    'projectAgent.task.keep': 'Keep task',
+    'projectAgent.task.withdrawFailed': 'Could not withdraw the task. Please retry. Its output and evidence will be kept.',
     'projectAgent.chat.work.background': 'Tasks ({count})',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',

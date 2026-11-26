@@ -1,26 +1,27 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { WORK_SESSION_STATUSES, type FollowUpProjection } from '@peer-agent/protocol';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+import { isActivelyVerifying, isAwaitingBotReport, isVerificationFailed, type TaskStatusFacts } from './drawerState.ts';
 
-type WorkerTone = 'warn' | 'danger' | 'active' | 'good' | 'queued' | 'muted';
+type WorkerTone = 'warn' | 'danger' | 'active' | 'good' | 'queued' | 'muted' | 'waiting';
 
 export function workerStatus(
-  status: string | null,
-  followUp: FollowUpProjection | undefined,
+  task: TaskStatusFacts,
   i18n: Pick<I18nRuntime, 'locale' | 't'>,
 ): { readonly text: string; readonly tone: WorkerTone } {
   const isZh = Boolean(i18n.locale?.startsWith('zh'));
-  if (status === 'result_ready' && followUp?.reason === 'verification_failed') {
-    return { text: isZh ? '核验未通过' : 'Verification failed', tone: 'danger' };
+  const { status, followUp } = task;
+  if (isVerificationFailed(task)) {
+    return { text: i18n.t('projectAgent.chat.work.verificationFailed'), tone: 'danger' };
+  }
+  if (isActivelyVerifying(task)) {
+    return { text: i18n.t('projectAgent.chat.sessionState.verifying'), tone: 'active' };
+  }
+  if (isAwaitingBotReport(task)) {
+    return { text: i18n.t('projectAgent.chat.work.awaitingReport'), tone: 'waiting' };
   }
   if (status === 'failed') return { text: isZh ? '执行失败' : 'Execution failed', tone: 'danger' };
   if (followUp?.owner === 'user' || status === 'waiting_user' || status === 'needs_user') {
     return { text: isZh ? '待你确认' : 'Needs decision', tone: 'warn' };
-  }
-  if (status === 'verifying') {
-    return { text: isZh ? '核验中' : 'Verifying', tone: 'active' };
-  }
-  if (status === 'result_ready' && followUp?.owner === 'bot') {
-    return { text: i18n.t('projectAgent.chat.work.resultSettling'), tone: 'muted' };
   }
   if (status === 'running' || status === 'starting') {
     return { text: isZh ? '执行中' : 'Running', tone: 'active' };

@@ -5,7 +5,8 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { createI18n } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
-import { formatDrawerSessionStatus, formatDrawerStamp, groupDrawerSessions, readDrawerSession } from '../state/drawerState.ts';
+import * as drawerState from '../state/drawerState.ts';
+import { readDrawerSession } from '../state/drawerState.ts';
 import { taskProgressPreview } from '../state/taskDetailState.ts';
 
 // Render the actual component's read model without invoking child execution controls.
@@ -14,7 +15,7 @@ const jsx = { jsx: (type: unknown, props: unknown) => ({ type, props }), jsxs: (
 const modules: Record<string, unknown> = {
   react: { useState: (value: unknown) => [value, () => {}], useId: () => 'task-details' }, 'react/jsx-runtime': jsx,
   '@peer-agent/protocol': { WORK_SESSION_STATUSES },
-  '../state/drawerState': { formatDrawerSessionStatus, formatDrawerStamp, groupDrawerSessions },
+  '../state/drawerState': drawerState,
   '../state/taskDetailState': { taskProgressPreview },
   './TaskConversationButton': { TaskConversationButton: 'task-conversation-entry' },
   './ConversationScene': { ConversationSceneDrawer: 'scene' },
@@ -45,9 +46,9 @@ function render(input: Record<string, unknown>) {
 }
 
 test('native detail headers remain localized for cancelled and handoff states', () => {
-  assert.equal(find(render({ status: 'cancelled' }), 'bot-task-status').props.children, '已取消');
+  assert.equal(find(render({ status: 'cancelled' }), 'bot-task-status').props.children[1], '已取消');
   const tree = render({ status: 'starting', coordination: { operationId: 'handoff', action: 'handoff', phase: 'stopping', goalRevision: 2, reason: 'Continue' } });
-  assert.equal(find(tree, 'bot-task-status').props.children, '正在接手');
+  assert.equal(find(tree, 'bot-task-status').props.children[1], '正在接手');
 });
 test('neutral child waiting cannot erase an explicit host human gate', () => {
   assert.equal(find(render({ status: 'waiting_user' }), 'bot-task-progress-text').props.children, '等待跟进');
@@ -56,14 +57,28 @@ test('neutral child waiting cannot erase an explicit host human gate', () => {
     assert.equal(find(tree, 'bot-task-progress-text').props.children, label);
   }
 });
-test('a Bot-owned result does not manufacture user acceptance in its header', () => {
-  const tree = render({ status: 'result_ready', followUp: { owner: 'bot', inCurrentList: true, reason: 'awaiting_acceptance_technical' } });
-  const label = find(tree, 'bot-task-status').props.children;
-  assert.equal(label, createI18n('zh-CN').t('projectAgent.chat.work.resultSettling'));
-  assert.notEqual(label, '结果待确认');
+test('drawer shows a static awaiting-report status, an animated live check and a separate verification failure', () => {
+  const followUp = { owner: 'bot', inCurrentList: true, reason: 'awaiting_acceptance_technical' };
+  const tree = render({ status: 'result_ready', verificationActive: false, followUp });
+  const [awaitingIcon, awaitingLabel] = find(tree, 'bot-task-status').props.children;
+  assert.equal(awaitingLabel, '等待主 Bot 汇报结果');
+  assert.equal(awaitingIcon.props.name, 'circle');
+  assert.equal(awaitingIcon.props.className, undefined);
+  assert.equal(find(tree, 'bot-task-progress-text').props.children, awaitingLabel);
 
-  const failedTree = render({ status: 'result_ready', followUp: { owner: 'bot', inCurrentList: true, reason: 'verification_failed' } });
-  assert.equal(find(failedTree, 'bot-task-status').props.children, createI18n('zh-CN').t('projectAgent.chat.work.verificationFailed'));
+  const live = render({ status: 'verifying', verificationActive: true, verificationProgress: {
+    continuationId: 'live-check', observationCount: 2, startedAt: '2026-11-26T11:00:00Z', lastProgressAt: '2026-11-26T11:01:00Z', phase: 'tools',
+  } });
+  const [liveIcon, liveLabel] = find(live, 'bot-task-status').props.children;
+  assert.equal(liveLabel, '正在核对结果');
+  assert.equal(liveIcon.props.className, 'motion-spin');
+  assert.equal(find(live, 'bot-task-progress-text').props.children, '正在核对结果 · 已检查 2 项事实');
+
+  const failedTree = render({ status: 'result_ready', followUp: { ...followUp, reason: 'verification_failed' } });
+  const [failedIcon, failedLabel] = find(failedTree, 'bot-task-status').props.children;
+  assert.equal(failedLabel, '核验未通过');
+  assert.equal(failedIcon.props.name, 'warning');
+  assert.equal(failedIcon.props.className, undefined);
 });
 
 test('withdrawn history uses the host-ended follow-up copy rather than assigning work back to the Bot', () => {

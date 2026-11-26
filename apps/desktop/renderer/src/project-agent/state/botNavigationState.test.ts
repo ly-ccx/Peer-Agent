@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createI18n } from '@peer-agent/i18n';
 import type { BotListItem } from '@peer-agent/protocol';
 import type { DrawerSession } from './drawerState.ts';
 import {
@@ -145,7 +146,8 @@ test('侧栏活跃任务优先使用实时 work.sessions 并按关注度排序�
 });
 
 test('Touch Bar 活跃摘要与历史时间分组行为准确', () => {
-  const idle = summarizeActiveSessions([], true);
+  const i18n = createI18n('zh-CN');
+  const idle = summarizeActiveSessions([], i18n);
   assert.equal(idle.leadTone, 'idle');
   assert.equal(idle.total, 0);
 
@@ -153,14 +155,36 @@ test('Touch Bar 活跃摘要与历史时间分组行为准确', () => {
     { status: 'waiting_user', followUp: { inCurrentList: true, owner: 'user', reason: 'human_request' } },
     { status: 'result_ready', followUp: { inCurrentList: true, owner: 'bot', reason: 'verification_failed' } },
     { status: 'running', followUp: { inCurrentList: true, owner: 'bot', reason: 'live_execution' } },
-  ], true);
+  ], i18n);
   assert.equal(mixed.total, 3);
   assert.equal(mixed.leadTone, 'warn');
-  assert.deepEqual(mixed.segments, ['待你决定 1', '核验未通过 1']);
+  assert.deepEqual(mixed.segments, ['待你决定 1', '核验未通过 1', '执行中 1']);
 
   const now = Date.parse('2026-11-23T12:00:00.000Z');
   assert.equal(recencyBucketOf('2026-11-23T08:00:00.000Z', now), 'today');
   assert.equal(recencyBucketOf('2026-11-20T08:00:00.000Z', now), 'week');
   assert.equal(recencyBucketOf('2026-11-01T08:00:00.000Z', now), 'earlier');
   assert.equal(recencyBucketOf('not-a-date', now), 'earlier');
+});
+
+test('the current task summary preserves separate verification and awaiting-report counts with concurrent attention items', () => {
+  const i18n = createI18n('zh-CN');
+  const awaitingReport = { inCurrentList: true, owner: 'bot', reason: 'awaiting_acceptance_technical' } as const;
+  const sessions = [
+    { status: 'verifying', verificationActive: true },
+    { status: 'verifying' }, // The lightweight RC45 directory snapshot only has the projected status.
+    { status: 'verifying', verificationActive: false },
+    { status: 'result_ready', verificationActive: false, followUp: awaitingReport },
+    { status: 'result_ready', verificationActive: true, followUp: { ...awaitingReport, reason: 'verification_failed' } },
+    { status: 'waiting_user', followUp: { owner: 'user', inCurrentList: true, reason: 'human_request' } },
+    { status: 'cancelled', followUp: { inCurrentList: false, owner: 'none', reason: 'user_withdrawn' } },
+  ] as const;
+  const summary = summarizeActiveSessions(sessions, i18n);
+  assert.equal(summary.total, 6);
+  assert.equal(summary.leadTone, 'warn');
+  assert.deepEqual(summary.segments, ['待你决定 1', '核验未通过 1', '核验中 2', '待汇报 1']);
+  assert.equal(summarizeActiveSessions([sessions[3]], i18n).leadSpinning, false);
+  assert.equal(summarizeActiveSessions([sessions[0]], i18n).leadSpinning, true);
+  assert.deepEqual(summarizeActiveSessions([sessions[0], sessions[3]], createI18n('en-US')).segments,
+    ['Verifying 1', 'Awaiting report 1']);
 });

@@ -24,6 +24,20 @@ test('a compact list cannot hide a fetched report or overwrite its evidence', ()
   assert.equal(merged.summary, 'Read the project files');
   assert.deepEqual(merged.evidenceRefs, ['actual']);
 });
+
+test('a retained verification detail cannot revive activity after the current projection moves to awaiting report', () => {
+  const selected = readDrawerSession({ sessionId: 'work', status: 'result_ready', sourceRevision: 'new',
+    followUp: { owner: 'bot', inCurrentList: true, reason: 'awaiting_acceptance_technical' } })!;
+  const detail = readDrawerSession({ sessionId: 'work', status: 'verifying', verificationActive: true, sourceRevision: 'old',
+    verificationProgress: { continuationId: 'old', observationCount: 2, startedAt: '2026-11-26T10:00:00Z',
+      lastProgressAt: '2026-11-26T10:01:00Z', phase: 'tools' },
+    report: { evidenceRefs: ['existing-evidence'] } })!;
+  const merged = mergeTaskDetail(selected, detail)!;
+  assert.equal(merged.verificationActive, undefined);
+  assert.equal(merged.verificationProgress, undefined);
+  assert.deepEqual(merged.evidenceRefs, ['existing-evidence']);
+  assert.equal(taskProgressPreview(merged, null, createI18n('zh-CN')), '等待主 Bot 汇报结果');
+});
 test('another task report never leaks into a newly selected task', () => {
   const selected = readDrawerSession({ sessionId: 'new', status: 'running' })!;
   const detail = readDrawerSession({ sessionId: 'old', report: { summary: 'Other work' } })!;

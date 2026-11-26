@@ -4,7 +4,8 @@
  * 隐藏 obligation_indexed，不在前端另建第二套状态过滤白名单。
  */
 import type { BotListItem, BotListSession, FollowUpProjection } from '@peer-agent/protocol';
-import type { DrawerSession } from './drawerState';
+import type { I18nRuntime } from '@peer-agent/i18n';
+import { isActivelyVerifying, isAwaitingBotReport, isTaskStatusSpinning, isVerificationFailed, type DrawerSession } from './drawerState.ts';
 
 export type ShellView =
   | { readonly kind: 'bot'; readonly workspaceId: string }
@@ -24,6 +25,7 @@ export interface SidebarTaskEntry {
   readonly status: string;
   readonly updatedAt: string;
   readonly followUp?: FollowUpProjection;
+  readonly verificationActive?: boolean;
   readonly phaseLabel?: string;
   readonly anchorMessageId?: string;
   readonly planId?: string;
@@ -197,6 +199,7 @@ function fromDrawerSession(session: DrawerSession): SidebarTaskEntry {
     status: session.status,
     updatedAt: session.spawnedAt || '',
     followUp: session.followUp,
+    verificationActive: session.verificationActive,
     phaseLabel: session.statusLabel,
     anchorMessageId: session.anchorMessageId || undefined,
     planId: session.planId,
@@ -249,10 +252,12 @@ export interface TouchBarActiveSummary {
 }
 
 export function summarizeActiveSessions(
-  sessions: readonly Pick<SidebarTaskEntry, 'status' | 'followUp'>[],
-  isZh: boolean,
+  sessions: readonly Pick<SidebarTaskEntry, 'status' | 'followUp' | 'verificationActive'>[],
+  i18n: Pick<I18nRuntime, 'locale' | 't'>,
 ): TouchBarActiveSummary {
-  const total = sessions.length;
+  const isZh = i18n.locale.startsWith('zh');
+  const current = sessions.filter(session => isSessionInCurrentList(session.status, session.followUp) === true);
+  const total = current.length;
   if (total === 0) {
     return { total: 0, leadTone: 'idle', leadSpinning: false, segments: [] };
   }
@@ -260,15 +265,17 @@ export function summarizeActiveSessions(
   let verifyFailed = 0;
   let execFailed = 0;
   let verifying = 0;
+  let awaitingReport = 0;
   let running = 0;
   let queued = 0;
-  for (const s of sessions) {
-    if (s.followUp?.owner === 'user' || s.status === 'waiting_user') needsUser += 1;
-    else if (s.status === 'result_ready' && s.followUp?.reason === 'verification_failed') verifyFailed += 1;
+  for (const s of current) {
+    if (isVerificationFailed(s)) verifyFailed += 1;
+    else if (isActivelyVerifying(s)) verifying += 1;
+    else if (s.followUp?.owner === 'user' || s.status === 'waiting_user') needsUser += 1;
     else if (s.status === 'failed') execFailed += 1;
-    else if (s.status === 'verifying' || (s.status === 'result_ready' && s.followUp?.owner === 'bot')) verifying += 1;
+    else if (isAwaitingBotReport(s)) awaitingReport += 1;
     else if (s.status === 'queued') queued += 1;
-    else running += 1;
+    else if (isTaskStatusSpinning(s)) running += 1;
   }
   const segments: string[] = [];
   let leadTone: TouchBarActiveSummary['leadTone'] = 'muted';
@@ -290,13 +297,16 @@ export function summarizeActiveSessions(
     if (leadTone === 'muted') { leadTone = 'azure'; leadSpinning = true; }
   }
   if (verifying > 0) {
-    segments.push(isZh ? `核验中 ${verifying}` : `Verifying ${verifying}`);
+    segments.push(i18n.t('projectAgent.chat.work.verifyingCount', { count: verifying }));
     if (leadTone === 'muted') { leadTone = 'azure'; leadSpinning = true; }
   }
-  if (queued > 0 && segments.length < 2) {
+  if (awaitingReport > 0) {
+    segments.push(i18n.t('projectAgent.chat.work.awaitingReportCount', { count: awaitingReport }));
+  }
+  if (queued > 0) {
     segments.push(isZh ? `排队中 ${queued}` : `Queued ${queued}`);
   }
-  return { total, leadTone, leadSpinning, segments: segments.slice(0, 2) };
+  return { total, leadTone, leadSpinning, segments };
 }
 
 export type RecencyBucketKey = 'today' | 'week' | 'earlier';
