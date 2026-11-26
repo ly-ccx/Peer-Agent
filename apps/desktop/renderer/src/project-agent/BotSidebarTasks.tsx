@@ -58,8 +58,7 @@ export const BotSidebarTasks = memo(function BotSidebarTasks({
               onOpenTask(workspaceId, task.sessionId);
             }}
           >
-            <span className={`bot-sidebar-task-state${visual.tone === 'active' ? ' motion-spin' : ''}`} aria-hidden="true" />
-            <ExecutorIcon className="bot-sidebar-task-cli" />
+            <ExecutorIcon className="bot-sidebar-task-cli" flowing={visual.tone === 'active'} />
             <span className="bot-sidebar-task-title">{task.title}</span>
           </button>
         );
