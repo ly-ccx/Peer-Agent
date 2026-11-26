@@ -121,8 +121,8 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
     assert.ok(parsed);
     return parsed;
   });
-  const markup = renderToStaticMarkup(createElement(ReplyTaskReferences, { messages, i18n,
-    workIndex: indexBotWork([live], true), onOpen() {} }));
+  const rows = replyTaskReferences(messages, indexBotWork([live], true));
+  const markup = renderToStaticMarkup(createElement(ReplyTaskReferences, { rows, i18n, onOpen() {} }));
   assert.match(markup, /data-session-id="review" data-tone="danger" title="复核变更 · 核验未通过"/);
   assert.match(markup, /data-session-id="finished" data-tone="good" title="[^"]*已完成"/);
   assert.match(markup, /data-session-id="legacy" data-tone="muted"/);
@@ -137,10 +137,8 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
     followUp: { owner: 'bot', inCurrentList: true, reason: 'live_execution' },
   })!;
   const liveMarkup = renderToStaticMarkup(createElement(ReplyTaskReferences, {
-    messages: [],
     rows: [{ id: 'live-research', session: activeTask, status: 'running' }],
     i18n,
-    workIndex: indexBotWork([activeTask], true),
     onOpen() {},
   }));
   assert.match(liveMarkup, /data-session-id="live-research" data-tone="active" title="调研主流 Agent 的 ACP 支持 · 执行中"/);

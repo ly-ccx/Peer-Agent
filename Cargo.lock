@@ -2028,6 +2028,7 @@ dependencies = [
 name = "peer-project-agent"
 version = "0.1.0-rc.44"
 dependencies = [
+ "base64 0.22.1",
  "flate2",
  "peer-protocol",
  "peer-runtime",

@@ -768,7 +768,12 @@ impl WatchPublisher {
             let mut progressed = false;
 
             // Progress diff on newly completed leaves (throttled per session)
-            if let Some(prev) = prior {
+            if let Some(prev) = prior
+                && !matches!(
+                    curr.status.as_str(),
+                    "result_ready" | "failed" | "interrupted" | "cancelled" | "accepted"
+                )
+            {
                 let prev_done: HashSet<&str> = prev
                     .leaves
                     .iter()
@@ -818,68 +823,6 @@ impl WatchPublisher {
                         "payload": { "need": kind },
                     }));
                 }
-            }
-
-            // result_ready transition / revision change
-            let result_changed = curr.status == "result_ready"
-                && (prior.is_none_or(|p| p.status != "result_ready")
-                    || (curr.result_revision.is_some()
-                        && curr.result_revision != prior.and_then(|p| p.result_revision.clone())));
-            if result_changed {
-                let token = curr
-                    .result_revision
-                    .as_deref()
-                    .or(curr.completed_at.as_deref())
-                    .unwrap_or(&curr.version);
-                events.push(json!({
-                    "eventId": delegation_event_id(&curr.session_id, "result_ready", token),
-                    "kind": "result_ready",
-                    "workspaceId": workspace_id,
-                    "sessionId": curr.session_id,
-                    "at": at_iso,
-                    "payload": {
-                        "outcome": curr.verdict_outcome,
-                        "evidenceRefs": curr.verdict_evidence_refs,
-                    },
-                }));
-            }
-
-            // Terminal failure / interruption / cancellation
-            if prior.is_some_and(|p| p.status != curr.status)
-                && matches!(curr.status.as_str(), "failed" | "interrupted" | "cancelled")
-            {
-                let mut payload = json!({ "status": curr.status });
-                if matches!(curr.status.as_str(), "failed" | "interrupted") {
-                    let failure = describe_failure(curr);
-                    if !failure.summary.is_empty() {
-                        payload["summary"] = json!(failure.summary);
-                        if !failure.reason.is_empty() {
-                            payload["reason"] = json!(failure.reason);
-                        }
-                        if !failure.last_error.is_empty() {
-                            payload["lastError"] = json!(failure.last_error);
-                        }
-                        if !failure.cause.is_empty() {
-                            payload["cause"] = json!(failure.cause);
-                        }
-                        let same = assess_same_cause(curr, Some(&failure));
-                        if same.count > 0 {
-                            payload["sameCauseCount"] = json!(same.count);
-                        }
-                        if same.ask_user {
-                            payload["stopAutoRetry"] = json!(true);
-                            payload["askUser"] = json!(true);
-                        }
-                    }
-                }
-                events.push(json!({
-                    "eventId": delegation_event_id(&curr.session_id, &curr.status, &curr.version),
-                    "kind": curr.status,
-                    "workspaceId": workspace_id,
-                    "sessionId": curr.session_id,
-                    "at": at_iso,
-                    "payload": payload,
-                }));
             }
 
             // Stall detection with deduplication by stall_id
@@ -1001,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn watch_publisher_deduplicates_stalls_and_emits_same_cause_failure() {
+    fn watchdog_emits_only_non_terminal_signals_never_duplicates_session_ended() {
         let publisher = WatchPublisher::new();
         let plan_running = json!({
             "planId": "p1",
@@ -1045,11 +988,15 @@ mod tests {
                 "phase": "running"
             }
         });
-        let ev3 = publisher.publish("ws-1", &[plan_failed], "2026-11-20T10:16:00.000Z", None);
-        assert!(ev3.iter().any(|e| {
-            e["kind"] == "failed"
-                && e["payload"]["stopAutoRetry"] == true
-                && e["payload"]["sameCauseCount"] == 3
-        }));
+        for status in ["failed", "completed", "cancelled", "interrupted"] {
+            let mut plan = plan_failed.clone();
+            plan["status"] = json!(status);
+            plan["delegationOrigin"]["phase"] = json!(status);
+            let emitted = publisher.publish("ws-1", &[plan], "2026-11-20T10:16:00.000Z", None);
+            assert!(emitted.iter().all(|event| matches!(
+                event["kind"].as_str(),
+                Some("stalled" | "progress" | "needs_user")
+            )));
+        }
     }
 }

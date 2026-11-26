@@ -77,6 +77,17 @@ impl Stream {
             },
         }
     }
+    pub fn has_tool_intent(&self) -> bool {
+        match self {
+            Self::Chat(stream) => stream.has_tool_intent(),
+            Self::Other(stream) => match &stream.decoder {
+                Decoder::Anthropic(decoder) => decoder.has_tool_intent(),
+                Decoder::Responses(decoder) => decoder.has_tool_intent(),
+                Decoder::Gemini(decoder) => decoder.has_tool_intent(),
+            },
+        }
+    }
+
     pub fn preview_text(&self) -> &str {
         match self {
             Self::Chat(s) => &s.text,

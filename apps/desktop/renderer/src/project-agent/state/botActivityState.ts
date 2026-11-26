@@ -1,4 +1,4 @@
-import type { ProjectAgentActivity } from '@peer-agent/protocol';
+import { parseQuietReply, withoutGrowingQuietMarker, type ProjectAgentActivity } from '@peer-agent/protocol';
 import { normalizeBotMessage, conversationRows } from './botConversationState.ts';
 import type { BotChatMessage, BotToolRound, ConversationRow, ConversationDisplayRow } from './botConversationState';
 import { botNarration } from './botNarrationState.ts';
@@ -36,13 +36,41 @@ export function activityFromConversationSnapshot(current: ProjectAgentActivity |
   return mergeBotActivity(current, incoming, workspaceId);
 }
 
+function displayReplyText(raw: string, final: boolean): string {
+  const parsed = parseQuietReply(raw);
+  if (parsed.isQuiet) return parsed.leadingText;
+  if (final) return raw;
+  const visible = withoutGrowingQuietMarker(raw);
+  return visible === raw ? raw : parseQuietReply(visible).leadingText;
+}
+
+/** Apply the same sentinel projection to both delivered snapshots and live text. */
+export function displayActivity(activity: ProjectAgentActivity): ProjectAgentActivity | null {
+  const raw = activity.replyText ?? '';
+  const final = TERMINAL.has(activity.phase);
+  const replyText = displayReplyText(raw, final);
+  const segments = activity.segments ?? [];
+  if (activity.phase === 'done' && parseQuietReply(raw).isPureQuiet && !segments.some(segment => segment.kind === 'tool')) return null;
+  const displaySegments = segments.flatMap<ProjectAgentActivity['segments'][number]>(segment => {
+    if (segment.kind !== 'text') return [segment];
+    const text = displayReplyText(segment.text, final);
+    return text ? [text === segment.text ? segment : { ...segment, text }] : [];
+  });
+  if (replyText === raw && segments.length === displaySegments.length
+      && segments.every((segment, index) => segment === displaySegments[index])) return activity;
+  const phase = raw && !replyText && activity.phase === 'responding' ? 'thinking' : activity.phase;
+  return { ...activity, phase, replyText, segments: displaySegments };
+}
+
 export function visibleBotActivity(activity: ProjectAgentActivity | null, messages: readonly BotChatMessage[]): ProjectAgentActivity | null {
   if (!activity || activity.phase === 'disposed') return null;
   if (messages.some(message => message.turnId === activity.turnId && (message.kind === 'agent_reply'
     || message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind))))) return null;
-  const delivering = activity.phase === 'done' && Boolean((activity.replyText ?? '').trim());
-  if (!delivering && TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
-  return activity;
+  const visible = displayActivity(activity);
+  if (!visible) return null;
+  const delivering = visible.phase === 'done' && Boolean((visible.replyText ?? '').trim());
+  if (!delivering && TERMINAL.has(visible.phase) && messages.some(message => message.id === visible.turnId)) return null;
+  return visible;
 }
 
 /** Folding a historical failure changes the thread, never the identity of its detail record. */

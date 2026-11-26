@@ -5,6 +5,7 @@ import { conversationRows, normalizeBotMessage, type BotChatMessage, type Conver
 import { attachBotProcesses, visibleBotActivity } from './botActivityState.ts';
 import { awaitingInputAnswered, continuousReplyRows, conversationRowShowsAuthor, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
 import { replyReferencesForRows } from './replyReferenceState.ts';
+import { indexBotWork, threadTaskReferences } from './botWorkState.ts';
 const at = '2026-10-22T00:00:00Z';
 function message(id: string, kind: string, extra: Record<string, unknown> = {}) {
   return normalizeBotMessage({ id, kind, role: kind === 'user_input' ? 'user' : 'assistant', createdAt: at, ...extra })!;
@@ -16,6 +17,22 @@ function activity(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivi
     phase: 'thinking', replyTo: [user.id], segments: [], replyText: '', ...extra };
 }
 const replies = (rows: ReturnType<typeof continuousReplyRows>) => rows.filter((r): r is BotReplyRow => r.type === 'reply');
+test('dispatch, completion and follow-up share the original inline task row', () => {
+  const makeReply = (id: string, sources: string[]) => {
+    const reply = message(id, 'agent_reply', { content: id, sources });
+    return { type: 'reply', id, aliases: [id], replyTo: [], paragraphs: [], message: reply, messages: [reply] } satisfies BotReplyRow;
+  };
+  const dispatch = makeReply('dispatch', ['work']);
+  const completion = makeReply('completion', ['work']);
+  const followup = makeReply('followup', ['work', 'separate-work']);
+  const resumed = { sessionId: 'work', status: 'running', followUpEpoch: 1, anchorMessageId: '', title: '原任务',
+    statusLabel: '', spawnedAt: '', conversationId: '', modelLabel: '', summary: '', evidenceRefs: [], progress: '' };
+  const owners = threadTaskReferences([dispatch, completion, followup], indexBotWork([resumed], true));
+  assert.equal(owners.get(dispatch)?.[0]?.session, resumed);
+  assert.equal(owners.has(completion), false);
+  assert.deepEqual(owners.get(followup)?.map(task => task.id), ['separate-work']);
+});
+
 test('pending, public stream and final retain one carrier and original anchors', () => {
   const cache = new Map<string, string>();
   const waiting = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at }], [], cache))[0]!;

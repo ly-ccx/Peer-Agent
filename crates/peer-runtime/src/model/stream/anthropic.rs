@@ -28,6 +28,12 @@ pub(super) struct Anthropic {
     pub done: bool,
 }
 impl Anthropic {
+    pub(super) fn has_tool_intent(&self) -> bool {
+        self.blocks
+            .values()
+            .any(|block| matches!(block, Block::Tool { .. }))
+    }
+
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         if v["type"] == "error" || v.get("error").is_some() {
             return Err(ModelError::provider_event(v));

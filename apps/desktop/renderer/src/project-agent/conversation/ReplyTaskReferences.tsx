@@ -1,24 +1,20 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
-import type { BotChatMessage } from '../state/botConversationState';
-import { replyTaskReferences, type BotWorkIndex, type BotWorkRow } from '../state/botWorkState';
+import type { BotWorkRow } from '../state/botWorkState';
 import { workerStatus } from '../state/workerStatus';
 
-export function ReplyTaskReferences({ messages, rows, workIndex, i18n, onOpen }: {
-  readonly messages: readonly BotChatMessage[];
-  readonly rows?: readonly BotWorkRow[];
-  readonly workIndex: BotWorkIndex;
+export function ReplyTaskReferences({ rows, i18n, onOpen }: {
+  readonly rows: readonly BotWorkRow[];
   readonly i18n: I18nRuntime;
   readonly onOpen: (sessionId: string) => void;
 }) {
-  const references = rows ?? replyTaskReferences(messages, workIndex);
-  if (!references.length) return null;
+  if (!rows.length) return null;
   const executor = executorDisplayName('peer', Boolean(i18n.locale?.startsWith('zh')));
 
   return (
     <div className="bot-reply-task-references bot-inline-worker-feed" role="group" aria-label={i18n.t('projectAgent.chat.work.heading')}>
-      {references.map((row) => {
+      {rows.map((row) => {
         const title = row.session?.title && row.session.title !== row.id
           ? row.session.title
           : i18n.t('projectAgent.chat.work.related');

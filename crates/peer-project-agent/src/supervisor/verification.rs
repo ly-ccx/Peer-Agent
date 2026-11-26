@@ -484,7 +484,11 @@ impl SessionSupervisor {
         }
         plan["delegationOrigin"]["phase"] = json!("completed");
         plan["updatedAt"] = json!(now_iso());
-        self.write_plan(plan)?;
+        if initial {
+            self.persist_terminal_transition(plan, "host_recovery")?;
+        } else {
+            self.write_plan(plan)?;
+        }
         Ok(true)
     }
 }

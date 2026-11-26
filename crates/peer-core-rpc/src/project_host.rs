@@ -754,7 +754,12 @@ impl ProjectHostRuntime {
                 .list_sessions(workspace_id)
                 .iter()
                 .any(|s| s.status == "queued");
-            if !has_new_unread && !has_queued_sessions {
+            let now_ms = peer_project_agent::parse_iso_ms(&now_iso()).unwrap_or(0);
+            let wake_trial_due = self
+                .host
+                .failure_hold(workspace_id)
+                .is_some_and(|hold| now_ms >= hold.hold_until_ms);
+            if !has_new_unread && !has_queued_sessions && !wake_trial_due {
                 return;
             }
         }
@@ -905,6 +910,7 @@ impl ProjectHostRuntime {
         } else {
             Some(bot_model.clone())
         };
+        let had_failure_hold = self.host.failure_hold(workspace_id).is_some();
         let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
             workspace_id,
             &bot_model,
@@ -934,6 +940,13 @@ impl ProjectHostRuntime {
                     }
                 } else if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
                     paused.remove(workspace_id);
+                }
+                if had_failure_hold
+                    && !ended_in_failure
+                    && report.last_turn.is_some()
+                    && self.host.failure_hold(workspace_id).is_none()
+                {
+                    self.wake_workspace(workspace_id);
                 }
                 if !report.promoted_session_ids.is_empty() {
                     for sid in &report.promoted_session_ids {

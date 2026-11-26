@@ -1,0 +1,14 @@
+[
+  ["NO_REPLY", true, true, "", ""],
+  ["  **NO_REPLY**.  ", true, true, "", ""],
+  ["`NO_REPLY`", true, true, "", ""],
+  ["> NO_REPLY", true, true, "", ">"],
+  ["NO_REPLY NO_REPLY", true, true, "", "NO_REPLY"],
+  ["已更新记录。\nNO_REPLY", true, false, "已更新记录。", "已更新记录。"],
+  ["XNO_REPLY", false, false, "XNO_REPLY", "XNO_REPLY"],
+  ["no_reply", false, false, "no_reply", "no_reply"],
+  ["请用 `NO_REPLY` 表示静默", false, false, "请用 `NO_REPLY` 表示静默", "请用 `NO_REPLY` 表示静默"],
+  ["规则说明：输出 `NO_REPLY`", false, false, "规则说明：输出 `NO_REPLY`", "规则说明：输出 `NO_REPLY`"],
+  ["NO_R", false, false, "NO_R", ""],
+  ["已处理完毕 NO_RE", false, false, "已处理完毕 NO_RE", "已处理完毕"]
+]

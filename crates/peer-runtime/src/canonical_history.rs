@@ -269,14 +269,14 @@ fn folded(values: &[Value]) -> Vec<Value> {
     }
     out
 }
-fn user(m: &Value) -> Result<Option<Value>, &'static str> {
+fn user(m: &Value, workspace_images: bool) -> Result<Option<Value>, &'static str> {
     // Interactive material requires its governed transport adapter, never silent
     // omission or reinterpretation as project/system instructions.
     if !m["resourceFeedback"].is_null() && m["resourceFeedback"] != json!([]) {
         return Err("history_resource_feedback_unsupported");
     }
     let mut blocks = Vec::<String>::new();
-    let mut images = Vec::<String>::new();
+    let mut images = Vec::<Value>::new();
     if let Some(s) = m["content"]
         .as_str()
         .filter(|s| !javascript_trim(s).is_empty())
@@ -342,7 +342,9 @@ fn user(m: &Value) -> Result<Option<Value>, &'static str> {
                 text(&a["dataUrl"])
             };
             if !u.is_empty() {
-                images.push(u.into())
+                images.push(json!({"type":"image_url","image_url":{"url":u}}));
+            } else if workspace_images && a["blobDigest"].is_string() {
+                images.push(json!({"type":"workspace_image","attachment":a}));
             }
         }
     }
@@ -352,8 +354,8 @@ fn user(m: &Value) -> Result<Option<Value>, &'static str> {
         } else {
             text(&a["url"])
         };
-        if !u.is_empty() && !images.iter().any(|s| s == u) {
-            images.push(u.into())
+        if !u.is_empty() && !images.iter().any(|part| part["image_url"]["url"] == u) {
+            images.push(json!({"type":"image_url","image_url":{"url":u}}));
         }
     }
     let content = blocks.join("\n\n");
@@ -367,9 +369,7 @@ fn user(m: &Value) -> Result<Option<Value>, &'static str> {
     if !content.is_empty() {
         parts.push(json!({"type":"text","text":content}))
     }
-    for u in images {
-        parts.push(json!({"type":"image_url","image_url":{"url":u}}))
-    }
+    parts.extend(images);
     Ok(Some(json!({"role":"user","content":parts})))
 }
 fn flush(out: &mut Vec<Value>, pending: &mut Vec<String>) {
@@ -448,6 +448,16 @@ fn assistant(m: &Value, out: &mut Vec<Value>) -> Result<(), &'static str> {
     Ok(())
 }
 pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
+    project_history_with_workspace_images(values, None)
+}
+
+pub(crate) type WorkspaceImageResolver =
+    std::sync::Arc<dyn Fn(&Value) -> Option<String> + Send + Sync>;
+
+pub(crate) fn project_history_with_workspace_images(
+    values: &[Value],
+    resolve_image: Option<&WorkspaceImageResolver>,
+) -> Result<Value, &'static str> {
     // Bound before cloning/expanding; Runtime never holds the entire transcript.
     peer_protocol::javascript_json_array_string_with_limit(values, 8 * 1024 * 1024)
         .map_err(|_| "history_projection_limit")?;
@@ -487,7 +497,7 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
         }
         match m["role"].as_str() {
             Some("user") => {
-                if let Some(v) = user(&m)? {
+                if let Some(v) = user(&m, resolve_image.is_some())? {
                     messages.push(v)
                 }
             }
@@ -502,6 +512,28 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
     let hash = bytes.encode_utf16().fold(0x811c9dc5u32, |h, c| {
         (h ^ u32::from(c)).wrapping_mul(0x01000193)
     });
+    // Fingerprint the verified blob identity without expanding the stored
+    // transcript. Hydrate only projected image parts for the bounded wire request.
+    if let Some(resolve) = resolve_image {
+        let mut bytes = bytes.len();
+        for message in &mut messages {
+            if message["role"] != "user" {
+                continue;
+            }
+            for part in message["content"].as_array_mut().into_iter().flatten() {
+                if part["type"] != "workspace_image" {
+                    continue;
+                }
+                let url =
+                    resolve(&part["attachment"]).ok_or("history_workspace_image_unavailable")?;
+                bytes = bytes.saturating_add(url.len());
+                if bytes > crate::model::REQUEST_BYTES {
+                    return Err("model_request_size_limit");
+                }
+                *part = json!({"type":"image_url","image_url":{"url":url}});
+            }
+        }
+    }
     let mut out = json!({"messages":messages,"compactionBoundaryIndex":index,"projectorVersion":peer_protocol::CANONICAL_HISTORY_PROJECTOR_VERSION,"historyFingerprint":format!("history-v3-{hash:08x}")});
     if let Some(c) = continuity {
         out["continuityContext"] = c["summary"].clone();
@@ -513,6 +545,34 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn delegated_workspace_images_are_resolved_only_at_canonical_projection() {
+        let rows = [json!({
+            "id": "followup", "role": "user", "kind": "user_followup", "content": "Look at this",
+            "attachments": [{"kind": "image", "blobDigest": "known", "mimeType": "image/png"}],
+        })];
+        assert_eq!(
+            project_history(&rows).unwrap()["messages"][0]["content"],
+            "Look at this"
+        );
+        let resolve: WorkspaceImageResolver = std::sync::Arc::new(|attachment| {
+            (attachment["blobDigest"] == "known").then(|| "data:image/png;base64,AA==".into())
+        });
+        let projected = project_history_with_workspace_images(&rows, Some(&resolve)).unwrap();
+        assert_eq!(
+            projected["messages"][0]["content"][1],
+            json!({
+                "type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}
+            })
+        );
+        assert!(rows[0]["attachments"][0]["dataUrl"].is_null());
+        let missing: WorkspaceImageResolver = std::sync::Arc::new(|_| None);
+        assert_eq!(
+            project_history_with_workspace_images(&rows, Some(&missing)).unwrap_err(),
+            "history_workspace_image_unavailable"
+        );
+    }
+
     #[test]
     fn durable_selection_matches_actual_ts_sync_and_yielding_projectors() {
         let f: Value = serde_json::from_str(include_str!(

@@ -35,7 +35,8 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
     completed: knownProgress.completed, total: knownProgress.total,
   }) : '';
   return <button type="button" className={`bot-work-panel-session is-${variant}`} data-needs-user={needsUser}
-    data-blocked={blocked} data-session-id={session.sessionId} onClick={() => onOpen(session.sessionId)}>
+    data-blocked={blocked} data-session-id={session.sessionId}
+    title={session.followUpEpoch ? (isZh ? `第 ${session.followUpEpoch} 轮跟进` : `Follow-up ${session.followUpEpoch}`) : undefined} onClick={() => onOpen(session.sessionId)}>
     <span className="bot-work-panel-agent-icon">
       <ExecutorIcon size={variant === 'agent' ? 14 : 16} title={executorDisplayName('peer', isZh)} />
     </span>

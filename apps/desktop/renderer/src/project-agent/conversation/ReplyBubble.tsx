@@ -1,4 +1,5 @@
 import { ReplyResourceContext } from './ReplyResourceContext';
+import { parseQuietReply } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
@@ -13,7 +14,7 @@ import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyTaskReferences } from './ReplyTaskReferences';
 import { InlineInteractiveReplies } from './InlineInteractiveReplies';
-import type { BotWorkIndex } from '../state/botWorkState';
+import type { BotWorkIndex, BotWorkRow } from '../state/botWorkState';
 
 export function ReplyBubble({
   workspaceId,
@@ -26,6 +27,7 @@ export function ReplyBubble({
   onQuote,
   onOpenDetails,
   workIndex,
+  taskRows,
   onOpenWork,
   narration = [],
 }: {
@@ -39,11 +41,14 @@ export function ReplyBubble({
   readonly onQuote: (excerpt: string) => void;
   readonly onOpenDetails?: () => void;
   readonly workIndex: BotWorkIndex;
+  readonly taskRows: readonly BotWorkRow[];
   readonly onOpenWork: (sessionId: string) => void;
   readonly narration?: readonly BotNarrationSegment[];
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
-  const cleanContent = stripHistoricalLocalRecordForDisplay(message.content);
+  const parsed = parseQuietReply(stripHistoricalLocalRecordForDisplay(message.content));
+  if (parsed.isPureQuiet) return null;
+  const cleanContent = parsed.leadingText;
   const displayContent = !cleanContent && message.content.trim().length > 0
     ? i18n.t('projectAgent.chat.protocolLeakFallback')
     : cleanContent;
@@ -65,7 +70,7 @@ export function ReplyBubble({
         </div>
       </div>
       <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={message.meta?.evidenceRefs ?? []} isZh={Boolean(i18n.locale?.startsWith('zh'))} />
-      <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
+      <ReplyTaskReferences rows={taskRows} i18n={i18n} onOpen={onOpenWork} />
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
       <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails}

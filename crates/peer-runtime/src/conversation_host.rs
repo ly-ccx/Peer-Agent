@@ -400,6 +400,13 @@ pub struct CapabilityOverrides {
     pub disabled_mcp_ids: Vec<String>,
 }
 
+struct DelegatedMaterials {
+    opening_attachments: Vec<Value>,
+    resolve_image: crate::canonical_history::WorkspaceImageResolver,
+}
+
+type DelegatedInputReader = Arc<dyn Fn(u64) -> Result<Vec<Value>, HostError> + Send + Sync>;
+
 /// One Host instance owns the bounded live registry across ordinary sessions.
 /// Discovery is read-only. A dropped runner stays unknown, never implicitly idle.
 pub struct NativeConversationRuntime {
@@ -407,6 +414,8 @@ pub struct NativeConversationRuntime {
     live: ExecutionRegistry,
     access: ConversationAccess,
     capability_overrides: CapabilityOverrides,
+    delegated_inputs: Option<DelegatedInputReader>,
+    delegated_materials: Option<DelegatedMaterials>,
 }
 #[derive(Clone, Copy)]
 enum ExecutionSurface {
@@ -424,12 +433,38 @@ impl NativeConversationRuntime {
             live: ExecutionRegistry::default(),
             access,
             capability_overrides: CapabilityOverrides::default(),
+            delegated_inputs: None,
+            delegated_materials: None,
         }
     }
     pub fn with_capability_overrides(mut self, overrides: CapabilityOverrides) -> Self {
         self.capability_overrides = overrides;
         self
     }
+    /// Read durable work-session input between delegated model requests. The
+    /// active conversation owner validates and commits messages to its own history.
+    pub fn with_delegated_inputs(
+        mut self,
+        read: impl Fn(u64) -> Result<Vec<Value>, HostError> + Send + Sync + 'static,
+    ) -> Self {
+        self.delegated_inputs = Some(Arc::new(read));
+        self
+    }
+
+    /// Admit only attachments already selected from the delegating input. The
+    /// resolver is restricted to the owning workspace and runs at wire time.
+    pub fn with_delegated_attachments(
+        mut self,
+        opening_attachments: Vec<Value>,
+        resolve_image: impl Fn(&Value) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.delegated_materials = Some(DelegatedMaterials {
+            opening_attachments,
+            resolve_image: Arc::new(resolve_image),
+        });
+        self
+    }
+
     pub fn update_chat_model(
         &self,
         conversation: &str,
@@ -690,6 +725,9 @@ impl NativeConversationRuntime {
             cognition_source: None,
             interactive_user_input: false,
             delegated_verification: false,
+            delegated_inputs: None,
+            delegated_input_seq: 0,
+            workspace_image_resolver: None,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -935,7 +973,7 @@ impl NativeConversationRuntime {
             return Err(HostError("invalid_workspace"));
         }
         let at = now();
-        let user_message = user_input::message(
+        let mut user_message = user_input::message(
             &workspace,
             options.prompt,
             options.image_paths,
@@ -943,6 +981,13 @@ impl NativeConversationRuntime {
             external,
         )
         .await?;
+        let delegated_materials = self.delegated_materials.as_ref().filter(|_| delegated);
+        if options.resume_from.is_none()
+            && let Some(materials) = delegated_materials
+            && !materials.opening_attachments.is_empty()
+        {
+            user_message["attachments"] = json!(materials.opening_attachments);
+        }
         if !options.image_paths.is_empty() {
             let projected =
                 crate::canonical_history::project_history(std::slice::from_ref(&user_message))
@@ -1145,6 +1190,14 @@ impl NativeConversationRuntime {
                 &expected.source_revision,
             )?
             .into();
+        let delegated_input_seq = expected
+            .history
+            .messages
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .filter_map(|message| message["steerSeq"].as_u64())
+            .max()
+            .unwrap_or(0);
         let mut host = Host {
             home: self.home.clone(),
             store,
@@ -1183,6 +1236,14 @@ impl NativeConversationRuntime {
             cognition_source: None,
             interactive_user_input,
             delegated_verification,
+            delegated_inputs: if delegated {
+                self.delegated_inputs.clone()
+            } else {
+                None
+            },
+            delegated_input_seq,
+            workspace_image_resolver: delegated_materials
+                .map(|materials| Arc::clone(&materials.resolve_image)),
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -1594,6 +1655,9 @@ impl NativeConversationRuntime {
             cognition_source: None,
             interactive_user_input: true,
             delegated_verification: false,
+            delegated_inputs: None,
+            delegated_input_seq: 0,
+            workspace_image_resolver: None,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -1876,6 +1940,9 @@ impl NativeConversationRuntime {
             cognition_source: None,
             interactive_user_input: true,
             delegated_verification: false,
+            delegated_inputs: None,
+            delegated_input_seq: 0,
+            workspace_image_resolver: None,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -2055,6 +2122,9 @@ struct Host<'a> {
     cognition_source: Option<CognitionSource>,
     interactive_user_input: bool,
     delegated_verification: bool,
+    delegated_inputs: Option<DelegatedInputReader>,
+    delegated_input_seq: u64,
+    workspace_image_resolver: Option<crate::canonical_history::WorkspaceImageResolver>,
     worker: Option<readonly_worker::Worker>,
     explorer_requests: BTreeSet<String>,
     runner: Option<runner::Runner>,
@@ -2461,6 +2531,9 @@ impl CognitionHost for Host<'_> {
         )
         .map_err(HostError)
     }
+    fn workspace_image_resolver(&self) -> Option<crate::canonical_history::WorkspaceImageResolver> {
+        self.workspace_image_resolver.clone()
+    }
     fn request_input(&self, projected: &Value) -> Option<(usize, &str)> {
         self.runner_request_input(projected)
     }
@@ -2544,6 +2617,7 @@ impl CognitionHost for Host<'_> {
                                     crate::model::ModelDelta::Thinking(thinking) => {
                                         ConversationEvent::ThinkingDelta(thinking)
                                     }
+                                    crate::model::ModelDelta::ToolIntent => return Ok(()),
                                 };
                                 output
                                     .publish(event)
@@ -2567,8 +2641,34 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         self.delegated_verification
     }
 
+    fn ingest_pending_user_input(&mut self) -> Result<bool, HostError> {
+        let Some(read) = self.delegated_inputs.as_ref() else {
+            return Ok(false);
+        };
+        let mut added = false;
+        for message in read(self.delegated_input_seq)? {
+            let seq = message["steerSeq"]
+                .as_u64()
+                .ok_or(HostError("invalid_delegated_input"))?;
+            if message["role"] != "user"
+                || !matches!(
+                    message["kind"].as_str(),
+                    Some("user_correction" | "user_input")
+                )
+                || seq <= self.delegated_input_seq
+            {
+                return Err(HostError("invalid_delegated_input"));
+            }
+            self.append(&message)?;
+            self.delegated_input_seq = seq;
+            added = true;
+        }
+        Ok(added)
+    }
+
     async fn request(&mut self) -> Result<ModelTurn, HostError> {
         self.source_current()?;
+        self.ingest_pending_user_input()?;
         self.prepare_runner_frame()?;
         self.request_admitted = false;
         let mut pipeline = self

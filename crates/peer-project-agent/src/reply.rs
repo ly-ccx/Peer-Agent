@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
-const TEXT_MAX: usize = 8000;
+pub(crate) const TEXT_MAX: usize = 32_000;
 const OUTCOMES: [&str; 4] = ["passed", "failed", "partial", "unverifiable"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,7 +388,7 @@ pub fn compose_reply(input: ComposeReplyInput) -> Result<ComposedReply, ProjectE
     if text.is_empty() || text.chars().count() > TEXT_MAX {
         return Err(ProjectError::new(
             "invalid_input",
-            "text is required and must be at most 8000 characters",
+            format!("text is required and must be at most {TEXT_MAX} characters"),
         ));
     }
     let validated_question = input.question.as_ref().map(validate_question).transpose()?;
