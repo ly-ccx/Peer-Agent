@@ -152,6 +152,40 @@ pub fn normalize_proactivity(level: Option<&str>) -> &'static str {
     }
 }
 
+pub(crate) fn result_fact_key(session_id: &str, revision: &str) -> String {
+    format!("session:{session_id}:result_ready:{revision}")
+}
+
+/// Only a formal reply citing this terminal revision is proof of delivery.
+pub(crate) fn reports_result_revision(message: &Value, session_id: &str, revision: &str) -> bool {
+    if revision.is_empty()
+        || message["role"] != "assistant"
+        || message["kind"] != "agent_reply"
+        || ![&message["sources"], &message["meta"]["sources"]]
+            .iter()
+            .any(|sources| {
+                sources
+                    .as_array()
+                    .is_some_and(|ids| ids.iter().any(|id| id == session_id))
+            })
+    {
+        return false;
+    }
+    let key = result_fact_key(session_id, revision);
+    message["meta"]["reportFactKeys"]
+        .as_array()
+        .is_some_and(|keys| keys.iter().any(|fact| fact == &key))
+        || message["meta"]["sessionStates"]
+            .as_array()
+            .is_some_and(|states| {
+                states.iter().any(|row| {
+                    row["sessionId"] == session_id
+                        && matches!(row["status"].as_str(), Some("result_ready" | "completed"))
+                        && row["sourceRevision"] == revision
+                })
+            })
+}
+
 /// Top-to-bottom surfacing policy table from ADR 80 §9 / `delegation.ts#decideSurfacing`.
 pub fn decide_surfacing(
     event: &SurfacingEvent,
