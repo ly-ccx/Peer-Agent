@@ -152,7 +152,7 @@ export function BotConversation({
       onObligationConfirm={obligations.confirm}
       onObligationReject={obligations.reject}
       onObligationRetry={obligations.retry}
-      onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
+      onOpenTask={onLocateSession} onRefreshWork={onRefreshWork}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
