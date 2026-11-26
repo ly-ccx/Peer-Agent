@@ -277,9 +277,9 @@ test('explicit upload validation rejects oversized content and cannot trust decl
     const base = { id: 'a', name: 'brief.md', sourceKind: 'user_upload', kind: 'text', mimeType: 'text/plain', size: 0, text: 'ok' };
     const submit = attachments => queue.submitInput(input(randomUUID(), 'read', { attachments }));
     assert.throws(() => submit([{ ...base, text: '字'.repeat(180_000) }]), /512 KiB/);
-    assert.throws(() => submit(Array.from({ length: 9 }, () => base)), /8 attachments/);
+    assert.throws(() => submit(Array.from({ length: 101 }, () => base)), /100 attachments/);
     assert.throws(() => submit([{ ...base, kind: 'image', mimeType: 'image/png', dataUrl: 'https://untrusted/image.png' }]), /image data/);
-    assert.throws(() => submit([{ ...base, kind: 'image', mimeType: 'image/png', dataUrl: `data:image/png;base64,${Buffer.alloc(8 * 1024 * 1024 + 1).toString('base64')}` }]), /8 MiB/);
+    assert.throws(() => submit([{ ...base, kind: 'image', mimeType: 'image/png', dataUrl: `data:image/png;base64,${Buffer.alloc(32 * 1024 * 1024 + 1).toString('base64')}` }]), /32 MiB/);
     const large = submit([{ ...base, kind: 'image', mimeType: 'image/png', size: 600_000,
       dataUrl: `data:image/png;base64,${Buffer.alloc(600_000).toString('base64')}`, filePath: '/not-authorized' }]);
     assert.equal(large.attachments[0].dataUrl.length > 512 * 1024, true);

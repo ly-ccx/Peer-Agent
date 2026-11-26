@@ -2,7 +2,7 @@
 //! attachment projection (`packages/runtime-node/src/project-agent/input-attachments.mjs`
 //! and `crates/peer-runtime/src/canonical_history.rs`).
 
-use crate::{ProjectError, is_valid_input_id};
+use crate::{ProjectError, atomic_write, is_valid_input_id, is_valid_workspace_id};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -12,9 +12,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const INPUT_ATTACHMENT_LIMIT: usize = 8;
-pub const MAX_IMAGE_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
+pub const INPUT_ATTACHMENT_LIMIT: usize = 100;
+pub const MAX_IMAGE_ATTACHMENT_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_TEXT_ATTACHMENT_BYTES: usize = 512 * 1024;
+/// Images larger than this decoded threshold are stored out-of-line in
+/// `<workspace_runtime>/attachment-blobs/<sha256>.<ext>` so JSONL logs and RPC frames
+/// stay compact even with 100+ high-resolution screenshots.
+pub const INLINE_IMAGE_THRESHOLD_BYTES: usize = 32 * 1024;
 
 const B64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -109,6 +113,26 @@ fn clip_token(raw: Option<&str>, limit: usize, fallback: &str) -> String {
     s.chars().take(limit).collect()
 }
 
+fn is_valid_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn image_ext_for_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tiff"),
+        "image/avif" => Some("avif"),
+        "image/heic" => Some("heic"),
+        "image/heif" => Some("heif"),
+        "image/svg+xml" => Some("svg"),
+        _ => None,
+    }
+}
+
 fn is_valid_image_mime_subtype(mime: &str) -> bool {
     let Some(sub) = mime.strip_prefix("image/") else {
         return false;
@@ -167,14 +191,14 @@ pub fn normalize_user_upload(item: &Value) -> Result<Value, ProjectError> {
             {
                 return Err(ProjectError::new(
                     "INVALID_ATTACHMENT",
-                    "attachment image exceeds 8 MiB",
+                    "attachment image exceeds 32 MiB",
                 ));
             }
             let decoded = base64_decode_strict(b64)?;
             if decoded.len() > MAX_IMAGE_ATTACHMENT_BYTES {
                 return Err(ProjectError::new(
                     "INVALID_ATTACHMENT",
-                    "attachment image exceeds 8 MiB",
+                    "attachment image exceeds 32 MiB",
                 ));
             }
             Ok(json!({
@@ -226,10 +250,169 @@ pub fn normalize_input_attachments(items: &[Value]) -> Result<Vec<Value>, Projec
     if items.len() > INPUT_ATTACHMENT_LIMIT {
         return Err(ProjectError::new(
             "ATTACHMENT_LIMIT",
-            "attachments exceed limit of 8",
+            "attachments exceed limit of 100",
         ));
     }
     items.iter().map(normalize_user_upload).collect()
+}
+
+/// Normalize untrusted incoming user uploads and spill image attachments larger than
+/// `INLINE_IMAGE_THRESHOLD_BYTES` into content-addressed raw files under
+/// `<runtime_ws_root>/attachment-blobs/<sha256>.<ext>` so JSONL logs and RPC frames remain small.
+pub fn persist_input_attachments(
+    runtime_ws_root: &Path,
+    items: &[Value],
+) -> Result<Vec<Value>, ProjectError> {
+    let normalized = normalize_input_attachments(items)?;
+    let mut out = Vec::with_capacity(normalized.len());
+    for item in normalized {
+        if item["kind"].as_str() == Some("image")
+            && let Some(mime) = item["mimeType"].as_str()
+            && let Some(ext) = image_ext_for_mime(mime)
+            && let Some(url) = item["dataUrl"].as_str()
+            && let Some((_, b64)) = url.strip_prefix("data:").and_then(|r| r.split_once(','))
+        {
+            let raw = base64_decode_strict(b64)?;
+            if raw.len() > INLINE_IMAGE_THRESHOLD_BYTES {
+                let digest = format!("{:x}", Sha256::digest(&raw));
+                let blob_path = runtime_ws_root
+                    .join("attachment-blobs")
+                    .join(format!("{digest}.{ext}"));
+                if !blob_path.exists() {
+                    atomic_write(&blob_path, &raw)?;
+                }
+                out.push(json!({
+                    "id": item["id"],
+                    "name": item["name"],
+                    "mimeType": mime,
+                    "size": item["size"],
+                    "sourceKind": "user_upload",
+                    "kind": "image",
+                    "blobDigest": digest,
+                    "filePath": blob_path.to_string_lossy(),
+                }));
+                continue;
+            }
+        }
+        out.push(item);
+    }
+    Ok(out)
+}
+
+/// Normalize an already-persisted upload record (accepts both inline `dataUrl` images and
+/// host-persisted `blobDigest` images without trusting any caller-supplied `filePath`).
+fn normalize_persisted_upload(item: &Value) -> Result<Value, ProjectError> {
+    let Some(obj) = item.as_object() else {
+        return Err(ProjectError::new(
+            "INVALID_ATTACHMENT",
+            "attachment must be an object",
+        ));
+    };
+    if obj.get("kind").and_then(Value::as_str) == Some("image")
+        && obj
+            .get("dataUrl")
+            .and_then(Value::as_str)
+            .is_none_or(|s| s.trim().is_empty())
+        && let Some(digest) = obj
+            .get("blobDigest")
+            .and_then(Value::as_str)
+            .filter(|s| is_valid_sha256_hex(s))
+    {
+        let size = obj
+            .get("size")
+            .and_then(Value::as_u64)
+            .filter(|s| *s <= MAX_IMAGE_ATTACHMENT_BYTES as u64)
+            .ok_or_else(|| ProjectError::new("INVALID_ATTACHMENT", "attachment size is invalid"))?
+            as usize;
+        let id = clip_token(obj.get("id").and_then(Value::as_str), 80, "attachment");
+        let name = clip_token(obj.get("name").and_then(Value::as_str), 240, "file");
+        let mime_type = clip_token(
+            obj.get("mimeType").and_then(Value::as_str),
+            100,
+            "application/octet-stream",
+        );
+        if !is_valid_image_mime_subtype(&mime_type) || image_ext_for_mime(&mime_type).is_none() {
+            return Err(ProjectError::new(
+                "INVALID_ATTACHMENT",
+                "attachment image data is invalid",
+            ));
+        }
+        let mut out = json!({
+            "id": id,
+            "name": name,
+            "mimeType": mime_type,
+            "size": size,
+            "sourceKind": "user_upload",
+            "kind": "image",
+            "blobDigest": digest,
+        });
+        if let Some(fp) = obj
+            .get("filePath")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        {
+            out["filePath"] = json!(fp);
+        }
+        return Ok(out);
+    }
+    normalize_user_upload(item)
+}
+
+/// Resolve an image attachment's `data:<mime>;base64,...` URL, loading verified raw bytes from
+/// `<data_home>/project-runtime/<workspace_id>/attachment-blobs/<blobDigest>.<ext>` when stored
+/// out-of-line. Never trusts arbitrary `filePath` values from JSON.
+pub fn resolve_workspace_image_data_url(
+    data_home: &Path,
+    workspace_id: &str,
+    att: &Value,
+) -> Option<String> {
+    if let Some(url) = att["dataUrl"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| att["url"].as_str().filter(|s| !s.trim().is_empty()))
+    {
+        return Some(url.to_owned());
+    }
+    let blob_path = verified_workspace_blob_path(data_home, workspace_id, att)?;
+    let mime = att["mimeType"].as_str()?;
+    let bytes = read_verified_blob_bytes(&blob_path, att["blobDigest"].as_str()?)?;
+    Some(format!("data:{mime};base64,{}", base64_encode(&bytes)))
+}
+
+fn verified_workspace_blob_path(
+    data_home: &Path,
+    workspace_id: &str,
+    att: &Value,
+) -> Option<PathBuf> {
+    let ws = workspace_id.trim();
+    if !is_valid_workspace_id(ws) {
+        return None;
+    }
+    let digest = att["blobDigest"]
+        .as_str()
+        .filter(|s| is_valid_sha256_hex(s))?;
+    let mime = att["mimeType"].as_str()?;
+    let ext = image_ext_for_mime(mime)?;
+    Some(
+        data_home
+            .join("project-runtime")
+            .join(ws)
+            .join("attachment-blobs")
+            .join(format!("{digest}.{ext}")),
+    )
+}
+
+fn read_verified_blob_bytes(path: &Path, expected_digest: &str) -> Option<Vec<u8>> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() as usize > MAX_IMAGE_ATTACHMENT_BYTES {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_ATTACHMENT_BYTES {
+        return None;
+    }
+    let actual = format!("{:x}", Sha256::digest(&bytes));
+    (actual == expected_digest).then_some(bytes)
 }
 
 fn image_media_type(path: &Path) -> Option<(&'static str, &'static str)> {
@@ -330,10 +513,27 @@ pub fn load_local_image_attachment(
     }))
 }
 
-/// Extract normalized attachments carried by anchored parent messages (max 8, deduped by `id`).
+/// Extract normalized attachments carried by anchored parent messages (deduped by `id`).
 pub fn attachments_from_messages(
     messages: &[Value],
     anchor_message_ids: &[String],
+) -> Result<Vec<Value>, ProjectError> {
+    attachments_from_messages_inner(messages, anchor_message_ids, false)
+}
+
+/// Extract persisted attachments (including out-of-line `blobDigest` image records) carried by
+/// anchored parent messages (deduped by `id`).
+pub fn attachments_from_messages_persisted(
+    messages: &[Value],
+    anchor_message_ids: &[String],
+) -> Result<Vec<Value>, ProjectError> {
+    attachments_from_messages_inner(messages, anchor_message_ids, true)
+}
+
+fn attachments_from_messages_inner(
+    messages: &[Value],
+    anchor_message_ids: &[String],
+    allow_blob_refs: bool,
 ) -> Result<Vec<Value>, ProjectError> {
     let anchors: HashSet<&str> = anchor_message_ids.iter().map(String::as_str).collect();
     let mut out = Vec::new();
@@ -348,7 +548,15 @@ pub fn attachments_from_messages(
         let Some(raw) = msg["attachments"].as_array() else {
             continue;
         };
-        for item in normalize_input_attachments(raw)? {
+        if raw.len() > INPUT_ATTACHMENT_LIMIT {
+            return Err(ProjectError::code("ATTACHMENT_LIMIT"));
+        }
+        for raw_item in raw {
+            let item = if allow_blob_refs {
+                normalize_persisted_upload(raw_item)?
+            } else {
+                normalize_user_upload(raw_item)?
+            };
             let att_id = item["id"].as_str().unwrap_or("").to_owned();
             if seen.insert(att_id) {
                 out.push(item);
@@ -374,6 +582,23 @@ fn format_attachment_size(bytes: f64) -> String {
 /// Project a canonical persisted `user_input` message (with optional text/image/unsupported
 /// attachments) into a model-ready message matching `peer_runtime::canonical_history::user`.
 pub fn project_user_message_for_model(msg: &Value) -> Option<Value> {
+    project_user_message_for_model_inner(None, msg)
+}
+
+/// Project a canonical persisted `user_input` message into a model-ready message, hydrating
+/// out-of-line workspace image blobs (`blobDigest`) into data URLs on demand.
+pub fn project_user_message_for_model_in_workspace(
+    data_home: &Path,
+    workspace_id: &str,
+    msg: &Value,
+) -> Option<Value> {
+    project_user_message_for_model_inner(Some((data_home, workspace_id)), msg)
+}
+
+fn project_user_message_for_model_inner(
+    workspace_ctx: Option<(&Path, &str)>,
+    msg: &Value,
+) -> Option<Value> {
     if msg["role"].as_str() != Some("user") {
         return None;
     }
@@ -413,12 +638,16 @@ pub fn project_user_message_for_model(msg: &Value) -> Option<Value> {
                     "Attached file: {name}\nMIME: {mime}\nSize: {size_str}\n{tail}"
                 ));
             } else if kind == "image" {
-                let u = a["dataUrl"]
-                    .as_str()
-                    .filter(|s| !s.trim().is_empty())
-                    .or_else(|| a["url"].as_str().filter(|s| !s.trim().is_empty()));
-                if let Some(url) = u {
-                    images.push(url.to_owned());
+                let resolved = match workspace_ctx {
+                    Some((home, ws)) => resolve_workspace_image_data_url(home, ws, a),
+                    None => a["dataUrl"]
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| a["url"].as_str().filter(|s| !s.trim().is_empty()))
+                        .map(str::to_owned),
+                };
+                if let Some(url) = resolved {
+                    images.push(url);
                 }
             }
         }
@@ -466,6 +695,25 @@ pub fn materialize_image_attachments(
     dir: &Path,
     attachments: &[Value],
 ) -> Result<Vec<PathBuf>, ProjectError> {
+    materialize_image_attachments_inner(None, dir, attachments)
+}
+
+/// Materialize `kind == "image"` attachments (both inline `dataUrl` and out-of-line `blobDigest`
+/// files) into regular files inside `dir` for delegated worker `ConversationOptions.image_paths`.
+pub fn materialize_image_attachments_in_workspace(
+    data_home: &Path,
+    workspace_id: &str,
+    dir: &Path,
+    attachments: &[Value],
+) -> Result<Vec<PathBuf>, ProjectError> {
+    materialize_image_attachments_inner(Some((data_home, workspace_id)), dir, attachments)
+}
+
+fn materialize_image_attachments_inner(
+    workspace_ctx: Option<(&Path, &str)>,
+    dir: &Path,
+    attachments: &[Value],
+) -> Result<Vec<PathBuf>, ProjectError> {
     let mut paths = Vec::new();
     let image_items: Vec<&Value> = attachments
         .iter()
@@ -476,26 +724,31 @@ pub fn materialize_image_attachments(
     }
     fs::create_dir_all(dir).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
     for (idx, att) in image_items.iter().enumerate() {
-        let Some(url) = att["dataUrl"].as_str() else {
+        if let Some(url) = att["dataUrl"].as_str().filter(|s| !s.trim().is_empty()) {
+            let Some((header, b64)) = url.strip_prefix("data:").and_then(|r| r.split_once(','))
+            else {
+                continue;
+            };
+            let mime = header.strip_suffix(";base64").unwrap_or("");
+            let Some(ext) = image_ext_for_mime(mime) else {
+                continue;
+            };
+            let raw = base64_decode_strict(b64)?;
+            let out_path = dir.join(format!("att-{}-{idx}.{ext}", uuid::Uuid::new_v4()));
+            fs::write(&out_path, &raw).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+            paths.push(out_path);
             continue;
-        };
-        let Some((header, b64)) = url.strip_prefix("data:").and_then(|r| r.split_once(',')) else {
-            continue;
-        };
-        let mime = header.strip_suffix(";base64").unwrap_or("");
-        let ext = match mime {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/gif" => "gif",
-            "image/webp" => "webp",
-            "image/bmp" => "bmp",
-            "image/tiff" => "tiff",
-            _ => continue,
-        };
-        let raw = base64_decode_strict(b64)?;
-        let out_path = dir.join(format!("att-{}-{idx}.{ext}", uuid::Uuid::new_v4()));
-        fs::write(&out_path, &raw).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
-        paths.push(out_path);
+        }
+        if let Some((home, ws)) = workspace_ctx
+            && let Some(blob_path) = verified_workspace_blob_path(home, ws, att)
+            && let Some(digest) = att["blobDigest"].as_str()
+            && let Some(ext) = att["mimeType"].as_str().and_then(image_ext_for_mime)
+            && let Some(raw) = read_verified_blob_bytes(&blob_path, digest)
+        {
+            let out_path = dir.join(format!("att-{}-{idx}.{ext}", uuid::Uuid::new_v4()));
+            fs::write(&out_path, &raw).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+            paths.push(out_path);
+        }
     }
     Ok(paths)
 }
@@ -606,5 +859,66 @@ mod tests {
         let files = materialize_image_attachments(&mat_dir, &extracted).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(fs::read(&files[0]).unwrap(), png);
+    }
+
+    #[test]
+    fn persists_large_image_out_of_line_and_projects_or_materializes_from_workspace_blob() {
+        let dir = tempdir().unwrap();
+        let data_home = dir.path();
+        let ws = "ws-large-img";
+        let ws_root = data_home.join("project-runtime").join(ws);
+
+        let mut large_png = sample_png_bytes();
+        large_png.resize(INLINE_IMAGE_THRESHOLD_BYTES + 4096, 0x42);
+        let data_url = format!("data:image/png;base64,{}", base64_encode(&large_png));
+
+        let raw_att = json!({
+            "id": "att-big-1",
+            "name": "8k-shot.png",
+            "mimeType": "image/png",
+            "size": large_png.len(),
+            "kind": "image",
+            "dataUrl": data_url,
+        });
+
+        let persisted = persist_input_attachments(&ws_root, &[raw_att]).unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert!(persisted[0].get("dataUrl").is_none());
+        let digest = persisted[0]["blobDigest"].as_str().unwrap();
+        let file_path = PathBuf::from(persisted[0]["filePath"].as_str().unwrap());
+        assert!(file_path.exists());
+        assert_eq!(fs::read(&file_path).unwrap(), large_png);
+
+        let msg = json!({
+            "id": "input-big-1",
+            "role": "user",
+            "kind": "user_input",
+            "content": "inspect 8k image",
+            "attachments": persisted,
+        });
+        let projected = project_user_message_for_model_in_workspace(data_home, ws, &msg).unwrap();
+        let parts = projected["content"].as_array().unwrap();
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], data_url);
+
+        let extracted =
+            attachments_from_messages_persisted(&[msg], &[String::from("input-big-1")]).unwrap();
+        assert_eq!(extracted.len(), 1);
+        let mat_dir = dir.path().join("mat-out");
+        let files = materialize_image_attachments_in_workspace(data_home, ws, &mat_dir, &extracted)
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(fs::read(&files[0]).unwrap(), large_png);
+
+        // Corrupting the blob on disk fails sha256 verification and refuses to return stale bytes.
+        fs::write(&file_path, b"corrupted").unwrap();
+        assert!(
+            resolve_workspace_image_data_url(
+                data_home,
+                ws,
+                &json!({ "kind": "image", "mimeType": "image/png", "blobDigest": digest })
+            )
+            .is_none()
+        );
     }
 }

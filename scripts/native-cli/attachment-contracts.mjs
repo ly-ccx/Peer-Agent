@@ -28,7 +28,7 @@ for(const [name,url]of urls)for(const wire of ['openai-chat','openai-responses',
 const fact={body:'🦀'.repeat(300000),escapes:'\n"\u0000'};
 const encoded=JSON.stringify(fact);
 const arrayEncoded=JSON.stringify([fact]);
-const result={schemaVersion:1,provenance:'Actual TS canonical projector and wire encoders; native admission errors are explicit safety deltas.',requestBytes:2097152,factualJsonBytes:8388608,permissionJsonBytes:1048576,largeFact:{scalars:300000,bytes:Buffer.byteLength(encoded),sha256:createHash('sha256').update(encoded).digest('hex'),arrayBytes:Buffer.byteLength(arrayEncoded),arraySha256:createHash('sha256').update(arrayEncoded).digest('hex')},cases};
+const result={schemaVersion:1,provenance:'Actual TS canonical projector and wire encoders; native admission errors are explicit safety deltas.',requestBytes:536870912,factualJsonBytes:8388608,permissionJsonBytes:1048576,largeFact:{scalars:300000,bytes:Buffer.byteLength(encoded),sha256:createHash('sha256').update(encoded).digest('hex'),arrayBytes:Buffer.byteLength(arrayEncoded),arraySha256:createHash('sha256').update(arrayEncoded).digest('hex')},cases};
 const file=new URL('../../packages/protocol/contracts/native-cli/attachment-images.json',import.meta.url);
 if(process.argv.includes('--write'))writeFileSync(file,JSON.stringify(result,null,2)+'\n');else assert.deepEqual(result,JSON.parse(readFileSync(file,'utf8')));
 console.log(`${cases.length} actual attachment wire vectors verified.`);

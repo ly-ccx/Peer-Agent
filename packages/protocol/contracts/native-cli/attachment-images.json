@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "provenance": "Actual TS canonical projector and wire encoders; native admission errors are explicit safety deltas.",
-  "requestBytes": 2097152,
+  "requestBytes": 536870912,
   "factualJsonBytes": 8388608,
   "permissionJsonBytes": 1048576,
   "largeFact": {

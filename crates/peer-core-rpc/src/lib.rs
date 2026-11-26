@@ -501,4 +501,56 @@ mod tests {
         assert!(result.is_err());
         drop(writer);
     }
+
+    #[tokio::test]
+    async fn multi_megabyte_request_accepted_and_limit_error_preserves_caller_id() {
+        let (mut client, _shutdown, server_handle) = spawn_server(Duration::from_secs(5));
+
+        client
+            .send(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "core.initialize",
+                "params": {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "client": { "name": "peer-desktop", "version": "0.1.0" },
+                    "externalCapabilities": []
+                }
+            }))
+            .await;
+        let init = client.recv().await.expect("init reply");
+        assert_eq!(init["id"], 1);
+        assert!(init.get("result").is_some());
+
+        // Previously rejected when cumulative strings exceeded 1 MiB.
+        let chunk = "A".repeat(900 * 1024);
+        client
+            .send(&json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "core.ping",
+                "params": { "a": chunk, "b": chunk }
+            }))
+            .await;
+        let big_reply = client.recv().await.expect("multi-megabyte ping reply");
+        assert_eq!(big_reply["id"], 2);
+        assert!(big_reply.get("result").is_some());
+
+        // Trigger JsonDecodeError::LimitExceeded via nesting depth > 64 and verify caller id is preserved.
+        let mut deep = String::from(r#"{"jsonrpc":"2.0","id":42,"method":"core.ping","params":"#);
+        for _ in 0..80 {
+            deep.push('[');
+        }
+        for _ in 0..80 {
+            deep.push(']');
+        }
+        deep.push_str("}\n");
+        client.send_raw(deep.as_bytes()).await;
+        let limit_err = client.recv().await.expect("limit error reply");
+        assert_eq!(limit_err["id"], 42);
+        assert_eq!(limit_err["error"]["code"], protocol::CODE_INVALID_REQUEST);
+
+        drop(client);
+        server_handle.await.expect("join").expect("clean exit");
+    }
 }

@@ -2,13 +2,17 @@
 use super::*;
 /// CLI defaults live at the wire seam rather than in the HTTP transport.
 pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
+    encode_with_limit(wire, input, effective_request_bytes())
+}
+
+fn encode_with_limit(wire: Wire, input: &WireInput<'_>, limit: usize) -> Result<Value, ModelError> {
     if input.options.chat_dialect == ChatDialect::Environment {
         if wire != Wire::Chat {
             return Err(ModelError::new("model_environment_wire_invalid"));
         }
         return super::environment::encode(input);
     }
-    let mut body = super::encode(wire, input)?;
+    let mut body = super::encode_with_limit(wire, input, limit)?;
     if wire == Wire::Chat
         && input
             .options
@@ -97,7 +101,7 @@ pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelEr
     if wire == Wire::Gemini {
         apply_gemini_runtime_dialect(&mut body, input);
     }
-    check_limit(&body)?;
+    check_limit_with(&body, limit)?;
     Ok(body)
 }
 
@@ -396,19 +400,27 @@ mod tests {
             tools: None,
             options: &options,
         };
-        let overhead = serde_json::to_vec(&super::super::encode(Wire::Responses, &input).unwrap())
-            .unwrap()
-            .len();
-        let system = "x".repeat(2 * 1024 * 1024 - overhead + 1);
+        let test_limit = 64 * 1024;
+        let overhead = serde_json::to_vec(
+            &super::super::encode_with_limit(Wire::Responses, &input, test_limit).unwrap(),
+        )
+        .unwrap()
+        .len();
+        let system = "x".repeat(test_limit - overhead + 1);
         input.system = &system;
         assert_eq!(
-            serde_json::to_vec(&super::super::encode(Wire::Responses, &input).unwrap())
-                .unwrap()
-                .len(),
-            2 * 1024 * 1024
+            serde_json::to_vec(
+                &super::super::encode_with_limit(Wire::Responses, &input, test_limit).unwrap()
+            )
+            .unwrap()
+            .len(),
+            test_limit
         );
         assert_eq!(
-            encode(Wire::Responses, &input).err().unwrap().code,
+            encode_with_limit(Wire::Responses, &input, test_limit)
+                .err()
+                .unwrap()
+                .code,
             "model_request_limit"
         );
     }

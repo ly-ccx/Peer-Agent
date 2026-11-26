@@ -1191,3 +1191,66 @@ test('rebindFolder validates missing/taken folders, clears managed flag, syncs w
   assert.equal(bridgeSynced.length, 1);
   assert.equal(bridgeSynced[0].path, nextFolder);
 });
+
+test('rust bot host compacts draft-backed images to draftBlobDigest on submit and falls back on DRAFT_TOO_LARGE_FOR_RPC read', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'draft-compact-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workspaceId = 'ws-img-compact';
+  const digest = 'a'.repeat(64);
+  const wsRoot = path.join(root, workspaceId);
+  mkdirSync(path.join(wsRoot, 'input-drafts'), { recursive: true });
+  mkdirSync(path.join(wsRoot, 'input-draft-blobs'), { recursive: true });
+  writeFileSync(
+    path.join(wsRoot, 'input-drafts', 'desktop.json'),
+    JSON.stringify({ schemaVersion: 1, revision: 1, draft: { text: '', quote: null, attachmentIds: ['att-1'] }, pending: [], uploads: { 'att-1': digest } }),
+  );
+  writeFileSync(
+    path.join(wsRoot, 'input-draft-blobs', `${digest}.json`),
+    JSON.stringify({ id: 'att-1', name: '8k.png', mimeType: 'image/png', size: 123456, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,AAAA' }),
+  );
+
+  const submittedCalls = [];
+  let localReadCalled = false;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    draftRootDir: root,
+    inputDrafts: {
+      read(payload) {
+        localReadCalled = true;
+        return { ok: true, snapshot: { revision: 1, draft: { text: 'huge-draft', quote: null, attachments: [] }, pending: [] }, fromLocal: payload.workspaceId };
+      },
+      write() { return { ok: true, revision: 2 }; },
+    },
+    classicCoreBridge: {
+      isAvailable: () => true,
+      isProjectBotHostActive: () => true,
+      async projectBotReadInputDraft() { return { ok: false, code: 'DRAFT_TOO_LARGE_FOR_RPC' }; },
+      async projectBotSubmitInput(params) {
+        submittedCalls.push(params);
+        return { ok: true, input: { inputId: params.inputId }, delivery: 'queued' };
+      },
+    },
+    schedule: () => 1,
+  });
+
+  const draftRes = await service.readInputDraft({ workspaceId, surface: 'desktop' });
+  assert.equal(draftRes.ok, true);
+  assert.equal(localReadCalled, true);
+  assert.equal(draftRes.snapshot.draft.text, 'huge-draft');
+
+  const submitRes = await service.submitInput({
+    workspaceId,
+    inputId: 'in-big-1',
+    surface: 'desktop',
+    text: 'look at these',
+    attachments: [
+      { id: 'att-1', name: '8k.png', mimeType: 'image/png', size: 123456, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,AAAA' },
+      { id: 'att-inline', name: 'quick.png', mimeType: 'image/png', size: 100, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,BBBB' },
+    ],
+  });
+  assert.equal(submitRes.ok, true);
+  assert.equal(submittedCalls.length, 1);
+  assert.equal(submittedCalls[0].attachments[0].draftBlobDigest, digest);
+  assert.equal('dataUrl' in submittedCalls[0].attachments[0], false);
+  assert.equal(submittedCalls[0].attachments[1].dataUrl, 'data:image/png;base64,BBBB');
+});

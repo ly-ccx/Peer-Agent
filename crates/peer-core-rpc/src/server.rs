@@ -36,7 +36,7 @@ use tokio::{
     task::JoinSet,
 };
 
-const MAX_INBOUND_STRING_BYTES: usize = 1024 * 1024;
+const MAX_INBOUND_STRING_BYTES: usize = MAX_FRAME_BYTES;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const MULTI_CLIENT_NOTIFY_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -1207,10 +1207,10 @@ where
         ) {
             Ok(doc) => doc.value,
             Err(JsonDecodeError::LimitExceeded) => {
+                let err_id = extract_raw_request_id(&frame);
                 if let Err(write_err) = client_writer
                     .send_value(
-                        &RpcError::invalid_request("JSON frame limit exceeded")
-                            .to_response(Value::Null),
+                        &RpcError::invalid_request("JSON frame limit exceeded").to_response(err_id),
                     )
                     .await
                 {
@@ -1219,8 +1219,9 @@ where
                 continue;
             }
             Err(JsonDecodeError::InvalidJson) => {
+                let err_id = extract_raw_request_id(&frame);
                 if let Err(write_err) = client_writer
-                    .send_value(&RpcError::parse_error("Invalid JSON").to_response(Value::Null))
+                    .send_value(&RpcError::parse_error("Invalid JSON").to_response(err_id))
                     .await
                 {
                     break Err(write_err);
@@ -1417,4 +1418,53 @@ fn extract_valid_id(id: Option<&Value>) -> Option<Option<Value>> {
     } else {
         None
     }
+}
+
+/// Best-effort bounded scan of an oversized or unparseable JSON-RPC frame prefix to recover
+/// the caller's top-level `"id"` so clients immediately reject instead of hanging until timeout.
+fn extract_raw_request_id(frame: &[u8]) -> Value {
+    let prefix_len = frame.len().min(1024);
+    let Ok(prefix) = std::str::from_utf8(&frame[..prefix_len]) else {
+        return Value::Null;
+    };
+    let Some(pos) = prefix.find("\"id\"") else {
+        return Value::Null;
+    };
+    let rest = prefix[pos + 4..].trim_start();
+    let Some(rest) = rest.strip_prefix(':') else {
+        return Value::Null;
+    };
+    let rest = rest.trim_start();
+    if let Some(after_quote) = rest.strip_prefix('"') {
+        let mut out = String::new();
+        let mut escaped = false;
+        for ch in after_quote.chars().take(128) {
+            if escaped {
+                out.push(ch);
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                return Value::String(out);
+            } else {
+                out.push(ch);
+            }
+        }
+        return Value::Null;
+    }
+    let digits_len = rest
+        .bytes()
+        .enumerate()
+        .take_while(|&(i, b)| b.is_ascii_digit() || (i == 0 && b == b'-'))
+        .count();
+    if digits_len > 0 {
+        let token = &rest[..digits_len];
+        if let Ok(n) = token.parse::<i64>() {
+            return Value::Number(n.into());
+        }
+        if let Ok(n) = token.parse::<u64>() {
+            return Value::Number(n.into());
+        }
+    }
+    Value::Null
 }

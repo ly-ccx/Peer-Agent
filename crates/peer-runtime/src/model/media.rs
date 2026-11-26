@@ -60,6 +60,9 @@ fn inline(raw: &str, wire: Wire) -> Result<(), ModelError> {
     Ok(())
 }
 pub(super) fn admit(history: &Value, wire: Wire) -> Result<(), ModelError> {
+    admit_with_limit(history, wire, wire::effective_request_bytes())
+}
+fn admit_with_limit(history: &Value, wire: Wire, limit: usize) -> Result<(), ModelError> {
     let messages = history["messages"]
         .as_array()
         .ok_or_else(|| ModelError::new("history_projection_invalid"))?;
@@ -83,7 +86,7 @@ pub(super) fn admit(history: &Value, wire: Wire) -> Result<(), ModelError> {
                 .filter(|s| !s.is_empty())
                 .ok_or_else(invalid)?;
             image_bytes = image_bytes.saturating_add(raw.len());
-            if image_bytes > wire::REQUEST_BYTES {
+            if image_bytes > limit {
                 return Err(ModelError::new("model_request_limit"));
             }
             let parsed = reqwest::Url::parse(raw).map_err(|_| invalid())?;
@@ -215,7 +218,8 @@ mod tests {
                 .is_err()
             );
         }
-        let url = format!("data:image/png;base64,{}", "A".repeat(wire::REQUEST_BYTES));
-        assert_eq!(admit(&json!({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":url}}]}]}),wire::Wire::Chat).unwrap_err().code,"model_request_limit");
+        let test_limit = 64 * 1024;
+        let url = format!("data:image/png;base64,{}", "A".repeat(test_limit));
+        assert_eq!(admit_with_limit(&json!({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":url}}]}]}),wire::Wire::Chat, test_limit).unwrap_err().code,"model_request_limit");
     }
 }

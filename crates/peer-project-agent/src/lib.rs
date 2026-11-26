@@ -52,9 +52,12 @@ pub use acceptance::{
     is_handoff_conflict, verdict_ref_for,
 };
 pub use attachments::{
-    INPUT_ATTACHMENT_LIMIT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_ATTACHMENT_BYTES,
-    attachments_from_messages, load_local_image_attachment, materialize_image_attachments,
-    normalize_input_attachments, normalize_user_upload, project_user_message_for_model,
+    INLINE_IMAGE_THRESHOLD_BYTES, INPUT_ATTACHMENT_LIMIT, MAX_IMAGE_ATTACHMENT_BYTES,
+    MAX_TEXT_ATTACHMENT_BYTES, attachments_from_messages, attachments_from_messages_persisted,
+    load_local_image_attachment, materialize_image_attachments,
+    materialize_image_attachments_in_workspace, normalize_input_attachments, normalize_user_upload,
+    persist_input_attachments, project_user_message_for_model,
+    project_user_message_for_model_in_workspace, resolve_workspace_image_data_url,
 };
 pub use cards::{
     CardResolution, ConfirmCardInput, TaskQuestionDraft, append_card_resolution,

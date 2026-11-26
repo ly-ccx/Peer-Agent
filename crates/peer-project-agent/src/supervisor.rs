@@ -2514,10 +2514,17 @@ impl SessionSupervisor {
                 crate::read_full_conversation_messages(&self.conversations, parent_cid)
                     .ok()
                     .and_then(|msgs| {
-                        crate::attachments::attachments_from_messages(&msgs, &anchor_ids).ok()
+                        crate::attachments::attachments_from_messages_persisted(&msgs, &anchor_ids)
+                            .ok()
                     })
                     .and_then(|atts| {
-                        crate::attachments::materialize_image_attachments(&mat_dir, &atts).ok()
+                        crate::attachments::materialize_image_attachments_in_workspace(
+                            &self.data_home,
+                            workspace_id,
+                            &mat_dir,
+                            &atts,
+                        )
+                        .ok()
                     })
                     .unwrap_or_default()
             } else {

@@ -16,7 +16,13 @@ impl Gemini {
             || v.get("error").is_some()
             || v["promptFeedback"].get("blockReason").is_some()
         {
-            return Err(ModelError::new("model_provider_error"));
+            return Err(ModelError::provider_event(
+                if event.get("error").is_some() {
+                    event
+                } else {
+                    v
+                },
+            ));
         }
         if let Some(usage) = v.get("usageMetadata") {
             self.usage = Some(usage.clone());

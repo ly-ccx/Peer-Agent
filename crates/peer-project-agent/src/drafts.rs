@@ -19,12 +19,12 @@ use std::{
     time::Duration,
 };
 
-const MAX_DRAFT_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_TOTAL_BLOB_BYTES: u64 = 96 * 1024 * 1024;
+const MAX_DRAFT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_TOTAL_BLOB_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_TEXT_CHARS: usize = 100_000;
 const MAX_QUOTE_MSG_ID_CHARS: usize = 512;
 const MAX_PENDING: usize = 32;
-const MAX_ATTACHMENTS: usize = 16;
+const MAX_ATTACHMENTS: usize = 100;
 const MAX_QUOTE_REFS: usize = 64;
 const MAX_TASK_REFS: usize = 5;
 const MAX_TASK_REF_TITLE_CHARS: usize = 200;
@@ -925,6 +925,37 @@ impl InputDraftStore {
             .map_err(|_| ProjectError::code("DRAFT_SAVE_FAILED"))?;
         Ok(next_revision)
     }
+
+    /// Read and verify a previously uploaded draft attachment blob by content digest.
+    pub fn read_blob_by_digest(
+        &self,
+        workspace_id: &str,
+        digest: &str,
+    ) -> Result<Value, ProjectError> {
+        let ws = workspace_id.trim();
+        if !is_valid_workspace_id(ws) || !valid_sha256_hex(digest) {
+            return Err(ProjectError::code("INVALID_ATTACHMENT"));
+        }
+        let blob_path = self
+            .runtime_root
+            .join(ws)
+            .join("input-draft-blobs")
+            .join(format!("{digest}.json"));
+        let meta =
+            fs::metadata(&blob_path).map_err(|_| ProjectError::code("INVALID_ATTACHMENT"))?;
+        if !meta.is_file() || meta.len() > MAX_DRAFT_BYTES {
+            return Err(ProjectError::code("INVALID_ATTACHMENT"));
+        }
+        let body =
+            fs::read_to_string(&blob_path).map_err(|_| ProjectError::code("INVALID_ATTACHMENT"))?;
+        let actual = format!("{:x}", Sha256::digest(body.as_bytes()));
+        if actual != digest {
+            return Err(ProjectError::code("INVALID_ATTACHMENT"));
+        }
+        let parsed: Value =
+            serde_json::from_str(&body).map_err(|_| ProjectError::code("INVALID_ATTACHMENT"))?;
+        normalize_user_upload(&parsed)
+    }
 }
 
 #[cfg(test)]
@@ -1077,8 +1108,8 @@ mod tests {
             .unwrap_err();
         assert_eq!(att_conflict.code, "DRAFT_ATTACHMENT_CONFLICT");
 
-        // More than 8 attachments per draft/pending rejects with INVALID_DRAFT.
-        let nine_uploads: Vec<Value> = (0..9)
+        // More than INPUT_ATTACHMENT_LIMIT (100) attachments per draft/pending rejects with INVALID_DRAFT.
+        let too_many_uploads: Vec<Value> = (0..=INPUT_ATTACHMENT_LIMIT)
             .map(|i| {
                 json!({
                     "id": format!("a-{i}"),
@@ -1090,15 +1121,17 @@ mod tests {
                 })
             })
             .collect();
-        let nine_ids: Vec<String> = (0..9).map(|i| format!("a-{i}")).collect();
+        let too_many_ids: Vec<String> = (0..=INPUT_ATTACHMENT_LIMIT)
+            .map(|i| format!("a-{i}"))
+            .collect();
         assert_eq!(
             store
                 .write_strict(&json!({
                     "workspaceId": "ws-1",
                     "surface": "desktop",
                     "revision": 2,
-                    "uploads": nine_uploads,
-                    "draft": { "text": "", "quote": null, "attachmentIds": nine_ids },
+                    "uploads": too_many_uploads,
+                    "draft": { "text": "", "quote": null, "attachmentIds": too_many_ids },
                     "pending": []
                 }))
                 .unwrap_err()

@@ -8,7 +8,18 @@ mod environment;
 mod gemini;
 mod responses;
 use content::*;
-pub(crate) const REQUEST_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const REQUEST_BYTES: usize = 512 * 1024 * 1024;
+
+pub(crate) fn effective_request_bytes() -> usize {
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(raw) = std::env::var("PEER_NATIVE_TEST_REQUEST_LIMIT_BYTES")
+        && let Ok(limit) = raw.trim().parse::<usize>()
+        && limit > 0
+    {
+        return limit;
+    }
+    REQUEST_BYTES
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Wire {
@@ -66,20 +77,30 @@ pub struct WireInput<'a> {
     pub options: &'a GenerationOptions,
 }
 pub fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
+    encode_with_limit(wire, input, effective_request_bytes())
+}
+pub(super) fn encode_with_limit(
+    wire: Wire,
+    input: &WireInput<'_>,
+    limit: usize,
+) -> Result<Value, ModelError> {
     let body = match wire {
         Wire::Chat => chat(input)?,
         Wire::Responses => responses::encode(input)?,
         Wire::Anthropic => anthropic::encode(input)?,
         Wire::Gemini => gemini::encode(input)?,
     };
-    check_limit(&body)?;
+    check_limit_with(&body, limit)?;
     Ok(body)
 }
 pub(super) fn check_limit(body: &Value) -> Result<(), ModelError> {
+    check_limit_with(body, effective_request_bytes())
+}
+pub(super) fn check_limit_with(body: &Value, limit: usize) -> Result<(), ModelError> {
     if serde_json::to_vec(body)
         .map_err(|_| ModelError::new("model_request_invalid"))?
         .len()
-        > REQUEST_BYTES
+        > limit
     {
         return Err(ModelError::new("model_request_limit"));
     }

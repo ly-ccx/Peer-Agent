@@ -30,7 +30,7 @@ pub(super) struct Anthropic {
 impl Anthropic {
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         if v["type"] == "error" || v.get("error").is_some() {
-            return Err(ModelError::new("model_provider_error"));
+            return Err(ModelError::provider_event(v));
         }
         match v["type"].as_str() {
             Some("ping") => {}

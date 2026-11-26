@@ -410,7 +410,7 @@ test('forgery, missing admission and corrupted transport cannot move the new con
   const f = await fixture(t), queue = createInputQueue({ ...f.options, validateInteractiveFeedback: f.admission.validate });
   const missing = createInputQueue(f.options);
   assert.throws(() => missing.submitInput(f.input('unbound')), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
-  assert.throws(() => queue.submitInput(f.input('full', { attachments: Array.from({ length: 8 }, (_, i) => ({ ...upload, id: `file-${i}` })) })), { code: 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT' });
+  assert.throws(() => queue.submitInput(f.input('full', { attachments: Array.from({ length: 100 }, (_, i) => ({ ...upload, id: `file-${i}` })) })), { code: 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT' });
   assert.equal(existsSync(path.join(f.rootDir, f.owner.workspaceId, 'input-queue.jsonl')), false);
   queue.submitInput(f.input('selected'));
   const file = path.join(f.rootDir, f.owner.workspaceId, 'input-queue.jsonl'), row = JSON.parse(readFileSync(file, 'utf8'));

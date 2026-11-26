@@ -19,7 +19,7 @@ impl Responses {
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         match v["type"].as_str() {
             Some("response.failed" | "response.incomplete" | "error") => {
-                return Err(ModelError::new("model_provider_error"));
+                return Err(ModelError::provider_event(v));
             }
             Some("response.output_text.delta") => append(&mut self.text, &v["delta"], 512 * 1024)?,
             Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {

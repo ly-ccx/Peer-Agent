@@ -40,7 +40,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
     let info;
     try { info = statSync(file); }
     catch (error) { if (error?.code === 'ENOENT') return empty(); throw error; }
-    if (!info.isFile() || info.size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
+    if (!info.isFile() || info.size > 64 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
     const saved = JSON.parse(readFileSync(file, 'utf8'));
     if (![1, 2, 3].includes(saved?.schemaVersion) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
       || !record(saved.draft) || !Array.isArray(saved.pending) || saved.pending.length > MAX_PENDING || !record(saved.uploads)
@@ -64,7 +64,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
           if (!/^[a-f0-9]{64}$/.test(digest || '')) throw Error('DRAFT_UNAVAILABLE');
           if (hydrated.has(id)) return hydrated.get(id);
           const blob = path.join(root, 'input-draft-blobs', `${digest}.json`);
-          if (verifyBlobs && statSync(blob).size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
+          if (verifyBlobs && statSync(blob).size > 64 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
           const body = readFileSync(blob, 'utf8');
           if (verifyBlobs && createHash('sha256').update(body).digest('hex') !== digest) throw Error('DRAFT_UNAVAILABLE');
           const item = normalizeUserUpload(JSON.parse(body));
@@ -144,7 +144,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
       const pending = request.pending.map(item => ({ ...envelope(item, request.workspaceId, validateInteractiveFeedback), attachmentIds: refs(item.attachmentIds) }));
       if (new Set(pending.map(item => item.inputId)).size !== pending.length) throw Error('INVALID_DRAFT');
       const used = new Set([...draft.attachmentIds, ...pending.flatMap(item => item.attachmentIds)]);
-      if ([...used].reduce((bytes, id) => bytes + statSync(path.join(root, 'input-draft-blobs', `${uploads[id]}.json`)).size, 0) > 96 * 1024 * 1024) throw Error('DRAFT_LIMIT');
+      if ([...used].reduce((bytes, id) => bytes + statSync(path.join(root, 'input-draft-blobs', `${uploads[id]}.json`)).size, 0) > 2 * 1024 * 1024 * 1024) throw Error('DRAFT_LIMIT');
       const feedbackBytes = Buffer.byteLength(JSON.stringify([draft.resourceFeedback ?? [], ...pending.map(item => item.resourceFeedback ?? [])]));
       if (feedbackBytes > 1024 * 1024) throw Error('DRAFT_LIMIT');
       const selections = [draft, ...pending].some(item => item.resourceFeedback?.some(row => row.resource.kind === 'interactive'));

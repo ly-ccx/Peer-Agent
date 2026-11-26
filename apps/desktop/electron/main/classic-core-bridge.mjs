@@ -1245,7 +1245,7 @@ export function createClassicCoreBridge({
   }
 
   async function projectBotWriteInputDraft(params = {}) {
-    return requireClient().request('project.bot.writeInputDraft', params || {});
+    return requireClient().request('project.bot.writeInputDraft', params || {}, { timeoutMs: 60_000 });
   }
 
   async function projectBotReadEvidence(params = {}) {
@@ -1340,7 +1340,7 @@ export function createClassicCoreBridge({
   }
 
   async function projectBotSubmitInput(params = {}) {
-    return requireClient().request('project.bot.submitInput', params || {});
+    return requireClient().request('project.bot.submitInput', params || {}, { timeoutMs: 60_000 });
   }
 
   async function projectBotStopResponse(params = {}) {

@@ -38,7 +38,7 @@ test('explicit condition-only sends use the original queue and combined quota fa
     result: { owner, resultId: 'result', contentVersion: hash }, specHash: hash, stateRevision: 1, stateDigest: hash, selectionDigest: hash,
     values: { $x: 4 }, dataLevel: 'D3_private', capturedAt: '2026-11-03T00:00:00.000Z', excerpt: 'Conditions' })!;
   const f = fixture(), session = f.make(); await session.load();
-  const uploads: ProjectInputAttachment[] = Array.from({ length: 8 }, (_, i) => ({ id: `upload-${i}`, name: 'a.txt', kind: 'text', sourceKind: 'user_upload', mimeType: 'text/plain', text: 'a', size: 1 }));
+  const uploads: ProjectInputAttachment[] = Array.from({ length: 100 }, (_, i) => ({ id: `upload-${i}`, name: 'a.txt', kind: 'text', sourceKind: 'user_upload', mimeType: 'text/plain', text: 'a', size: 1 }));
   session.edit({ text: 'Original draft', quote: { messageId: 'quoted', text: 'Original quote' }, attachments: uploads, resourceFeedback: [feedback] });
   const before = structuredClone(session.getSnapshot().draft);
   assert.equal((await session.send()).code, 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
@@ -144,4 +144,27 @@ test('staging an image attachment on the draft then sending submits the bytes wi
   assert.deepEqual(f.calls[0]!.attachments, [image]);
   assert.equal(f.calls[0]!.text, '');
   assert.deepEqual(session.getSnapshot().draft.attachments, []);
+});
+
+test('large multi-image draft uploads chunk sequentially across CAS revisions without dropping images', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const payload = `data:image/png;base64,${'A'.repeat(9 * 1024 * 1024)}`;
+  const images: ProjectInputAttachment[] = [0, 1, 2].map(index => ({
+    id: `img-big-${index}`,
+    name: `shot-${index}.png`,
+    mimeType: 'image/png',
+    size: 6_750_000,
+    sourceKind: 'user_upload',
+    kind: 'image',
+    dataUrl: payload,
+  }));
+  session.edit({ text: 'three large images', attachments: images });
+  const flushed = await session.flush();
+  assert.equal(flushed, true);
+  // Each 9 MiB image cannot share a 16 MiB chunk with two others, so revision advances >= 2 times.
+  assert.ok(session.getSnapshot().revision >= 3);
+  const result = await session.send();
+  assert.equal(result.ok, true);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0]!.attachments.length, 3);
 });

@@ -15,9 +15,9 @@ function fakeFile(name: string, type = ''): File {
 }
 
 describe('attachmentIntake constants', () => {
-  it('keeps the original limits', () => {
-    assert.equal(MAX_ATTACHMENTS, 8);
-    assert.equal(MAX_IMAGE_BYTES, 8 * 1024 * 1024);
+  it('keeps the shared limits', () => {
+    assert.equal(MAX_ATTACHMENTS, 100);
+    assert.equal(MAX_IMAGE_BYTES, 32 * 1024 * 1024);
     assert.equal(MAX_TEXT_FILE_BYTES, 512 * 1024);
   });
 });
