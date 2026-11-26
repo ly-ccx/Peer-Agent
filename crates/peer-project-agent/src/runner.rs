@@ -389,7 +389,7 @@ impl ProjectAgentRunner {
                 Some(FailureHoldSignal::AuthRejected)
             } else if err.is_usage_limit() {
                 Some(FailureHoldSignal::UsageLimit {
-                    retry_after_seconds: err.retry_after_seconds,
+                    retry_after_seconds: err.retry_after_ms.map(|ms| ms.div_ceil(1000)),
                     last_error: formatted.clone().unwrap_or_else(|| err.code.to_owned()),
                 })
             } else {
@@ -404,7 +404,7 @@ impl ProjectAgentRunner {
             err.code,
             formatted.as_deref(),
             err.http_status,
-            err.http_detail.as_deref(),
+            err.http_detail,
             cancel,
         )
     }
@@ -1524,20 +1524,34 @@ impl ProjectAgentRunner {
             .map(|g| g.clone())
             .unwrap_or_else(|_| SAME_PROVIDER_RETRY_DELAYS_MS.to_vec());
         let mut policy = SameProviderRetryPolicy::with_delays_ms(delays);
+        if cancel.is_cancelled() {
+            return Err(ModelError::new("CANCELLED"));
+        }
+        let prepared = model
+            .prepare_materialized_request(
+                &self.data_home,
+                conversation_id,
+                system_prompt,
+                &json!({"messages": live_messages}),
+                tools_json,
+                live,
+                cancel,
+            )
+            .await?;
+        let mut attempts = 0;
+        let mut deadline = None;
+        let mut permit = None;
         loop {
             if cancel.is_cancelled() {
                 return Err(ModelError::new("CANCELLED"));
             }
+            attempts += 1;
             let stream_state = Mutex::new(Some(String::new()));
-            let result = model
-                .turn_with_materialized_history_and_deltas(
-                    &self.data_home,
-                    conversation_id,
-                    system_prompt,
-                    &json!({"messages": live_messages}),
-                    tools_json,
-                    live,
+            let result = prepared
+                .send_with_deltas(
                     cancel,
+                    deadline,
+                    // Preview state belongs to this physical attempt.
                     async |delta| {
                         if let Ok(mut state) = stream_state.lock() {
                             match delta {
@@ -1586,6 +1600,7 @@ impl ProjectAgentRunner {
                     },
                 )
                 .await;
+            drop(permit.take());
             record_attempt_usage(accounting, &result, true);
             match result {
                 Ok(turn) => {
@@ -1593,20 +1608,21 @@ impl ProjectAgentRunner {
                         .commit(context.0, context.1, context.2.clone());
                     return Ok(turn);
                 }
-                Err(err) if err.is_usage_limit() => return Err(err),
-                Err(err) => {
-                    let delay = match policy.next_delay(&err) {
-                        Ok(Some(d)) => d,
-                        Ok(None) => return Err(err),
-                        Err(code) => return Err(ModelError::new(code)),
+                Err(mut err) => {
+                    err.attempts_used = attempts;
+                    if err.is_usage_limit() {
+                        return Err(err);
+                    }
+                    let Some(retry) = policy.next_retry(&err) else {
+                        return Err(err);
                     };
                     // Discard any partial text emitted before retrying so the live pane resets cleanly.
                     self.set_activity_phase(workspace_id, "waiting", Some(""), false);
-                    tokio::select! {
-                        biased;
-                        _ = cancel.cancelled() => return Err(ModelError::new("CANCELLED")),
-                        _ = tokio::time::sleep(delay) => {}
+                    permit = model.wait_for_retry(&retry, cancel).await?;
+                    if permit.is_none() || tokio::time::Instant::now() >= retry.deadline {
+                        return Err(err);
                     }
+                    deadline = Some(retry.deadline);
                 }
             }
         }

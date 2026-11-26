@@ -22,8 +22,19 @@ impl Responses {
 
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         match v["type"].as_str() {
-            Some("response.failed" | "response.incomplete" | "error") => {
-                return Err(ModelError::provider_event(v));
+            Some(kind @ ("response.failed" | "response.incomplete" | "error")) => {
+                self.usage = v
+                    .pointer("/response/usage")
+                    .filter(|u| !u.is_null())
+                    .cloned();
+                return Err(ModelError::provider_event(
+                    match kind {
+                        "response.failed" => "response.failed",
+                        "response.incomplete" => "response.incomplete",
+                        _ => "error",
+                    },
+                    v,
+                ));
             }
             Some("response.output_text.delta") => append(&mut self.text, &v["delta"], 512 * 1024)?,
             Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
@@ -86,7 +97,12 @@ impl Responses {
             Some("response.completed") => {
                 let response = &v["response"];
                 if response["status"] != "completed" {
-                    return Err(ModelError::new("model_stream_incomplete"));
+                    return Err(ModelError::terminal_stop(
+                        "response.completed",
+                        response
+                            .pointer("/incomplete_details/reason")
+                            .and_then(Value::as_str),
+                    ));
                 }
                 let output = response["output"]
                     .as_array()
@@ -129,7 +145,7 @@ impl Responses {
                     }
                 }
                 if seen.len() != self.items.len() || text != self.text {
-                    return Err(ModelError::new("model_stream_incomplete"));
+                    return Err(ModelError::terminal_stop("response.completed", None));
                 }
                 self.usage = response.get("usage").filter(|u| !u.is_null()).cloned();
                 self.done = true;

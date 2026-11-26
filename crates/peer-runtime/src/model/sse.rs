@@ -24,8 +24,8 @@ impl ChatStream {
 
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
         let mut frames = std::mem::take(&mut self.frames);
-        let result = frames.push(chunk, |bytes| {
-            self.event(bytes)?;
+        let result = frames.push(chunk, |kind, bytes| {
+            self.event(kind, bytes)?;
             Ok(self.done)
         });
         self.frames = frames;
@@ -34,7 +34,11 @@ impl ChatStream {
     pub fn terminal(&self) -> bool {
         self.done
     }
-    pub(super) fn event(&mut self, bytes: &[u8]) -> Result<(), ModelError> {
+    pub(super) fn event(
+        &mut self,
+        kind: Option<&'static str>,
+        bytes: &[u8],
+    ) -> Result<(), ModelError> {
         if bytes == b"[DONE]" {
             if self.done {
                 return Err(ModelError::new("model_stream_invalid"));
@@ -46,14 +50,14 @@ impl ChatStream {
             return Err(ModelError::new("model_stream_invalid"));
         }
         let v = decode(bytes, 1024 * 1024)?;
-        if v.get("error").is_some() {
-            return Err(ModelError::provider_event(&v));
-        }
         if let Some(u) = v.get("usage").filter(|v| !v.is_null()) {
             if self.usage.is_some() {
                 return Err(ModelError::new("model_usage_invalid"));
             }
             self.usage = Some(u.clone())
+        }
+        if let Some(kind) = kind.or_else(|| v.get("error").is_some().then_some("error")) {
+            return Err(ModelError::provider_event(kind, &v));
         }
         let choices = v["choices"]
             .as_array()
@@ -121,15 +125,24 @@ impl ChatStream {
         }
         Ok(())
     }
+    pub(super) fn terminal_stop_error(&self) -> Option<ModelError> {
+        self.reason
+            .as_deref()
+            .filter(|reason| !matches!(*reason, "stop" | "tool_calls"))
+            .map(|reason| ModelError::terminal_stop("finish_reason", Some(reason)))
+    }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
+        if let Some(error) = self.terminal_stop_error() {
+            return Err(error);
+        }
+        if !self.done || !self.frames.complete() {
+            return Err(ModelError::new("model_stream_incomplete"));
+        }
         if self.calls.is_empty() && self.text.trim().is_empty() {
             return Err(ModelError::new("model_empty_response"));
         }
-        if !self.done
-            || !self.frames.complete()
-            || !matches!(self.reason.as_deref(), Some("stop" | "tool_calls"))
-        {
-            return Err(ModelError::new("model_stream_incomplete"));
+        if self.reason.is_none() {
+            return Err(ModelError::terminal_stop("done", None));
         }
         if (self.reason.as_deref() == Some("tool_calls")) == self.calls.is_empty() {
             return Err(ModelError::new("model_stream_invalid"));

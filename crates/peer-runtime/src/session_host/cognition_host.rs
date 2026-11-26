@@ -69,6 +69,9 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
     fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError> {
         self.frame.budget.request(self.host, &now())
     }
+    fn can_retry(&self) -> Result<bool, HostError> {
+        Ok(!self.host.has_work_background_shells())
+    }
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError> {
         let f = self.frame;
         assemble_work_context_for_turn(

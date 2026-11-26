@@ -16,20 +16,17 @@ impl Gemini {
 
     pub fn event(&mut self, event: &Value) -> Result<bool, ModelError> {
         let v = event.get("response").unwrap_or(event);
-        if event.get("error").is_some()
-            || v.get("error").is_some()
-            || v["promptFeedback"].get("blockReason").is_some()
-        {
-            return Err(ModelError::provider_event(
-                if event.get("error").is_some() {
-                    event
-                } else {
-                    v
-                },
-            ));
-        }
         if let Some(usage) = v.get("usageMetadata") {
             self.usage = Some(usage.clone());
+        }
+        if event["type"] == "error" || event.get("error").is_some() {
+            return Err(ModelError::provider_event("error", event));
+        }
+        if v.get("error").is_some() {
+            return Err(ModelError::provider_event("error", v));
+        }
+        if v["promptFeedback"].get("blockReason").is_some() {
+            return Err(ModelError::provider_event("promptFeedback", v));
         }
         let candidates = match v.get("candidates").and_then(Value::as_array) {
             Some(c) => c.as_slice(),
@@ -85,8 +82,7 @@ impl Gemini {
                 .filter(|r| *r != "FINISH_REASON_UNSPECIFIED")
             {
                 if reason != "STOP" {
-                    return Err(ModelError::new("model_stream_incomplete")
-                        .with_detail(format!("finishReason={reason}")));
+                    return Err(ModelError::terminal_stop("finishReason", Some(reason)));
                 }
                 self.done = true;
             }
@@ -95,9 +91,7 @@ impl Gemini {
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(
-                ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason")
-            );
+            return Err(ModelError::new("model_stream_incomplete"));
         }
         let mut turn = finish(
             self.text,

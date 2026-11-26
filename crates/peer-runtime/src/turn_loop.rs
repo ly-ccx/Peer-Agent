@@ -3,8 +3,50 @@
 use crate::{
     CancellationToken,
     capability::CapabilityError,
-    model::{ModelContinuation, ModelToolCall, ModelTurn},
+    model::{ModelContinuation, ModelError, ModelToolCall, ModelTurn},
 };
+
+/// Inference failures retain their diagnostics through the host loop. Local
+/// capability and authority errors keep their existing stable codes.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TurnError {
+    Host(CapabilityError),
+    Inference(ModelError),
+}
+impl TurnError {
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::Host(error) => error.0,
+            Self::Inference(error) => error.code,
+        }
+    }
+    pub(crate) fn into_inference(self) -> Option<ModelError> {
+        match self {
+            Self::Inference(error) => Some(error),
+            Self::Host(_) => None,
+        }
+    }
+}
+impl From<CapabilityError> for TurnError {
+    fn from(error: CapabilityError) -> Self {
+        Self::Host(error)
+    }
+}
+impl From<ModelError> for TurnError {
+    fn from(error: ModelError) -> Self {
+        Self::Inference(error)
+    }
+}
+impl From<peer_store::StoreError> for TurnError {
+    fn from(error: peer_store::StoreError) -> Self {
+        Self::Host(error.into())
+    }
+}
+impl From<TurnError> for CapabilityError {
+    fn from(error: TurnError) -> Self {
+        Self(error.code())
+    }
+}
 
 pub(crate) trait TurnHost {
     fn is_delegated_verification(&self) -> bool {
@@ -17,7 +59,7 @@ pub(crate) trait TurnHost {
 
     /// Prepare/send through the actual model/Context seam and capture usage,
     /// including errors. Revalidate the live principal before returning calls.
-    async fn request(&mut self) -> Result<ModelTurn, CapabilityError>;
+    async fn request(&mut self) -> Result<ModelTurn, TurnError>;
     async fn record_assistant(&mut self, turn: &ModelTurn) -> Result<(), CapabilityError>;
     /// Return only after the Host has settled the grant, result and Evidence.
     /// Unknown effects remain errors.
@@ -73,9 +115,9 @@ pub(crate) async fn run(
     max_turns: Option<usize>,
     owned: &CancellationToken,
     external: &CancellationToken,
-) -> Result<LoopOutcome, CapabilityError> {
+) -> Result<LoopOutcome, TurnError> {
     if max_turns == Some(0) {
-        return Err(CapabilityError("invalid_max_turns"));
+        return Err(CapabilityError("invalid_max_turns").into());
     }
     let mut turns = 0usize;
     let mut tool_calls = 0usize;
@@ -105,7 +147,7 @@ pub(crate) async fn run(
         if host.is_delegated_verification()
             && (turn.calls.len() > 16 || tool_calls.saturating_add(turn.calls.len()) > 128)
         {
-            return Err(CapabilityError("verifier_tool_budget_exhausted"));
+            return Err(CapabilityError("verifier_tool_budget_exhausted").into());
         }
         let mut ids = Vec::with_capacity(turn.calls.len());
         for call in std::mem::take(&mut turn.calls) {

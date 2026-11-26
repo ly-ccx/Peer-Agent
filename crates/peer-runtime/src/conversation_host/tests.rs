@@ -1,5 +1,6 @@
 //! Actual ordinary production Host with real HTTP and original canonical Stores.
 use super::*;
+mod retry;
 use crate::model::{
     ModelConfig,
     wire::{GenerationOptions, Wire},
@@ -39,6 +40,18 @@ fn server(streams: Vec<String>) -> (String, std::thread::JoinHandle<Vec<Value>>)
 }
 fn server_with_reply_gate(
     streams: Vec<String>,
+    before_reply: impl FnMut(usize) + Send + 'static,
+) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+    raw_server_with_reply_gate(
+        streams
+            .into_iter()
+            .map(|body| retry::sse_response(&body, body.len()))
+            .collect(),
+        before_reply,
+    )
+}
+fn raw_server_with_reply_gate(
+    responses: Vec<String>,
     mut before_reply: impl FnMut(usize) + Send + 'static,
 ) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -49,7 +62,7 @@ fn server_with_reply_gate(
     listener.set_nonblocking(true).unwrap();
     let handle = std::thread::spawn(move || {
         let mut requests = vec![];
-        for (request_index, body) in streams.into_iter().enumerate() {
+        for (request_index, response) in responses.into_iter().enumerate() {
             let deadline = Instant::now() + Duration::from_secs(20);
             let mut socket = loop {
                 match listener.accept() {
@@ -102,7 +115,7 @@ fn server_with_reply_gate(
             socket.read_exact(&mut bytes).unwrap();
             requests.push(serde_json::from_slice(&bytes).unwrap());
             before_reply(request_index);
-            write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            socket.write_all(response.as_bytes()).unwrap();
         }
         requests
     });

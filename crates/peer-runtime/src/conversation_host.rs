@@ -1,5 +1,6 @@
 //! Ordinary conversation Host over the same cognition, turn and Provider seams.
 //! A conversation/stream is its actual principal; no Goal/Work is synthesized.
+use crate::turn_loop::TurnError;
 use crate::{
     CancellationToken,
     capability::{CapabilityError as HostError, now},
@@ -254,6 +255,8 @@ pub struct ConversationOutcome {
     pub usage: UsageSnapshot,
     pub lifetime_usage: Option<Value>,
     pub error: Option<&'static str>,
+    /// Runtime-only provider diagnosis for the terminal inference failure.
+    pub model_error: Option<ModelError>,
     pub goal: Option<Value>,
     pub context_accounting: Option<Value>,
     pub stop_reason: Option<&'static str>,
@@ -308,6 +311,16 @@ pub trait ConversationOutput {
         &'a mut self,
         event: ConversationEvent<'a>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HostError>> + 'a>>;
+
+    /// Reset provisional text/thinking before a new attempt for the same step.
+    /// Return true once the reset is reflected in all live readers. Legacy
+    /// outputs fall back to the committed assistant record after a retry.
+    fn model_retry<'a>(
+        &'a mut self,
+        _notice: crate::model::ModelRetryNotice,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, HostError>> + 'a>> {
+        Box::pin(async { Ok(false) })
+    }
 }
 
 pub enum GoalRunnerEvent<'a> {
@@ -719,6 +732,8 @@ impl NativeConversationRuntime {
             system: None,
             turns: 0,
             request_admitted: false,
+            retry_preview_blocked: false,
+            retry_preview_dirty: false,
             background_shells: BTreeMap::new(),
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
@@ -1166,6 +1181,7 @@ impl NativeConversationRuntime {
                 if let Some(cleanup) = error.into_cleanup() {
                     cleanup.close_unstarted(&store, &now())?;
                     return Ok(ConversationOutcome {
+                        model_error: None,
                         session_id: conversation,
                         content: String::new(),
                         turns: 0,
@@ -1230,6 +1246,8 @@ impl NativeConversationRuntime {
             system: None,
             turns: 0,
             request_admitted: false,
+            retry_preview_blocked: false,
+            retry_preview_dirty: false,
             background_shells: BTreeMap::new(),
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
@@ -1276,7 +1294,7 @@ impl NativeConversationRuntime {
             {
                 runner_stop = host.drive_new_goal(options.max_turns).await?;
             }
-            Ok::<_, HostError>(result)
+            Ok::<_, TurnError>(result)
         }
         .await;
         let cleanup = host.finish().await;
@@ -1288,7 +1306,7 @@ impl NativeConversationRuntime {
                     result
                         .as_ref()
                         .err()
-                        .map_or("goal_runner_interrupted", |error| error.0),
+                        .map_or("goal_runner_interrupted", TurnError::code),
                 )),
             }
         } else {
@@ -1298,7 +1316,7 @@ impl NativeConversationRuntime {
             .as_ref()
             .err()
             .copied()
-            .or_else(|| result.as_ref().err().copied())
+            .or_else(|| result.as_ref().err().map(|error| HostError(error.code())))
             .or_else(|| goal.as_ref().err().copied())
             .or_else(|| {
                 result
@@ -1312,21 +1330,34 @@ impl NativeConversationRuntime {
             .map(|r| r.content.clone())
             .unwrap_or_default();
         let stop_reason = result.as_ref().ok().map(|r| r.stop.as_str());
-        let parent_question = result.ok().and_then(|out| match out.stop {
-            crate::turn_loop::LoopStop::RequestedParentInput { call_id, question }
-                if error.is_none() =>
-            {
-                Some(ParentAgentQuestion { call_id, question })
-            }
-            _ => None,
-        });
+        let error_code = error.map(|e| e.0);
+        let (parent_question, model_error) = match result {
+            Ok(out) => (
+                match out.stop {
+                    crate::turn_loop::LoopStop::RequestedParentInput { call_id, question }
+                        if error.is_none() =>
+                    {
+                        Some(ParentAgentQuestion { call_id, question })
+                    }
+                    _ => None,
+                },
+                None,
+            ),
+            Err(error) => (
+                None,
+                error
+                    .into_inference()
+                    .filter(|model| Some(model.code) == error_code),
+            ),
+        };
         Ok(ConversationOutcome {
             session_id: conversation,
             content,
             turns: host.turns,
             usage: host.usage.snapshot(),
             lifetime_usage: cleanup.ok().flatten(),
-            error: error.map(|e| e.0),
+            error: error_code,
+            model_error,
             goal: goal.ok().flatten().filter(|_| error.is_none()),
             context_accounting: None,
             stop_reason,
@@ -1511,6 +1542,7 @@ impl NativeConversationRuntime {
                 if let Some(cleanup) = error.into_cleanup() {
                     cleanup.close_unstarted(&store, &now())?;
                     return Ok(ConversationOutcome {
+                        model_error: None,
                         session_id: conversation,
                         content: String::new(),
                         turns: 0,
@@ -1649,6 +1681,8 @@ impl NativeConversationRuntime {
             system: None,
             turns: 0,
             request_admitted: false,
+            retry_preview_blocked: false,
+            retry_preview_dirty: false,
             background_shells: BTreeMap::new(),
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
@@ -1679,7 +1713,7 @@ impl NativeConversationRuntime {
         }
         .await;
 
-        let err_code = result.as_ref().err().map(|e| e.0).or_else(|| {
+        let err_code = result.as_ref().err().map(TurnError::code).or_else(|| {
             result
                 .as_ref()
                 .ok()
@@ -1728,13 +1762,19 @@ impl NativeConversationRuntime {
         } else {
             None
         };
+        let error = final_error.map(|e| e.0);
+        let model_error = result
+            .err()
+            .and_then(TurnError::into_inference)
+            .filter(|model| Some(model.code) == error);
         Ok(ConversationOutcome {
             session_id: conversation,
             content,
             turns: host.turns,
             usage: host.usage.snapshot(),
             lifetime_usage: cleanup.ok().flatten(),
-            error: final_error.map(|e| e.0),
+            error,
+            model_error,
             goal: None,
             context_accounting,
             stop_reason,
@@ -1934,6 +1974,8 @@ impl NativeConversationRuntime {
             system: None,
             turns: 0,
             request_admitted: false,
+            retry_preview_blocked: false,
+            retry_preview_dirty: false,
             background_shells: BTreeMap::new(),
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
@@ -2116,6 +2158,8 @@ struct Host<'a> {
     system: Option<Value>,
     turns: usize,
     request_admitted: bool,
+    retry_preview_blocked: bool,
+    retry_preview_dirty: bool,
     background_shells: BTreeMap<String, background_shell::BackgroundShell>,
     completed_shells: BTreeMap<String, crate::providers::EffectOutcome>,
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
@@ -2594,20 +2638,57 @@ impl CognitionHost for Host<'_> {
     ) -> Result<F::Output, HostError> {
         self.wait_owned(future).await
     }
+    fn can_retry(&self) -> Result<bool, HostError> {
+        let run = self
+            .store
+            .read_conversation_execution(&self.identity.conversation_id)?
+            .ok_or(HostError("conversation_execution_changed"))?;
+        Ok(run.pending_tools.is_empty() && self.background_shells.is_empty())
+    }
+    async fn on_retry(
+        &mut self,
+        notice: crate::model::ModelRetryNotice,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), HostError> {
+        if let Some(output) = self.output.take() {
+            let owned = self.owned.clone();
+            let reset = self
+                .wait_owned(async {
+                    tokio::select! {
+                        biased;
+                        _ = owned.cancelled() => Err(HostError("CANCELLED")),
+                        _ = tokio::time::sleep_until(deadline) => Ok(false),
+                        reset = output.model_retry(notice) => reset,
+                    }
+                })
+                .await;
+            self.output = Some(output);
+            if reset?? {
+                self.retry_preview_blocked = false;
+            } else if self.retry_preview_dirty {
+                self.retry_preview_blocked = true;
+            }
+            self.retry_preview_dirty = false;
+        }
+        Ok(())
+    }
     async fn send_prepared(
         &mut self,
-        prepared: PreparedRequest<'_>,
+        prepared: &PreparedRequest<'_>,
         request: &CognitionRequest<'_>,
         observed: &mut Option<ModelObservation>,
         primary: bool,
+        retry_deadline: Option<tokio::time::Instant>,
     ) -> Result<Result<ModelTurn, ModelError>, HostError> {
         let mut output = self.output.take();
-        let show_delta = primary && self.worker.is_none();
+        let mut preview_dirty = false;
+        let show_delta = primary && self.worker.is_none() && !self.retry_preview_blocked;
         let result = self
             .wait_owned(async {
                 let result = prepared
                     .send_with_deltas(
                         request.owned,
+                        retry_deadline,
                         async |delta: crate::model::ModelDelta<'_>| {
                             if show_delta && let Some(output) = output.as_mut() {
                                 let event = match delta {
@@ -2619,6 +2700,7 @@ impl CognitionHost for Host<'_> {
                                     }
                                     crate::model::ModelDelta::ToolIntent => return Ok(()),
                                 };
+                                preview_dirty = true;
                                 output
                                     .publish(event)
                                     .await
@@ -2633,6 +2715,7 @@ impl CognitionHost for Host<'_> {
             })
             .await;
         self.output = output;
+        self.retry_preview_dirty |= preview_dirty;
         result
     }
 }
@@ -2666,7 +2749,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         Ok(added)
     }
 
-    async fn request(&mut self) -> Result<ModelTurn, HostError> {
+    async fn request(&mut self) -> Result<ModelTurn, TurnError> {
         self.source_current()?;
         self.ingest_pending_user_input()?;
         self.prepare_runner_frame()?;
@@ -2705,7 +2788,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
                     8 * 1024 * 1024,
                 )?;
                 if history.source_revision != self.expected.source_revision {
-                    return Err(HostError("CONTEXT_SNAPSHOT_CHANGED"));
+                    return Err(HostError("CONTEXT_SNAPSHOT_CHANGED").into());
                 }
                 pipeline
                     .request_explorer(self, &request, &mut usage, &history, &projected)
@@ -2722,6 +2805,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         self.pipeline = Some(pipeline);
         self.usage = usage;
         let response = response?;
+        self.retry_preview_dirty = false;
         self.expected = response.history;
         self.system = Some(response.system);
         if self.worker.is_none() {
