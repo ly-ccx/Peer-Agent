@@ -161,37 +161,39 @@ export function BotComposer({
       }} />
       {uploads.attachments.length ? <BotAttachments attachments={uploads.attachments} i18n={i18n} onRemove={uploads.remove} /> : null}
       {dragging ? <span className="bot-file-drop-hint" aria-hidden="true">{i18n.t('projectAgent.chat.dropAttachments')}</span> : null}
-      <ComposerInputSuggestion prediction={prediction} text={text} i18n={i18n} />
-      <textarea
-        ref={textareaRef}
-        value={text}
-        disabled={!ready}
-        rows={1}
-        placeholder={prediction.isPresented ? '' : prompt}
-        aria-label={prompt}
-        title={i18n.t('projectAgent.chat.hint')}
-        aria-invalid={tooLong}
-        aria-describedby={tooLong ? 'bot-input-error' : undefined}
-        onChange={prediction.onChange}
-        onPaste={event => {
-          const files = getClipboardFiles(event.clipboardData.items);
-          if (!files.length) return;
-          event.preventDefault();
-          uploads.add(files);
-        }}
-        onCompositionStart={event => composition.start(event.currentTarget)}
-        onCompositionEnd={event => composition.end(event.currentTarget)}
-        onKeyUp={event => composition.keyUp(event.nativeEvent)}
-        onBlur={() => composition.reset()}
-        onKeyDown={(event) => {
-          if (composition.keyDown(event.nativeEvent)) return;
-          if (prediction.onKeyDown(event)) return;
-          if (event.key === 'Enter' && !event.shiftKey) {
+      <div className="composer-input-field">
+        <textarea
+          ref={textareaRef}
+          value={text}
+          disabled={!ready}
+          rows={1}
+          placeholder={prediction.isPresented ? '' : prompt}
+          aria-label={prompt}
+          title={i18n.t('projectAgent.chat.hint')}
+          aria-invalid={tooLong}
+          aria-describedby={tooLong ? 'bot-input-error' : undefined}
+          onChange={prediction.onChange}
+          onPaste={event => {
+            const files = getClipboardFiles(event.clipboardData.items);
+            if (!files.length) return;
             event.preventDefault();
-            send();
-          }
-        }}
-      />
+            uploads.add(files);
+          }}
+          onCompositionStart={event => composition.start(event.currentTarget)}
+          onCompositionEnd={event => composition.end(event.currentTarget)}
+          onKeyUp={event => composition.keyUp(event.nativeEvent)}
+          onBlur={() => composition.reset()}
+          onKeyDown={(event) => {
+            if (composition.keyDown(event.nativeEvent)) return;
+            if (prediction.onKeyDown(event)) return;
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              send();
+            }
+          }}
+        />
+        <ComposerInputSuggestion prediction={prediction} text={text} i18n={i18n} />
+      </div>
       {tooLong ? <p id="bot-input-error" role="alert">{i18n.t('projectAgent.chat.inputTooLong')}</p> : null}
       {uploads.error ? <p className="bot-attachment-error" role="alert">{uploads.error}</p> : null}
       {uploads.reading ? <p className="bot-attachment-status" role="status">{i18n.t('projectAgent.chat.readingAttachments')}</p> : null}
