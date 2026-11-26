@@ -16,9 +16,11 @@ impl CommandFrame {
         }
         let out = quote(out.to_str().ok_or("shell_session_output_path_invalid")?);
         let err = quote(err.to_str().ok_or("shell_session_output_path_invalid")?);
+        let isolated = needs_subshell_isolation(command);
         Ok(Self::encode(
-            &format!("eval {}", quote(command)),
+            &format!("command eval {}", quote(command)),
             Some((out, err)),
+            isolated,
         ))
     }
 
@@ -27,17 +29,27 @@ impl CommandFrame {
             .to_str()
             .filter(|path| !path.contains('\0'))
             .ok_or("invalid_cwd")?;
-        Ok(Self::encode(&format!("command cd {}", quote(path)), None))
+        Ok(Self::encode(
+            &format!("command cd {}", quote(path)),
+            None,
+            false,
+        ))
     }
 
-    fn encode(expression: &str, pipes: Option<(String, String)>) -> Self {
+    fn encode(expression: &str, pipes: Option<(String, String)>, isolated: bool) -> Self {
         let nonce = uuid::Uuid::new_v4().simple();
         let marker = format!("\x1epeer-{nonce}\x1f").into_bytes();
         let encoded = format!("\\036peer-{nonce}\\037");
         let status = format!("__peer_status_{nonce}");
-        let command = format!(
-            "{{ {expression}; }} </dev/null {CONTROL}>&- {OUTPUT_FENCE}>&- {ERROR_FENCE}>&-\n{status}=$?\n",
-        );
+        let command = if isolated {
+            format!(
+                "( {expression} ) </dev/null {CONTROL}>&- {OUTPUT_FENCE}>&- {ERROR_FENCE}>&-\n{status}=$?\n",
+            )
+        } else {
+            format!(
+                "{{ {expression}; }} </dev/null {CONTROL}>&- {OUTPUT_FENCE}>&- {ERROR_FENCE}>&-\n{status}=$?\nset +e +u\n",
+            )
+        };
         let body = if let Some((out, err)) = pipes {
             format!(
                 "{{ {{\n{command}command printf '{encoded}' >&{OUTPUT_FENCE}\n\
@@ -52,6 +64,142 @@ impl CommandFrame {
         );
         Self { script, marker }
     }
+}
+
+/// Returns `true` when an unquoted shell token could terminate or alter the
+/// exit-on-error state of the persistent `/bin/sh` interpreter (e.g. `exit`,
+/// `return`, `trap`, or `set -e` / `set -u` / `set -o`). Running those commands
+/// in a subshell `( command eval ... )` preserves exact exit-code semantics
+/// without closing the persistent shell session.
+pub(super) fn needs_subshell_isolation(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut prev_was_set = false;
+    while i < len {
+        match bytes[i] {
+            b' ' | b'\t' | b'\r' => {
+                i += 1;
+            }
+            b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'{' | b'}' => {
+                prev_was_set = false;
+                i += 1;
+            }
+            b'#' => {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'\'' => {
+                prev_was_set = false;
+                i += 1;
+                while i < len && bytes[i] != b'\'' {
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                }
+            }
+            b'"' => {
+                prev_was_set = false;
+                i += 1;
+                while i < len && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                if i < len {
+                    i += 1;
+                }
+            }
+            b'\\' => {
+                prev_was_set = false;
+                i = (i + 2).min(len);
+            }
+            _ => {
+                let start = i;
+                let mut has_quote = false;
+                while i < len
+                    && !matches!(
+                        bytes[i],
+                        b' ' | b'\t'
+                            | b'\r'
+                            | b'\n'
+                            | b';'
+                            | b'&'
+                            | b'|'
+                            | b'('
+                            | b')'
+                            | b'{'
+                            | b'}'
+                            | b'<'
+                            | b'>'
+                    )
+                {
+                    match bytes[i] {
+                        b'\'' => {
+                            has_quote = true;
+                            i += 1;
+                            while i < len && bytes[i] != b'\'' {
+                                i += 1;
+                            }
+                            if i < len {
+                                i += 1;
+                            }
+                        }
+                        b'"' => {
+                            has_quote = true;
+                            i += 1;
+                            while i < len && bytes[i] != b'"' {
+                                if bytes[i] == b'\\' && i + 1 < len {
+                                    i += 2;
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            if i < len {
+                                i += 1;
+                            }
+                        }
+                        b'\\' => {
+                            has_quote = true;
+                            i = (i + 2).min(len);
+                        }
+                        _ => i += 1,
+                    }
+                }
+                if i == start {
+                    prev_was_set = false;
+                    i += 1;
+                    continue;
+                }
+                if has_quote {
+                    prev_was_set = false;
+                    continue;
+                }
+                let word = &command[start..i];
+                if matches!(word, "exit" | "return" | "trap") {
+                    return true;
+                }
+                if prev_was_set {
+                    if let Some(flags) = word.strip_prefix('-')
+                        && !flags.is_empty()
+                        && flags != "-"
+                        && flags.bytes().any(|b| matches!(b, b'e' | b'u' | b'o'))
+                    {
+                        return true;
+                    }
+                    if word == "+o" {
+                        return true;
+                    }
+                }
+                prev_was_set = word == "set";
+            }
+        }
+    }
+    false
 }
 
 fn quote(value: &str) -> String {

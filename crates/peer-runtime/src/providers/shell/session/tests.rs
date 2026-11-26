@@ -268,7 +268,6 @@ async fn timeout_and_missing_frame_require_retiring_the_actual_process_group() {
             Duration::from_millis(250),
             "shell_timeout",
         ),
-        ("printf observed; exit 0", Duration::from_secs(5), "closed"),
         (
             "printf observed; exec /bin/sleep 0.25",
             Duration::from_secs(5),
@@ -438,6 +437,81 @@ async fn dash_can_keep_the_same_duplex_control_across_calls() {
     let (exit, out, _) = run(&mut shell, root.path(), "printf '%s' \"$PEER_DASH\"").await;
     assert_eq!(exit.unwrap().code, 0);
     assert_eq!(out.preview, b"retained");
+    assert!(shell.stop().await);
+    assert!(group_absent(pid));
+}
+
+#[tokio::test]
+async fn exit_set_e_set_u_and_syntax_errors_keep_the_persistent_shell_alive() {
+    let root = workspace();
+    let nested = root.path().join("sub");
+    fs::create_dir(&nested).unwrap();
+    let mut shell = ShellSession::spawn(root.path()).unwrap();
+    let pid = shell.pid();
+
+    // 1. Explicit exit 0 (e.g. `result=$?; exit "$result"`) succeeds without killing the shell.
+    let (res, out, _) = run(
+        &mut shell,
+        root.path(),
+        "printf 'built-ok'; result=0; exit \"$result\"; printf 'never'",
+    )
+    .await;
+    assert_eq!(res.unwrap().code, 0);
+    assert_eq!(out.preview, b"built-ok");
+
+    // 2. Conditional exit 1 (e.g. `if grep ...; then exit 1; fi`) returns exit code 1 cleanly.
+    let (res, out, _) = run(
+        &mut shell,
+        root.path(),
+        "printf 'found-match'; if true; then exit 1; fi; printf 'never'",
+    )
+    .await;
+    assert_eq!(res.unwrap().code, 1);
+    assert_eq!(out.preview, b"found-match");
+
+    // 3. `set -e` stops the command on first failure without killing the persistent shell.
+    let (res, out, _) = run(
+        &mut shell,
+        root.path(),
+        "set -e; printf 'before-fail'; false; printf 'never'",
+    )
+    .await;
+    assert_eq!(res.unwrap().code, 1);
+    assert_eq!(out.preview, b"before-fail");
+
+    // 4. `set -u` unbound variable returns non-zero without killing the persistent shell.
+    let (res, _, _) = run(
+        &mut shell,
+        root.path(),
+        "set -u; printf '%s' \"$PEER_UNSET_VAR\"",
+    )
+    .await;
+    assert_ne!(res.unwrap().code, 0);
+
+    // 5. Syntax error returns non-zero without killing the persistent shell.
+    let (res, _, _) = run(&mut shell, root.path(), "if true; then").await;
+    assert_ne!(res.unwrap().code, 0);
+
+    // 6. Quoted 'exit 1' does NOT trigger subshell isolation, so cd/export still persist.
+    let (res, out, _) = run(
+        &mut shell,
+        root.path(),
+        "cd sub && export PEER_STILL_ALIVE='exit 1' && printf '%s' 'exit 1'",
+    )
+    .await;
+    assert_eq!(
+        res,
+        Ok(Exit {
+            code: 0,
+            cwd: nested.clone()
+        })
+    );
+    assert_eq!(out.preview, b"exit 1");
+
+    let (res, out, _) = run(&mut shell, &nested, "printf '%s' \"$PEER_STILL_ALIVE\"").await;
+    assert_eq!(res.unwrap().code, 0);
+    assert_eq!(out.preview, b"exit 1");
+    assert_eq!(shell.pid(), pid);
     assert!(shell.stop().await);
     assert!(group_absent(pid));
 }

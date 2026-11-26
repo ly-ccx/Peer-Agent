@@ -85,13 +85,17 @@ impl CapabilityProvider for ShellProvider {
         let foreground = if background {
             None
         } else {
-            self.foreground.clone()
+            self.foreground
+                .as_ref()
+                .filter(|shell| !shell.is_retired())
+                .cloned()
         };
         let cwd = if let Some(c) = args.get("cwd") {
             resolve(workspace, c.as_str().ok_or(HostError("invalid_cwd"))?)?
         } else {
             #[cfg(any(target_os = "macos", target_os = "linux"))]
-            let remembered = foreground
+            let remembered = self
+                .foreground
                 .as_ref()
                 .and_then(foreground::ForegroundShell::cwd);
             #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -119,7 +123,7 @@ impl CapabilityProvider for ShellProvider {
                     .ok_or(HostError("invalid_timeout"))
             })
             .transpose()?
-            .unwrap_or(30000);
+            .unwrap_or(120_000);
         Ok(Box::new(ShellEffect {
             args,
             cwd,

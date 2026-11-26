@@ -139,7 +139,7 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
 fn actual_interpreter_exit_without_a_command_frame_preserves_captured_output_and_unknown() {
     let server = Server::new(vec![reply_tool(
         "bash",
-        json!({"command":"printf 'actual error' >&2; exit 7"}),
+        json!({"command":"printf 'actual error' >&2; exec /bin/sh -c 'exit 7'"}),
     )]);
     let f = Fixture::new(&server);
     let output = f.run();
@@ -160,4 +160,36 @@ fn actual_interpreter_exit_without_a_command_frame_preserves_captured_output_and
     assert_eq!(unknown["toolCallId"], result["toolCallId"]);
     assert_eq!(unknown["nativeShellGrant"], message["permissionGrants"][0]);
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn explicit_exit_in_bash_command_returns_exit_code_and_keeps_shell_alive() {
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"printf 'actual error' >&2; exit 7"}),
+        ),
+        reply_tool("bash", json!({"command":"printf 'still-alive'; exit 0"})),
+        reply_text("Handled non-zero exit and continued."),
+    ]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let history = f.history();
+    let first = &history[1]["segments"][0]["result"];
+    assert_eq!(first["status"], "failed");
+    assert!(first["error"].is_null());
+    assert_eq!(first["output"]["exitCode"], 7);
+    assert_eq!(first["output"]["stderr"], "actual error");
+    let second = &history[2]["segments"][0]["result"];
+    assert_eq!(second["status"], "success");
+    assert_eq!(second["output"]["exitCode"], 0);
+    assert_eq!(second["output"]["stdout"], "still-alive");
+    let budget = f.budget(|_| {});
+    assert!(budget["uncertainDispatches"].as_array().unwrap().is_empty());
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
 }

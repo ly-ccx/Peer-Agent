@@ -1108,23 +1108,27 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
     assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
 }
 #[test]
-fn foreground_timeout_reaps_the_claimed_shell_and_retains_its_unknown_effect() {
-    let server = Server::new(vec![reply_tool(
-        "bash",
-        json!({"command":"printf '%s' \"$$\" > interpreter.pid; printf before-timeout; /bin/sleep 10","timeoutMs":450}),
-    )]);
+fn foreground_timeout_reaps_the_claimed_shell_and_allows_recovery_bash_calls() {
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"printf '%s' \"$$\" > interpreter.pid; printf before-timeout; /bin/sleep 10","timeoutMs":450}),
+        ),
+        reply_tool("bash", json!({"command":"printf recovered-after-timeout"})),
+        reply_text("Recovered after timeout."),
+    ]);
     let f = Fixture::new(&server);
     let r = f.run();
     assert_eq!(
         r.status.code(),
-        Some(1),
+        Some(0),
         "{}",
         String::from_utf8_lossy(&r.stderr)
     );
     let history = f.history();
     let result = &history[1]["segments"][0]["result"];
     assert_eq!(result["status"], "failed");
-    assert_eq!(result["error"]["code"], "execution_outcome_unknown");
+    assert_eq!(result["error"]["code"], "shell_timeout");
     assert_eq!(result["output"]["timedOut"], true);
     assert_eq!(result["output"]["stdout"], "before-timeout");
     let pid = std::fs::read_to_string(f.root.path().join("workspace/interpreter.pid"))
@@ -1136,16 +1140,12 @@ fn foreground_timeout_reaps_the_claimed_shell_and_retains_its_unknown_effect() {
         rustix::process::test_kill_process_group(pid),
         Err(rustix::io::Errno::SRCH)
     );
+    let second_result = &history[2]["segments"][0]["result"];
+    assert_eq!(second_result["status"], "success");
+    assert_eq!(second_result["output"]["stdout"], "recovered-after-timeout");
     let budget = f.budget(|_| {});
-    assert_eq!(
-        budget["uncertainDispatches"][0]["toolCallId"],
-        result["toolCallId"]
-    );
-    assert_eq!(
-        budget["uncertainDispatches"][0]["nativeShellGrant"]["grantId"],
-        result["evidence"]["permissionGrantId"]
-    );
-    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert!(budget["uncertainDispatches"].as_array().unwrap().is_empty());
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
 }
 
 #[test]

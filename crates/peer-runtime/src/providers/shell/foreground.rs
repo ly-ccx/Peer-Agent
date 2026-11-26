@@ -3,7 +3,10 @@ use super::{
     session::{AdmissionPoint, Exchange, OutputStatus, SessionOutput, ShellSession},
     *,
 };
-use std::sync::Mutex;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::sync::Mutex as AsyncMutex;
 
 pub(super) struct ShellScope {
@@ -49,6 +52,7 @@ pub(super) struct ForegroundShell {
 struct Shared {
     id: String,
     cwd: Mutex<Option<PathBuf>>,
+    retired: AtomicBool,
     slot: AsyncMutex<Slot>,
 }
 
@@ -72,9 +76,14 @@ impl ForegroundShell {
             shared: Arc::new(Shared {
                 id: format!("shell-session_{}", uuid::Uuid::new_v4()),
                 cwd: Mutex::new(None),
+                retired: AtomicBool::new(false),
                 slot: AsyncMutex::new(Slot::default()),
             }),
         }
+    }
+
+    pub(super) fn is_retired(&self) -> bool {
+        self.shared.retired.load(Ordering::Acquire)
     }
 
     // A scope-selection hint. The worker checks its kernel cwd and the
@@ -221,7 +230,13 @@ impl ForegroundShell {
             }
             Err(error) if error.may_have_dispatched => {
                 let stopped = slot.stop().await;
-                let mut outcome = EffectOutcome::failed("execution_outcome_unknown");
+                self.shared.retired.store(true, Ordering::Release);
+                let code = if stopped && error.code == "shell_timeout" {
+                    "shell_timeout"
+                } else {
+                    "execution_outcome_unknown"
+                };
+                let mut outcome = EffectOutcome::failed(code);
                 outcome.ended = stopped;
                 outcome.output = json!({
                     "exitCode": null, "timedOut": error.code == "shell_timeout",
