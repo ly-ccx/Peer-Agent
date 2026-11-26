@@ -852,6 +852,14 @@ export function BotListShell({
                   onReplyArrived={announceReply}
                   onReplyPresenceChange={updateReplyPresence}
                   onLocateSession={(sessionId) => openTaskView(opened.workspaceId, sessionId)}
+                  onOpenHistory={() => setMeHistoryOpen(true)}
+                  onOpenManagement={(objectiveId) => {
+                    showDetails?.();
+                    const trigger = document.activeElement;
+                    if (trigger instanceof HTMLButtonElement) drawerTriggerRef.current = trigger;
+                    setInspect(null);
+                    setDrawerMemory(current => ({ ...openDrawer(current, objectiveId ? 'objectives' : 'settings'), objectiveId }));
+                  }}
                   contextSessionId={activeTaskSessionId}
                   onTaskContext={setTaskContext}
                   taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}

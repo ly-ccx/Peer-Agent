@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ProjectAgentActivity, TaskOverviewItem } from '@peer-agent/protocol';
+import type { ProjectAgentActivity, ProjectObjectiveView, TaskOverviewItem } from '@peer-agent/protocol';
 import { normalizeBotMessage } from './botConversationState.ts';
 import { indexBotWork } from './botWorkState.ts';
 import { readDrawerSession } from './drawerState.ts';
 import {
   workPanelActivity,
-  workPanelChildrenByParent,
+  workPanelCards,
+  workPanelGroups,
+  workPanelMaterialSections,
   workPanelMaterials,
   workPanelNeedsUser,
-  workPanelSessions,
 } from './botWorkPanelState.ts';
 
 const session = (sessionId: string, parentSessionId?: string, status = 'running') => readDrawerSession({
@@ -22,19 +23,48 @@ const overview = (id: string, openPath?: string): TaskOverviewItem => ({
     artifacts: [{ ref: `artifact-${id}`, kind: 'file', label: 'result.md', actionLabel: 'Open', ...(openPath ? { openPath } : {}) }] }],
 });
 
-test('tasks and returned child Agents retain their explicit parent relation', () => {
-  const parent = session('parent'), child = session('child', 'parent'), returned = session('returned', 'parent', 'accepted');
-  const index = indexBotWork([parent, child, returned, session('unrelated', undefined, 'accepted')], true);
-  assert.equal(child.parentSessionId, 'parent');
-  const sessions = workPanelSessions(index);
-  assert.deepEqual(sessions.tasks.map(row => row.sessionId), ['parent']);
-  assert.deepEqual(sessions.agents.map(row => row.sessionId), ['parent', 'child', 'returned']);
-  const children = workPanelChildrenByParent(sessions);
-  assert.deepEqual(children.get('parent')?.map(row => row.sessionId), ['child', 'returned']);
-  assert.equal(children.has('child'), false);
-  const singleLayer = workPanelSessions(indexBotWork([parent], true));
-  assert.equal(workPanelChildrenByParent(singleLayer).size, 0);
-  assert.deepEqual(workPanelSessions({ ...index, available: false }), { tasks: [], agents: [] });
+test('one tree groups all four states; a child in a different lane never duplicates its parent', () => {
+  const index = indexBotWork([session('parent'), session('child', 'parent'), session('blocked', 'child', 'failed'),
+    session('queued', 'parent', 'queued'), session('returned', 'parent', 'accepted')], true);
+  const groups = workPanelGroups(index);
+  assert.deepEqual(groups.map(({ lane, count }) => [lane, count]), [['needsYou', 1], ['doing', 2], ['todo', 1], ['delivered', 1]]);
+  assert.deepEqual(groups.map(group => group.roots.map(node => node.id)), [
+    ['session:blocked'], ['session:parent'], ['session:queued'], ['session:returned'],
+  ]);
+  assert.deepEqual(groups[1].roots[0].children.map(node => node.id), ['session:child']);
+  assert.deepEqual(workPanelGroups({ ...index, available: false }), []);
+});
+
+test('no matters yields an empty board and a queued task does not create empty groups', () => {
+  assert.deepEqual(workPanelGroups(indexBotWork([], true)), []);
+  assert.deepEqual(workPanelGroups(indexBotWork([session('queued', undefined, 'queued')], true)).map(group => group.lane), ['todo']);
+});
+
+test('active goals join queued work unless already represented by a current session', () => {
+  const objective = (objectiveId: string, status: ProjectObjectiveView['status']): ProjectObjectiveView => ({
+    objectiveId, status, workspaceId: 'bot', projectAgentConversationId: 'conversation', originMessageId: 'input',
+    title: objectiveId, outcome: '', successSignals: [], milestones: [], autonomy: 'report_only', watches: [],
+    budget: { maxAutoSessionsPerDay: 0, maxProbeRunsPerDay: 0 }, createdBy: 'user_request', createdAt: '', updatedAt: '', version: 1,
+  });
+  const index = indexBotWork([{ ...session('working'), objectiveId: 'linked' }, session('queued', undefined, 'queued')], true);
+  const groups = workPanelGroups(index, [objective('linked', 'active'), objective('next', 'active'), objective('paused', 'paused')]);
+  assert.deepEqual(groups.map(({ lane, count }) => [lane, count]), [['doing', 1], ['todo', 2]]);
+  assert.deepEqual(groups[1].roots.map(node => node.id), ['session:queued', 'objective:next']);
+});
+
+test('pending questions and approvals link back to their source; resolved cards disappear', () => {
+  const card = (cardId: string, kind: string, sessionId?: string, resolvedState?: string) => ({
+    cardId, kind, content: cardId, refs: { sessionId }, resolvedState, actions: [{ id: 'respond', kind: 'answer', label: 'Respond' }],
+  });
+  const messages = [normalizeBotMessage({ id: 'question-message', kind: 'agent_reply', role: 'assistant', cards: [
+    card('question', 'question', 'child'), card('approval', 'approval'), card('settled', 'approval'),
+  ] })!, normalizeBotMessage({ id: 'receipt', kind: 'agent_reply', role: 'assistant', cards: [card('settled', 'approval', undefined, 'resolved')] })!];
+  const cards = workPanelCards(messages);
+  assert.deepEqual(cards.map(({ cardId, messageId }) => [cardId, messageId]), [['question', 'question-message'], ['approval', 'question-message']]);
+  const index = indexBotWork([session('parent'), session('child', 'parent'), session('old', undefined, 'failed')], true);
+  const [needs, doing] = workPanelGroups(index, [], [{ grantId: 'grant', items: [{ sessionId: 'old' }] }], cards);
+  assert.deepEqual(needs.roots.map(node => node.id), ['grant:grant', 'session:child', 'card:approval']);
+  assert.equal(doing.count, 1);
 });
 
 test('only the host follow-up owner can turn a technical result into a human request', () => {
@@ -71,6 +101,15 @@ test('registered output survives later reads; prose paths never create materials
   assert.equal(materials[0].reference?.path, '/workspace/result.md');
 });
 
+test('formal artifacts and written files are separate from process-only reads', () => {
+  const read = normalizeBotMessage({ id: 'files', kind: 'agent_reply', role: 'assistant', resourceReferences: [
+    { path: 'notes.md', tool: 'read_file' }, { path: 'changed.md', tool: 'edit_file' },
+  ] })!;
+  const sections = workPanelMaterialSections(workPanelMaterials('bot', indexBotWork([session('one')], true), [overview('one')], [read]));
+  assert.deepEqual(sections.outputs.map(item => item.source).sort(), ['artifact', 'output']);
+  assert.deepEqual(sections.references.map(item => item.label), ['notes.md']);
+});
+
 test('artifacts without a confirmed path retain preview provenance without inventing a file', () => {
   const index = indexBotWork([session('one')], true);
   const material = workPanelMaterials('bot', index, [overview('one')], [])[0];
@@ -84,6 +123,7 @@ test('a local persistence blocker retains the host Bot responsibility through th
     followUp: { owner: 'bot', inCurrentList: true, reason: 'local_persistence_failed' }, origin: { anchorMessageId: 'input' } })!;
   assert.equal(row.followUp?.reason, 'local_persistence_failed');
   assert.equal(workPanelNeedsUser(row), false);
-  const current = workPanelSessions(indexBotWork([row], true));
-  assert.equal(current.tasks.some(task => task.sessionId === 'local'), true);
+  const current = workPanelGroups(indexBotWork([row], true));
+  assert.equal(current[0].lane, 'needsYou');
+  assert.equal(current[0].roots[0].id, 'session:local');
 });

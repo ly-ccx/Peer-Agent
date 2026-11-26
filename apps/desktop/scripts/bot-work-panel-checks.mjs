@@ -53,7 +53,7 @@ export async function checkWorkPanelLayout({ page, report, captureDirectory }) {
         }
       }
     }
-    await page.locator('.bot-work-panel-head button').focus(); await page.keyboard.press('Escape');
+    await page.locator('.bot-work-panel-actions button').last().focus(); await page.keyboard.press('Escape');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
     assert.equal(await toggle.evaluate(node => node === document.activeElement), true);
   } finally {

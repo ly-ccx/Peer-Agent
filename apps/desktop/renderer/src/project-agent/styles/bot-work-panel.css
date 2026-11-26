@@ -59,13 +59,7 @@
 .bot-work-panel-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: var(--space-1) var(--space-5) var(--space-4); }
 /* View changes use the shared fade without retaining an animation fill. */
 .bot-work-panel-scroll.motion-enter-fade { animation-fill-mode: backwards; }
-.bot-work-panel-attention { margin-bottom: var(--space-4); padding: var(--space-3); border: 1px solid color-mix(in srgb, var(--chrome-hairline) 80%, transparent); border-radius: var(--ui-radius-control); background: var(--paper-hover); }
-.bot-work-panel-attention h3 { display: flex; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-1); color: var(--graphite-soft); font-size: var(--ui-font-caption); font-weight: 400; }
-.bot-work-panel-focus { margin: 0; font-size: var(--ui-font-control); font-weight: 500; overflow-wrap: anywhere; }
-.bot-work-panel-focus-source { display: flex; align-items: flex-start; gap: var(--space-2); width: 100%; min-height: var(--ui-target-min); padding: var(--space-2) 0 0; border: 0; color: var(--graphite-soft); background: transparent; font: inherit; font-size: var(--ui-font-caption); text-align: start; cursor: pointer; }
-.bot-work-panel-focus-source > span { display: -webkit-box; flex: 1; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.bot-work-panel-focus-source > svg { flex: none; margin-top: var(--space-1); }
-.bot-work-panel-focus-source:hover { color: var(--graphite-base); }
+.bot-work-panel-session[data-blocked="true"] .bot-work-panel-status { font-weight: 600; }
 .bot-work-panel-note, .bot-work-panel-empty { margin: var(--space-2) 0; color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
 .bot-work-panel-section + .bot-work-panel-section { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 65%, transparent); }
 .bot-work-panel-section > header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: var(--space-1) var(--space-2); margin-bottom: var(--space-2); }
@@ -93,8 +87,28 @@
 .bot-work-panel-progress { display: block; height: 3px; margin-block: var(--space-1); border-radius: var(--ui-radius-pill); background: var(--control-fill); overflow: hidden; }
 .bot-work-panel-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--graphite-soft); transition: width var(--za-motion-medium) var(--za-ease-standard); }
 .bot-work-panel-agent-icon { display: grid; flex: none; place-items: center; width: var(--space-8); height: var(--space-8); border-radius: var(--ui-radius-control-compact); background: var(--paper-hover); color: var(--graphite-soft); }
-.bot-work-panel-task-group { display: flex; flex-direction: column; }
-.bot-work-panel-subagents { display: flex; flex-direction: column; margin: 0 0 var(--space-1) var(--space-4); padding-inline-start: var(--space-3); border-inline-start: 1px solid color-mix(in srgb, var(--chrome-hairline) 75%, transparent); }
+.bot-work-panel-tree { margin: 0; padding: 0; list-style: none; }
+.bot-work-panel-tree > li { min-width: 0; }
+.bot-work-panel-tree .bot-work-panel-tree { margin-inline-start: var(--space-4); padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--chrome-hairline); }
+.bot-work-panel-link { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--ui-target-min); padding: var(--space-2); border: 0; border-radius: var(--ui-radius-control-compact); color: var(--graphite-base); background: transparent; text-align: start; font: inherit; font-size: var(--ui-font-meta); cursor: pointer; overflow-wrap: anywhere; }
+.bot-work-panel-link:hover { background: var(--paper-hover); }
+.bot-work-panel-link > svg { flex: none; color: var(--graphite-soft); }
+.bot-work-panel-link small { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--graphite-soft); }
+.bot-work-panel-identity, .bot-work-panel-actions { display: flex; align-items: center; gap: var(--space-2); }
+.bot-work-panel-identity, .bot-work-panel-identity > div { min-width: 0; }
+.bot-work-panel-actions, .bot-work-panel-avatar { flex: none; }
+.bot-work-panel-avatar .bot-avatar { width: var(--space-8); height: var(--space-8); }
+.bot-work-panel-identity h2, .bot-work-panel-identity p { display: block; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-work-panel-identity p, .bot-work-panel-empty-state p { color: var(--graphite-soft); font-size: var(--ui-font-caption); }
+.bot-work-panel-empty-state { padding-block: var(--space-5); }
+.bot-work-panel-empty-state h3 { margin: 0; font-size: var(--ui-font-body); font-weight: 500; }
+.bot-work-panel-empty-state p { margin: var(--space-1) 0 0; }
+.bot-work-panel-section[data-lane="needsYou"] h3 { color: var(--azure-seal); font-weight: 600; }
+.bot-work-panel-history { margin-block: var(--space-3); }
+.bot-work-panel-foundation { border-block-start: 1px solid var(--chrome-hairline); color: var(--graphite-soft); font-size: var(--ui-font-caption); }
+.bot-work-panel-foundation summary { padding-block: var(--space-2); cursor: pointer; }
+.bot-work-panel-foundation summary > span { margin-inline-start: var(--space-1); }
+.bot-work-panel-foundation details + details { border-block-start: 1px solid var(--chrome-hairline); }
 .bot-work-panel-session.is-agent .bot-work-panel-agent-icon { width: var(--space-6); height: var(--space-6); }
 .bot-work-panel-materials { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
 .bot-work-panel-materials > li { min-width: 0; }
@@ -120,7 +134,6 @@
 .bot-work-material-preview > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }
 @supports (corner-shape: superellipse(1.4)) {
   .bot-work-panel { corner-shape: var(--surface-corner); }
-  .bot-work-panel-attention { corner-shape: var(--control-corner); }
 }
 @media (forced-colors: active) {
   .bot-work-panel { border-color: CanvasText; }

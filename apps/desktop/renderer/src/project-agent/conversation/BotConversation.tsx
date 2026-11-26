@@ -20,7 +20,7 @@ import { BotMessageList } from './BotMessageList';
 import { ObligationGrantList } from './ObligationGrantCard';
 import { useObligationGrants } from '../state/useObligationGrants';
 import { BotRecoveryControl } from './BotRecoveryControl';
-import { botAvatarDisplayColor } from '../BotAvatar';
+import { BotAvatar, botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
@@ -37,6 +37,8 @@ export function BotConversation({
   onReplyArrived,
   onReplyPresenceChange,
   onLocateSession,
+  onOpenHistory,
+  onOpenManagement,
   onInspect,
   focusMessageId = null,
   focusRequestId = 0,
@@ -62,6 +64,8 @@ export function BotConversation({
   readonly onReplyArrived?: (workspaceId: string) => void;
   readonly onReplyPresenceChange?: (workspaceId: string, mood: BotAvatarMood | null) => void;
   readonly onLocateSession: (sessionId: string) => void;
+  readonly onOpenHistory: () => void;
+  readonly onOpenManagement: (objectiveId?: string) => void;
   readonly onInspect?: (inspect: BotInspect) => void;
   readonly focusMessageId?: string | null;
   readonly focusRequestId?: number;
@@ -141,19 +145,33 @@ export function BotConversation({
     evidence: { ok: false, evidenceRef, kind: 'observation', summary: '', truncated: false, code: '' }, rounds: null });
 
   const obligations = useObligationGrants(workspaceId, profile.agentConversationId, onRefreshWork);
+  const thread = useRef<HTMLDivElement>(null);
+  const [boardFocus, setBoardFocus] = useState<TaskConversationRequest | null>(null);
+  const focusConversation = (messageId: string, cardId?: string) => {
+    setHighlightedId(messageId);
+    setHighlightRequestId(value => value + 1);
+    setBoardFocus(current => ({ id: (current?.id ?? 0) - 1, messageId, cardId }));
+  };
   return (
     <BotInputContext.Provider value={conversation.answer}>
     <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
-      recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
-      obligationGrants={obligations.grants}
-      obligationError={obligations.error}
-      obligationWriter={obligations.writer}
-      obligationSubmittingId={obligations.submittingId}
-      onObligationConfirm={obligations.confirm}
-      onObligationReject={obligations.reject}
-      onObligationRetry={obligations.retry}
-      onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
-    <div className="bot-convo" style={{
+      recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n} botName={label}
+      avatar={<BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} interactive={false} />}
+      obligationGrants={obligations.grants} onOpenHistory={onOpenHistory} onOpenSettings={() => onOpenManagement()}
+      onOpenObjective={onOpenManagement} onOpenTask={onLocateSession} onRefreshWork={onRefreshWork}
+      onOpenCard={({ messageId, cardId }) => focusConversation(messageId, cardId)}
+      onOpenBlocker={sessionId => {
+        const context = taskConversationContext(workspaceId, sessionId, conversation.messages, workIndex);
+        const messageId = context?.messageId ?? workIndex.byId.get(sessionId)?.anchorMessageId;
+        if (messageId) focusConversation(messageId, context?.question?.cardId);
+        else onLocateSession(sessionId);
+      }}
+      onOpenGrant={grantId => {
+        const grant = thread.current?.querySelector<HTMLElement>(`#${CSS.escape(`obligation-grant-${grantId}`)}`);
+        grant?.scrollIntoView({ block: 'nearest' });
+        grant?.focus({ preventScroll: true });
+      }}>
+    <div ref={thread} className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
       {replyDetailsId && replyDetailsTarget ? createPortal(<ReplyDetails key={replyDetailsId} row={details.row} loading={details.loading}
@@ -191,7 +209,7 @@ export function BotConversation({
           onLoadOlder={conversation.loadOlder}
           highlightedId={highlightedId}
           highlightRequestId={highlightRequestId}
-          focusTaskRequest={taskRequest?.draft ? null : taskRequest}
+          focusTaskRequest={boardFocus?.messageId === highlightedId && boardFocus ? boardFocus : taskRequest?.draft ? null : taskRequest}
           i18n={i18n}
           onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
           onQuote={(messageId, excerpt) => {

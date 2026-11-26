@@ -154,6 +154,7 @@ test('work panel rows and agent activity rows unify on Peer ExecutorIcon matchin
   })!;
   const taskMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
     session: taskSession,
+    lane: 'doing',
     variant: 'task',
     i18n,
     onOpen() {},
@@ -163,6 +164,7 @@ test('work panel rows and agent activity rows unify on Peer ExecutorIcon matchin
 
   const subagentMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
     session: taskSession,
+    lane: 'doing',
     variant: 'agent',
     i18n,
     onOpen() {},
