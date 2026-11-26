@@ -1,6 +1,6 @@
 [package]
 name = "peer-protocol"
-version = "0.1.0-rc.42"
+version = "0.1.0-rc.43"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
