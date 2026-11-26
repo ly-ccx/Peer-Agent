@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { projectBotRecoveryStatus } from '@peer-agent/protocol';
 import { recoveryConversationRows } from './recoveryConversationRows.ts';
 import type { BotReplyRow } from './botReplyContinuity.ts';
-const empty: BotReplyRow = { type: 'reply', id: 'reply:new', replyTo: ['input:new'], aliases: [], messages: [], paragraphs: [],
-  pending: { since: '2026-10-28T01:11:57.227Z', sending: false, restored: false } };
+const empty: BotReplyRow = { type: 'reply', id: 'reply:new', replyTo: ['input:new'], aliases: [], messages: [], paragraphs: [] };
 test('blocked recovery keeps historical content and identities, without a blank assistant avatar', () => {
   const history = { ...empty, id: 'reply:old', paragraphs: [{ id: 'p', text: '已有成果' }] };
   const rows = [history, empty];

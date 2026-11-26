@@ -171,9 +171,8 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <ConversationRowView key={conversationRowKey(row)} rowKey={conversationRowKey(row)}
-          entering={!previousRows.current.keys.has(conversationRowKey(row)) && (row.type === 'reply'
-            ? Boolean(row.pending && !row.pending.restored && !row.pending.deliveryIssue)
-            : row.type === 'message' && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput))}
+          entering={!previousRows.current.keys.has(conversationRowKey(row)) && row.type === 'message'
+            && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput)}
           className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
         {conversationRowShowsAuthor(row) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
@@ -187,7 +186,8 @@ export function BotMessageList({
           <UserBubble
             key={conversationRowKey(row)}
             message={row.message}
-            replied={replied.has(row.message.id)}
+            replied={replied.has(row.message.id) || Boolean(row.message.inputId && (replied.has(row.message.inputId) || replied.has(`input-${row.message.inputId}`)))}
+            replyWait={row.replyWait}
             workIndex={workIndex}
             anchors={anchors}
             onJump={onJump}

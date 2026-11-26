@@ -37,16 +37,10 @@ test('public progress keeps live activity status while decisions and recovery re
   assert.equal(state({ activity, stopping: true, paragraphs }).label, i18n.t('projectAgent.chat.stopping'));
 });
 
-test('receipt alone is not running cognition; refresh only reads current status', () => {
-  const pending = { since: '2000-01-01T00:00:00Z', sending: false, restored: false };
-  assert.deepEqual(state({ pending }), { label: null, busy: false, refresh: false });
-  assert.deepEqual(state({ pending: { ...pending, sending: true } }), { label: i18n.t('projectAgent.chat.sending'), busy: true, refresh: false });
-  assert.equal(state({ pending: { ...pending, restored: true } }).label, '尚未确认这条消息的回复状态');
-  assert.equal(state({ pending: { ...pending, deliveryIssue: true } }).label, '消息已保存，后续处理尚未完成');
-  assert.deepEqual(state({ pending, paragraphs: [{ id: 'progress', text: '已开始核对。' }] }),
+test('without Activity, even a recorded progress paragraph does not imply a running reply', () => {
+  assert.deepEqual(state({}), { label: null, busy: false, refresh: false });
+  assert.deepEqual(state({ paragraphs: [{ id: 'progress', text: '已开始核对。' }] }),
     { label: null, busy: false, refresh: false });
-  assert.equal(state({ pending: { ...pending, restored: true }, paragraphs: [{ id: 'progress', text: '历史进展' }] }).label,
-    '尚未确认这条消息的回复状态');
 });
 
 test('terminal activity stops the spinner and delivered cards own their feedback', () => {

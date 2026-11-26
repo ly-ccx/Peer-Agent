@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
-import { replyRowContains, replyRowMood, replyRowRunning } from '../state/botReplyContinuity';
+import { replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from '../state/botReplyContinuity';
 import { useLiveToolReveal } from './useLiveToolReveal';
 import { quoteRefsFor } from '../state/botConversationState';
 import { replyDetailsRow } from '../state/botActivityState';
@@ -77,9 +77,10 @@ export function BotConversation({
   readonly onRefreshWork: () => Promise<void>;
 }) {
   const conversation = useBotConversation(workspaceId);
-  const activeReply = [...conversation.viewRows].reverse().find(row => row.type === 'reply' && replyRowRunning(row));
-  const showToolMood = useLiveToolReveal(activeReply?.type === 'reply' ? activeReply.activity : undefined);
-  const replyMood = activeReply?.type === 'reply' ? replyRowMood(activeReply, { showToolMood }) : 'idle';
+  // Only real running Activity can drive the active avatar; receipts stay on user bubbles.
+  const activeReply = [...conversation.viewRows].reverse().find((row): row is BotReplyRow => row.type === 'reply' && replyRowRunning(row));
+  const showToolMood = useLiveToolReveal(activeReply?.activity);
+  const replyMood = activeReply ? replyRowMood(activeReply, { showToolMood }) : 'idle';
   useEffect(() => {
     onReplyPresenceChange?.(workspaceId, replyMood !== 'idle' || conversation.status === 'ready' ? replyMood : null);
   }, [workspaceId, conversation.status, replyMood, onReplyPresenceChange]);

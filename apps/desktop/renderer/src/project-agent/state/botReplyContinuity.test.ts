@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { conversationRows, normalizeBotMessage, type BotChatMessage, type ConversationDisplayRow } from './botConversationState.ts';
+import { applyOptimistic, conversationRows, normalizeBotMessage, type BotChatMessage, type ConversationDisplayRow, type PendingBotInput } from './botConversationState.ts';
 import { attachBotProcesses, visibleBotActivity } from './botActivityState.ts';
 import { awaitingInputAnswered, continuousReplyRows, conversationRowShowsAuthor, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
+import { conversationRowKey } from './conversationWindow.ts';
+import { userReceipt } from './userReceiptState.ts';
 import { replyReferencesForRows } from './replyReferenceState.ts';
 import { indexBotWork, threadTaskReferences } from './botWorkState.ts';
 const at = '2026-10-22T00:00:00Z';
@@ -16,6 +18,11 @@ function activity(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivi
   return { workspaceId: 'w', conversationId: 'c', turnId: 'turn', workId: 'work', startedAt: at, revision: 1,
     phase: 'thinking', replyTo: [user.id], segments: [], replyText: '', ...extra };
 }
+const userRow = (rows: ReturnType<typeof continuousReplyRows>, id: string) => {
+  const input = rows.find(row => row.type === 'message' && row.message.id === id);
+  assert.ok(input?.type === 'message');
+  return input;
+};
 const replies = (rows: ReturnType<typeof continuousReplyRows>) => rows.filter((r): r is BotReplyRow => r.type === 'reply');
 test('dispatch, completion and follow-up share the original inline task row', () => {
   const makeReply = (id: string, sources: string[]) => {
@@ -33,15 +40,17 @@ test('dispatch, completion and follow-up share the original inline task row', ()
   assert.deepEqual(owners.get(followup)?.map(task => task.id), ['separate-work']);
 });
 
-test('pending, public stream and final retain one carrier and original anchors', () => {
+test('receipt stays on the input; public stream and final retain one carrier and original anchors', () => {
   const cache = new Map<string, string>();
-  const waiting = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at }], [], cache))[0]!;
+  const waiting = continuousReplyRows([row(user)], [user], [{ inputId: 'u' }], [], cache);
+  assert.deepEqual(replies(waiting), []);
+  assert.equal(userRow(waiting, user.id).replyWait, 'waiting');
   const live = activity({ segments: [{ kind: 'text', id: 'opening', text: '先核对事实。' }] });
   const streaming = replies(continuousReplyRows([row(user), { type: 'activity', activity: live }], [user], [], [], cache))[0]!;
   const turn = message('turn', 'agent_turn', { replyTo: [user.id], meta: { workId: 'work' }, publicUpdates: [{ id: 'opening', text: '先核对事实。' }] });
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: '已完成。' });
   const finished = replies(continuousReplyRows([row(user), row(turn), row(final)], [user, turn, final], [], [], cache))[0]!;
-  assert.equal(waiting.id, streaming.id); assert.equal(streaming.id, finished.id);
+  assert.equal(streaming.id, finished.id);
   // Delivered legacy records collapse to the canonical answer; the streamed text becomes process (ADR87 D7.3).
   assert.deepEqual(finished.paragraphs.map(p => p.text), ['已完成。']);
   assert.ok(replyRowContains(finished, 'turn')); assert.ok(replyRowContains(finished, 'final'));
@@ -77,16 +86,17 @@ test('legacy incident records collapse to the answer without guessing roles or c
   // The persisted updates stay reachable for the process view; nothing is erased.
   assert.equal(finished.messages.length, 2);
 });
-test('restored unanswered input is unconfirmed rather than invented running work', () => {
-  const restored = replies(continuousReplyRows([row(user)], [user], [], []))[0]!;
-  assert.equal(restored.pending?.restored, true); assert.equal(replyRowRunning(restored), false);
+test('restored unanswered input owns its waiting mark and does not invent running work', () => {
+  const restored = continuousReplyRows([row(user)], [user], [], []);
+  assert.deepEqual(replies(restored), []);
+  assert.equal(userRow(restored, user.id).replyWait, 'waiting');
 });
 test('another input answer cannot clear this input wait', () => {
   const other = message('input-v', 'user_input', { inputId: 'v' });
   const final = message('reply-v', 'agent_reply', { replyTo: [other.id], content: '答复 v' });
-  const result = replies(continuousReplyRows([row(user), row(other), row(final)], [user, other, final], [{ inputId: 'u', createdAt: at }], []));
-  assert.ok(result.some(r => r.pending && r.replyTo.includes(user.id)));
-  assert.ok(result.some(r => r.message?.id === final.id));
+  const result = continuousReplyRows([row(user), row(other), row(final)], [user, other, final], [{ inputId: 'u' }], []);
+  assert.equal(userRow(result, user.id).replyWait, 'waiting');
+  assert.deepEqual(replies(result).map(r => r.message?.id), [final.id]);
 });
 test('yielded attempts share public paragraphs while canonical later replies stay separate', () => {
   const first = message('first', 'agent_turn', { replyTo: [user.id], meta: { workId: 'work' }, publicUpdates: [{ id: 'a', text: '第一步' }] });
@@ -130,8 +140,9 @@ test('exact reuse of an earlier paragraph does not leave a later streamed paragr
   assert.equal(result.messages.find(item => item.kind === 'agent_turn')?.publicUpdates?.[1]?.text, '去核对分支了。');
 });
 test('delivery uncertainty keeps receipt without declaring active execution', () => {
-  const result = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at, deliveryIssue: true }], []))[0]!;
-  assert.equal(replyRowRunning(result), false); assert.equal(replyRowMood(result), 'error');
+  const result = continuousReplyRows([row(user)], [user], [{ inputId: 'u', deliveryIssue: true }], []);
+  assert.deepEqual(replies(result), []);
+  assert.equal(userRow(result, user.id).replyWait, 'deliveryIssue');
 });
 test('a later active attempt retires the old failure display but preserves its detail record', () => {
   const failed = message('failed', 'system_card', { turnId: 'old', replyTo: [user.id], cards: [{ cardId: 'failure', kind: 'agent_unavailable', title: '失败', body: '' }] });
@@ -145,12 +156,12 @@ test('a later active attempt retires the old failure display but preserves its d
 test('an unknown local input has no invented reply or active execution placeholder', () => {
   const unknown = { ...user, pending: 'unknown' as const };
   const pending = [{ inputId: 'u', text: 'pending', quoteRefs: [], attachments: [], createdAt: at, state: 'unknown' as const }];
-  const result = continuousReplyRows([row(unknown)], [unknown], [{ inputId: 'u', createdAt: at }], pending);
+  const result = continuousReplyRows([row(unknown)], [unknown], [{ inputId: 'u' }], pending);
   assert.equal(replies(result).length, 0);
 });
 
 const received = [{ inputId: 'u', text: '你不知道 rc 40 是哪个分支打的包吗？', quoteRefs: [], attachments: [], createdAt: at, state: 'received' as const }];
-const awaiting = [{ inputId: 'u', createdAt: at }];
+const awaiting = [{ inputId: 'u' }];
 function live(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivity {
   return activity({ phase: 'waiting', replyText: '', segments: [], ...extra });
 }
@@ -162,7 +173,7 @@ function project(messages: BotChatMessage[], current: ProjectAgentActivity | nul
 }
 const authors = (rows: ReturnType<typeof project>) => rows.filter(conversationRowShowsAuthor);
 
-test('send, pending, first token, streaming and done stay one bot row', () => {
+test('first Activity, first token, streaming and done stay one bot row', () => {
   const prior = message('input-old', 'user_input', { inputId: 'old' });
   const earlier = message('old-reply', 'agent_reply', { replyTo: [prior.id], content: '上一轮已经回答过。' });
   const messages = [prior, earlier, user];
@@ -178,11 +189,13 @@ test('send, pending, first token, streaming and done stay one bot row', () => {
   const done = continuousReplyRows(
     attachBotProcesses(conversationRows([prior, earlier, user, turn, final]), [prior, earlier, user, turn, final], null),
     [prior, earlier, user, turn, final], [], [], cache);
-  for (const rows of [pending, waiting, thinking, tool, first, streaming, done]) {
+  assert.equal(userRow(pending, user.id).replyWait, 'waiting');
+  assert.ok(!replies(pending).some(reply => reply.replyTo.includes(user.id)));
+  for (const rows of [waiting, thinking, tool, first, streaming, done]) {
     const fresh = authors(rows).filter(row => row.type === 'reply' && row.replyTo.includes(user.id));
     assert.equal(fresh.length, 1, rows.map(row => row.type === 'reply' ? row.id : row.type).join(','));
   }
-  const id = authors(pending).filter(row => row.type === 'reply' && row.replyTo.includes(user.id))[0];
+  const id = authors(waiting).filter(row => row.type === 'reply' && row.replyTo.includes(user.id))[0];
   assert.ok(id?.type === 'reply');
   for (const rows of [waiting, thinking, tool, first, streaming, done]) {
     const same = authors(rows).find(row => row.type === 'reply' && row.replyTo.includes(user.id));
@@ -206,6 +219,8 @@ test('a long model wait, tool-only work, and reasoning with no text never stack 
     assert.equal(rows.filter(row => row.type === 'reply').length, 1);
     const reply = rows.find(row => row.type === 'reply');
     assert.equal(reply?.type === 'reply' && replyRowRunning(reply), true);
+    const matched = current.replyTo.some(id => id === 'u' || id === user.id);
+    assert.equal(userRow(rows, user.id).replyWait, matched ? undefined : 'waiting');
   }
 });
 
@@ -231,12 +246,12 @@ test('an empty assistant body does not render a header, including beside a live 
 });
 
 test('alias spellings claim the same receipt without becoming extra quote anchors', () => {
-  const rows = continuousReplyRows([row(user), { type: 'activity', activity: activity() }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const rows = continuousReplyRows([row(user), { type: 'activity', activity: activity() }], [user], [{ inputId: 'u' }], []);
   const reply = replies(rows)[0]!;
   assert.equal(replies(rows).length, 1);
   assert.deepEqual(reply.replyTo, [user.id]);
   assert.deepEqual(replyReferencesForRows(rows).get(reply), []);
-  const raw = continuousReplyRows([row(user), { type: 'activity', activity: activity({ replyTo: ['u'] }) }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const raw = continuousReplyRows([row(user), { type: 'activity', activity: activity({ replyTo: ['u'] }) }], [user], [{ inputId: 'u' }], []);
   const folded = replies(raw)[0]!;
   assert.equal(replies(raw).length, 1);
   assert.deepEqual(folded.replyTo, ['u']);
@@ -257,18 +272,18 @@ test('a historical input before a later agent_reply is never resurrected as an u
   const rows = continuousReplyRows(
     [row(older), row(proactiveWake), row(newer), { type: 'activity', activity: liveForNewer }],
     all,
-    [{ inputId: 'new', createdAt: at }],
+    [{ inputId: 'new' }],
     [{ inputId: 'new', text: '咋样了？', quoteRefs: [], attachments: [], createdAt: at, state: 'received' }],
   );
   const replyRows = replies(rows);
   assert.equal(replyRows.length, 2, 'only the delivered wake reply and the live reply for the new message should exist');
-  assert.ok(replyRows.every(item => !item.pending?.restored), 'older input before a delivered reply must not spawn an unconfirmed ghost row');
+  assert.equal(userRow(rows, older.id).replyWait, undefined, 'a proactive reply bounds historical wait inference');
   const settled = replies(continuousReplyRows([row(older), row(proactiveWake)], [older, proactiveWake], [], []));
   assert.equal(settled.length, 1);
   assert.equal(settled[0]!.message?.id, proactiveWake.id);
 });
 
-test('running activity for an earlier queued input suppresses duplicate unconfirmed restored row', () => {
+test('a restored input waits on its bubble before and after an earlier retry ends', () => {
   const older = message('input-old', 'user_input', { inputId: 'old', content: '写方案' });
   const prevFailure = message('turn-fail-card', 'system_card', {
     turnId: 'turn-fail',
@@ -287,7 +302,7 @@ test('running activity for an earlier queued input suppresses duplicate unconfir
   const runningReplies = replies(runningRows);
   assert.equal(runningReplies.length, 1, 'should not stack a second restored unconfirmed row while Bot is actively running');
   assert.equal(runningReplies[0]!.activity?.turnId, 'turn-older-retry');
-  assert.equal(runningReplies[0]!.pending, undefined);
+  assert.equal(userRow(runningRows, newer.id).replyWait, 'waiting');
 
   // Smooth avatar mood stays on `thinking` when showToolMood is false (transient local tool).
   const transientToolReply: BotReplyRow = {
@@ -299,8 +314,82 @@ test('running activity for an earlier queued input suppresses duplicate unconfir
 
   // Once no live activity is running, the unanswered restored input surfaces truthfully.
   const idleRows = continuousReplyRows([row(older), row(prevFailure), row(newer)], all, [], []);
-  const idleReplies = replies(idleRows);
-  assert.equal(idleReplies.length, 1);
-  assert.equal(idleReplies[0]!.pending?.restored, true);
-  assert.deepEqual(idleReplies[0]!.replyTo, [newer.id]);
+  assert.deepEqual(replies(idleRows), []);
+  assert.equal(userRow(idleRows, newer.id).replyWait, 'waiting');
+});
+
+
+const pendingInput = (inputId: string, state: PendingBotInput['state']): PendingBotInput => ({
+  inputId, state, text: inputId, quoteRefs: [], attachments: [], createdAt: at,
+});
+
+test('A runs, B/C wait on their bubbles, then B starts and one reply answers B and C', () => {
+  const a = message('input-a', 'user_input', { inputId: 'a' });
+  const b = message('server-b', 'user_input', { inputId: 'b' });
+  const c = message('server-c', 'user_input', { inputId: 'c' });
+  const aTool = live({ turnId: 'turn-a', workId: 'work-a', phase: 'tool', replyTo: [a.id],
+    segments: [{ kind: 'tool', id: 'read', name: 'read_file', status: 'running' }] });
+  const pending = [pendingInput('b', 'received'), pendingInput('c', 'received')];
+  const cache = new Map<string, string>();
+  const view = (messages: BotChatMessage[], current?: ProjectAgentActivity, inputs: PendingBotInput[] = []) => {
+    const shown = applyOptimistic(messages, inputs);
+    const history = attachBotProcesses(conversationRows(shown), shown, current ?? null);
+    const visible = visibleBotActivity(current ?? null, shown);
+    return continuousReplyRows(visible ? [...history, { type: 'activity', activity: visible }] : history, shown, [], inputs, cache);
+  };
+  const running = view([a], aTool, pending);
+  assert.deepEqual(replies(running).map(reply => reply.activity?.turnId), ['turn-a']);
+  assert.equal(authors(running).length, 1);
+  assert.equal(replyRowMood(replies(running)[0]!), 'working');
+  for (const id of ['b', 'c']) {
+    const bubble = userRow(running, `input-${id}`);
+    assert.equal(bubble.message.content, id);
+    assert.equal(userReceipt(bubble.message, false, bubble.replyWait).labelKey, 'projectAgent.chat.receivedWaiting');
+  }
+
+  const aFinal = message('answer-a', 'agent_reply', { turnId: 'turn-a', replyTo: [a.id], content: 'A done' });
+  const betweenTurns = view([a, aFinal], undefined, pending);
+  const reopened = view([a, b, c, aFinal]);
+  for (const [rows, inputs] of [[betweenTurns, ['input-b', 'input-c']], [reopened, [b.id, c.id]]] as const) {
+    assert.equal(replies(rows).length, 1);
+    assert.ok(replies(rows).every(reply => !replyRowRunning(reply)));
+    const bubbles = inputs.map(id => userRow(rows, id));
+    assert.deepEqual(bubbles.map(bubble => bubble.replyWait), ['waiting', 'waiting']);
+    assert.deepEqual(bubbles.map(conversationRowKey), ['input-b', 'input-c']);
+  }
+
+  const bActivity = live({ turnId: 'turn-b', workId: 'work-b', replyTo: ['b'] });
+  const started = view([a, b, c, aFinal], bActivity);
+  const liveB = replies(started).find(reply => reply.activity?.turnId === 'turn-b')!;
+  assert.ok(replyRowRunning(liveB));
+  assert.equal(liveB.id, 'reply-input-b');
+  assert.equal(userRow(started, b.id).replyWait, undefined);
+  assert.equal(userRow(started, c.id).replyWait, 'waiting');
+
+  const combined = message('answer-bc', 'agent_reply', { turnId: 'turn-b', replyTo: [b.id, 'input-c'], content: 'B and C done' });
+  const finished = view([a, b, c, aFinal, combined]);
+  const reply = replies(finished).find(reply => reply.message?.id === combined.id)!;
+  assert.equal(replies(finished).length, 2);
+  assert.equal(reply.id, liveB.id);
+  assert.deepEqual(reply.replyTo, [b.id, 'input-c']);
+  assert.deepEqual(replyReferencesForRows(finished).get(reply), [b.id, c.id]);
+  assert.ok(replyRowContains(userRow(finished, c.id), c.id), 'projected quote targets the rendered bubble');
+  assert.equal(userRow(finished, b.id).replyWait, undefined);
+  assert.equal(userRow(finished, c.id).replyWait, undefined);
+});
+
+test('failed or unconfirmed sends keep their retry input and only wait after receipt', () => {
+  for (const [state, labelKey] of [['failed', 'projectAgent.chat.failed'], ['unknown', 'projectAgent.chat.inputUnconfirmed'],
+    ['sending', 'projectAgent.chat.sending'], ['received', 'projectAgent.chat.receivedWaiting']] as const) {
+    const pending = [pendingInput('retry-id', state)];
+    const messages = applyOptimistic([], pending);
+    const rows = continuousReplyRows(conversationRows(messages), messages, [], pending);
+    const bubble = userRow(rows, 'input-retry-id');
+    assert.deepEqual(replies(rows), []);
+    assert.equal(conversationRowKey(bubble), 'input-retry-id');
+    assert.equal(bubble.replyWait, state === 'received' ? 'waiting' : undefined);
+    const mark = userReceipt(bubble.message, false, bubble.replyWait);
+    assert.equal(mark.labelKey, labelKey);
+    assert.equal(mark.retryInputId, state === 'failed' || state === 'unknown' ? 'retry-id' : undefined);
+  }
 });

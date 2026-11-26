@@ -284,6 +284,7 @@ export type TranslationKey =
   | 'projectAgent.chat.readingUnavailable'
   | 'projectAgent.chat.restoreReading'
   | 'projectAgent.chat.received'
+  | 'projectAgent.chat.receivedWaiting'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
   | 'projectAgent.chat.olderFailed'
@@ -2116,6 +2117,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
     'projectAgent.chat.restoreReading': '继续恢复阅读位置',
     'projectAgent.chat.received': '已收到',
+    'projectAgent.chat.receivedWaiting': '已收到 · 等待处理',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
     'projectAgent.chat.olderFailed': '加载失败，重试',
@@ -3686,6 +3688,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
     'projectAgent.chat.restoreReading': 'Continue restoring reading position',
     'projectAgent.chat.received': 'Received',
+    'projectAgent.chat.receivedWaiting': 'Received · waiting',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',
     'projectAgent.chat.olderFailed': 'Load failed, retry',
