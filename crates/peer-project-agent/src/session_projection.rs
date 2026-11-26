@@ -1761,6 +1761,11 @@ fn project_session_value(
         session.insert("coordination".into(), cf);
     }
     session.insert("spawnedAt".into(), json!(spawned_at));
+    for key in ["startedAt", "endedAt"] {
+        if let Some(value) = opt_str(&plan["sessionExecution"][key]) {
+            session.insert(key.into(), json!(value));
+        }
+    }
     if !summary.conversation_id.is_empty() {
         session.insert("conversationId".into(), json!(summary.conversation_id));
     }

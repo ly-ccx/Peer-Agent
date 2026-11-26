@@ -9,5 +9,12 @@ export function processSeconds(start: string | undefined, end: string | undefine
 export function processDuration(seconds: number, i18n: I18nRuntime): string {
   if (seconds < 1) return i18n.t('projectAgent.process.lessThanSecond');
   const whole = Math.floor(seconds);
+  if (whole >= 3600) {
+    const minutes = Math.floor(whole / 60) % 60;
+    return i18n.t('projectAgent.process.hours', {
+      hours: Math.floor(whole / 3600),
+      minutes: i18n.locale.startsWith('zh') ? String(minutes).padStart(2, '0') : minutes,
+    });
+  }
   return i18n.t(whole < 60 ? 'projectAgent.process.seconds' : 'projectAgent.process.minutes', { seconds: whole % 60, minutes: Math.floor(whole / 60) });
 }

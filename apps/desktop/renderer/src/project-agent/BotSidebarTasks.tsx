@@ -3,6 +3,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { ExecutorIcon, executorDisplayName } from './ExecutorIcon';
 import type { SidebarTaskEntry } from './state/botNavigationState';
 import { workerStatus } from './state/workerStatus';
+import { TaskExecutionDuration } from './TaskExecutionDuration';
 
 const DEFAULT_VISIBLE = 4;
 
@@ -60,6 +61,7 @@ export const BotSidebarTasks = memo(function BotSidebarTasks({
           >
             <ExecutorIcon className="bot-sidebar-task-cli" flowing={visual.tone === 'active'} />
             <span className="bot-sidebar-task-title">{task.title}</span>
+            <TaskExecutionDuration surface="sidebar" timing={task} i18n={i18n} />
           </button>
         );
       })}
