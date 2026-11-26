@@ -164,6 +164,7 @@ describe('provider channel registry', () => {
 
     assert.equal(resolved.reasoningParamStyle, 'openai-effort');
     assert.deepEqual(resolved.reasoningEffortMap, reasoningEffortMap);
+    assert.deepEqual(resolved.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh']);
   });
 
   it('resolves Gemini endpoints with API key query auth', () => {

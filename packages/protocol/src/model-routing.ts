@@ -135,7 +135,9 @@ export function projectModelRoutingMenuOption(provider: {
   readonly enabled?: unknown;
   readonly supportsReasoning?: unknown;
   readonly reasoningEffortLevels?: unknown;
+  readonly reasoningEffortMap?: unknown;
   readonly reasoningEffort?: unknown;
+  readonly reasoningDefaultEffort?: unknown;
   readonly defaultEffort?: unknown;
 } | null | undefined): ModelRoutingMenuOption | null {
   if (!provider || typeof provider.id !== 'string' || !provider.id.trim()) return null;

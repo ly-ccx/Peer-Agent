@@ -335,11 +335,20 @@ export function createProjectAgentApplicationService({
     if (!open()) return disabled();
     const workspaceId = payload?.workspaceId;
     if (classicCoreBridge?.isAvailable?.()) {
+      let currentModelPolicy = null;
       if (profileStore) {
         const current = profileStore.read?.(workspaceId);
         if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
+        currentModelPolicy = current.modelPolicy ?? null;
+      } else if (payload?.modelPolicy && typeof payload.modelPolicy === 'object') {
+        try {
+          const got = await classicCoreBridge.projectBotGet({ workspaceId });
+          if (got?.ok && got.item?.profile) currentModelPolicy = got.item.profile.modelPolicy ?? null;
+        } catch {
+          // Proceed with strict validation when current policy cannot be pre-read.
+        }
       }
-      const policy = profilePolicyPatch(payload, listModels());
+      const policy = profilePolicyPatch(payload, listModels(), currentModelPolicy);
       if (!policy.ok) return policy;
       let avatarSourcePath;
       if (payload.chooseAvatar === true) {
@@ -365,7 +374,7 @@ export function createProjectAgentApplicationService({
     }
     const current = profileStore?.read?.(workspaceId);
     if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };
-    const policy = profilePolicyPatch(payload, listModels());
+    const policy = profilePolicyPatch(payload, listModels(), current.modelPolicy ?? null);
     if (!policy.ok) return policy;
     if (typeof payload.displayName === 'string') {
       const displayName = cleanDisplayName(payload.displayName);

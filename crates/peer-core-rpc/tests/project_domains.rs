@@ -749,6 +749,53 @@ async fn project_bot_profile_access_read_approvals_history_and_search_roundtrip(
     assert_eq!(updated_prof["profile"]["planApproval"], "writes");
     assert_eq!(updated_prof["profile"]["acceptancePolicy"], "confirm");
 
+    // Fixed role override with "default" reasoningEffort must be accepted (matches TS ModelReasoningEffort),
+    // while unknown effort values remain rejected with INVALID_REASONING_EFFORT.
+    let default_effort_ok = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "modelPolicy": {
+                    "overrides": {
+                        "project_agent": {
+                            "mode": "fixed",
+                            "modelProviderId": "google-ai-gemini",
+                            "reasoningEffort": "default"
+                        }
+                    }
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(default_effort_ok["ok"], true);
+    assert_eq!(
+        default_effort_ok["profile"]["modelPolicy"]["overrides"]["project_agent"]["reasoningEffort"],
+        "default"
+    );
+
+    let bad_effort = client
+        .call(
+            "project.profile.update",
+            json!({
+                "workspaceId": ws_id,
+                "modelPolicy": {
+                    "overrides": {
+                        "project_agent": {
+                            "mode": "fixed",
+                            "modelProviderId": "google-ai-gemini",
+                            "reasoningEffort": "bogus"
+                        }
+                    }
+                }
+            }),
+        )
+        .await["result"]
+        .clone();
+    assert_eq!(bad_effort["ok"], false);
+    assert_eq!(bad_effort["code"], "INVALID_REASONING_EFFORT");
+
     // Modular cat avatar parts update, partial merge preservation, and validation
     let bad_parts = client
         .call(

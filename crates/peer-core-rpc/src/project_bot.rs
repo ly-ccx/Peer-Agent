@@ -35,7 +35,7 @@ const MODEL_POLICY_ROLES: [&str; 8] = [
     "compactor",
 ];
 const MODEL_POLICY_TIERS: [&str; 4] = ["strong", "fast", "economy", "vision"];
-const REASONING_EFFORTS: [&str; 6] = ["off", "low", "medium", "high", "xhigh", "max"];
+const REASONING_EFFORTS: [&str; 7] = ["off", "low", "medium", "default", "high", "xhigh", "max"];
 const ACTIVE_PLAN_STATUSES: [&str; 8] = [
     "drafting",
     "awaiting_approval",

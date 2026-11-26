@@ -1477,11 +1477,29 @@ export function resolveChannel(config = {}) {
     };
   }
   const reasoningEffortMap = normalizeReasoningEffortMap(config.reasoningEffortMap);
+  const fixedReasoningContractChannel = (
+    isOpenCodeGo
+    || channelId === CHANNEL_IDS.DEEPSEEK
+    || channelId === CHANNEL_IDS.KIMI_CODING_PLAN
+    || channelId === CHANNEL_IDS.MOONSHOT
+    || channelId === CHANNEL_IDS.GROK
+  );
   if (!isOpenCodeGo && reasoningEffortMap) {
     capabilities.reasoning = {
       ...(capabilities.reasoning || {}),
       effortMap: reasoningEffortMap,
     };
+    if (!fixedReasoningContractChannel) {
+      const mapLevels = ['off', 'low', 'medium', 'default', 'high', 'xhigh', 'max']
+        .filter((level) => Object.hasOwn(reasoningEffortMap, level));
+      if (mapLevels.length > 0) {
+        capabilities.reasoning.effortLevels = mapLevels;
+        if (!mapLevels.includes(capabilities.reasoning.defaultEffort)) {
+          capabilities.reasoning.defaultEffort = ['default', 'medium', 'high', 'low', ...mapLevels]
+            .find((level) => mapLevels.includes(level));
+        }
+      }
+    }
   }
   if (config.supportsPromptCaching !== undefined) {
     capabilities.promptCache = Boolean(config.supportsPromptCaching);
