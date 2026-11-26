@@ -13,6 +13,8 @@ import { BOT_WORK_PANEL_MIN_WIDTH, workPanelActivity, workPanelCards, workPanelG
   type WorkPanelCard, type WorkPanelGroup, type WorkPanelLane, type WorkPanelNode } from '../state/botWorkPanelState';
 import { useBotWorkPanelData } from '../state/useBotWorkPanelData';
 import { useBotWorkPanelObjectives } from '../state/useBotWorkPanelObjectives';
+import { useBotWorkPanelGitStatus } from '../state/useBotWorkPanelGitStatus';
+import { BotWorkGitSection } from './BotWorkGitSection';
 import { BotWorkSessionRow } from './BotWorkSessionRow';
 import type { ObligationGrantView } from './ObligationGrantCard';
 import { BotWorkMaterials } from './BotWorkMaterials';
@@ -85,7 +87,11 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   const workspacePath = resources?.owner?.workspaceId === workspaceId && resources.ready ? resources.owner.path : null;
   const data = useBotWorkPanelData(workspaceId, workspacePath, open);
   const objectives = useBotWorkPanelObjectives(workspaceId, open);
-  const references = recovering ? undefined : workPanelActivity(rows)?.resourceReferences;
+  const activity = recovering ? undefined : workPanelActivity(rows);
+  const references = activity?.resourceReferences;
+  const workRevision = JSON.stringify([recovering, Boolean(activity), [...workIndex.byId.values()]
+    .map(session => [session.sessionId, session.status]).sort(([a], [b]) => a!.localeCompare(b!))]);
+  const git = useBotWorkPanelGitStatus(workspaceId, workspacePath, open, workRevision);
   const materials = useMemo(() => workPanelMaterialSections(workPanelMaterials(workspaceId, workIndex, data.items, messages,
     { resourceReferences: references })), [workspaceId, workIndex, data.items, messages, references]);
   const cards = useMemo(() => workPanelCards(messages), [messages]);
@@ -133,7 +139,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
         {!groups.length && objectives.loading ? <p className="bot-work-panel-note bot-reading-shimmer" role="status">{i18n.t('resources.loading')}</p> : null}
         <button type="button" className="ui-button is-compact bot-work-panel-history" onClick={() => leave(onOpenHistory)}>
           <PeerIcon name="history" size={14} />{i18n.t('projectAgent.workPanel.history')}</button>
-        {workspacePath || groups.length || materials.outputs.length || materials.references.length ? <div className="bot-work-panel-foundation">
+        {workspacePath || groups.length || materials.outputs.length || materials.references.length || git.status ? <div className="bot-work-panel-foundation">
           <details><summary><PeerIcon name="chevronRight" size={12} />
             {i18n.t('projectAgent.workPanel.outputs')} <span>{materials.outputs.length}</span></summary>
             {data.error ? <ReadFailure message={i18n.t(workspacePath ? 'resources.readFailed' : 'projectAgent.workPanel.scopeUnavailable')}
@@ -152,6 +158,8 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
             <BotWorkMaterials materials={materials.references} i18n={i18n} onOpenTask={actions.onOpenTask} />
             {!materials.references.length ? <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.emptyReferences')}</p> : null}
           </details>
+          {git.status ? <BotWorkGitSection key={workspaceId} {...git} i18n={i18n}
+            onOpen={workspacePath ? (path, kind) => leave(() => resources?.openReference({ workspaceId, path, kind }, { literalPath: true })) : undefined} /> : null}
         </div> : null}
       </div>
     </aside>

@@ -28,6 +28,7 @@
     "./work-budget": "./dist/project-agent/work-budget.mjs",
     "./diagnostic-phase": "./dist/diagnostic-phase.mjs",
     "./goal-plan-files": "./dist/goal-plan-files.mjs",
+    "./git-read": "./dist/git-read.mjs",
     "./project-agent": {
       "types": "./dist/project-agent-public.d.ts",
       "default": "./dist/project-agent-public.js"

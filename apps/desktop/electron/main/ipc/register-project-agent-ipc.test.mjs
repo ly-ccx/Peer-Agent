@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createProjectAgentApplicationService } from '../project-agent/project-agent-application-service.mjs';
+import { createWorkPanelGitStatus } from '../project-agent/work-panel-git-status.mjs';
+import { resolve } from 'node:path';
 import { createProjectAgentIpcRegistrations } from './register-project-agent-ipc.mjs';
 
 const CHANNELS = [
@@ -133,6 +135,30 @@ test('每个通道把载荷交给应用服务，创建和改档案带上发送�
   assert.equal(calls.some((call) => call[0] === 'submit-input'), true);
   assert.equal(calls.some((call) => call[0] === 'decide-approval'), true);
   assert.deepEqual(calls.at(-1), ['diagnostics', { channel: 'project-agent:diagnostics' }, sender]);
+});
+
+test('Git status IPC accepts only registered workspace IDs and never forwards renderer paths', async () => {
+  const path = resolve('registered-workspace');
+  const lookedUp = [];
+  const queried = [];
+  const readGitStatus = createWorkPanelGitStatus({
+    resolveWorkspacePath: id => { lookedUp.push(id); return id === 'known' ? path : undefined; },
+    read: async input => { queried.push(input); throw Object.assign(new Error(), { reason: 'git_not_repository' }); },
+  });
+  const projectAgent = createProjectAgentApplicationService({ enabled: () => true });
+  const handlers = new Map();
+  const [registration] = createProjectAgentIpcRegistrations({ projectAgent, readGitStatus });
+  registration.register({ handle: (channel, handler) => handlers.set(channel, handler) });
+  const invoke = handlers.get('project-agent:read-git-status');
+  assert.equal(typeof invoke, 'function');
+  for (const payload of [undefined, '/tmp', ['known'], { path }, { workspaceId: '../known' }, { workspaceId: '' },
+    { workspaceId: 'known', path }, { workspaceId: 'known', operation: 'log' }, { workspaceId: 'unknown' }]) {
+    assert.equal((await invoke({}, payload)).kind, 'invalid-workspace');
+  }
+  assert.deepEqual(lookedUp, ['unknown']);
+  assert.deepEqual(queried, []);
+  assert.equal((await invoke({}, { workspaceId: 'known' })).kind, 'not-git');
+  assert.deepEqual(queried, [{ path }]);
 });
 
 test('证据正文只经 read-evidence 通道从 main 读出', async () => {

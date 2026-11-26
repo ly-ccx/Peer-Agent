@@ -7,7 +7,7 @@ function owner(ownerName, register) {
   return Object.freeze({ owner: ownerName, register });
 }
 
-export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
+export function createProjectAgentIpcRegistrations({ projectAgent, readGitStatus } = {}) {
   const ports = {
     list: assertFunction(projectAgent?.list, 'projectAgent.list'),
     listAttention: assertFunction(projectAgent?.listAttention, 'projectAgent.listAttention'),
@@ -72,6 +72,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:read-input-image', (_event, payload) => ports.readInputImage(payload));
       ipc.handle('project-agent:stop-response', (_event, payload) => ports.stopResponse(payload));
       ipc.handle('project-agent:read-evidence', (_event, payload) => ports.readEvidence(payload));
+      if (readGitStatus) ipc.handle('project-agent:read-git-status', (_event, payload) => readGitStatus(payload));
       ipc.handle('project-agent:list-sessions', (_event, payload) => ports.listSessions(payload));
       ipc.handle('project-agent:get-session', (_event, payload) => ports.getSession(payload));
       ipc.handle('project-agent:cancel-session', (_event, payload) => ports.cancelSession(payload));

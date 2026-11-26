@@ -1158,6 +1158,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
   readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentStopResponse: (params: ProjectAgentStopResponseRequest) => Promise<ProjectAgentStopResponseResult>;
+  readonly projectAgentReadGitStatus: (params: { workspaceId: string }) => Promise<import('../../project-agent/gitStatusTypes').WorkPanelGitStatus>;
   readonly projectObjectivesList: (params: ProjectObjectiveListRequest) => Promise<ProjectObjectiveListResult>;
   readonly projectObjectivesUpdate: (params: ProjectObjectiveUpdateRequest) => Promise<ProjectObjectiveItemResult>;
   readonly projectObjectivesPause: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;
