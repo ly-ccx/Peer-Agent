@@ -40,6 +40,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly followUpEpoch?: number;
   readonly parentSessionId?: string;
   readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
   readonly planId?: string;
@@ -271,8 +272,10 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && Number.isSafeInteger(progress.observationCount) && progress.observationCount >= 0
     && Number.isFinite(Date.parse(progress.startedAt)) && Number.isFinite(Date.parse(progress.lastProgressAt))
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
+  const epoch = record.followUpEpoch;
   return {
     sessionId,
+    ...(typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch >= 0 ? { followUpEpoch: epoch } : {}),
     ...(readString(origin.parentSessionId) ? { parentSessionId: readString(origin.parentSessionId) } : {}),
     ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),
     sourceRevision: readString(record.sourceRevision),

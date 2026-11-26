@@ -14,15 +14,21 @@ use crate::{
     ObjectiveStore, ProjectError, ProjectInput, SessionSupervisor, ToolProjectionMode,
     TurnProjectionSignals, UserAnchorCandidate, atomic_write,
     circuit_breaker::{CircuitAdmit, CircuitBreakerStore},
+    context_delta::{SectionFingerprints, SessionContextTracker, read_context},
     coordination_work_id,
     interactive_provider::{WorkSessionInteractiveContext, WorkSessionInteractiveProvider},
     is_effective_memory, is_valid_workspace_id, memory_secret_reason, now_iso, parse_iso_ms,
-    provider::{ProjectCapabilityProvider, TurnExecutionState},
+    provider::{ProjectCapabilityProvider, TurnExecutionState, commit_composed_reply},
+    quiet_reply::{parse_quiet_reply, without_growing_quiet_marker},
     skill_packs::{
         ACTIVATE_SKILL_PACK_TOOL, auto_activated_packs, build_allowlist, ordered_definitions,
         render_unactivated_pack_catalog,
     },
-    system_context::{ProjectAgentContextInput, assemble_project_agent_context},
+    system_context::{ProjectAgentContextInput, assemble_project_agent_context_with_delta},
+    wake_envelope::{
+        WAKE_REPORT_READ_TIMEOUT_MS, build_event_only_wake_message, read_wake_envelope,
+        wake_event_session_id,
+    },
 };
 use peer_protocol::{
     UsageAmounts, UsagePurpose, build_compaction_marker, interactive_result::InteractiveOwner,
@@ -82,6 +88,7 @@ pub struct ProjectAgentActivity {
 pub enum TurnEndKind {
     ReplyCommitted { message_id: String },
     AwaitingChildren { session_ids: Vec<String> },
+    QuietSettled { reason: String },
     Yielded,
     UserStopped,
     CircuitOpen,
@@ -94,6 +101,19 @@ pub struct AgentTurnOutcome {
     pub end: TurnEndKind,
     pub spawned_session_ids: Vec<String>,
     pub tool_calls: usize,
+    pub(crate) failure_hold: Option<FailureHoldSignal>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FailureHoldSignal {
+    UsageLimit {
+        retry_after_seconds: Option<u64>,
+        last_error: String,
+    },
+    CircuitOpen {
+        open_until_ms: Option<i64>,
+    },
+    AuthRejected,
 }
 
 pub struct RunTurnOptions<'a> {
@@ -116,6 +136,7 @@ pub struct ProjectAgentRunner {
     supervisor: Arc<SessionSupervisor>,
     coordination: Arc<CoordinationHub>,
     breaker_store: CircuitBreakerStore,
+    context_tracker: SessionContextTracker,
     last_workspace_id: Mutex<Option<String>>,
     retry_delays_ms: Mutex<Vec<u64>>,
     projection_mode: Mutex<ToolProjectionMode>,
@@ -137,6 +158,7 @@ impl ProjectAgentRunner {
         let home = data_home.as_ref().to_path_buf();
         Self {
             breaker_store: CircuitBreakerStore::new(&home),
+            context_tracker: SessionContextTracker::default(),
             data_home: home,
             supervisor,
             coordination,
@@ -362,6 +384,21 @@ impl ProjectAgentRunner {
         cancel: &CancellationToken,
     ) -> TurnEndKind {
         let formatted = err.format_diagnostic();
+        if !cancel.is_cancelled() {
+            let signal = if err.code == ModelError::AUTH_REJECTED {
+                Some(FailureHoldSignal::AuthRejected)
+            } else if err.is_usage_limit() {
+                Some(FailureHoldSignal::UsageLimit {
+                    retry_after_seconds: err.retry_after_seconds,
+                    last_error: formatted.clone().unwrap_or_else(|| err.code.to_owned()),
+                })
+            } else {
+                None
+            };
+            if let Ok(mut hold) = ctx.failure_hold.lock() {
+                *hold = signal;
+            }
+        }
         self.record_turn_failure_with_detail(
             ctx,
             err.code,
@@ -474,6 +511,7 @@ struct TurnFailureCtx<'a> {
     turn_id: &'a str,
     provider_scope: &'a str,
     now_ms: i64,
+    failure_hold: Mutex<Option<FailureHoldSignal>>,
 }
 
 fn should_settle_quiet_wake_empty_response(
@@ -493,7 +531,7 @@ fn should_settle_quiet_wake_empty_response(
         matches!(
             ev["kind"].as_str(),
             Some("report_available" | "session_completed")
-        )
+        ) || (ev["kind"] == "session_ended" && ev["payload"]["status"] == "completed")
     })
 }
 
@@ -1245,80 +1283,193 @@ fn estimate_prompt_chars(system_prompt: &str, messages: &[Value]) -> usize {
     total
 }
 
-fn persist_fallback_reply(
-    conv_store: &ConversationStore,
-    conversation_id: &str,
-    turn_id: &str,
-    current_input_anchors: &[String],
-    text: &str,
-) -> Result<String, peer_store::StoreError> {
-    persist_fallback_reply_with_evidence(
-        conv_store,
-        conversation_id,
-        turn_id,
-        current_input_anchors,
-        text,
-        &[],
+enum NaturalReplyOutcome {
+    Committed(String),
+    QuietSettled,
+    NeedsRepair(&'static str),
+    NoReply,
+}
+
+fn unreported_wake_failures(
+    supervisor: &SessionSupervisor,
+    state: &TurnExecutionState,
+    wake_events: &[Value],
+) -> Vec<crate::WorkSessionSummary> {
+    let mut failure_ids = HashSet::new();
+    let mut interrupted_revisions = HashSet::new();
+    for event in wake_events {
+        let Some(id) = wake_event_session_id(event) else {
+            continue;
+        };
+        let status = if event["kind"] == "session_ended" {
+            event["payload"]["status"].as_str()
+        } else {
+            event["kind"].as_str()
+        };
+        if matches!(status, Some("failed" | "session_failed" | "interrupted")) {
+            failure_ids.insert(id);
+        }
+        // An interrupted plan can project as paused or queued. The terminal event is
+        // authoritative for that exact revision, even when that UI status differs.
+        if status == Some("interrupted")
+            && event["payload"]["initiatedBy"] != "user"
+            && let Some(at) = event["at"].as_str()
+        {
+            interrupted_revisions.insert((id, at));
+        }
+    }
+    if failure_ids.is_empty() && interrupted_revisions.is_empty() {
+        return Vec::new();
+    }
+    supervisor
+        .list_sessions(&state.workspace_id)
+        .into_iter()
+        .filter(|session| {
+            let id = &session.session_id;
+            ((failure_ids.contains(id.as_str()) && session.status == "failed")
+                || interrupted_revisions.contains(&(id.as_str(), session.updated_at.as_str())))
+                && !state.messaged_session_ids.contains(id)
+                && !state.cancelled_session_ids.contains(id)
+                && !state.prior_report_fact_keys.contains(&format!(
+                    "session:{id}:{}:{}",
+                    session.status, session.updated_at
+                ))
+        })
+        .collect()
+}
+
+fn commit_natural_reply(
+    data_home: &Path,
+    supervisor: &SessionSupervisor,
+    state: &mut TurnExecutionState,
+    raw_text: &str,
+    wake_events: &[Value],
+) -> Result<NaturalReplyOutcome, ProjectError> {
+    if state.reply_committed_id.is_some() || !state.waiting_session_ids.is_empty() {
+        return Ok(NaturalReplyOutcome::NoReply);
+    }
+    let clean = strip_literal_tool_call_blocks(raw_text);
+    let parsed = parse_quiet_reply(clean.trim());
+    if state.kind == "wake" && parsed.is_quiet {
+        return Ok(
+            if unreported_wake_failures(supervisor, state, wake_events).is_empty() {
+                NaturalReplyOutcome::QuietSettled
+            } else {
+                NaturalReplyOutcome::NoReply
+            },
+        );
+    }
+    let mut text = parsed.leading_text;
+    if state.kind == "user" && (parsed.is_pure_quiet || text.is_empty()) {
+        let has_work =
+            !state.spawned_session_ids.is_empty() || !state.messaged_session_ids.is_empty();
+        if !has_work && state.published_interactive_refs.is_empty() {
+            return Ok(NaturalReplyOutcome::NeedsRepair(
+                "This is a direct user message; NO_REPLY is only allowed on background wake turns. Please answer the user directly.",
+            ));
+        }
+        let user_text = state
+            .user_anchor_candidates
+            .iter()
+            .find(|candidate| state.current_input_anchors.contains(&candidate.message_id))
+            .map(|candidate| candidate.text.as_str())
+            .unwrap_or("");
+        let is_zh = user_text.chars().any(|ch| matches!(ch, '㐀'..='鿿'));
+        text = match (has_work, is_zh) {
+            (true, true) => "已安排后台处理，有结果我第一时间告诉你。",
+            (true, false) => "I’ve started working on this in the background and will share the result when it’s ready.",
+            (false, true) => "已为你整理好下方交互视图。",
+            (false, false) => "I’ve put together the interactive view below.",
+        }.to_owned();
+    }
+    if text.is_empty() {
+        return Ok(if state.post_reply_rejected {
+            NaturalReplyOutcome::NeedsRepair(
+                "Your previous structured reply was rejected. Use the tool diagnostics to correct it, or deliver your final reply directly in natural language.",
+            )
+        } else {
+            NaturalReplyOutcome::NoReply
+        });
+    }
+    let sources: Vec<_> = wake_events
+        .iter()
+        .filter_map(|event| {
+            let kind = event["kind"].as_str()?;
+            let relevant = matches!(
+                kind,
+                "report_available"
+                    | "stalled"
+                    | "needs_user"
+                    | "worker_question"
+                    | "result_ready"
+                    | "failed"
+                    | "session_failed"
+            ) || (kind == "session_ended"
+                && event["payload"]["status"] != "cancelled");
+            if relevant {
+                wake_event_session_id(event)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let turn_id = state.turn_id.clone();
+    let delivery = commit_composed_reply(
+        &json!({"text": text, "sources": sources}),
+        data_home,
+        supervisor,
+        state,
+        &turn_id,
+        true,
+        false,
+    )
+    .map_err(|failure| failure.err)?;
+    Ok(
+        if delivery["suppressed"] == true || delivery["queuedForDigest"] == true {
+            NaturalReplyOutcome::NoReply
+        } else {
+            NaturalReplyOutcome::Committed(text)
+        },
     )
 }
 
-fn persist_fallback_reply_with_evidence(
-    conv_store: &ConversationStore,
-    conversation_id: &str,
-    turn_id: &str,
-    current_input_anchors: &[String],
-    text: &str,
-    evidence_refs: &[String],
-) -> Result<String, peer_store::StoreError> {
-    let msg_id = format!("reply-{turn_id}");
-    let at = now_iso();
-    let mut meta = json!({
-        "replyTo": current_input_anchors,
-        "sources": [],
-        "memoryUsed": [],
-        "memoryLearned": [],
-        "surfacing": "message",
-    });
-    if !evidence_refs.is_empty() {
-        meta["evidenceRefs"] = json!(evidence_refs);
+fn commit_wake_failure_notice(
+    data_home: &Path,
+    supervisor: &SessionSupervisor,
+    state: &mut TurnExecutionState,
+    wake_events: &[Value],
+) -> Result<(), ProjectError> {
+    let failed = unreported_wake_failures(supervisor, state, wake_events);
+    if failed.is_empty() {
+        return Ok(());
     }
-    conv_store.append_message_idempotent(
-        conversation_id,
-        &json!({
-            "id": msg_id,
-            "role": "assistant",
-            "kind": "agent_reply",
-            "content": text,
-            "replyTo": current_input_anchors,
-            "sources": [],
-            "fallback": true,
-            "turnId": turn_id,
-            "createdAt": at,
-            "meta": meta,
-            "marks": [],
-        }),
-        &at,
-        None,
-    )?;
-    Ok(msg_id)
-}
-
-fn collect_turn_interactive_refs(state: &Arc<Mutex<TurnExecutionState>>) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    if let Ok(st) = state.lock() {
-        for r in st.published_interactive_refs.iter().rev() {
-            if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX)
-                && seen.insert(r.clone())
-            {
-                out.push(r.clone());
-                if out.len() >= 20 {
-                    break;
-                }
-            }
-        }
+    let mut details = Vec::new();
+    let mut sources = Vec::new();
+    for summary in failed {
+        let reason = supervisor
+            .read_report(&state.workspace_id, &summary.session_id)
+            .ok()
+            .and_then(|report| report.failure_detail.or(report.failure_code))
+            .filter(|detail| memory_secret_reason(detail).is_none())
+            .unwrap_or_else(|| "执行异常中断".to_owned());
+        let title: String = summary.title.chars().take(200).collect();
+        let reason: String = reason.chars().take(240).collect();
+        details.push(format!("- 「{title}」：{reason}"));
+        sources.push(summary.session_id);
     }
-    out
+    let text = format!("以下任务没能顺利跑完：\n{}", details.join("\n"));
+    let id = format!("wake-fallback-{}", state.turn_id);
+    commit_composed_reply(
+        &json!({"text": text, "sources": sources, "proactive": true}),
+        data_home,
+        supervisor,
+        state,
+        &id,
+        true,
+        true,
+    )
+    .map_err(|failure| failure.err)?;
+    Ok(())
 }
 
 fn push_public_update(updates: &mut Vec<Value>, total_chars: &mut usize, text: &str) {
@@ -1365,6 +1516,7 @@ impl ProjectAgentRunner {
         live: &LiveHistory,
         accounting: &mut RuntimeUsageAccounting,
         cancel: &CancellationToken,
+        context: (&str, u64, &SectionFingerprints),
     ) -> Result<ModelTurn, ModelError> {
         let delays = self
             .retry_delays_ms
@@ -1376,8 +1528,7 @@ impl ProjectAgentRunner {
             if cancel.is_cancelled() {
                 return Err(ModelError::new("CANCELLED"));
             }
-            let stream_state = Arc::new(Mutex::new((String::new(), false)));
-            let stream_text_to_activity = tools_json.as_array().is_none_or(|a| a.is_empty());
+            let stream_state = Mutex::new(Some(String::new()));
             let result = model
                 .turn_with_materialized_history_and_deltas(
                     &self.data_home,
@@ -1388,48 +1539,45 @@ impl ProjectAgentRunner {
                     live,
                     cancel,
                     async |delta| {
-                        match delta {
-                            ModelDelta::Thinking(_) => {
-                                self.set_activity_phase(workspace_id, "thinking", None, false);
-                            }
-                            ModelDelta::Text(chunk) => {
-                                if !stream_text_to_activity {
-                                    // Dual-channel isolation: companion prose emitted during
-                                    // tool-enabled rounds is internal scratchpad, never streamed
-                                    // into the user-facing reply bubble.
-                                    self.set_activity_phase(workspace_id, "thinking", None, false);
-                                } else if !chunk.is_empty()
-                                    && let Ok(mut state) = stream_state.lock()
-                                {
-                                    let avail = MAX_STREAM_TEXT_BYTES.saturating_sub(state.0.len());
-                                    if avail > 0 {
-                                        state.0.push_str(clip_utf8_bytes(chunk, avail));
-                                    }
-                                    if !state.1 && has_literal_tool_call_syntax(&state.0) {
-                                        state.1 = true;
-                                        let clean = strip_literal_tool_call_blocks(&state.0);
-                                        if clean.is_empty() {
+                        if let Ok(mut state) = stream_state.lock() {
+                            match delta {
+                                ModelDelta::Thinking(_) => {}
+                                ModelDelta::ToolIntent => {
+                                    // Retract the uncommitted preview. Structured calls
+                                    // are admitted and displayed by the tool host.
+                                    *state = None;
+                                    self.set_activity_phase(
+                                        workspace_id,
+                                        "thinking",
+                                        Some(""),
+                                        false,
+                                    );
+                                }
+                                ModelDelta::Text(chunk) => {
+                                    if let Some(raw) = state.as_mut() {
+                                        let available =
+                                            MAX_STREAM_TEXT_BYTES.saturating_sub(raw.len());
+                                        raw.push_str(clip_utf8_bytes(chunk, available));
+                                        if has_literal_tool_call_syntax(raw) {
+                                            *state = None;
                                             self.set_activity_phase(
                                                 workspace_id,
                                                 "thinking",
                                                 Some(""),
                                                 false,
                                             );
-                                        } else {
-                                            self.set_activity_phase(
-                                                workspace_id,
-                                                "responding",
-                                                Some(&clean),
-                                                false,
-                                            );
+                                        } else if !has_partial_tool_call_prefix(raw) {
+                                            let visible = without_growing_quiet_marker(raw);
+                                            let visible = parse_quiet_reply(visible).leading_text;
+                                            if !visible.trim().is_empty() {
+                                                self.set_activity_phase(
+                                                    workspace_id,
+                                                    "responding",
+                                                    Some(&visible),
+                                                    false,
+                                                );
+                                            }
                                         }
-                                    } else if !state.1 && !has_partial_tool_call_prefix(&state.0) {
-                                        self.set_activity_phase(
-                                            workspace_id,
-                                            "responding",
-                                            Some(&state.0),
-                                            false,
-                                        );
                                     }
                                 }
                             }
@@ -1440,7 +1588,12 @@ impl ProjectAgentRunner {
                 .await;
             record_attempt_usage(accounting, &result, true);
             match result {
-                Ok(turn) => return Ok(turn),
+                Ok(turn) => {
+                    self.context_tracker
+                        .commit(context.0, context.1, context.2.clone());
+                    return Ok(turn);
+                }
+                Err(err) if err.is_usage_limit() => return Err(err),
                 Err(err) => {
                     let delay = match policy.next_delay(&err) {
                         Ok(Some(d)) => d,
@@ -1645,12 +1798,15 @@ impl ProjectAgentRunner {
             Some(&provider_scope),
             now_ms,
         ) {
-            Ok(CircuitAdmit::Blocked { .. }) => {
+            Ok(CircuitAdmit::Blocked { open_until }) => {
                 return Ok(AgentTurnOutcome {
                     turn_id,
                     end: TurnEndKind::CircuitOpen,
                     spawned_session_ids: vec![],
                     tool_calls: 0,
+                    failure_hold: Some(FailureHoldSignal::CircuitOpen {
+                        open_until_ms: open_until.as_deref().and_then(parse_iso_ms),
+                    }),
                 });
             }
             Ok(CircuitAdmit::Admitted { trial }) => trial,
@@ -1820,7 +1976,11 @@ impl ProjectAgentRunner {
             )
         };
 
-        let sessions = self.supervisor.list_sessions(opts.workspace_id);
+        let supervisor = Arc::clone(&self.supervisor);
+        let workspace = opts.workspace_id.to_owned();
+        let sessions = read_context("roster", move || supervisor.list_sessions(&workspace))
+            .await
+            .unwrap_or_default();
         let unanswered_wake_anchors: Vec<String> = if opts.kind == "wake" {
             let wake_sids: HashSet<&str> = opts
                 .wake_events
@@ -1888,20 +2048,6 @@ impl ProjectAgentRunner {
             .map(|p| p.effective_communication_style(&global_communication_style))
             .unwrap_or(global_communication_style.as_str());
         let memory_enabled = profile.as_ref().is_none_or(|p| p.is_memory_enabled());
-        let memories = if memory_enabled {
-            MemoryStore::new(&self.data_home)
-                .list(&MemoryFilter {
-                    scope: None,
-                    workspace_id: Some(opts.workspace_id),
-                    kind: None,
-                    status: Some("active"),
-                })
-                .into_iter()
-                .filter(|m| is_effective_memory(m, now_ms))
-                .collect()
-        } else {
-            Vec::new()
-        };
         let mut unreported_anchor_sessions = Vec::new();
         for s in &sessions {
             if s.status == "result_ready" && !reported_session_ids.contains(&s.session_id) {
@@ -1910,9 +2056,6 @@ impl ProjectAgentRunner {
                 }
             }
         }
-        let objectives = ObjectiveStore::new(&self.data_home)
-            .list(opts.workspace_id)
-            .unwrap_or_default();
         let instructions = ProjectInstructions::observe_desktop_host(
             opts.workspace_path,
             &self.data_home,
@@ -1928,7 +2071,7 @@ impl ProjectAgentRunner {
             Some(&turn_id),
         );
 
-        let (working_context, agent_messages) = if coord_active {
+        if coord_active {
             let _ = self.coordination.ensure_work(
                 opts.workspace_id,
                 &work_id,
@@ -1937,83 +2080,158 @@ impl ProjectAgentRunner {
                 &[],
                 "runnable",
             );
-            let wc = self.coordination.read_working_context(
-                opts.workspace_id,
-                &work_id,
-                opts.conversation_id,
-            );
-            let msgs = self
-                .coordination
-                .read_agent_messages_for_context(opts.workspace_id, opts.conversation_id);
-            let obs_ids: Vec<String> = msgs
-                .iter()
-                .filter_map(|m| m["messageId"].as_str().map(str::to_owned))
-                .collect();
-            let _ = self.coordination.mark_agent_messages_observed(
-                opts.workspace_id,
-                opts.conversation_id,
-                &obs_ids,
-            );
-            (wc, msgs)
-        } else {
-            (None, Vec::new())
+        }
+        let (memories, objectives, working_context, agent_messages, mounted_capabilities_summary) = tokio::join!(
+            read_context("memories", {
+                let home = self.data_home.clone();
+                let workspace = opts.workspace_id.to_owned();
+                move || {
+                    if memory_enabled {
+                        MemoryStore::new(&home)
+                            .list(&MemoryFilter {
+                                scope: None,
+                                workspace_id: Some(&workspace),
+                                kind: None,
+                                status: Some("active"),
+                            })
+                            .into_iter()
+                            .filter(|m| is_effective_memory(m, now_ms))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                }
+            }),
+            read_context("objectives", {
+                let home = self.data_home.clone();
+                let workspace = opts.workspace_id.to_owned();
+                move || ObjectiveStore::new(&home).list(&workspace)
+            }),
+            read_context("working_context", {
+                let coordination = Arc::clone(&self.coordination);
+                let workspace = opts.workspace_id.to_owned();
+                let conversation = opts.conversation_id.to_owned();
+                let work = work_id.clone();
+                move || {
+                    if coord_active {
+                        coordination.read_working_context(&workspace, &work, &conversation)
+                    } else {
+                        None
+                    }
+                }
+            }),
+            read_context("agent_messages", {
+                let coordination = Arc::clone(&self.coordination);
+                let workspace = opts.workspace_id.to_owned();
+                let conversation = opts.conversation_id.to_owned();
+                move || {
+                    if coord_active {
+                        coordination.read_agent_messages_for_context(&workspace, &conversation)
+                    } else {
+                        Vec::new()
+                    }
+                }
+            }),
+            read_context("mounted_capabilities", {
+                let home = self.data_home.clone();
+                let workspace = opts.workspace_path.to_path_buf();
+                let policy = profile.as_ref().and_then(|p| p.capability_policy.clone());
+                move || {
+                    crate::render_bot_mounted_capabilities_summary(
+                        &home,
+                        &workspace,
+                        policy.as_ref(),
+                    )
+                }
+            }),
+        );
+        let memories = memories.unwrap_or_default();
+        let objectives = match objectives {
+            Some(Ok(items)) => items,
+            Some(Err(error)) => {
+                eprintln!(
+                    "project-agent context read degraded: objectives ({})",
+                    error.code
+                );
+                Vec::new()
+            }
+            None => Vec::new(),
         };
+        let working_context = working_context.flatten();
+        let agent_messages = agent_messages.unwrap_or_default();
+        let mounted_capabilities_summary = mounted_capabilities_summary.flatten();
 
         let projection_mode = self.projection_mode();
-        let initial_packs: Vec<String> = if projection_mode == ToolProjectionMode::Progressive {
-            let has_obligations =
-                crate::read_persisted_obligation_grants(&self.data_home, opts.workspace_id)
-                    .is_ok_and(|grants| !grants.is_empty())
-                    || peer_store::ExecutionResourceStore::open_existing(&self.data_home)
-                        .ok()
-                        .is_some_and(|rstore| {
-                            sessions.iter().any(|s| {
-                                self.supervisor
-                                    .read_plan(&s.plan_id)
-                                    .ok()
-                                    .and_then(|plan| crate::host_resource_plan_from_plan(&plan))
-                                    .is_some_and(|hp| {
-                                        !rstore.claims_for(&hp).unwrap_or_default().is_empty()
-                                            || !rstore
-                                                .retained_unknowns(&hp)
-                                                .unwrap_or_default()
-                                                .is_empty()
-                                    })
-                            })
-                        });
-            let interactive_publishing_available =
-                self.supervisor.is_interactive_publishing_available();
-            let has_interactive_results = interactive_publishing_available
-                || InteractiveResultStore::new(&self.data_home)
-                    .list_for_owner(&peer_protocol::interactive_result::InteractiveOwner {
-                        workspace_id: opts.workspace_id.to_owned(),
-                        conversation_id: opts.conversation_id.to_owned(),
-                    })
-                    .is_ok_and(|items| !items.is_empty());
+        let (initial_packs, skill_pack_catalog) = if projection_mode
+            == ToolProjectionMode::Progressive
+        {
             let has_working_context = working_context.as_ref().is_some_and(|wc| {
                 wc["notes"].as_array().is_some_and(|a| !a.is_empty())
                     || wc["windows"].as_array().is_some_and(|a| !a.is_empty())
             });
-            auto_activated_packs(&TurnProjectionSignals {
+            let known_signals = TurnProjectionSignals {
                 has_sessions: !sessions.is_empty(),
                 has_objectives: !objectives.is_empty(),
-                has_obligations,
-                has_interactive_results,
+                has_obligations: false,
+                has_interactive_results: false,
                 has_working_context,
+            };
+            let fallback = auto_activated_packs(&known_signals);
+            read_context("skill_packs", {
+                let home = self.data_home.clone();
+                let supervisor = Arc::clone(&self.supervisor);
+                let owner = peer_protocol::interactive_result::InteractiveOwner {
+                    workspace_id: opts.workspace_id.to_owned(),
+                    conversation_id: opts.conversation_id.to_owned(),
+                };
+                let plan_ids: Vec<_> = sessions.iter().map(|s| s.plan_id.clone()).collect();
+                move || {
+                    let has_obligations =
+                        crate::read_persisted_obligation_grants(&home, &owner.workspace_id)
+                            .is_ok_and(|grants| !grants.is_empty())
+                            || peer_store::ExecutionResourceStore::open_existing(&home)
+                                .ok()
+                                .is_some_and(|rstore| {
+                                    plan_ids.iter().any(|plan_id| {
+                                        supervisor
+                                            .read_plan(plan_id)
+                                            .ok()
+                                            .and_then(|plan| {
+                                                crate::host_resource_plan_from_plan(&plan)
+                                            })
+                                            .is_some_and(|hp| {
+                                                !rstore
+                                                    .claims_for(&hp)
+                                                    .unwrap_or_default()
+                                                    .is_empty()
+                                                    || !rstore
+                                                        .retained_unknowns(&hp)
+                                                        .unwrap_or_default()
+                                                        .is_empty()
+                                            })
+                                    })
+                                });
+                    let has_interactive_results = supervisor.is_interactive_publishing_available()
+                        || InteractiveResultStore::new(&home)
+                            .list_for_owner(&owner)
+                            .is_ok_and(|items| !items.is_empty());
+                    let initial = auto_activated_packs(&TurnProjectionSignals {
+                        has_obligations,
+                        has_interactive_results,
+                        ..known_signals
+                    });
+                    let catalog = render_unactivated_pack_catalog(&initial);
+                    (initial, catalog)
+                }
+            })
+            .await
+            .unwrap_or_else(|| {
+                let catalog = render_unactivated_pack_catalog(&fallback);
+                (fallback, catalog)
             })
         } else {
-            Vec::new()
+            (Vec::new(), None)
         };
-        let skill_pack_catalog = if projection_mode == ToolProjectionMode::Progressive {
-            render_unactivated_pack_catalog(&initial_packs)
-        } else {
-            None
-        };
-        let mounted_capabilities_summary = crate::render_bot_mounted_capabilities_summary(
-            &self.data_home,
-            opts.workspace_path,
-            profile.as_ref().and_then(|p| p.capability_policy.as_ref()),
-        );
 
         let LoadedBotHistory {
             mut continuity_summary,
@@ -2077,22 +2295,41 @@ impl ProjectAgentRunner {
             }
         }
 
+        let mut wake_report_read_degraded = false;
+        let mut wake_reports = HashMap::new();
         if opts.kind == "wake" || (live_messages.is_empty() && opts.user_inputs.is_empty()) {
             let wake_text = if opts.wake_events.is_empty() {
-                "Review current project status and respond via post_reply or wait_for_sessions."
+                "Review current project status. Reply naturally if the user needs an update, or output NO_REPLY for a quiet wake."
                     .to_owned()
             } else {
-                format!(
-                    "Process {} project wake event(s). Inspect updated reports, verify results, and respond via post_reply or wait_for_sessions.",
-                    opts.wake_events.len()
+                let supervisor = Arc::clone(&self.supervisor);
+                let workspace_id = opts.workspace_id.to_owned();
+                let events = opts.wake_events.to_vec();
+                let reader = tokio::task::spawn_blocking(move || {
+                    read_wake_envelope(&supervisor, &workspace_id, &events)
+                });
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(WAKE_REPORT_READ_TIMEOUT_MS),
+                    reader,
                 )
+                .await
+                {
+                    Ok(Ok(envelope)) => {
+                        wake_reports = envelope.reports;
+                        envelope.message
+                    }
+                    _ => {
+                        wake_report_read_degraded = true;
+                        build_event_only_wake_message(opts.wake_events)
+                    }
+                }
             };
             live_messages.push(json!({"role": "user", "content": wake_text}));
             committed_message_ids.push(None);
         } else if live_messages.last().and_then(|m| m["role"].as_str()) == Some("assistant") {
             live_messages.push(json!({
                 "role": "user",
-                "content": "Continue and respond to the pending user request via post_reply or wait_for_sessions.",
+                "content": "Continue and reply naturally to the pending user request.",
             }));
             committed_message_ids.push(None);
         }
@@ -2108,33 +2345,44 @@ impl ProjectAgentRunner {
         let interactive_catalog_prompt = interactive_bridge
             .as_ref()
             .and_then(|bridge| bridge.catalog_prompt());
-        let build_system_prompt = |continuity: Option<&str>| {
-            assemble_project_agent_context(&ProjectAgentContextInput {
-                workspace_id: opts.workspace_id,
-                workspace_path: &opts.workspace_path.to_string_lossy(),
-                bot_name,
-                communication_style,
-                provider: model.provider(),
-                model: model.model_id(),
-                turn_kind: opts.kind,
-                instructions: &instructions,
-                memories: &memories,
-                sessions: &sessions,
-                objectives: &objectives,
-                current_input_anchors: &current_input_anchors,
-                wake_events: opts.wake_events,
-                continuity_summary: continuity,
-                retry_continuity: retry_continuity.as_ref(),
-                working_context: working_context.as_ref(),
-                agent_messages: &agent_messages,
-                skill_pack_catalog: skill_pack_catalog.as_deref(),
-                mounted_capabilities_summary: mounted_capabilities_summary.as_deref(),
-                host_surface,
-                interactive_publishing_available,
-                interactive_catalog_prompt: interactive_catalog_prompt.as_deref(),
-            })
+        let context_id = format!(
+            "{}:{}:{}",
+            opts.conversation_id,
+            model.provider(),
+            model.model_id()
+        );
+        let build_system_prompt = |continuity: Option<&str>, epoch| {
+            let prior = self.context_tracker.prior(&context_id, epoch);
+            assemble_project_agent_context_with_delta(
+                &ProjectAgentContextInput {
+                    workspace_id: opts.workspace_id,
+                    workspace_path: &opts.workspace_path.to_string_lossy(),
+                    bot_name,
+                    communication_style,
+                    provider: model.provider(),
+                    model: model.model_id(),
+                    turn_kind: opts.kind,
+                    instructions: &instructions,
+                    memories: &memories,
+                    sessions: &sessions,
+                    objectives: &objectives,
+                    current_input_anchors: &current_input_anchors,
+                    wake_events: opts.wake_events,
+                    continuity_summary: continuity,
+                    retry_continuity: retry_continuity.as_ref(),
+                    working_context: working_context.as_ref(),
+                    agent_messages: &agent_messages,
+                    skill_pack_catalog: skill_pack_catalog.as_deref(),
+                    mounted_capabilities_summary: mounted_capabilities_summary.as_deref(),
+                    host_surface,
+                    interactive_publishing_available,
+                    interactive_catalog_prompt: interactive_catalog_prompt.as_deref(),
+                },
+                &prior,
+            )
         };
-        let mut system_prompt = build_system_prompt(continuity_summary.as_deref());
+        let (mut system_prompt, mut fingerprints) =
+            build_system_prompt(continuity_summary.as_deref(), compaction_epoch);
 
         let turn_state = Arc::new(Mutex::new(TurnExecutionState {
             workspace_id: opts.workspace_id.to_owned(),
@@ -2156,6 +2404,9 @@ impl ProjectAgentRunner {
             work_id: work_id.clone(),
             waiting_session_ids: vec![],
             spawned_session_ids: vec![],
+            messaged_session_ids: vec![],
+            cancelled_session_ids: vec![],
+            wake_reports: Arc::new(wake_reports),
             published_interactive_refs: vec![],
             activated_packs: initial_packs.clone(),
             memory_learned: vec![],
@@ -2256,7 +2507,8 @@ impl ProjectAgentRunner {
             {
                 continuity_summary = Some(done.summary);
                 compaction_epoch = done.compaction_epoch;
-                system_prompt = build_system_prompt(continuity_summary.as_deref());
+                (system_prompt, fingerprints) =
+                    build_system_prompt(continuity_summary.as_deref(), compaction_epoch);
                 compacted_this_turn = true;
             }
         }
@@ -2268,8 +2520,13 @@ impl ProjectAgentRunner {
             turn_id: &turn_id,
             provider_scope: &provider_scope,
             now_ms,
+            failure_hold: Mutex::new(None),
         };
 
+        let mut unobserved_agent_messages: Vec<_> = agent_messages
+            .iter()
+            .filter_map(|message| message["messageId"].as_str().map(str::to_owned))
+            .collect();
         let mut delivery_repair_used = false;
         let mut protocol_repair_attempts = 0usize;
         let mut round = 0usize;
@@ -2289,14 +2546,14 @@ impl ProjectAgentRunner {
             fn round_prompt_for(base: &str, near_cutoff: bool) -> std::borrow::Cow<'_, str> {
                 if near_cutoff {
                     std::borrow::Cow::Owned(format!(
-                        "{base}\n\nFINAL TOOL ROUND NOTICE:\nThis is your last tool round for this turn. Do NOT start further exploratory reads. If you need to delegate work, call `spawn_session` now, and deliver your reply via `post_reply` (or call `wait_for_sessions` if active child sessions remain)."
+                        "{base}\n\nFINAL TOOL ROUND NOTICE:\nThis is your last tool round for this turn. Do NOT start further exploratory reads. If you need to delegate work, call `spawn_session` now. Deliver your final reply directly in natural language, or output NO_REPLY for a quiet background wake."
                     ))
                 } else {
                     std::borrow::Cow::Borrowed(base)
                 }
             }
             let round_system_prompt = round_prompt_for(&system_prompt, near_cutoff);
-            let mut model_turn = match self
+            let model_turn = match self
                 .call_model_with_retry(
                     model,
                     opts.workspace_id,
@@ -2307,10 +2564,11 @@ impl ProjectAgentRunner {
                     &live,
                     &mut accounting,
                     cancel,
+                    (&context_id, compaction_epoch, &fingerprints),
                 )
                 .await
             {
-                Ok(t) => t,
+                Ok(t) => Some(t),
                 Err(err)
                     if err.context_overflow_status.is_some()
                         && !compacted_this_turn
@@ -2334,7 +2592,10 @@ impl ProjectAgentRunner {
                         Ok(Some(done)) => {
                             continuity_summary = Some(done.summary);
                             compaction_epoch = done.compaction_epoch;
-                            system_prompt = build_system_prompt(continuity_summary.as_deref());
+                            (system_prompt, fingerprints) = build_system_prompt(
+                                continuity_summary.as_deref(),
+                                compaction_epoch,
+                            );
                             let retry_system_prompt = round_prompt_for(&system_prompt, near_cutoff);
                             live = LiveHistory::default();
                             match self
@@ -2348,10 +2609,11 @@ impl ProjectAgentRunner {
                                     &live,
                                     &mut accounting,
                                     cancel,
+                                    (&context_id, compaction_epoch, &fingerprints),
                                 )
                                 .await
                             {
-                                Ok(t) => t,
+                                Ok(t) => Some(t),
                                 Err(retry_err) => {
                                     trial_in_flight = false;
                                     final_end = self.record_model_turn_failure(
@@ -2376,6 +2638,7 @@ impl ProjectAgentRunner {
                         }
                     }
                 }
+                Err(err) if err.code == "model_empty_response" && opts.kind == "user" => None,
                 Err(err)
                     if should_settle_quiet_wake_empty_response(
                         opts.kind,
@@ -2399,129 +2662,101 @@ impl ProjectAgentRunner {
                 }
             };
 
-            let leaked_protocol = has_literal_tool_call_syntax(&model_turn.content);
-            // Dual-channel isolation: only non-tool rounds emit user-visible prose updates.
-            // Companion text emitted alongside tool calls stays in `rounds_record` for diagnostics
-            // so internal scratchpad monologues never leak into the chat or process summary.
-            if model_turn.calls.is_empty() && !leaked_protocol {
-                push_public_update(
-                    &mut public_updates,
-                    &mut public_update_chars,
-                    &model_turn.content,
-                );
+            if model_turn.is_some()
+                && !unobserved_agent_messages.is_empty()
+                && self
+                    .coordination
+                    .mark_agent_messages_observed(
+                        opts.workspace_id,
+                        opts.conversation_id,
+                        &unobserved_agent_messages,
+                    )
+                    .is_ok()
+            {
+                unobserved_agent_messages.clear();
             }
+            let content = model_turn.as_ref().map_or("", |turn| turn.content.as_str());
+            let leaked_protocol = has_literal_tool_call_syntax(content);
             if cancel.is_cancelled() {
                 rounds_record.push(json!({
-                    "text": model_turn.content,
+                    "text": content,
                     "toolCalls": [],
                 }));
                 final_end = TurnEndKind::UserStopped;
                 break;
             }
 
-            if model_turn.calls.is_empty() {
+            if model_turn.as_ref().is_none_or(|turn| turn.calls.is_empty()) {
                 rounds_record.push(json!({
-                    "text": model_turn.content,
+                    "text": content,
                     "toolCalls": [],
                 }));
-                if leaked_protocol {
-                    if protocol_repair_attempts < 2 && !cancel.is_cancelled() {
-                        protocol_repair_attempts += 1;
-                        self.set_activity_phase(opts.workspace_id, "thinking", Some(""), false);
-                        live_messages.push(json!({
-                            "role": "user",
-                            "content": "Your previous response emitted raw tool-call markup (such as DSML or XML tags) in plain text instead of structured tool calls. Do NOT output <｜DSML｜...>, <|DSML|...>, <tool_call>, <function_calls>, <invoke>, or <parameter> tags in text. Either invoke tools using the native structured tool-calling interface (including post_reply for your final answer), or reply directly in plain prose.",
-                        }));
-                        committed_message_ids.push(None);
-                        round = round.saturating_sub(1);
-                        continue;
-                    }
-                    let clean = strip_literal_tool_call_blocks(&model_turn.content);
-                    if opts.kind == "user" && !clean.is_empty() {
-                        push_public_update(&mut public_updates, &mut public_update_chars, &clean);
-                        let fallback_ev = collect_turn_interactive_refs(&turn_state);
-                        match persist_fallback_reply_with_evidence(
-                            &conv_store,
-                            opts.conversation_id,
-                            &turn_id,
-                            &current_input_anchors,
-                            &clean,
-                            &fallback_ev,
-                        ) {
-                            Ok(msg_id) => {
-                                final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
-                            }
-                            Err(err) => {
-                                trial_in_flight = false;
-                                final_end =
-                                    self.record_turn_failure(&failure_ctx, err.code(), cancel);
-                            }
-                        }
-                    } else if opts.kind == "user" {
-                        trial_in_flight = false;
-                        final_end = self.record_turn_failure(
-                            &failure_ctx,
-                            "unsupported_tool_response",
-                            cancel,
-                        );
-                    }
-                    break;
-                }
-                let (post_rejected, committed_or_waiting) = turn_state
-                    .lock()
-                    .map(|s| {
-                        (
-                            s.post_reply_rejected,
-                            s.reply_committed_id.is_some() || !s.waiting_session_ids.is_empty(),
-                        )
-                    })
-                    .unwrap_or((false, false));
-                if !committed_or_waiting
-                    && !delivery_repair_used
-                    && !cancel.is_cancelled()
-                    && (opts.kind == "wake" || post_rejected)
-                {
-                    delivery_repair_used = true;
-                    let sanitized =
-                        peer_runtime::canonical_history::sanitize_assistant(&model_turn.content);
-                    let trimmed = peer_protocol::javascript_trim(&sanitized);
-                    if !trimmed.is_empty() {
-                        live_messages.push(json!({
-                            "role": "assistant",
-                            "content": trimmed,
-                        }));
-                        committed_message_ids.push(None);
-                    }
+                if leaked_protocol && protocol_repair_attempts < 2 {
+                    protocol_repair_attempts += 1;
+                    self.set_activity_phase(opts.workspace_id, "thinking", Some(""), false);
                     live_messages.push(json!({
-                        "role": "user",
-                        "content": "No final reply or session wait has been committed (or your previous post_reply was rejected). Fix any validation error using the tool diagnostics and call post_reply (or wait_for_sessions if active child sessions remain).",
-                    }));
+                            "role": "user",
+                            "content": "Your previous response emitted raw tool-call markup (such as DSML or XML tags) in plain text instead of structured tool calls. Do NOT output <｜DSML｜...>, <|DSML|...>, <tool_call>, <function_calls>, <invoke>, or <parameter> tags in text. Either invoke tools using the native structured tool-calling interface, or reply directly in plain prose.",
+                        }));
                     committed_message_ids.push(None);
                     round = round.saturating_sub(1);
                     continue;
                 }
-                if opts.kind == "user" && !model_turn.content.trim().is_empty() {
-                    let fallback_ev = collect_turn_interactive_refs(&turn_state);
-                    match persist_fallback_reply_with_evidence(
-                        &conv_store,
-                        opts.conversation_id,
-                        &turn_id,
-                        &current_input_anchors,
-                        model_turn.content.trim(),
-                        &fallback_ev,
-                    ) {
-                        Ok(msg_id) => {
-                            final_end = TurnEndKind::ReplyCommitted { message_id: msg_id };
-                        }
-                        Err(err) => {
-                            trial_in_flight = false;
-                            final_end = self.record_turn_failure(&failure_ctx, err.code(), cancel);
-                        }
+                if leaked_protocol
+                    && opts.kind == "user"
+                    && strip_literal_tool_call_blocks(content).trim().is_empty()
+                {
+                    trial_in_flight = false;
+                    final_end =
+                        self.record_turn_failure(&failure_ctx, "unsupported_tool_response", cancel);
+                    break;
+                }
+                let delivery = match turn_state.lock() {
+                    Ok(mut state) => commit_natural_reply(
+                        &self.data_home,
+                        &self.supervisor,
+                        &mut state,
+                        content,
+                        opts.wake_events,
+                    ),
+                    Err(_) => Err(ProjectError::code("turn_state_unavailable")),
+                };
+                match delivery {
+                    Ok(NaturalReplyOutcome::Committed(text)) => {
+                        push_public_update(&mut public_updates, &mut public_update_chars, &text);
+                    }
+                    Ok(NaturalReplyOutcome::QuietSettled) => {
+                        final_end = TurnEndKind::QuietSettled {
+                            reason: "no_reply_marker".into(),
+                        };
+                    }
+                    Ok(NaturalReplyOutcome::NeedsRepair(instruction)) if !delivery_repair_used => {
+                        delivery_repair_used = true;
+                        self.set_activity_phase(opts.workspace_id, "thinking", Some(""), false);
+                        live_messages.push(json!({"role": "user", "content": instruction}));
+                        committed_message_ids.push(None);
+                        round = round.saturating_sub(1);
+                        continue;
+                    }
+                    Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
+                        trial_in_flight = false;
+                        let code = if leaked_protocol {
+                            "unsupported_tool_response"
+                        } else {
+                            "empty_model_response"
+                        };
+                        final_end = self.record_turn_failure(&failure_ctx, code, cancel);
+                    }
+                    Ok(NaturalReplyOutcome::NoReply) => {}
+                    Err(err) => {
+                        trial_in_flight = false;
+                        final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
                     }
                 }
                 break;
             }
 
+            let mut model_turn = model_turn.expect("nonempty tool calls require a model turn");
             let mut assistant_tool_calls = Vec::new();
             let mut tool_results = Vec::new();
             let mut round_tool_records = Vec::new();
@@ -2712,30 +2947,6 @@ impl ProjectAgentRunner {
             if stop_loop {
                 break;
             }
-            if round >= max_rounds {
-                let (post_rejected, committed_or_waiting) = turn_state
-                    .lock()
-                    .map(|s| {
-                        (
-                            s.post_reply_rejected,
-                            s.reply_committed_id.is_some() || !s.waiting_session_ids.is_empty(),
-                        )
-                    })
-                    .unwrap_or((false, false));
-                if !committed_or_waiting
-                    && !delivery_repair_used
-                    && !cancel.is_cancelled()
-                    && (opts.kind == "wake" || post_rejected)
-                {
-                    delivery_repair_used = true;
-                    live_messages.push(json!({
-                        "role": "user",
-                        "content": "No final reply or session wait has been committed (or your previous post_reply was rejected). Fix any validation error using the tool diagnostics and call post_reply (or wait_for_sessions if active child sessions remain).",
-                    }));
-                    committed_message_ids.push(None);
-                    round = round.saturating_sub(1);
-                }
-            }
         }
 
         let needs_synthesis = opts.kind == "user"
@@ -2744,6 +2955,7 @@ impl ProjectAgentRunner {
                 final_end,
                 TurnEndKind::ReplyCommitted { .. }
                     | TurnEndKind::AwaitingChildren { .. }
+                    | TurnEndKind::QuietSettled { .. }
                     | TurnEndKind::UserStopped
                     | TurnEndKind::Failed { .. }
                     | TurnEndKind::CircuitOpen
@@ -2773,6 +2985,7 @@ impl ProjectAgentRunner {
                     &live,
                     &mut accounting,
                     cancel,
+                    (&context_id, compaction_epoch, &fingerprints),
                 )
                 .await
             {
@@ -2801,6 +3014,7 @@ impl ProjectAgentRunner {
                             &no_live,
                             &mut accounting,
                             cancel,
+                            (&context_id, compaction_epoch, &fingerprints),
                         )
                         .await
                     } else {
@@ -2812,45 +3026,40 @@ impl ProjectAgentRunner {
                                 "text": t.content,
                                 "toolCalls": [],
                             }));
-                            let leaked = has_literal_tool_call_syntax(&t.content);
-                            let final_text = if leaked {
-                                strip_literal_tool_call_blocks(&t.content)
-                            } else {
-                                t.content.trim().to_owned()
+                            let delivery = match turn_state.lock() {
+                                Ok(mut state) => commit_natural_reply(
+                                    &self.data_home,
+                                    &self.supervisor,
+                                    &mut state,
+                                    &t.content,
+                                    opts.wake_events,
+                                ),
+                                Err(_) => Err(ProjectError::code("turn_state_unavailable")),
                             };
-                            if !final_text.is_empty() {
-                                push_public_update(
-                                    &mut public_updates,
-                                    &mut public_update_chars,
-                                    &final_text,
-                                );
-                                match persist_fallback_reply(
-                                    &conv_store,
-                                    opts.conversation_id,
-                                    &turn_id,
-                                    &current_input_anchors,
-                                    &final_text,
-                                ) {
-                                    Ok(msg_id) => {
-                                        final_end =
-                                            TurnEndKind::ReplyCommitted { message_id: msg_id };
-                                    }
-                                    Err(err) => {
-                                        trial_in_flight = false;
-                                        final_end = self.record_turn_failure(
-                                            &failure_ctx,
-                                            err.code(),
-                                            cancel,
-                                        );
-                                    }
+                            match delivery {
+                                Ok(NaturalReplyOutcome::Committed(text)) => {
+                                    push_public_update(
+                                        &mut public_updates,
+                                        &mut public_update_chars,
+                                        &text,
+                                    );
                                 }
-                            } else if leaked && !cancel.is_cancelled() {
-                                trial_in_flight = false;
-                                final_end = self.record_turn_failure(
-                                    &failure_ctx,
-                                    "unsupported_tool_response",
-                                    cancel,
-                                );
+                                Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
+                                    trial_in_flight = false;
+                                    let code = if has_literal_tool_call_syntax(&t.content) {
+                                        "unsupported_tool_response"
+                                    } else {
+                                        "empty_model_response"
+                                    };
+                                    final_end =
+                                        self.record_turn_failure(&failure_ctx, code, cancel);
+                                }
+                                Ok(_) => {}
+                                Err(err) => {
+                                    trial_in_flight = false;
+                                    final_end =
+                                        self.record_turn_failure(&failure_ctx, err.code, cancel);
+                                }
                             }
                         }
                         Err(err) => {
@@ -2872,6 +3081,7 @@ impl ProjectAgentRunner {
                 final_end,
                 TurnEndKind::ReplyCommitted { .. }
                     | TurnEndKind::AwaitingChildren { .. }
+                    | TurnEndKind::QuietSettled { .. }
                     | TurnEndKind::UserStopped
                     | TurnEndKind::Failed { .. }
                     | TurnEndKind::CircuitOpen
@@ -2880,160 +3090,16 @@ impl ProjectAgentRunner {
                 .lock()
                 .map(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty())
                 .unwrap_or(false);
-        if needs_wake_failure_fallback {
-            let mut failed_event_sids = Vec::new();
-            let mut seen_sids = HashSet::new();
-            for ev in opts.wake_events {
-                let ev_kind = ev["kind"].as_str().unwrap_or("");
-                let is_failure_event = ev_kind == "session_failed"
-                    || (ev_kind == "session_ended"
-                        && (ev["payload"]["status"].as_str() == Some("failed")
-                            || ev["payload"]["error"].is_string()));
-                if !is_failure_event {
-                    continue;
-                }
-                if let Some(sid) = ev["payload"]["sessionId"]
-                    .as_str()
-                    .or_else(|| ev["sessionId"].as_str())
-                    .filter(|s| !s.is_empty())
-                    && seen_sids.insert(sid.to_owned())
-                {
-                    failed_event_sids.push(sid.to_owned());
-                }
-            }
-            if !failed_event_sids.is_empty() {
-                let live_sessions = self.supervisor.list_sessions(opts.workspace_id);
-                let failed_summaries: Vec<crate::WorkSessionSummary> = failed_event_sids
-                    .iter()
-                    .filter_map(|sid| {
-                        live_sessions
-                            .iter()
-                            .find(|s| s.session_id == *sid && s.status == "failed")
-                            .cloned()
-                    })
-                    .collect();
-                if !failed_summaries.is_empty() {
-                    let (valid_user_ids, prior_keys, unreported_anchors) = turn_state
-                        .lock()
-                        .map(|s| {
-                            (
-                                s.valid_user_message_ids.clone(),
-                                s.prior_report_fact_keys.clone(),
-                                s.unreported_anchor_sessions.clone(),
-                            )
-                        })
-                        .unwrap_or_default();
-                    let project_session_ids: HashSet<String> =
-                        live_sessions.iter().map(|s| s.session_id.clone()).collect();
-                    let mut sources = Vec::new();
-                    let mut status_claims = Vec::new();
-                    let mut session_facts = Vec::new();
-                    let mut reply_to = Vec::new();
-                    let mut seen_anchors = HashSet::new();
-                    let mut details = Vec::new();
-                    for summary in &failed_summaries {
-                        let rep = self
-                            .supervisor
-                            .read_report(opts.workspace_id, &summary.session_id)
-                            .ok();
-                        let reason_raw = rep
-                            .as_ref()
-                            .and_then(|r| {
-                                r.failure_detail
-                                    .as_deref()
-                                    .or(r.failure_code.as_deref())
-                                    .map(str::trim)
-                                    .filter(|v| !v.is_empty())
-                            })
-                            .unwrap_or("执行异常中断");
-                        let reason: String = reason_raw.chars().take(240).collect();
-                        details.push((summary.title.clone(), summary.session_id.clone(), reason));
-                        sources.push(summary.session_id.clone());
-                        status_claims.push(crate::reply::StatusClaim {
-                            session_id: summary.session_id.clone(),
-                            status: "failed".to_owned(),
-                        });
-                        session_facts.push(crate::reply::SessionStatusFact {
-                            session_id: summary.session_id.clone(),
-                            status: summary.status.clone(),
-                            source_revision: Some(summary.updated_at.clone()),
-                            observation_revision: None,
-                            independent_verifier: rep
-                                .as_ref()
-                                .map(|r| r.independent_verifier.clone()),
-                            verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
-                            verdict_ref: rep.as_ref().map(|r| {
-                                crate::acceptance::verdict_ref_for(
-                                    &summary.session_id,
-                                    &r.verdict_outcome,
-                                )
-                            }),
-                        });
-                        for anc in &summary.anchor_message_ids {
-                            if valid_user_ids.contains(anc) && seen_anchors.insert(anc.clone()) {
-                                reply_to.push(anc.clone());
-                            }
-                        }
-                    }
-                    let fallback_text = if details.len() == 1 {
-                        let (title, _sid, reason) = &details[0];
-                        format!(
-                            "「{title}」没能顺利跑完：{reason}。\n\n如果你想换个思路或者让我再试一次，直接告诉我就可以。"
-                        )
-                    } else {
-                        let lines: Vec<String> = details
-                            .iter()
-                            .map(|(title, _sid, reason)| format!("- 「{title}」：{reason}"))
-                            .collect();
-                        format!(
-                            "有 {} 项任务没能顺利跑完：\n{}\n\n如果你想调整方案或重新来过，直接告诉我就可以。",
-                            details.len(),
-                            lines.join("\n")
-                        )
-                    };
-                    let reply_id = format!("reply-wake-fallback-{turn_id}");
-                    if let Ok(composed) =
-                        crate::reply::compose_reply(crate::reply::ComposeReplyInput {
-                            message_id: reply_id.clone(),
-                            turn_id: Some(turn_id.clone()),
-                            kind: "wake".into(),
-                            text: fallback_text,
-                            reply_to,
-                            sources,
-                            status_claims,
-                            proactive: true,
-                            question: None,
-                            valid_user_message_ids: valid_user_ids,
-                            project_session_ids,
-                            session_facts,
-                            memory_used: vec![],
-                            memory_learned: vec![],
-                            evidence_refs: vec![],
-                            surfacing: crate::reply::Surfacing::Message,
-                            prior_report_fact_keys: prior_keys,
-                            unreported_anchor_sessions: unreported_anchors,
-                        })
-                        && !composed.suppressed_duplicate
-                    {
-                        let at = now_iso();
-                        let mut msg = composed.message;
-                        msg["createdAt"] = json!(at);
-                        if let Some(meta) = msg["meta"].as_object_mut() {
-                            meta.insert("fallback".into(), json!(true));
-                        }
-                        if conv_store
-                            .append_message_idempotent(opts.conversation_id, &msg, &at, None)
-                            .is_ok()
-                            && let Ok(mut guard) = turn_state.lock()
-                        {
-                            for k in composed.report_fact_keys {
-                                guard.prior_report_fact_keys.insert(k);
-                            }
-                            guard.reply_committed_id = Some(reply_id);
-                        }
-                    }
-                }
-            }
+        if needs_wake_failure_fallback
+            && let Ok(mut state) = turn_state.lock()
+            && let Err(err) = commit_wake_failure_notice(
+                &self.data_home,
+                &self.supervisor,
+                &mut state,
+                opts.wake_events,
+            )
+        {
+            final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
         }
 
         drop(admission);
@@ -3095,7 +3161,9 @@ impl ProjectAgentRunner {
                 _ => "done",
             };
             if visible_activity {
-                if matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty() {
+                if matches!(final_end, TurnEndKind::QuietSettled { .. })
+                    || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
+                {
                     self.dispose_activity(opts.workspace_id);
                 } else {
                     self.set_activity_phase(opts.workspace_id, phase, None, true);
@@ -3221,6 +3289,7 @@ impl ProjectAgentRunner {
             "finishedAt": finished_at,
             "durationMs": duration_ms,
             "outcome": outcome_label,
+            "wakeReportReadDegraded": wake_report_read_degraded,
         });
         let trace_offloaded = write_agent_turn_trace(
             &self.data_home,
@@ -3288,13 +3357,33 @@ impl ProjectAgentRunner {
         );
 
         if coord_active {
-            let end_state = match &final_end {
-                TurnEndKind::ReplyCommitted { .. } => "delivered",
-                TurnEndKind::AwaitingChildren { .. } => "waiting_children",
-                TurnEndKind::UserStopped => "stopped",
-                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "blocked",
-                TurnEndKind::Yielded => "runnable",
-            };
+            let end_state =
+                match &final_end {
+                    TurnEndKind::QuietSettled { .. }
+                        if self.supervisor.list_sessions(opts.workspace_id).iter().any(
+                            |session| {
+                                matches!(
+                                    session.status.as_str(),
+                                    "queued"
+                                        | "starting"
+                                        | "running"
+                                        | "paused"
+                                        | "waiting_user"
+                                        | "waiting_agent"
+                                )
+                            },
+                        ) =>
+                    {
+                        "waiting_children"
+                    }
+                    TurnEndKind::ReplyCommitted { .. } | TurnEndKind::QuietSettled { .. } => {
+                        "delivered"
+                    }
+                    TurnEndKind::AwaitingChildren { .. } => "waiting_children",
+                    TurnEndKind::UserStopped => "stopped",
+                    TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "blocked",
+                    TurnEndKind::Yielded => "runnable",
+                };
             let _ = self.coordination.ensure_work(
                 opts.workspace_id,
                 &work_id,
@@ -3320,11 +3409,13 @@ impl ProjectAgentRunner {
             }
         }
 
+        let failure_hold = failure_ctx.failure_hold.into_inner().unwrap_or_default();
         Ok(AgentTurnOutcome {
             turn_id,
             end: final_end,
             spawned_session_ids: snapshot.spawned_session_ids,
             tool_calls: total_tool_calls,
+            failure_hold,
         })
     }
 }
@@ -3598,48 +3689,6 @@ mod tests {
             format_tool_outcome_output(&ok),
             json!({ "ok": true, "content": "hi" })
         );
-    }
-
-    #[test]
-    fn persist_fallback_reply_propagates_store_error() {
-        let dir = tempdir().unwrap();
-        let conv_store = ConversationStore::new(dir.path());
-        let err = persist_fallback_reply(
-            &conv_store,
-            "missing-conv",
-            "turn-missing",
-            &["input-1".into()],
-            "fallback text",
-        )
-        .unwrap_err();
-        assert_eq!(err, peer_store::StoreError::NotFound);
-
-        let meta = conv_store
-            .create(
-                &peer_store::NewConversation {
-                    title: "Mismatch",
-                    workspace_path: None,
-                    mode: "chat",
-                    created_at: "2026-11-22T00:00:00.000Z",
-                },
-                None,
-            )
-            .unwrap();
-        let conv_id = meta["id"].as_str().unwrap();
-        std::fs::write(
-            dir.path().join(format!("conversations/{conv_id}.jsonl")),
-            "{\"id\":\"u-1\",\"role\":\"user\",\"content\":\"hi\"}\n",
-        )
-        .unwrap();
-        let err = persist_fallback_reply(
-            &conv_store,
-            conv_id,
-            "turn-mismatch",
-            &["input-1".into()],
-            "fallback text",
-        )
-        .unwrap_err();
-        assert_eq!(err, peer_store::StoreError::CommitUncertain);
     }
 
     #[test]
@@ -3939,3 +3988,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod adr138_tests;

@@ -7,8 +7,9 @@ use crate::{
     BotProfileStore, CommitAgentMessageRequest, ConversationSearchDocument,
     ConversationSearchIndex, CoordinationHub, DigestQueue, ExecutionObligationService,
     INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_INSPECT_TOOL, InteractiveResultStore, MemoryFilter,
-    MemoryStore, ObjectiveActions, ObjectiveStore, ProjectError, SessionSupervisor, SpawnCriterion,
-    SpawnSessionRequest, UpdateObjectiveRequest, UserAnchorCandidate, WriteMemoryRequest,
+    MemoryStore, MessageSessionRequest, ObjectiveActions, ObjectiveStore, ProjectError,
+    SessionSupervisor, SpawnCriterion, SpawnSessionRequest, UpdateObjectiveRequest,
+    UserAnchorCandidate, WriteMemoryRequest,
     acceptance::verdict_ref_for,
     memory_secret_reason, objective_action_card_id,
     objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
@@ -31,7 +32,7 @@ use peer_runtime::{
 use peer_store::ConversationStore;
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -57,6 +58,9 @@ pub struct TurnExecutionState {
     pub work_id: String,
     pub waiting_session_ids: Vec<String>,
     pub spawned_session_ids: Vec<String>,
+    pub messaged_session_ids: Vec<String>,
+    pub cancelled_session_ids: Vec<String>,
+    pub wake_reports: Arc<HashMap<String, crate::WorkSessionReport>>,
     pub published_interactive_refs: Vec<String>,
     pub activated_packs: Vec<String>,
     pub memory_learned: Vec<String>,
@@ -64,8 +68,8 @@ pub struct TurnExecutionState {
     pub holds_lease: bool,
 }
 
-struct CapFailure {
-    err: ProjectError,
+pub(crate) struct CapFailure {
+    pub(crate) err: ProjectError,
     extra: Option<Value>,
 }
 
@@ -268,14 +272,16 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "message_session",
                 "local.delegation.message_session",
-                "Send a user-authorized answer or amendment. On wake, answer only a pending technical question directed to this parent Bot.",
+                "Answer a pending worker question (answer), steer active work (amend), or continue a finished task in its existing conversation and workspace (followup).",
                 json!({
                     "type": "object",
                     "required": ["sessionId", "text", "intent"],
                     "properties": {
                         "sessionId": {"type": "string"},
-                        "text": {"type": "string"},
-                        "intent": {"type": "string", "enum": ["answer", "amend"]}
+                        "text": {"type": "string", "maxLength": 8000},
+                        "intent": {"type": "string", "enum": ["answer", "amend", "followup"]},
+                        "expectedEpoch": {"type": "integer", "minimum": 0},
+                        "attachments": {"type": "array", "items": {"type": "string"}, "maxItems": 100}
                     },
                     "additionalProperties": false
                 }),
@@ -298,7 +304,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "wait_for_sessions",
                 "local.delegation.wait_for_sessions",
-                "Yield a background wake turn quietly while waiting for delegated child sessions to report. On user turns after calling spawn_session, prefer post_reply (with the new sessionId in sources) so the user immediately sees your acknowledgment and live task row.",
+                "Deprecated compatibility tool. On user turns simply reply in natural text after spawning sessions; on wake turns output NO_REPLY to stay quiet while child sessions run.",
                 json!({
                     "type": "object",
                     "required": ["sessionIds"],
@@ -311,7 +317,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             Self::manifest(
                 "post_reply",
                 "local.delegation.post_reply",
-                "Speak to the user in natural, human-friendly language as their project partner. Keep structured provenance in `sources`/`statusClaims`, never as raw protocol jargon inside `text`.",
+                "Optional structured reply tool. Use only to attach quick-reply question options or override surfacing or sources. For normal answers, delegation acknowledgments, and wake summaries, simply output your reply directly as natural text.",
                 json!({
                     "type": "object",
                     "required": ["text"],
@@ -323,7 +329,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                         },
                         "text": {
                             "type": "string",
-                            "maxLength": 8000,
+                            "maxLength": crate::reply::TEXT_MAX,
                             "description": "Your direct message spoken to the user. Write naturally like a human teammate: lead with clear conclusions in the user's language, and never expose internal tool names, JSON fields (like workerOutput), raw session UUIDs, or protocol status enums (like result_ready / verification_failed / supersedes)."
                         },
                         "proactive": {"type": "boolean"},
@@ -1089,17 +1095,19 @@ fn resolve_anchors_for_state(
     })
 }
 
-fn execute_post_reply(
+pub(crate) fn commit_composed_reply(
     args: &Value,
     data_home: &Path,
     supervisor: &SessionSupervisor,
     state: &mut TurnExecutionState,
     tool_call_id: &str,
+    natural: bool,
+    fallback: bool,
 ) -> Result<Value, CapFailure> {
     let text = args["text"]
         .as_str()
         .ok_or_else(|| ProjectError::code("invalid_input"))?;
-    let proactive = args["proactive"].as_bool().unwrap_or(false);
+    let mut proactive = args["proactive"].as_bool().unwrap_or(false);
     let raw_reply_to: Vec<String> = args["replyTo"]
         .as_array()
         .map(|a| {
@@ -1145,26 +1153,6 @@ fn execute_post_reply(
     let sessions = supervisor.list_sessions(&state.workspace_id);
     let project_session_ids: HashSet<String> =
         sessions.iter().map(|s| s.session_id.clone()).collect();
-    let session_facts: Vec<SessionStatusFact> = sessions
-        .iter()
-        .map(|s| {
-            let rep = supervisor
-                .read_report(&state.workspace_id, &s.session_id)
-                .ok();
-            SessionStatusFact {
-                session_id: s.session_id.clone(),
-                status: s.status.clone(),
-                source_revision: Some(s.updated_at.clone()),
-                observation_revision: None,
-                independent_verifier: rep.as_ref().map(|r| r.independent_verifier.clone()),
-                verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
-                verdict_ref: rep
-                    .as_ref()
-                    .map(|r| verdict_ref_for(&s.session_id, &r.verdict_outcome)),
-            }
-        })
-        .collect();
-
     // Normalize optional `session:` prefix when it matches a real project session,
     // deduplicate sources, merge any claimed real project session IDs, and auto-fill
     // omitted statusClaims from persisted host facts while preserving strict rejection
@@ -1182,7 +1170,9 @@ fn execute_post_reply(
         } else {
             raw
         };
-        if seen_sources.insert(normalized.clone()) {
+        if (!natural || project_session_ids.contains(&normalized))
+            && seen_sources.insert(normalized.clone())
+        {
             sources.push(normalized);
         }
     }
@@ -1199,27 +1189,15 @@ fn execute_post_reply(
             sources.push(claim.session_id.clone());
         }
     }
-    // When this user turn spawned delegated work sessions and acknowledges via
-    // `post_reply` without manually listing every spawned session in `sources`,
-    // attach them automatically so the live inline task row renders right below
-    // the Bot's delegation reply.
-    if state.kind == "user" && !state.spawned_session_ids.is_empty() {
-        for sid in &state.spawned_session_ids {
+    if natural || state.kind == "user" {
+        for sid in state
+            .spawned_session_ids
+            .iter()
+            .chain(&state.messaged_session_ids)
+        {
             if project_session_ids.contains(sid) && seen_sources.insert(sid.clone()) {
                 sources.push(sid.clone());
             }
-        }
-    }
-    let explicit_claim_ids: HashSet<String> =
-        status_claims.iter().map(|c| c.session_id.clone()).collect();
-    for sid in &sources {
-        if !explicit_claim_ids.contains(sid)
-            && let Some(fact) = session_facts.iter().find(|f| f.session_id == *sid)
-        {
-            status_claims.push(StatusClaim {
-                session_id: sid.clone(),
-                status: fact.status.clone(),
-            });
         }
     }
     // When a wake turn posts a reply citing sessions whose originating user input has not yet
@@ -1231,7 +1209,7 @@ fn execute_post_reply(
             if let Some(sess) = sessions.iter().find(|s| s.session_id == *sid) {
                 for anc in &sess.anchor_message_ids {
                     if state.valid_user_message_ids.contains(anc)
-                        && !state.answered_user_message_ids.contains(anc)
+                        && (fallback || !state.answered_user_message_ids.contains(anc))
                         && seen_reply_to.insert(anc.clone())
                     {
                         reply_to.push(anc.clone());
@@ -1240,13 +1218,74 @@ fn execute_post_reply(
             }
         }
     }
+    // Natural replies have no model-authored `sources` parameter; auto-cite any unreported
+    // `result_ready` sessions bound to the resolved anchors so `compose_reply` never rejects
+    // with `result_source_required` on retries or merged wakes.
+    if natural && !reply_to.is_empty() {
+        for (anchor, sid) in &state.unreported_anchor_sessions {
+            if reply_to.contains(anchor)
+                && project_session_ids.contains(sid)
+                && seen_sources.insert(sid.clone())
+            {
+                sources.push(sid.clone());
+            }
+        }
+    }
+    let reports: Vec<_> = sources
+        .iter()
+        .map(|sid| {
+            state
+                .wake_reports
+                .get(sid)
+                .filter(|report| {
+                    sessions.iter().any(|session| {
+                        session.session_id == *sid
+                            && session.updated_at == report.summary.updated_at
+                    })
+                })
+                .cloned()
+                .or_else(|| supervisor.read_report(&state.workspace_id, sid).ok())
+        })
+        .collect();
+    let session_facts: Vec<SessionStatusFact> = sources
+        .iter()
+        .zip(&reports)
+        .filter_map(|(sid, rep)| {
+            let s = sessions.iter().find(|s| s.session_id == *sid)?;
+            Some(SessionStatusFact {
+                session_id: s.session_id.clone(),
+                status: s.status.clone(),
+                source_revision: Some(s.updated_at.clone()),
+                observation_revision: None,
+                independent_verifier: rep.as_ref().map(|r| r.independent_verifier.clone()),
+                verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
+                verdict_ref: rep
+                    .as_ref()
+                    .map(|r| verdict_ref_for(&s.session_id, &r.verdict_outcome)),
+            })
+        })
+        .collect();
+    let explicit_claim_ids: HashSet<String> =
+        status_claims.iter().map(|c| c.session_id.clone()).collect();
+    for fact in &session_facts {
+        if !explicit_claim_ids.contains(&fact.session_id) {
+            status_claims.push(StatusClaim {
+                session_id: fact.session_id.clone(),
+                status: fact.status.clone(),
+            });
+        }
+    }
+
+    if natural && state.kind == "wake" && reply_to.is_empty() {
+        proactive = true;
+    }
 
     let profiles = BotProfileStore::new(data_home);
     let proactivity = profiles
         .read(&state.workspace_id)
         .and_then(|p| p.proactivity)
         .unwrap_or_else(|| "standard".into());
-    let surfacing = if state.kind == "user" {
+    let surfacing = if state.kind == "user" || fallback {
         Surfacing::Message
     } else {
         let is_agent_proactive = proactive && reply_to.is_empty() && question.is_none();
@@ -1282,6 +1321,11 @@ fn execute_post_reply(
         .decision
     };
 
+    let ready_sessions: Vec<_> = session_facts
+        .iter()
+        .filter(|fact| fact.status == "result_ready")
+        .map(|fact| fact.session_id.clone())
+        .collect();
     let mut interactive_refs = Vec::new();
     let mut other_refs = Vec::new();
     let mut seen_ev = HashSet::new();
@@ -1294,17 +1338,15 @@ fn execute_post_reply(
             interactive_refs.push(r.clone());
         }
     }
-    for sid in &sources {
-        if let Ok(rep) = supervisor.read_report(&state.workspace_id, sid) {
-            for r in rep.evidence_refs {
-                if !seen_ev.insert(r.clone()) {
-                    continue;
-                }
-                if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX) {
-                    interactive_refs.push(r);
-                } else {
-                    other_refs.push(r);
-                }
+    for rep in reports.into_iter().flatten() {
+        for r in rep.evidence_refs {
+            if !seen_ev.insert(r.clone()) {
+                continue;
+            }
+            if r.starts_with(peer_protocol::interactive_result::INTERACTIVE_RESULT_PREFIX) {
+                interactive_refs.push(r);
+            } else {
+                other_refs.push(r);
             }
         }
     }
@@ -1360,6 +1402,9 @@ fn execute_post_reply(
     let at = crate::now_iso();
     let mut msg = composed.message;
     msg["createdAt"] = json!(at);
+    if fallback {
+        msg["meta"]["fallback"] = json!(true);
+    }
 
     if surfacing == Surfacing::Digest {
         DigestQueue::new(data_home).hold(
@@ -1388,7 +1433,7 @@ fn execute_post_reply(
         .map_err(ProjectError::from)?;
 
     // Policy auto-acceptance for any cited `result_ready` sessions after reply is durably posted.
-    for sid in &sources {
+    for sid in &ready_sessions {
         let _ = supervisor.settle_session(
             &state.workspace_id,
             sid,
@@ -2602,6 +2647,7 @@ fn execute_project_capability(
             } else {
                 supervisor.cancel_session_by_agent(&state.workspace_id, sid, reason, true)?
             };
+            state.cancelled_session_ids.push(updated.session_id.clone());
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
         "local.delegation.control_work" => {
@@ -2637,6 +2683,9 @@ fn execute_project_capability(
                     true,
                 )?
             };
+            if action == "cancel" {
+                state.cancelled_session_ids.push(updated.session_id.clone());
+            }
             Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
         }
         "local.delegation.reprioritize_session" => {
@@ -2665,15 +2714,69 @@ fn execute_project_capability(
                 .as_str()
                 .ok_or_else(|| ProjectError::code("invalid_input"))?;
             check_quote_scope(&state, sid)?;
-            let updated = if state.current_input_anchors.is_empty() {
-                if state.kind != "wake" || intent != "answer" {
-                    return Err(ProjectError::code("current_user_required").into());
+            let autonomous = state.current_input_anchors.is_empty();
+            if autonomous && state.kind != "wake" {
+                return Err(ProjectError::code("current_user_required").into());
+            }
+            let expected_epoch = args
+                .get("expectedEpoch")
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .ok_or_else(|| ProjectError::code("invalid_input"))
+                })
+                .transpose()?;
+            let mut attachments = Vec::new();
+            if let Some(ids) = args.get("attachments") {
+                let ids = ids
+                    .as_array()
+                    .filter(|ids| ids.len() <= 100)
+                    .ok_or_else(|| ProjectError::code("invalid_input"))?;
+                if !ids.is_empty() {
+                    let messages = crate::read_full_conversation_messages(
+                        &ConversationStore::new(data_home),
+                        &state.conversation_id,
+                    )
+                    .map_err(ProjectError::from)?;
+                    let available = crate::attachments::attachments_from_messages_persisted(
+                        &messages,
+                        &state.current_input_anchors,
+                    )?;
+                    let mut seen = HashSet::new();
+                    for id in ids {
+                        let id = id
+                            .as_str()
+                            .ok_or_else(|| ProjectError::code("invalid_input"))?;
+                        if seen.insert(id) {
+                            let attachment = available
+                                .iter()
+                                .find(|attachment| attachment["id"] == id)
+                                .ok_or_else(|| {
+                                    ProjectError::code("attachment_not_in_current_input")
+                                })?;
+                            attachments.push(attachment.clone());
+                        }
+                    }
                 }
-                supervisor.answer_worker(&state.workspace_id, &state.conversation_id, sid, text)?
-            } else {
-                supervisor.message_session(&state.workspace_id, sid, text, intent, true)?
-            };
-            Ok(json!({ "ok": true, "sessionId": updated.session_id, "status": updated.status }))
+            }
+            let updated = supervisor.deliver_session_message(
+                MessageSessionRequest {
+                    workspace_id: &state.workspace_id,
+                    session_id: sid,
+                    text,
+                    intent,
+                    expected_epoch,
+                    anchor_message_ids: state.current_input_anchors.clone(),
+                    worker_model_selection: Some(state.worker_model_selection.clone()),
+                    holds_lease: state.holds_lease,
+                },
+                Some((&state.conversation_id, autonomous)),
+                &attachments,
+            )?;
+            state.messaged_session_ids.push(updated.session_id.clone());
+            let mut result = json!(updated);
+            result["ok"] = json!(true);
+            Ok(result)
         }
         "local.delegation.resume_session" => {
             let sid = args["sessionId"]
@@ -2754,7 +2857,15 @@ fn execute_project_capability(
             )
         }
         "local.delegation.post_reply" => {
-            let res = execute_post_reply(args, data_home, supervisor, &mut state, tool_call_id);
+            let res = commit_composed_reply(
+                args,
+                data_home,
+                supervisor,
+                &mut state,
+                tool_call_id,
+                false,
+                false,
+            );
             if res.is_err() {
                 state.post_reply_rejected = true;
             }

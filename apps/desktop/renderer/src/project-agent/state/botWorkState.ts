@@ -1,6 +1,7 @@
 import { WORK_SESSION_STATUSES, type WorkSessionStatus } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
+import type { BotConversationViewRow } from './botReplyContinuity';
 import { formatDrawerSessionStatus, type DrawerSession } from './drawerState.ts';
 
 export interface BotWorkIndex {
@@ -85,6 +86,22 @@ export function liveReplyTaskReferences(
   }
   return [...references.values()].slice(0, 100);
 }
+
+/** Keep each task in its first reply carrier in the loaded thread, including while that task resumes. */
+export function threadTaskReferences(rows: readonly BotConversationViewRow[], index: BotWorkIndex): ReadonlyMap<BotConversationViewRow, readonly BotWorkRow[]> {
+  const byRow = new Map<BotConversationViewRow, BotWorkRow[]>();
+  const claimed = new Set<string>();
+  for (const row of rows) {
+    const candidates = row.type === 'reply' ? liveReplyTaskReferences(row, index)
+      : row.type === 'message' && row.message.kind === 'agent_reply' ? replyTaskReferences([row.message], index) : [];
+    const unclaimed = candidates.filter(task => !claimed.has(task.id));
+    if (unclaimed.length === 0) continue;
+    for (const task of unclaimed) claimed.add(task.id);
+    byRow.set(row, unclaimed);
+  }
+  return byRow;
+}
+
 export function canCancelTask(status: string | null, cancelable?: boolean): boolean {
   // 生命周期决策给出的 cancelable 优先；缺字段时才退回状态表，避免出现第二套规则。
   if (typeof cancelable === 'boolean') return cancelable;

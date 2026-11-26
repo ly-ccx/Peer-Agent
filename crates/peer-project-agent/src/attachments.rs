@@ -3,6 +3,7 @@
 //! and `crates/peer-runtime/src/canonical_history.rs`).
 
 use crate::{ProjectError, atomic_write, is_valid_input_id, is_valid_workspace_id};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,90 +21,20 @@ pub const MAX_TEXT_ATTACHMENT_BYTES: usize = 512 * 1024;
 /// stay compact even with 100+ high-resolution screenshots.
 pub const INLINE_IMAGE_THRESHOLD_BYTES: usize = 32 * 1024;
 
-const B64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
 fn base64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = u32::from(chunk[0]);
-        let b1 = u32::from(*chunk.get(1).unwrap_or(&0));
-        let b2 = u32::from(*chunk.get(2).unwrap_or(&0));
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(B64_TABLE[((triple >> 18) & 0x3f) as usize] as char);
-        out.push(B64_TABLE[((triple >> 12) & 0x3f) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            B64_TABLE[((triple >> 6) & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            B64_TABLE[(triple & 0x3f) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-fn b64_val(b: u8) -> Option<u8> {
-    match b {
-        b'A'..=b'Z' => Some(b - b'A'),
-        b'a'..=b'z' => Some(b - b'a' + 26),
-        b'0'..=b'9' => Some(b - b'0' + 52),
-        b'+' => Some(62),
-        b'/' => Some(63),
-        _ => None,
-    }
+    STANDARD.encode(bytes)
 }
 
 fn base64_decode_strict(s: &str) -> Result<Vec<u8>, ProjectError> {
-    let bytes = s.as_bytes();
-    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
+    if s.is_empty() {
         return Err(ProjectError::new(
             "INVALID_ATTACHMENT",
             "attachment image data is invalid",
         ));
     }
-    let pad = if bytes.ends_with(b"==") {
-        2
-    } else if bytes.ends_with(b"=") {
-        1
-    } else {
-        0
-    };
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3 - pad);
-    let num_chunks = bytes.len() / 4;
-    for (ci, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
-        let last = ci + 1 == num_chunks;
-        let a = b64_val(chunk[0]);
-        let b = b64_val(chunk[1]);
-        let c = if last && pad >= 2 {
-            (chunk[2] == b'=').then_some(0)
-        } else {
-            b64_val(chunk[2])
-        };
-        let d = if last && pad >= 1 {
-            (chunk[3] == b'=').then_some(0)
-        } else {
-            b64_val(chunk[3])
-        };
-        let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) else {
-            return Err(ProjectError::new(
-                "INVALID_ATTACHMENT",
-                "attachment image data is invalid",
-            ));
-        };
-        let triple =
-            (u32::from(a) << 18) | (u32::from(b) << 12) | (u32::from(c) << 6) | u32::from(d);
-        out.push(((triple >> 16) & 0xff) as u8);
-        if !(last && pad >= 2) {
-            out.push(((triple >> 8) & 0xff) as u8);
-        }
-        if !(last && pad >= 1) {
-            out.push((triple & 0xff) as u8);
-        }
-    }
-    Ok(out)
+    STANDARD
+        .decode(s)
+        .map_err(|_| ProjectError::new("INVALID_ATTACHMENT", "attachment image data is invalid"))
 }
 
 fn clip_token(raw: Option<&str>, limit: usize, fallback: &str) -> String {
@@ -145,6 +76,12 @@ fn is_valid_image_mime_subtype(mime: &str) -> bool {
 
 /// Normalize and validate one user attachment matching `input-attachments.mjs#normalizeUserUpload`.
 pub fn normalize_user_upload(item: &Value) -> Result<Value, ProjectError> {
+    normalize_user_upload_with_bytes(item).map(|(value, _)| value)
+}
+
+fn normalize_user_upload_with_bytes(
+    item: &Value,
+) -> Result<(Value, Option<Vec<u8>>), ProjectError> {
     let Some(obj) = item.as_object() else {
         return Err(ProjectError::new(
             "INVALID_ATTACHMENT",
@@ -201,15 +138,18 @@ pub fn normalize_user_upload(item: &Value) -> Result<Value, ProjectError> {
                     "attachment image exceeds 32 MiB",
                 ));
             }
-            Ok(json!({
-                "id": id,
-                "name": name,
-                "mimeType": mime_type,
-                "size": size,
-                "sourceKind": "user_upload",
-                "kind": "image",
-                "dataUrl": url,
-            }))
+            Ok((
+                json!({
+                    "id": id,
+                    "name": name,
+                    "mimeType": mime_type,
+                    "size": size,
+                    "sourceKind": "user_upload",
+                    "kind": "image",
+                    "dataUrl": url,
+                }),
+                Some(decoded),
+            ))
         }
         Some("text") => {
             let text = obj.get("text").and_then(Value::as_str).ok_or_else(|| {
@@ -221,24 +161,30 @@ pub fn normalize_user_upload(item: &Value) -> Result<Value, ProjectError> {
                     "attachment text exceeds 512 KiB",
                 ));
             }
-            Ok(json!({
+            Ok((
+                json!({
+                    "id": id,
+                    "name": name,
+                    "mimeType": mime_type,
+                    "size": size,
+                    "sourceKind": "user_upload",
+                    "kind": "text",
+                    "text": text,
+                }),
+                None,
+            ))
+        }
+        Some("unsupported") => Ok((
+            json!({
                 "id": id,
                 "name": name,
                 "mimeType": mime_type,
                 "size": size,
                 "sourceKind": "user_upload",
-                "kind": "text",
-                "text": text,
-            }))
-        }
-        Some("unsupported") => Ok(json!({
-            "id": id,
-            "name": name,
-            "mimeType": mime_type,
-            "size": size,
-            "sourceKind": "user_upload",
-            "kind": "unsupported",
-        })),
+                "kind": "unsupported",
+            }),
+            None,
+        )),
         _ => Err(ProjectError::new(
             "INVALID_ATTACHMENT",
             "attachment kind is invalid",
@@ -263,36 +209,39 @@ pub fn persist_input_attachments(
     runtime_ws_root: &Path,
     items: &[Value],
 ) -> Result<Vec<Value>, ProjectError> {
-    let normalized = normalize_input_attachments(items)?;
-    let mut out = Vec::with_capacity(normalized.len());
-    for item in normalized {
+    if items.len() > INPUT_ATTACHMENT_LIMIT {
+        return Err(ProjectError::new(
+            "ATTACHMENT_LIMIT",
+            "attachments exceed limit of 100",
+        ));
+    }
+    let mut out = Vec::with_capacity(items.len());
+    for raw_item in items {
+        let (item, decoded_image) = normalize_user_upload_with_bytes(raw_item)?;
         if item["kind"].as_str() == Some("image")
             && let Some(mime) = item["mimeType"].as_str()
             && let Some(ext) = image_ext_for_mime(mime)
-            && let Some(url) = item["dataUrl"].as_str()
-            && let Some((_, b64)) = url.strip_prefix("data:").and_then(|r| r.split_once(','))
+            && let Some(raw) = decoded_image
+            && raw.len() > INLINE_IMAGE_THRESHOLD_BYTES
         {
-            let raw = base64_decode_strict(b64)?;
-            if raw.len() > INLINE_IMAGE_THRESHOLD_BYTES {
-                let digest = format!("{:x}", Sha256::digest(&raw));
-                let blob_path = runtime_ws_root
-                    .join("attachment-blobs")
-                    .join(format!("{digest}.{ext}"));
-                if !blob_path.exists() {
-                    atomic_write(&blob_path, &raw)?;
-                }
-                out.push(json!({
-                    "id": item["id"],
-                    "name": item["name"],
-                    "mimeType": mime,
-                    "size": item["size"],
-                    "sourceKind": "user_upload",
-                    "kind": "image",
-                    "blobDigest": digest,
-                    "filePath": blob_path.to_string_lossy(),
-                }));
-                continue;
+            let digest = format!("{:x}", Sha256::digest(&raw));
+            let blob_path = runtime_ws_root
+                .join("attachment-blobs")
+                .join(format!("{digest}.{ext}"));
+            if !blob_path.exists() {
+                atomic_write(&blob_path, &raw)?;
             }
+            out.push(json!({
+                "id": item["id"],
+                "name": item["name"],
+                "mimeType": mime,
+                "size": item["size"],
+                "sourceKind": "user_upload",
+                "kind": "image",
+                "blobDigest": digest,
+                "filePath": blob_path.to_string_lossy(),
+            }));
+            continue;
         }
         out.push(item);
     }
@@ -503,11 +452,12 @@ pub fn load_local_image_attachment(
             format!("img-{}", &digest[..16])
         }
     };
-    normalize_user_upload(&json!({
-        "id": att_id,
-        "name": name,
-        "mimeType": mime,
+    Ok(json!({
+        "id": clip_token(Some(&att_id), 80, "attachment"),
+        "name": clip_token(Some(&name), 240, "file"),
+        "mimeType": clip_token(Some(mime), 100, "application/octet-stream"),
         "size": data.len(),
+        "sourceKind": "user_upload",
         "kind": "image",
         "dataUrl": data_url,
     }))

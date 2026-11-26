@@ -2085,8 +2085,9 @@ impl<'a> BotShellState<'a> {
             }
         };
         let live_activity = active_act.as_ref().map(|act| {
-            if !act.reply_text.is_empty() {
-                act.reply_text.clone()
+            let reply_text = peer_project_agent::without_growing_quiet_marker(&act.reply_text);
+            if !reply_text.is_empty() {
+                reply_text.to_owned()
             } else {
                 phase_label(&act.phase)
             }
@@ -2094,7 +2095,7 @@ impl<'a> BotShellState<'a> {
         let mut live_panel = self.work_panel.clone();
         if let Some(ref act) = active_act {
             live_panel.attention_label = Some(phase_label(&act.phase));
-            let trimmed = act.reply_text.trim();
+            let trimmed = peer_project_agent::without_growing_quiet_marker(&act.reply_text).trim();
             live_panel.attention_detail =
                 (!trimmed.is_empty()).then(|| trimmed.chars().take(120).collect());
         } else {

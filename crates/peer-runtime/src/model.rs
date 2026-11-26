@@ -87,6 +87,7 @@ impl ModelTurn {
 pub enum ModelDelta<'a> {
     Text(&'a str),
     Thinking(&'a str),
+    ToolIntent,
 }
 
 pub const SAME_PROVIDER_RETRY_DELAYS_MS: [u64; 3] = [500, 1_500, 3_000];
@@ -398,6 +399,11 @@ impl PreparedRequest<'_> {
                 .map_err(|_| ModelError::new("model_timeout"))??;
             if !response.status().is_success() {
                 let status = response.status().as_u16();
+                let retry_after_seconds = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|header| header.to_str().ok())
+                    .and_then(|header| header.trim().parse::<u64>().ok());
                 // The status is sufficient for access rejection. An error body
                 // cannot turn it into context pressure or a retry.
                 if let Some(error) = ModelError::http_access_rejection(status) {
@@ -420,7 +426,9 @@ impl PreparedRequest<'_> {
                     }
                     body.extend_from_slice(&chunk);
                 }
-                return Err(ModelError::http(status, &body));
+                let mut error = ModelError::http(status, &body);
+                error.retry_after_seconds = retry_after_seconds;
+                return Err(error);
             }
             if !sse_content_type_allowed(response.headers()) {
                 return Err(ModelError::new("model_content_type_invalid"));
@@ -428,6 +436,7 @@ impl PreparedRequest<'_> {
             let decoder = stream.as_mut().expect("one request decoder");
             let mut shown = 0;
             let mut shown_thinking = 0;
+            let mut reported_tool_intent = false;
             while let Some(chunk) = tokio::time::timeout(model.deadline, response.chunk())
                 .await
                 .map_err(|_| ModelError::new("model_timeout"))?
@@ -440,6 +449,10 @@ impl PreparedRequest<'_> {
                 })?
             {
                 decoder.push(&chunk)?;
+                if !reported_tool_intent && decoder.has_tool_intent() {
+                    publish(ModelDelta::ToolIntent).await?;
+                    reported_tool_intent = true;
+                }
                 let thinking = decoder.preview_thinking();
                 if thinking.len() > shown_thinking {
                     publish(ModelDelta::Thinking(&thinking[shown_thinking..])).await?;

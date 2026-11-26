@@ -99,6 +99,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly followUpEpoch?: number;
   readonly executionOwnership?: ExecutionOwnership;
   readonly followUp?: import('./task-overview.ts').FollowUpProjection;
   readonly verificationProgress?: VerificationProgress;

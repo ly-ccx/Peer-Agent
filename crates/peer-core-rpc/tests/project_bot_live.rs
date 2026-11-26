@@ -675,6 +675,9 @@ async fn live_submit_input_emits_push_events_and_commits_agent_reply() {
             .any(|m| m["role"] == "user" && m["content"] == "Hello Bot");
         let has_reply = msgs.iter().any(|m| {
             m["role"] == "assistant"
+                && m["kind"] == "agent_reply"
+                && m["replyTo"] == json!(["input-inp-live-1"])
+                && m["fallback"] == false
                 && m["content"]
                     .as_str()
                     .is_some_and(|c| c.contains("Mock bot reply: hello user!"))

@@ -418,6 +418,9 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
     {
         return Ok(ok_fail(err.code));
     }
+    let model_changed = model_policy
+        .as_ref()
+        .is_some_and(|policy| existing.model_policy.as_ref() != Some(policy));
     if auto_handoff.is_some()
         || plan_approval.is_some()
         || acceptance_policy.is_some()
@@ -447,6 +450,12 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
         }
     }
 
+    if model_changed {
+        let host = ctx.project_host.host();
+        host.clear_failure_hold(ws);
+        host.runner().reset_circuit_breaker_for(ws);
+        ctx.project_host.wake_workspace(ws);
+    }
     match store.read(ws) {
         Some(profile) => Ok(json!({ "ok": true, "profile": profile })),
         None => Ok(ok_fail("NOT_FOUND")),

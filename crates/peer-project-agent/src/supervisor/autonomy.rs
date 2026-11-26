@@ -41,7 +41,7 @@ impl SessionSupervisor {
             .ok_or_else(|| ProjectError::code("out_of_scope"))
     }
 
-    fn check_recovery_gates(&self, plan: &Value) -> Result<(), ProjectError> {
+    pub(super) fn check_recovery_gates(&self, plan: &Value) -> Result<(), ProjectError> {
         let origin = &plan["delegationOrigin"];
         let runner = &plan["runner"];
         if origin["supersededBy"].is_string()
@@ -232,7 +232,7 @@ impl SessionSupervisor {
             isolation: origin["isolation"].as_str().unwrap_or(isolation).to_owned(),
             worker_model_selection: origin["modelSelection"]["worker"].clone(),
         };
-        let summary = self.spawn_session_impl(req, Some((count, &old)))?;
+        let summary = self.spawn_session_impl(req, Some((count, &old)), None)?;
         Ok((summary, count))
     }
 
@@ -283,29 +283,26 @@ impl SessionSupervisor {
         Ok(self.summarize(&plan))
     }
 
-    pub(crate) fn answer_worker(
+    pub(super) fn answer_worker_locked(
         &self,
-        workspace_id: &str,
-        parent_id: &str,
-        session_id: &str,
+        plan: &mut Value,
         text: &str,
+        attachments: &[Value],
     ) -> Result<WorkSessionSummary, ProjectError> {
-        let _transition = self.transition_lock()?;
-        let mut plan = self.plan_for_bot(workspace_id, parent_id, session_id)?;
-        self.check_recovery_gates(&plan)?;
-        if !waiting_parent(&plan) || plan["runner"]["interruption"].is_object() {
+        if !waiting_parent(plan) || plan["runner"]["interruption"].is_object() {
             return Err(ProjectError::code("current_user_required"));
         }
-        if text.trim().is_empty() || text.chars().count() > 4000 {
+        if text.trim().is_empty() || text.chars().count() > 8_000 {
             return Err(ProjectError::code("invalid_input"));
         }
         let origin = &plan["delegationOrigin"];
+        let session_id = origin["sessionId"].as_str().unwrap_or_default().to_owned();
         let wait_id = origin["agentWaitMessageId"]
             .as_str()
             .or_else(|| plan["runner"]["runId"].as_str())
             .ok_or_else(|| ProjectError::code("agent_request_identity_missing"))?
             .to_owned();
-        let conv_id = if let Some(continuation) = self.load_worker_checkpoint(&plan)? {
+        let conv_id = if let Some(continuation) = self.load_worker_checkpoint(plan)? {
             plan["delegationOrigin"]["continueWorkerConversation"] = json!(true);
             continuation.identity.conversation_id
         } else {
@@ -330,7 +327,7 @@ impl SessionSupervisor {
                 &conv_id,
                 &json!({
                     "id": answer_id, "role": "user", "kind": "agent_answer", "replyTo": [wait_id],
-                    "content": text, "createdAt": at,
+                    "content": text, "attachments": attachments, "createdAt": at,
                 }),
                 &at,
                 None,
@@ -339,8 +336,8 @@ impl SessionSupervisor {
         plan["delegationOrigin"]["lastAnsweredAgentWaitMessageId"] = json!(wait_id);
         plan["delegationOrigin"]["agentWaitMessageId"] = Value::Null;
         plan["delegationOrigin"]["agentWaitQuestion"] = Value::Null;
-        self.queue_continuation(&mut plan)?;
-        Ok(self.summarize(&plan))
+        self.queue_continuation(plan)?;
+        Ok(self.summarize(plan))
     }
 
     fn queue_continuation(&self, plan: &mut Value) -> Result<(), ProjectError> {

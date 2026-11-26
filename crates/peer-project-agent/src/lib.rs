@@ -11,6 +11,7 @@ pub mod acceptance;
 pub mod attachments;
 pub mod cards;
 pub mod circuit_breaker;
+pub mod context_delta;
 pub mod coordination_bridge;
 pub mod coordination_recovery;
 pub mod digest;
@@ -27,6 +28,7 @@ pub mod objectives;
 pub mod obligation;
 pub mod profile;
 pub mod provider;
+pub mod quiet_reply;
 pub mod recovery;
 pub mod registry;
 pub mod reply;
@@ -38,6 +40,7 @@ pub mod skill_packs;
 pub mod supervisor;
 pub mod system_context;
 pub mod verifier;
+pub mod wake_envelope;
 pub mod watchdog;
 pub mod worktree;
 
@@ -142,6 +145,10 @@ pub use profile::{
     BotProfile, BotProfileStore, CreateBotProfile, clean_display_name, generate_avatar,
 };
 pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
+pub use quiet_reply::{
+    QUIET_REPLY_MARKER, QuietReplyParse, is_quiet_reply, parse_quiet_reply,
+    without_growing_quiet_marker,
+};
 pub use recovery::{
     ProjectRecoveryBarrier, RECOVERY_PHASES, RecoveryDiagnostic, RecoveryRunCounts,
 };
@@ -176,8 +183,8 @@ pub use skill_packs::{
     render_unactivated_pack_catalog,
 };
 pub use supervisor::{
-    DEFAULT_WORKER_MAX_TURNS, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
-    WorkSessionReport, WorkSessionSummary,
+    DEFAULT_WORKER_MAX_TURNS, MessageSessionOutcome, MessageSessionRequest, SessionSupervisor,
+    SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
 };
 pub use system_context::{ProjectAgentContextInput, assemble_project_agent_context};
 pub use verifier::{
@@ -464,3 +471,9 @@ pub(crate) fn read_full_conversation_messages(
         None => Err(peer_store::StoreError::NotFound),
     }
 }
+
+#[cfg(test)]
+extern crate self as peer_project_agent;
+#[cfg(test)]
+#[path = "../tests/support/project_agent_model.rs"]
+mod test_model;

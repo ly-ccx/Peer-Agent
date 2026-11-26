@@ -10,6 +10,10 @@ pub(super) struct Gemini {
     pub done: bool,
 }
 impl Gemini {
+    pub(super) fn has_tool_intent(&self) -> bool {
+        !self.calls.is_empty()
+    }
+
     pub fn event(&mut self, event: &Value) -> Result<bool, ModelError> {
         let v = event.get("response").unwrap_or(event);
         if event.get("error").is_some()

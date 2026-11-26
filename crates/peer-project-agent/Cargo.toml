@@ -15,6 +15,7 @@ peer-runtime = { path = "../peer-runtime" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+base64 = "=0.22.1"
 flate2 = "=1.1.11"
 rusqlite = { version = "=0.37.0", features = ["bundled", "limits"] }
 tempfile = "3.23.0"
