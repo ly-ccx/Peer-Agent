@@ -285,6 +285,42 @@ test('间隔超过 10 分钟或主动消息才插入时间分隔', () => {
   ])).has('a'), true);
 });
 
+test('普通主动汇报不误标今日小结，只有 digest 或显式 separatorLabel 才带今日小结', async () => {
+  const { createI18n } = await import('@peer-agent/i18n');
+  const { formatConversationSeparator } = await import('./botConversationState.ts');
+  const i18n = createI18n('zh-CN');
+  const rows = conversationRows([
+    message({ id: 'u1', kind: 'user_input', createdAt: '2026-09-27T09:00:00.000Z' }),
+    message({
+      id: 'wake-near',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T09:03:00.000Z',
+      proactive: true,
+      meta: { surfacing: 'message' },
+    }),
+    message({
+      id: 'wake-later',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T09:20:00.000Z',
+      proactive: true,
+      meta: { surfacing: 'message' },
+    }),
+    message({
+      id: 'digest-1',
+      kind: 'agent_reply',
+      createdAt: '2026-09-27T09:22:00.000Z',
+      proactive: true,
+      meta: { surfacing: 'digest' },
+    }),
+  ]);
+  const separators = rows.filter((row): row is Extract<typeof row, { type: 'separator' }> => row.type === 'separator');
+  assert.deepEqual(separators.map(row => row.id), ['sep-wake-later', 'sep-digest-1']);
+  assert.equal(separators[0]?.digest, undefined);
+  assert.equal(formatConversationSeparator(separators[0]!, i18n).includes('今日小结'), false);
+  assert.equal(separators[1]?.digest, true);
+  assert.equal(formatConversationSeparator(separators[1]!, i18n).includes('今日小结'), true);
+});
+
 test('超过 200 行时只留锚点附近的窗口', () => {
   const short = Array.from({ length: 40 }, (_item, index) => index);
   assert.equal(windowConversationRows(short, 10).rows.length, 40);

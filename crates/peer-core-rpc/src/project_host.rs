@@ -190,6 +190,7 @@ pub struct ProjectHostRuntime {
     settings: Mutex<HostRuntimeSettings>,
     active_turns: Mutex<HashMap<String, ActiveTurnEntry>>,
     active_workers: Mutex<HashMap<String, ActiveWorkerEntry>>,
+    active_maintenance: Mutex<HashMap<String, CancellationToken>>,
     live_approvals: Arc<Mutex<HashMap<String, LiveApprovalWaiter>>>,
     recovery_status: Mutex<HashMap<String, Value>>,
     in_flight_retries: Mutex<HashSet<String>>,
@@ -231,6 +232,7 @@ impl ProjectHostRuntime {
             settings: Mutex::new(HostRuntimeSettings::default()),
             active_turns: Mutex::new(HashMap::new()),
             active_workers: Mutex::new(HashMap::new()),
+            active_maintenance: Mutex::new(HashMap::new()),
             live_approvals: Arc::new(Mutex::new(HashMap::new())),
             recovery_status: Mutex::new(HashMap::new()),
             in_flight_retries: Mutex::new(HashSet::new()),
@@ -244,7 +246,7 @@ impl ProjectHostRuntime {
         })
     }
 
-    fn is_yield_cooled_down(&self, workspace_id: &str) -> bool {
+    pub(crate) fn is_yield_cooled_down(&self, workspace_id: &str) -> bool {
         let now = tokio::time::Instant::now();
         let Ok(mut guard) = self.yielded_until.lock() else {
             return false;
@@ -338,15 +340,13 @@ impl ProjectHostRuntime {
             return;
         }
         let peer = self.peer.clone();
-        let _ = self.spawner.spawn(move |_guard| {
-            tokio::task::spawn_local(async move {
-                let _ = peer
-                    .notify(
-                        "project.bot.changed",
-                        json!({ "workspaceIds": workspace_ids }),
-                    )
-                    .await;
-            });
+        self.spawner.spawn_send(async move {
+            let _ = peer
+                .notify(
+                    "project.bot.changed",
+                    json!({ "workspaceIds": workspace_ids }),
+                )
+                .await;
         });
     }
 
@@ -354,25 +354,21 @@ impl ProjectHostRuntime {
         let peer = self.peer.clone();
         let ws = workspace_id.to_owned();
         let cid = conversation_id.map(str::to_owned);
-        let _ = self.spawner.spawn(move |_guard| {
-            tokio::task::spawn_local(async move {
-                let mut payload = json!({ "workspaceId": ws });
-                if let Some(conv) = cid {
-                    payload["conversationId"] = json!(conv);
-                }
-                let _ = peer
-                    .notify("project.bot.conversationChanged", payload)
-                    .await;
-            });
+        self.spawner.spawn_send(async move {
+            let mut payload = json!({ "workspaceId": ws });
+            if let Some(conv) = cid {
+                payload["conversationId"] = json!(conv);
+            }
+            let _ = peer
+                .notify("project.bot.conversationChanged", payload)
+                .await;
         });
     }
 
     pub fn emit_obligation_grants(&self, payload: Value) {
         let peer = self.peer.clone();
-        let _ = self.spawner.spawn(move |_guard| {
-            tokio::task::spawn_local(async move {
-                let _ = peer.notify("project.bot.obligationGrants", payload).await;
-            });
+        self.spawner.spawn_send(async move {
+            let _ = peer.notify("project.bot.obligationGrants", payload).await;
         });
     }
 
@@ -547,23 +543,21 @@ impl ProjectHostRuntime {
         )));
         let peer_act = self.peer.clone();
         let cancel_act = cancel.clone();
-        let _ = self.spawner.spawn(move |_guard| {
-            tokio::task::spawn_local(async move {
-                loop {
-                    tokio::select! {
-                        biased;
-                        _ = cancel_act.cancelled() => break,
-                        msg = act_rx.recv() => {
-                            let Some((act, status)) = msg else { break; };
-                            let _ = peer_act.notify("project.bot.activity", json!({
-                                "workspaceId": act.workspace_id,
-                                "activity": act,
-                                "status": status,
-                            })).await;
-                        }
+        self.spawner.spawn_send(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel_act.cancelled() => break,
+                    msg = act_rx.recv() => {
+                        let Some((act, status)) = msg else { break; };
+                        let _ = peer_act.notify("project.bot.activity", json!({
+                            "workspaceId": act.workspace_id,
+                            "activity": act,
+                            "status": status,
+                        })).await;
                     }
                 }
-            });
+            }
         });
 
         // Heartbeat / yield monitor + periodic maintenance loop
@@ -591,7 +585,7 @@ impl ProjectHostRuntime {
                             tick_count += 1;
                             rt_hb.heartbeat_and_check_takeovers().await;
                             if tick_count.is_multiple_of(MAINTENANCE_TICKS) {
-                                rt_hb.run_maintenance_pass(&cancel_hb).await;
+                                rt_hb.run_maintenance_pass(&cancel_hb);
                             }
                         }
                     }
@@ -713,7 +707,7 @@ impl ProjectHostRuntime {
         }
     }
 
-    async fn run_maintenance_pass(&self, cancel: &CancellationToken) {
+    fn run_maintenance_pass(self: &Arc<Self>, cancel: &CancellationToken) {
         let owned = self.host.owned_workspaces();
         for ws_id in owned {
             if !self.is_enabled() || cancel.is_cancelled() {
@@ -722,28 +716,75 @@ impl ProjectHostRuntime {
             if !self.is_workspace_ready(&ws_id) || self.host.takeover_requested(&ws_id) {
                 continue;
             }
+            // Skip starting maintenance while a foreground Bot turn is active, but do NOT hold
+            // `workspace_lock` across maintenance I/O or curator LLM calls so user inputs can
+            // execute immediately without waiting on background maintenance.
             let lock = self.workspace_lock(&ws_id);
-            let Ok(_guard) = lock.try_lock() else {
+            let Ok(guard) = lock.try_lock() else {
                 continue;
             };
-            let model_opt = self
-                .load_model_for_role(&ws_id, "memory_curator", cancel)
-                .await
-                .ok()
-                .map(|(m, _)| m);
-            let at = now_iso();
-            if let Ok(report) = self
-                .host
-                .run_background_maintenance(&ws_id, &at, model_opt.as_ref(), cancel)
-                .await
-                && (report.flushed_digest
-                    || report.recovered_verifications > 0
-                    || report.settled_deliveries > 0)
+            let maint_cancel = cancel.child_token();
             {
-                self.emit_conversation_changed(&ws_id, None);
-                self.emit_changed(vec![ws_id]);
+                let mut active = self
+                    .active_maintenance
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if active.contains_key(&ws_id) {
+                    continue;
+                }
+                active.insert(ws_id.clone(), maint_cancel.clone());
+            }
+            drop(guard);
+
+            let rt = Arc::clone(self);
+            let ws = ws_id.clone();
+            if !self.spawner.spawn_isolated_local(
+                &format!("peer-maint-{ws_id}"),
+                move || async move {
+                    let model_opt = rt
+                        .load_model_for_role(&ws, "memory_curator", &maint_cancel)
+                        .await
+                        .ok()
+                        .map(|(m, _)| m);
+                    let at = now_iso();
+                    if !maint_cancel.is_cancelled()
+                        && rt.host.holds_lease(&ws)
+                        && let Ok(report) = rt
+                            .host
+                            .run_background_maintenance(&ws, &at, model_opt.as_ref(), &maint_cancel)
+                            .await
+                    {
+                        if report.flushed_digest
+                            || report.recovered_verifications > 0
+                            || report.settled_deliveries > 0
+                        {
+                            rt.emit_conversation_changed(&ws, None);
+                            rt.emit_changed(vec![ws.clone()]);
+                        }
+                        if (report.watchdog_events > 0 || report.watch_signals > 0)
+                            && rt.is_enabled()
+                            && !maint_cancel.is_cancelled()
+                        {
+                            rt.wake_workspace_from_heartbeat(&ws);
+                        }
+                    }
+                    if let Ok(mut active) = rt.active_maintenance.lock() {
+                        active.remove(&ws);
+                    }
+                },
+            ) && let Ok(mut active) = self.active_maintenance.lock()
+            {
+                active.remove(&ws_id);
             }
         }
+    }
+
+    pub fn wake_workspace_for_user_input(self: &Arc<Self>, workspace_id: &str) {
+        if !self.is_enabled() || !is_valid_workspace_id(workspace_id) {
+            return;
+        }
+        self.host.preempt_active_wake(workspace_id);
+        self.wake_workspace(workspace_id);
     }
 
     fn is_paused_after_failure(&self, workspace_id: &str) -> bool {
@@ -787,6 +828,9 @@ impl ProjectHostRuntime {
     pub fn wake_workspace(self: &Arc<Self>, workspace_id: &str) {
         if !self.is_enabled() || !is_valid_workspace_id(workspace_id) {
             return;
+        }
+        if self.host.inputs().has_pending(workspace_id) {
+            self.host.preempt_active_wake(workspace_id);
         }
         if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
             paused.remove(workspace_id);
@@ -889,20 +933,38 @@ impl ProjectHostRuntime {
             return;
         }
 
-        let Ok((bot_model, _)) = self
+        let bot_model = match self
             .load_model_for_role(workspace_id, "project_agent", &loop_cancel)
             .await
-        else {
-            // Even without a configured model, still promote any queued sessions if possible
-            if let Ok(promoted) = self.host.supervisor().promote_queued(workspace_id, true)
-                && !promoted.start.is_empty()
-            {
-                for sid in promoted.start {
-                    self.spawn_worker_session(workspace_id, &sid);
+        {
+            Ok((model, _)) => model,
+            Err(_) => {
+                // Even without a configured model, still promote any queued sessions if possible.
+                if let Ok(promoted) = self.host.supervisor().promote_queued(workspace_id, true)
+                    && !promoted.start.is_empty()
+                {
+                    for sid in promoted.start {
+                        self.spawn_worker_session(workspace_id, &sid);
+                    }
+                    self.emit_changed(vec![workspace_id.to_owned()]);
                 }
-                self.emit_changed(vec![workspace_id.to_owned()]);
+                if !loop_cancel.is_cancelled() && self.host.inputs().has_pending(workspace_id) {
+                    eprintln!("project-host tick failed for {workspace_id}: MODEL_UNAVAILABLE");
+                    if self
+                        .host
+                        .record_host_input_failure(workspace_id, "MODEL_UNAVAILABLE")
+                        .unwrap_or(false)
+                    {
+                        let cursor = self.host.inputs().read_cursor(workspace_id).ok().flatten();
+                        if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+                            paused.insert(workspace_id.to_owned(), cursor);
+                        }
+                        self.emit_conversation_changed(workspace_id, conv_id.as_deref());
+                        self.emit_changed(vec![workspace_id.to_owned()]);
+                    }
+                }
+                return;
             }
-            return;
         };
 
         let worker_sel = self.worker_selection_json(workspace_id, &loop_cancel).await;
@@ -988,7 +1050,25 @@ impl ProjectHostRuntime {
                     self.emit_changed(vec![workspace_id.to_owned()]);
                 }
             }
-            Err(_) => {
+            Err(err) => {
+                eprintln!("project-host tick failed for {workspace_id}: {}", err.code);
+                if !turn_cancel.is_cancelled()
+                    && !matches!(
+                        err.code,
+                        "LEASE_REQUIRED" | "LEASE_HELD_BY_OTHER" | "BOT_NOT_BOUND"
+                    )
+                    && self.host.inputs().has_pending(workspace_id)
+                    && self
+                        .host
+                        .record_host_input_failure(workspace_id, err.code)
+                        .unwrap_or(false)
+                {
+                    let cursor = self.host.inputs().read_cursor(workspace_id).ok().flatten();
+                    if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+                        paused.insert(workspace_id.to_owned(), cursor);
+                    }
+                    self.emit_conversation_changed(workspace_id, conv_id.as_deref());
+                }
                 self.emit_changed(vec![workspace_id.to_owned()]);
             }
         }
@@ -998,15 +1078,6 @@ impl ProjectHostRuntime {
         if !self.is_enabled() {
             return;
         }
-        {
-            let active = self
-                .active_workers
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if active.contains_key(session_id) {
-                return;
-            }
-        }
         let cancel = self
             .loop_cancel
             .lock()
@@ -1014,47 +1085,50 @@ impl ProjectHostRuntime {
             .and_then(|g| g.clone())
             .unwrap_or_else(|| self.peer.shutdown_child_token())
             .child_token();
-        if let Ok(mut active) = self.active_workers.lock() {
-            active.insert(
-                session_id.to_owned(),
-                ActiveWorkerEntry {
-                    workspace_id: workspace_id.to_owned(),
-                    cancel: cancel.clone(),
-                },
-            );
+        {
+            let mut active = self
+                .active_workers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let std::collections::hash_map::Entry::Vacant(entry) =
+                active.entry(session_id.to_owned())
+            else {
+                return;
+            };
+            entry.insert(ActiveWorkerEntry {
+                workspace_id: workspace_id.to_owned(),
+                cancel: cancel.clone(),
+            });
         }
         let rt = Arc::clone(self);
         let ws = workspace_id.to_owned();
         let sid = session_id.to_owned();
-        if self
-            .spawner
-            .spawn(move |_guard| {
-                tokio::task::spawn_local(async move {
-                    let worker = Arc::clone(&rt);
-                    let worker_ws = ws.clone();
-                    let worker_sid = sid.clone();
-                    let worker_cancel = cancel.clone();
-                    let joined = tokio::task::spawn_local(async move {
-                        worker
-                            .run_worker_task(&worker_ws, &worker_sid, &worker_cancel)
-                            .await;
-                    })
-                    .await;
-                    if let Err(error) = joined {
-                        eprintln!("project worker task {sid} exited: {error}");
-                    }
-                    if let Ok(mut active) = rt.active_workers.lock() {
-                        active.remove(&sid);
-                    }
-                    rt.emit_changed(vec![ws.clone()]);
-                    rt.emit_conversation_changed(&ws, None);
-                    if rt.is_enabled() && !cancel.is_cancelled() {
-                        rt.wake_workspace(&ws);
-                    }
-                });
-            })
-            .is_err()
-            && let Ok(mut active) = self.active_workers.lock()
+        if !self.spawner.spawn_isolated_local(
+            &format!("peer-worker-{session_id}"),
+            move || async move {
+                let worker = Arc::clone(&rt);
+                let worker_ws = ws.clone();
+                let worker_sid = sid.clone();
+                let worker_cancel = cancel.clone();
+                let joined = tokio::task::spawn_local(async move {
+                    worker
+                        .run_worker_task(&worker_ws, &worker_sid, &worker_cancel)
+                        .await;
+                })
+                .await;
+                if let Err(error) = joined {
+                    eprintln!("project worker task {sid} exited: {error}");
+                }
+                if let Ok(mut active) = rt.active_workers.lock() {
+                    active.remove(&sid);
+                }
+                rt.emit_changed(vec![ws.clone()]);
+                rt.emit_conversation_changed(&ws, None);
+                if rt.is_enabled() && !cancel.is_cancelled() {
+                    rt.wake_workspace(&ws);
+                }
+            },
+        ) && let Ok(mut active) = self.active_workers.lock()
         {
             active.remove(session_id);
         }
@@ -1366,6 +1440,11 @@ impl ProjectHostRuntime {
         {
             entry.cancel.cancel();
         }
+        if let Ok(maint) = self.active_maintenance.lock()
+            && let Some(token) = maint.get(workspace_id)
+        {
+            token.cancel();
+        }
         if let Ok(workers) = self.active_workers.lock() {
             for entry in workers.values() {
                 if entry.workspace_id == workspace_id {
@@ -1423,6 +1502,11 @@ impl ProjectHostRuntime {
         if let Ok(workers) = self.active_workers.lock() {
             for entry in workers.values() {
                 entry.cancel.cancel();
+            }
+        }
+        if let Ok(maint) = self.active_maintenance.lock() {
+            for token in maint.values() {
+                token.cancel();
             }
         }
         if let Ok(mut approvals) = self.live_approvals.lock() {

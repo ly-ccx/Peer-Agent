@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import type { BotReplyRow } from './botReplyContinuity';
+import { continuousReplyRows, type BotReplyRow } from './botReplyContinuity.ts';
 import { normalizeBotMessage } from './botConversationState.ts';
 import { replyPresenceState } from './replyPresenceState.ts';
 
@@ -51,6 +51,24 @@ test('terminal activity stops the spinner and delivered cards own their feedback
   const message = normalizeBotMessage({ id: 'failure', kind: 'system_card', content: '',
     cards: [{ cardId: 'failed', kind: 'agent_unavailable', content: '原始报错' }] })!;
   assert.deepEqual(state({ activity: { ...activity, phase: 'error' }, message }), { label: null, busy: false, refresh: false });
+});
+
+test('a host setup failure replaces the matching input receipt without creating live reply activity', () => {
+  const user = normalizeBotMessage({ id: 'input-i', inputId: 'i', kind: 'user_input', content: '继续' })!;
+  const failure = normalizeBotMessage({ id: 'turn-card', turnId: 'turn', kind: 'system_card', replyTo: ['i'],
+    cards: [{ cardId: 'card:agent_unavailable:turn', kind: 'agent_unavailable', content: '代理暂时无法加载模型。' }] })!;
+  const rows = continuousReplyRows(
+    [{ type: 'message', message: user }, { type: 'message', message: failure }],
+    [user, failure],
+    [{ inputId: 'i' }],
+    [],
+  );
+  const [input, reply] = rows;
+  assert.ok(input?.type === 'message');
+  assert.equal(input.replyWait, undefined);
+  assert.ok(reply?.type === 'reply');
+  assert.equal(reply.message, failure);
+  assert.deepEqual(replyPresenceState(reply, i18n), { label: null, busy: false, refresh: false });
 });
 
 test('finished execution keeps the same reply cue until the canonical message arrives without claiming live execution', () => {

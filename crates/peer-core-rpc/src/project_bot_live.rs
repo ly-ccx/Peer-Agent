@@ -629,7 +629,15 @@ pub async fn handle_submit_input(ctx: &ServerContext, params: Value) -> Result<V
         if handoff_handled && handoff.as_ref().is_some_and(|h| h["repairing"] == true) {
             ctx.project_host.spawn_worker_session(workspace_id, sid);
         }
-        ctx.project_host.wake_workspace(workspace_id);
+        ctx.project_host.wake_workspace_for_user_input(workspace_id);
+    } else if ctx.project_host.is_enabled()
+        && !ctx.project_host.is_yield_cooled_down(workspace_id)
+        && host.leases_status_readonly(workspace_id).is_none()
+    {
+        if handoff_handled && handoff.as_ref().is_some_and(|h| h["repairing"] == true) {
+            ctx.project_host.spawn_worker_session(workspace_id, sid);
+        }
+        ctx.project_host.wake_workspace_for_user_input(workspace_id);
     } else if !handoff_handled && !answer_str.is_empty() && !sid.is_empty() {
         match host.deliver_offline_answer(workspace_id, sid, &input.text) {
             Ok(res) if res["error"] == "workspace_mismatch" => {

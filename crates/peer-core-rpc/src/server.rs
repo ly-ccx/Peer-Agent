@@ -559,20 +559,25 @@ impl Drop for BackgroundCounterGuard {
 #[derive(Clone)]
 pub(crate) struct LocalBackgroundSpawner {
     local_tx: mpsc::UnboundedSender<LocalJob>,
+    io_handle: Option<tokio::runtime::Handle>,
     active_background: Arc<AtomicUsize>,
     background_done: Arc<Notify>,
 }
 
 impl LocalBackgroundSpawner {
+    fn bg_guard(&self) -> BackgroundCounterGuard {
+        self.active_background.fetch_add(1, Ordering::SeqCst);
+        BackgroundCounterGuard {
+            counter: Arc::clone(&self.active_background),
+            notify: Arc::clone(&self.background_done),
+        }
+    }
+
     pub(crate) fn spawn<F>(&self, spawn_fn: F) -> Result<(), RpcError>
     where
         F: FnOnce(BackgroundCounterGuard) + Send + 'static,
     {
-        let guard = BackgroundCounterGuard {
-            counter: Arc::clone(&self.active_background),
-            notify: Arc::clone(&self.background_done),
-        };
-        self.active_background.fetch_add(1, Ordering::SeqCst);
+        let guard = self.bg_guard();
         let res = self.local_tx.send(Box::new(move || {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
         }));
@@ -580,6 +585,52 @@ impl LocalBackgroundSpawner {
             return Err(RpcError::shutting_down());
         }
         Ok(())
+    }
+
+    /// Spawn a `Send` task on the multi-threaded Tokio I/O pool (when available) so notifications
+    /// and live activity streaming never block behind `peer-core-local-rt`.
+    pub(crate) fn spawn_send<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        if let Some(handle) = &self.io_handle {
+            handle.spawn(fut);
+            return;
+        }
+        let _ = self.spawn(move |_guard| {
+            tokio::task::spawn_local(fut);
+        });
+    }
+
+    /// Run a `!Send` task (such as a delegated worker episode or background maintenance pass) on
+    /// its own isolated `current_thread` runtime + `LocalSet` off `peer-core-local-rt` so workers
+    /// and sync `git`/FS operations can never starve Main Bot cognition or activity forwarding.
+    pub(crate) fn spawn_isolated_local<F, Fut>(&self, thread_name: &str, make_fut: F) -> bool
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + 'static,
+    {
+        let guard = self.bg_guard();
+        let runner = move || {
+            let _guard = guard;
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    let local = tokio::task::LocalSet::new();
+                    rt.block_on(local.run_until(make_fut()));
+                }
+            }));
+        };
+        if let Some(handle) = &self.io_handle {
+            handle.spawn_blocking(runner);
+            return true;
+        }
+        std::thread::Builder::new()
+            .name(thread_name.to_owned())
+            .spawn(runner)
+            .is_ok()
     }
 }
 
@@ -651,6 +702,7 @@ impl CoreEngine {
         let background_done = Arc::new(Notify::new());
         let spawner = LocalBackgroundSpawner {
             local_tx: local_tx.clone(),
+            io_handle: tokio::runtime::Handle::try_current().ok(),
             active_background: Arc::clone(&active_background),
             background_done: Arc::clone(&background_done),
         };
@@ -783,6 +835,7 @@ impl ServerContext {
     {
         LocalBackgroundSpawner {
             local_tx: self.local_tx.clone(),
+            io_handle: tokio::runtime::Handle::try_current().ok(),
             active_background: Arc::clone(&self.active_background),
             background_done: Arc::clone(&self.background_done),
         }
