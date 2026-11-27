@@ -451,7 +451,25 @@ test('引用和思考状态', () => {
   assert.deepEqual(quoteRefsFor('', '文字'), []);
   assert.equal(showAgentThinking([], true), true);
   assert.equal(showAgentThinking([{ inputId: 'a', text: 'x', quoteRefs: [], createdAt: '', state: 'sending' }], true), false);
+  assert.equal(showAgentThinking([{ inputId: 'b', text: 'x', quoteRefs: [], createdAt: '', state: 'rejected', rejectionCode: 'QUESTION_CLOSED' }], true), false);
   assert.equal(showAgentThinking([], false), false);
+});
+
+test('applyOptimistic preserves rejected state, rejectionCode, busy flag and taskRefs', () => {
+  const pending = applyOptimistic([], [{
+    inputId: 'rej-1',
+    text: 'hello',
+    quoteRefs: [],
+    taskRefs: [{ sessionId: 'sess-1', title: 'Task 1', status: 'running' }],
+    createdAt: '2026-11-27T00:00:00.000Z',
+    state: 'rejected',
+    rejectionCode: 'QUESTION_CLOSED',
+    busy: true,
+  }])[0]!;
+  assert.equal(pending.pending, 'rejected');
+  assert.equal(pending.rejectionCode, 'QUESTION_CLOSED');
+  assert.equal(pending.pendingBusy, true);
+  assert.deepEqual(pending.taskRefs, ['sess-1']);
 });
 
 test('optimistic, failed and acknowledged messages keep uploads until the durable echo', () => {

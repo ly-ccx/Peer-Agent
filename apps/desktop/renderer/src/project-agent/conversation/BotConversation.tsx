@@ -216,6 +216,14 @@ export function BotConversation({
           onRetry={(inputId) => {
             void conversation.retry(inputId);
           }}
+          onDiscard={(inputId) => conversation.discardPending(inputId)}
+          onRestoreToDraft={async (inputId) => {
+            const result = await conversation.restorePendingToDraft(inputId);
+            if (result.ok) {
+              thread.current?.querySelector<HTMLTextAreaElement>('.bot-composer textarea:not(:disabled)')?.focus();
+            }
+            return result;
+          }}
           onLocateSession={onLocateSession}
           onOpenDetails={(replyId) => {
             onInspect?.({

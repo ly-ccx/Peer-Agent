@@ -278,6 +278,12 @@ export function BotConversationComposer({
       <div className="bot-tray-scrim" aria-hidden="true" onClick={closeTray} />
     ) : null}
     <InputRecoveryNotice state={statusState} session={session} i18n={i18n} />
+    {conversation.restoredNotice ? (
+      <div className="bot-thread-feedback" role="status">
+        <p>{i18n.t(conversation.restoredNotice)}</p>
+        <button type="button" onClick={conversation.clearRestoredNotice}>{i18n.t('projectAgent.drawer.close')}</button>
+      </div>
+    ) : null}
     <BotComposerDraftBridge
       workspaceId={workspaceId}
       conversation={conversation}

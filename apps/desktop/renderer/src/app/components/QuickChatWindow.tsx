@@ -1,10 +1,11 @@
 import { useCompositionGuard } from '../hooks/useCompositionGuard';
 import { useInputRecovery } from '../../project-agent/state/useInputRecovery';
+import { rejectionLabelKey } from '../../project-agent/state/userReceiptState';
 import { InputRecoveryNotice } from '../../project-agent/conversation/InputRecoveryNotice';
 import { createI18n } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 import { useQuickChatBotModel } from '../../project-agent/state/useQuickChatBotModel';
-import type { LlmProviderConfigView, LocalAccessLevel } from '@peer-agent/protocol';
+import { isDefiniteProjectInputRejectionCode, type LlmProviderConfigView, type LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import {
@@ -413,7 +414,13 @@ export function QuickChatWindow() {
       setError('');
       await runQuickChatSubmission(async () => {
         const result = await recovery.session.send();
-        if (!result.ok) throw new Error(result.input ? i18n.t('projectAgent.chat.inputDeliveryIssue') : i18n.t('projectAgent.chat.inputUnconfirmed'));
+        if (!result.ok) {
+          throw new Error(result.input
+            ? i18n.t('projectAgent.chat.inputDeliveryIssue')
+            : isDefiniteProjectInputRejectionCode(result.code)
+              ? i18n.t(rejectionLabelKey(result.code))
+              : i18n.t('projectAgent.chat.inputUnconfirmed'));
+        }
         // A late receipt never clears or hides a new draft typed while the request was pending.
         if (activeBot.current === routed.workspaceId && !recovery.session.getSnapshot().draft.text && !recovery.session.getSnapshot().pending.length) await clientApi.quickChatHide?.();
       }, (reason) => {

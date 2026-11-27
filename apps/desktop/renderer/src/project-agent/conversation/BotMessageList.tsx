@@ -50,6 +50,8 @@ export function BotMessageList({
   onJump,
   onQuote,
   onRetry,
+  onDiscard,
+  onRestoreToDraft,
   onLocateSession,
   onOpenDetails,
   followRequestId = 0,
@@ -76,6 +78,8 @@ export function BotMessageList({
   readonly onJump: (messageId: string) => void;
   readonly onQuote: (messageId: string, excerpt: string) => void;
   readonly onRetry: (inputId: string) => void;
+  readonly onDiscard?: (inputId: string) => Promise<import('@peer-agent/protocol').ProjectInputMutationResult> | void;
+  readonly onRestoreToDraft?: (inputId: string) => Promise<import('@peer-agent/protocol').ProjectInputMutationResult> | void;
   readonly onLocateSession: (sessionId: string) => void;
   readonly onOpenDetails?: (replyId: string) => void;
   readonly focusTaskRequest?: TaskConversationRequest | null;
@@ -195,6 +199,8 @@ export function BotMessageList({
             highlighted={highlighted === row.message.id}
             i18n={i18n}
             onRetry={onRetry}
+            onDiscard={onDiscard}
+            onRestoreToDraft={onRestoreToDraft}
             onLocateSession={onLocateSession}
           />
         ) : row.message.kind === 'agent_turn' ? (

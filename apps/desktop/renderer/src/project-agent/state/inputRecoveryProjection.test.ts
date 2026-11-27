@@ -92,3 +92,23 @@ test('save errors reach the input area without disturbing history or discarding 
   assert.equal(composer().draft.text, 'preserve me');
   assert.equal(history(), initial);
 });
+
+test('discard and restoreToDraft project into both conversation and composer snapshots', async () => {
+  const f = fixture(); await f.session.load();
+  const history = createInputRecoveryProjection(f.session.getSnapshot, conversationInputKeys);
+  const composer = createInputRecoveryProjection(f.session.getSnapshot, composerInputKeys);
+  f.session.edit({ text: 'recoverable message' });
+  await f.session.send();
+  assert.equal(history().pending.length, 1);
+  assert.equal(composer().draft.text, '');
+
+  assert.deepEqual(await f.session.restoreToDraft('input-1'), { ok: true });
+  assert.equal(history().pending.length, 0);
+  assert.equal(composer().draft.text, 'recoverable message');
+
+  await f.session.send();
+  assert.equal(history().pending.length, 1);
+  assert.deepEqual(await f.session.discard('input-1'), { ok: true });
+  assert.equal(history().pending.length, 0);
+  assert.equal(composer().draft.text, '');
+});
