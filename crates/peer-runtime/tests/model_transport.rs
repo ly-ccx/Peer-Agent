@@ -1,21 +1,43 @@
 use peer_runtime::{
     CancellationToken,
     model::{
-        ModelConfig, NativeModel,
+        LiveHistory, ModelConfig, ModelDelta, NativeModel,
         wire::{GenerationOptions, Wire},
     },
 };
 use serde_json::json;
 use std::{
-    io::{Read, Write},
-    net::TcpListener,
+    io::{self, Read, Write},
+    net::{TcpListener, TcpStream},
     time::Duration,
 };
+
+type SocketOutcome = tokio::sync::oneshot::Receiver<io::Result<()>>;
+
+fn observe_peer_disconnect(socket: &mut TcpStream) -> io::Result<()> {
+    let mut byte = [0];
+    loop {
+        match socket.read(&mut byte) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected request bytes after the body",
+                ));
+            }
+            // Dropping a response can end TCP with a reset instead of EOF.
+            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 fn server(
     response: Option<String>,
 ) -> (
     String,
-    tokio::sync::oneshot::Receiver<bool>,
+    SocketOutcome,
     std::thread::JoinHandle<()>,
     tokio::sync::oneshot::Receiver<Vec<u8>>,
 ) {
@@ -48,13 +70,13 @@ fn server(
         let mut body = vec![0; n];
         socket.read_exact(&mut body).unwrap();
         let _ = capture.send(body);
-        if let Some(response) = response {
+        let outcome = if let Some(response) = response {
             socket.write_all(response.as_bytes()).unwrap();
-            let _ = send.send(true);
+            Ok(())
         } else {
-            let closed = socket.read(&mut b).is_ok_and(|n| n == 0);
-            let _ = send.send(closed);
-        }
+            observe_peer_disconnect(&mut socket)
+        };
+        let _ = send.send(outcome);
     });
     (endpoint, recv, thread, captured)
 }
@@ -106,13 +128,11 @@ async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
                 "model_timeout"
             }
         );
-        assert!(
-            tokio::time::timeout(Duration::from_secs(3), closed)
-                .await
-                .unwrap()
-                .unwrap(),
-            "cancelled transport must release its socket"
-        );
+        tokio::time::timeout(Duration::from_secs(3), closed)
+            .await
+            .unwrap()
+            .unwrap()
+            .expect("cancelled transport must release its socket");
         thread.join().unwrap();
     }
 }
@@ -203,11 +223,7 @@ async fn terminal_error_observation_binds_usage_to_the_actual_sent_bytes() {
 fn streaming_server(
     chunks: Vec<(Duration, String)>,
     stall_after_chunks: bool,
-) -> (
-    String,
-    tokio::sync::oneshot::Receiver<bool>,
-    std::thread::JoinHandle<()>,
-) {
+) -> (String, SocketOutcome, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
     let (send, recv) = tokio::sync::oneshot::channel();
@@ -246,17 +262,20 @@ fn streaming_server(
             if !delay.is_zero() {
                 std::thread::sleep(delay);
             }
-            if socket.write_all(chunk.as_bytes()).is_err() || socket.flush().is_err() {
-                let _ = send.send(true);
+            if let Err(error) = socket
+                .write_all(chunk.as_bytes())
+                .and_then(|()| socket.flush())
+            {
+                let _ = send.send(Err(error));
                 return;
             }
         }
-        if stall_after_chunks {
-            let closed = socket.read(&mut b).is_ok_and(|n| n == 0);
-            let _ = send.send(closed);
+        let outcome = if stall_after_chunks {
+            observe_peer_disconnect(&mut socket)
         } else {
-            let _ = send.send(true);
-        }
+            Ok(())
+        };
+        let _ = send.send(outcome);
     });
     (endpoint, recv, thread)
 }
@@ -318,12 +337,11 @@ async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
         .expect("actively streaming response must not be killed by wall-clock cutoff");
     assert_eq!(turn.content, "hello long stream");
     assert!(started.elapsed() > inactivity);
-    assert!(
-        tokio::time::timeout(Duration::from_secs(3), done)
-            .await
-            .unwrap()
-            .unwrap()
-    );
+    tokio::time::timeout(Duration::from_secs(3), done)
+        .await
+        .unwrap()
+        .unwrap()
+        .expect("the provider must send every scheduled SSE frame");
     thread.join().unwrap();
 }
 
@@ -332,7 +350,7 @@ async fn mid_stream_stall_exceeding_inactivity_deadline_fails_with_model_timeout
 {
     let (url, closed, thread) = streaming_server(
         vec![(
-            Duration::from_millis(10),
+            Duration::ZERO,
             format!(
                 "data: {}\n\n",
                 json!({"choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]})
@@ -352,25 +370,38 @@ async fn mid_stream_stall_exceeding_inactivity_deadline_fails_with_model_timeout
         Duration::from_millis(80),
     )
     .unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut emitted = String::new();
     let error = match model
-        .turn(
+        .turn_with_materialized_history_and_deltas(
+            home.path(),
+            "stall-stream",
             "context",
             &json!({"messages":[{"role":"user","content":"stall mid stream"}]}),
             &json!([]),
+            &LiveHistory::default(),
             &CancellationToken::new(),
+            async |delta| {
+                if let ModelDelta::Text(text) = delta {
+                    emitted.push_str(text);
+                }
+                Ok(())
+            },
         )
         .await
     {
         Err(error) => error,
         Ok(_) => panic!("mid-stream stalled HTTP must not succeed"),
     };
-    assert_eq!(error.code, "model_timeout");
-    assert!(
-        tokio::time::timeout(Duration::from_secs(3), closed)
-            .await
-            .unwrap()
-            .unwrap(),
-        "stalled stream must release its socket on inactivity timeout"
+    assert_eq!(
+        emitted, "partial",
+        "the client must decode the first SSE frame before timing out"
     );
+    assert_eq!(error.code, "model_timeout");
+    tokio::time::timeout(Duration::from_secs(3), closed)
+        .await
+        .unwrap()
+        .unwrap()
+        .expect("stalled stream must release its socket on inactivity timeout");
     thread.join().unwrap();
 }
