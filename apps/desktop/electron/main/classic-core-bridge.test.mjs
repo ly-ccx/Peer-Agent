@@ -3793,23 +3793,26 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
     });
     assert.equal(submitted.ok, true);
 
-    // Wait for Main Bot wake reply carrying the interactive-result://... evidenceRef.
+    // The worker's internal publication is still subject to the host approval gate.
+    let pending;
+    const approvalDeadline = Date.now() + 20_000;
+    while (!pending && Date.now() < approvalDeadline) {
+      const listed = await bridge.projectBotListApprovals({ workspaceId });
+      assert.equal(listed.ok, true, JSON.stringify(listed));
+      pending = listed.approvals.find((approval) => approval.state === 'open'
+        && approval.sessionId === spawnedSessionId && approval.capabilityId === 'local.interactive.publish');
+      if (!pending) await new Promise((r) => setTimeout(r, 80));
+    }
+    assert.ok(pending, 'worker must request approval for publish_interactive_result');
+    const approved = await bridge.projectBotDecideApproval({
+      workspaceId, approvalId: pending.approvalId, decision: 'approve', duration: 'once',
+    });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+
+    // Wait for the verify_session round trip and the natural reply with host Evidence.
     let replyWithInteractive = null;
-    let publishApproved = false;
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      if (!publishApproved && spawnedSessionId) {
-        const { approvals } = await bridge.projectBotListApprovals({ workspaceId });
-        const pending = approvals.find((approval) => approval.state === 'open'
-          && approval.sessionId === spawnedSessionId && approval.capabilityId === 'local.interactive.publish');
-        if (pending) {
-          const approved = await bridge.projectBotDecideApproval({
-            workspaceId, approvalId: pending.approvalId, decision: 'approve', duration: 'once',
-          });
-          assert.equal(approved.ok, true, JSON.stringify(approved));
-          publishApproved = true;
-        }
-      }
+    const replyDeadline = Date.now() + 20_000;
+    while (Date.now() < replyDeadline) {
       const conv = await bridge.projectBotReadConversation({ workspaceId, limit: 20 });
       const hit = (conv.messages || []).find((m) => (
         m.kind === 'agent_reply'
@@ -3825,7 +3828,6 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
 
     assert.equal(workerSawPublishTool, true, 'worker must receive publish_interactive_result tool');
     assert.equal(workerSawCatalogPrompt, true, 'worker must receive peer-basic-1 catalog prompt');
-    assert.equal(publishApproved, true, 'worker publication must complete through the host approval gate');
     assert.equal(verifierSawInspectOnly, true, 'verifier must receive inspect_interactive_result only');
     assert.equal(verifierEvaluatedCard, true, 'verifier must run real OpenUI evaluate via host.interactive.validate');
     assert.ok(publishedArtifactRef && publishedArtifactRef.startsWith('interactive-result://'), 'worker must publish interactive-result:// ref');
