@@ -112,15 +112,14 @@ export async function checkNativeBotRetry({ page, model, until, report, bot, hom
   await selectBotByName(page, 'project-000');
   assert.equal(wireRequests(model, RETRY_INPUT).length, 1, 'conversation re-entry must not replay a rejected turn');
 
-  await thread(page).and(page.locator('[aria-busy="false"]')).waitFor();
-  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
-  if (await latest.isVisible()) await latest.click();
-  await until(() => thread(page).evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
-  const retryButton = page.locator(`[data-card-id="card:agent_unavailable:${original.turnId}"]`)
-    .getByRole('button', { name: '继续尝试', exact: true });
-  await retryButton.focus();
-  assert.equal(await retryButton.evaluate(node => document.activeElement === node), true);
-  await retryButton.press('Enter');
+  // The stored coordination card's continuation button requires a protected
+  // Provider checkpoint. This rejection happened before any tool dispatch.
+  // Exercise the existing native input retry through the public preload API.
+  await until(() => history(home, bot).some(row => row.id === original.turnId && row.kind === 'agent_turn'), Boolean);
+  const trace = JSON.parse(readFileSync(path.join(home, 'project-runtime', bot.workspaceId, 'turns', original.turnId + '.json')));
+  assert.equal(trace.diagnosticTiming.outcome, 'error');
+  assert.deepEqual(trace.rounds, []);
+  await retry(page, bot, original.turnId);
   const expected = 'RC scripted reply: ' + RETRY_INPUT;
   await thread(page).getByText(expected, { exact: true }).waitFor();
   const rows = history(home, bot);
@@ -131,7 +130,7 @@ export async function checkNativeBotRetry({ page, model, until, report, bot, hom
   assert.deepEqual(replies[0].replyTo, [inputs[0].id]);
   assert.notEqual(replies[0].turnId, original.turnId);
   assert.equal(wireRequests(model, RETRY_INPUT).length, 2);
-  report.nativeManualRetry = { originalTurnId: original.turnId, replyId: replies[0].id, inputId: inputs[0].id, dispatches: 2 };
+  report.nativeManualRetry = { originalTurnId: original.turnId, replyId: replies[0].id, inputId: inputs[0].id, dispatches: 2, surface: 'preload' };
   report.checks.push('manual retry through real preload IPC and Rust requeues the same input after a provider error and commits one replacement reply');
 }
 

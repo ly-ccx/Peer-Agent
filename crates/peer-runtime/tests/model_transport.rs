@@ -213,6 +213,8 @@ fn streaming_server(
     let (send, recv) = tokio::sync::oneshot::channel();
     let thread = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
+        // Deliver small SSE frames independently of TCP delayed ACKs.
+        socket.set_nodelay(true).unwrap();
         socket
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -261,35 +263,37 @@ fn streaming_server(
 
 #[tokio::test]
 async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
+    let frame_interval = Duration::from_millis(120);
+    let inactivity = Duration::from_millis(270);
     let (url, done, thread) = streaming_server(
         vec![
             (
-                Duration::from_millis(40),
+                frame_interval,
                 format!(
                     "data: {}\n\n",
                     json!({"choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}]})
                 ),
             ),
             (
-                Duration::from_millis(40),
+                frame_interval,
                 format!(
                     "data: {}\n\n",
                     json!({"choices":[{"index":0,"delta":{"content":"long "},"finish_reason":null}]})
                 ),
             ),
             (
-                Duration::from_millis(40),
+                frame_interval,
                 format!(
                     "data: {}\n\n",
                     json!({"choices":[{"index":0,"delta":{"content":"stream"},"finish_reason":"stop"}]})
                 ),
             ),
-            (Duration::from_millis(40), "data: [DONE]\n\n".to_owned()),
+            (frame_interval, "data: [DONE]\n\n".to_owned()),
         ],
         false,
     );
-    // Total stream duration (~160ms) intentionally exceeds the single-wait idle timeout (90ms),
-    // proving active streaming resets the inactivity timer instead of being cut off mid-reply.
+    // Three content frames already exceed one idle interval. Allow host
+    // scheduling jitter between real socket writes while retaining that ratio.
     let model = NativeModel::new(
         ModelConfig {
             endpoint: url,
@@ -299,9 +303,10 @@ async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
             generation: GenerationOptions::default(),
         },
         None,
-        Duration::from_millis(90),
+        inactivity,
     )
     .unwrap();
+    let started = std::time::Instant::now();
     let turn = model
         .turn(
             "context",
@@ -312,6 +317,7 @@ async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
         .await
         .expect("actively streaming response must not be killed by wall-clock cutoff");
     assert_eq!(turn.content, "hello long stream");
+    assert!(started.elapsed() > inactivity);
     assert!(
         tokio::time::timeout(Duration::from_secs(3), done)
             .await
