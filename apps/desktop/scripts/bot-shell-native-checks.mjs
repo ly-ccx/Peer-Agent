@@ -100,6 +100,7 @@ async function retry(page, bot, turnId) {
 
 export async function checkNativeBotRetry({ page, model, until, report, bot, home, captureDirectory }) {
   await submit(page, RETRY_INPUT);
+  await until(() => wireRequests(model, RETRY_INPUT).some(request => request.finished), Boolean);
   const failure = thread(page).locator('.bot-unavailable-reply').last();
   await failure.waitFor();
   const original = await until(() => history(home, bot).findLast(row =>
