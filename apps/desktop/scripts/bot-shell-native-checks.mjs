@@ -113,9 +113,14 @@ export async function checkNativeBotRetry({ page, model, until, report, bot, hom
   assert.equal(wireRequests(model, RETRY_INPUT).length, 1, 'conversation re-entry must not replay a rejected turn');
 
   await thread(page).and(page.locator('[aria-busy="false"]')).waitFor();
+  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
+  if (await latest.isVisible()) await latest.click();
+  await until(() => thread(page).evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   const retryButton = page.locator(`[data-card-id="card:agent_unavailable:${original.turnId}"]`)
     .getByRole('button', { name: '继续尝试', exact: true });
-  await retryButton.click();
+  await retryButton.focus();
+  assert.equal(await retryButton.evaluate(node => document.activeElement === node), true);
+  await retryButton.press('Enter');
   const expected = 'RC scripted reply: ' + RETRY_INPUT;
   await thread(page).getByText(expected, { exact: true }).waitFor();
   const rows = history(home, bot);
