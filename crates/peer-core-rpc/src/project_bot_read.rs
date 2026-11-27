@@ -47,7 +47,8 @@ pub fn handle_bot_get(ctx: &ServerContext, params: Value) -> Result<Value, RpcEr
         .and_then(Value::as_str)
         .unwrap_or("");
     let data_home = &ctx.config.data_home;
-    let sessions_by_ws = SessionSupervisor::new(data_home, None).list_all_bot_sessions();
+    let sessions = SessionSupervisor::new(data_home, None).list_bot_sessions(workspace_id);
+    let sessions_by_ws = std::collections::HashMap::from([(workspace_id.to_owned(), sessions)]);
     match BotDirectory::new(data_home).get_bot(workspace_id, &sessions_by_ws) {
         Ok(detail) => {
             let path_exists =

@@ -83,7 +83,7 @@ fn server(
 #[tokio::test]
 async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
     for cancel_request in [false, true] {
-        let (url, closed, thread, _) = server(None);
+        let (url, closed, thread, request) = server(None);
         let cancel = CancellationToken::new();
         let model = NativeModel::new(
             ModelConfig {
@@ -97,17 +97,19 @@ async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
             if cancel_request {
                 Duration::from_secs(2)
             } else {
-                Duration::from_millis(40)
+                Duration::from_millis(800)
             },
         )
         .unwrap();
-        if cancel_request {
+        let cancellation = cancel_request.then(|| {
             let signal = cancel.clone();
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(40)).await;
+                request
+                    .await
+                    .expect("provider must receive the request before cancellation");
                 signal.cancel();
-            });
-        }
+            })
+        });
         let error = match model
             .turn(
                 "context",
@@ -128,6 +130,9 @@ async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
                 "model_timeout"
             }
         );
+        if let Some(cancellation) = cancellation {
+            cancellation.await.unwrap();
+        }
         tokio::time::timeout(Duration::from_secs(3), closed)
             .await
             .unwrap()
@@ -282,37 +287,24 @@ fn streaming_server(
 
 #[tokio::test]
 async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
-    let frame_interval = Duration::from_millis(120);
-    let inactivity = Duration::from_millis(270);
-    let (url, done, thread) = streaming_server(
-        vec![
-            (
-                frame_interval,
-                format!(
-                    "data: {}\n\n",
-                    json!({"choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}]})
-                ),
-            ),
-            (
-                frame_interval,
-                format!(
-                    "data: {}\n\n",
-                    json!({"choices":[{"index":0,"delta":{"content":"long "},"finish_reason":null}]})
-                ),
-            ),
-            (
-                frame_interval,
-                format!(
-                    "data: {}\n\n",
-                    json!({"choices":[{"index":0,"delta":{"content":"stream"},"finish_reason":"stop"}]})
-                ),
-            ),
-            (frame_interval, "data: [DONE]\n\n".to_owned()),
-        ],
-        false,
-    );
-    // Three content frames already exceed one idle interval. Allow host
-    // scheduling jitter between real socket writes while retaining that ratio.
+    let frame_interval = Duration::from_millis(125);
+    let inactivity_deadline = Duration::from_millis(800);
+    // Content alone spans one deadline, with room for runner pauses between writes.
+    let parts = [
+        "hello ", "from ", "a ", "long ", "and ", "active ", "stream",
+    ];
+    let mut frames: Vec<_> = parts
+        .iter()
+        .enumerate()
+        .map(|(index, content)| {
+            let finish = (index + 1 == parts.len()).then_some("stop");
+            let chunk =
+                json!({"choices":[{"index":0,"delta":{"content":content},"finish_reason":finish}]});
+            (frame_interval, format!("data: {chunk}\n\n"))
+        })
+        .collect();
+    frames.push((frame_interval, "data: [DONE]\n\n".to_owned()));
+    let (url, done, thread) = streaming_server(frames, false);
     let model = NativeModel::new(
         ModelConfig {
             endpoint: url,
@@ -322,7 +314,7 @@ async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
             generation: GenerationOptions::default(),
         },
         None,
-        inactivity,
+        inactivity_deadline,
     )
     .unwrap();
     let started = std::time::Instant::now();
@@ -335,8 +327,12 @@ async fn active_streaming_survives_past_single_wait_inactivity_deadline() {
         )
         .await
         .expect("actively streaming response must not be killed by wall-clock cutoff");
-    assert_eq!(turn.content, "hello long stream");
-    assert!(started.elapsed() > inactivity);
+    assert_eq!(turn.content, "hello from a long and active stream");
+    let total_elapsed = started.elapsed();
+    assert!(
+        total_elapsed > inactivity_deadline,
+        "stream lasted {total_elapsed:?}"
+    );
     tokio::time::timeout(Duration::from_secs(3), done)
         .await
         .unwrap()
@@ -367,7 +363,7 @@ async fn mid_stream_stall_exceeding_inactivity_deadline_fails_with_model_timeout
             generation: GenerationOptions::default(),
         },
         None,
-        Duration::from_millis(80),
+        Duration::from_millis(800),
     )
     .unwrap();
     let home = tempfile::tempdir().unwrap();

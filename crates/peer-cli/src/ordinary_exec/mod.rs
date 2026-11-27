@@ -61,14 +61,19 @@ async fn stdin_prompt(cancel: &CancellationToken) -> Result<String, &'static str
                 &input,
                 rustix::event::PollFlags::IN,
             )];
-            let ready = rustix::event::poll(
+            let ready = match rustix::event::poll(
                 &mut poll,
                 Some(&rustix::event::Timespec {
                     tv_sec: 0,
                     tv_nsec: 0,
                 }),
-            )
-            .map_err(|_| "stdin_unavailable")?;
+            ) {
+                Ok(ready) => ready,
+                // A signal may interrupt poll before the watcher publishes
+                // cancellation. Let the watcher run before probing stdin again.
+                Err(rustix::io::Errno::INTR) => 0,
+                Err(_) => return Err("stdin_unavailable"),
+            };
             if ready == 0 {
                 tokio::select! {biased;_=cancel.cancelled()=>return Err("CANCELLED"),_=tokio::time::sleep(Duration::from_millis(10))=>{}}
                 continue;
