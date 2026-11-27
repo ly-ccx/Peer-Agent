@@ -92,6 +92,10 @@ const { TouchBarTray } = loadComponent<typeof import('./conversation/TouchBarTra
   '../state/botNavigationState': { recencyBucketOf },
   '../state/workerStatus': status,
 });
+const workingPlanStrip = loadComponent<typeof import('./task-workspace/TaskWorkingPlanStrip')>('./task-workspace/TaskWorkingPlanStrip.tsx', {
+  '../../ui/icons': icons,
+  '../styles/task-working-plan-strip.css': {},
+});
 const { TaskWorkspaceView } = loadComponent<typeof import('./task-workspace/TaskWorkspaceView')>('./task-workspace/TaskWorkspaceView.tsx', {
   '@peer-agent/protocol': protocol,
   '../../clientApi': { clientApi: {} },
@@ -106,6 +110,7 @@ const { TaskWorkspaceView } = loadComponent<typeof import('./task-workspace/Task
   '../conversation/ComposerTouchBar': { ComposerTouchBar },
   '../drawer/ConversationScene': { ConversationSceneDrawer: () => null },
   './TaskEvidenceInspector': { TaskEvidenceInspector: () => null },
+  './TaskWorkingPlanStrip': workingPlanStrip,
   './verdictStrip': { verdictStrip },
   '../styles/bot-task-workspace.css': {},
   '../styles/bot-touchbar.css': {},
@@ -322,7 +327,12 @@ test('task workspace header and Touch Bar animate only real execution or verific
       onBackToBot() {}, onTaskConversation() {}, onOpenTask() {}, onCiteToBot() {}, async onRefreshSessions() {},
     }));
   };
-  const awaiting = renderWorkspace({ status: 'result_ready', verificationActive: false, followUp });
+  const workingPlan = {
+    epoch: 0, revision: 1, updatedAt: '2026-11-27T00:00:00Z',
+    total: 1, completed: 1, blocked: 0, steps: [{ title: 'Prepare report', status: 'completed' }],
+  };
+  const awaiting = renderWorkspace({ status: 'result_ready', verificationActive: false, followUp, workingPlan });
+  assert.match(awaiting, /aria-label="工作计划"/);
   assert.match(awaiting, /bot-task-status-pill[^>]*><svg data-icon="circle"><\/svg><span>等待主 Bot 汇报结果<\/span>/);
   assert.match(awaiting, /bot-tb-status-text">等待主 Bot 汇报结果/);
   assert.match(awaiting, /title="撤回任务" aria-label="撤回任务"><svg data-icon="close"><\/svg><span>撤回<\/span>/);
@@ -333,7 +343,8 @@ test('task workspace header and Touch Bar animate only real execution or verific
   assert.match(awaitingEnglish, /Waiting for main bot report/);
   assert.match(awaitingEnglish, /title="Withdraw task" aria-label="Withdraw task"/);
 
-  const verifying = renderWorkspace({ status: 'verifying', conversationId: 'live-verifier', verificationActive: true, followUp });
+  const verifying = renderWorkspace({ status: 'verifying', conversationId: 'live-verifier', verificationActive: true, followUp, workingPlan });
+  assert.match(verifying, /aria-label="工作计划"/);
   assert.equal((verifying.match(/data-icon="loader" class="motion-spin"/g) ?? []).length, 2);
   assert.match(verifying, /bot-task-status-pill[^>]*>.*<span>正在核对结果<\/span>/);
   assert.match(verifying, /bot-tb-status-text">正在核对结果/);

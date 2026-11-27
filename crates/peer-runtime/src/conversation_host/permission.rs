@@ -40,6 +40,7 @@ struct DecisionContext<'a> {
 
 fn risk_label(permission: ProviderPermission, risk: Option<ShellRisk>) -> &'static str {
     match permission {
+        ProviderPermission::WorkingPlan => "L0_inert",
         ProviderPermission::Read => "L1_local_read",
         ProviderPermission::FileWrite => "L2_local_write",
         ProviderPermission::Shell | ProviderPermission::External => {
@@ -69,7 +70,9 @@ fn automatic(
     if level == LocalAccessLevel::FullLocal
         || matches!(
             permission,
-            ProviderPermission::ConversationGoal | ProviderPermission::ShellStop
+            ProviderPermission::ConversationGoal
+                | ProviderPermission::WorkingPlan
+                | ProviderPermission::ShellStop
         )
     {
         return true;
@@ -116,6 +119,7 @@ fn evaluate_automation_policy(
         permission,
         ProviderPermission::UserInput
             | ProviderPermission::ConversationGoal
+            | ProviderPermission::WorkingPlan
             | ProviderPermission::ShellStop
     ) {
         return None;
@@ -313,6 +317,8 @@ impl Host<'_> {
                     "shell_task_stop_same_scope"
                 } else if permission == ProviderPermission::ConversationGoal {
                     "host_policy_conversation_goal"
+                } else if permission == ProviderPermission::WorkingPlan {
+                    "host_policy_working_plan"
                 } else if level == LocalAccessLevel::FullLocal {
                     "local_access_level_full"
                 } else if permission == ProviderPermission::Read {

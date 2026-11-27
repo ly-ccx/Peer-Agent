@@ -15,6 +15,7 @@ import type { TaskConversationContext, TaskConversationRequest } from '../state/
 import { ComposerTouchBar } from '../conversation/ComposerTouchBar';
 import { ConversationSceneDrawer } from '../drawer/ConversationScene';
 import { TaskEvidenceInspector, type InspectorTab } from './TaskEvidenceInspector';
+import { TaskWorkingPlanStrip } from './TaskWorkingPlanStrip';
 import { verdictStrip } from './verdictStrip';
 import '../styles/bot-task-workspace.css';
 import '../styles/bot-touchbar.css';
@@ -244,6 +245,7 @@ export function TaskWorkspaceView({
     liveSession?.status,
     sessionsAvailable || !liveSession,
     `${liveSession?.sourceRevision || ''}:${liveSession?.observationRevision || ''}`,
+    liveSession?.status === 'running' ? 3_600 : undefined,
   );
   const session = useMemo(() => {
     const merged = mergeTaskDetail(liveSession, reportRead.detail);
@@ -458,6 +460,8 @@ export function TaskWorkspaceView({
   const verificationNotice = !verifying && session.verification?.outcome === 'failed'
     ? (session.verification.summary || (isZh ? '独立核验未通过，可展开核验查看详情或基于此重跑。' : 'Independent verification failed.'))
     : '';
+  const workingPlan = session.followUpEpoch === undefined || session.workingPlan?.epoch === session.followUpEpoch
+    ? session.workingPlan : undefined;
   const verdict = !verifying && session.verification ? verdictStrip(session.verification, isZh) : null;
 
   return (
@@ -551,6 +555,8 @@ export function TaskWorkspaceView({
               ? 'projectAgent.task.withdrawFailed' : 'projectAgent.task.cancelFailed')}</span>
           </div>
         ) : null}
+
+        <TaskWorkingPlanStrip key={`${session.sessionId}:${session.followUpEpoch ?? 0}`} workingPlan={workingPlan} isZh={isZh} />
 
         {/* Primary Stage: Direct Native Worker Conversation Stream (full height, zero card chrome) */}
         <div className="bot-task-conversation-stage">

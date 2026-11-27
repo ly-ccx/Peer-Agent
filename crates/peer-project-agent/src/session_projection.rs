@@ -2127,6 +2127,37 @@ pub fn get_session_projected(
         &mut parent_anchors,
     );
 
+    if let Some(worker_cid) = opt_str(&plan["delegationOrigin"]["workerConversationId"])
+        && let Ok(Some(working_plan)) =
+            peer_store::WorkingPlanStore::new(data_home).read(worker_cid)
+        && !working_plan.steps.is_empty()
+    {
+        let (completed, total, blocked) = working_plan.counts();
+        let steps = working_plan
+            .steps
+            .iter()
+            .map(|step| {
+                json!({
+                    "title": step.title,
+                    "status": step.status,
+                    "check": step.check,
+                    "note": step.note,
+                })
+            })
+            .collect::<Vec<_>>();
+        session["workingPlan"] = json!({
+            "epoch": working_plan.epoch,
+            "revision": working_plan.revision,
+            "updatedAt": working_plan.updated_at,
+            "summary": working_plan.summary,
+            "invariants": working_plan.invariants,
+            "completed": completed,
+            "total": total,
+            "blocked": blocked,
+            "steps": steps,
+        });
+    }
+
     if detail == Some("report") {
         let sess_status = session["status"].as_str().unwrap_or("");
         let mut report = build_session_report(&plan, trimmed, sess_status, &child_msgs);

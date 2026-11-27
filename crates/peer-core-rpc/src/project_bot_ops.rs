@@ -1345,6 +1345,9 @@ fn project_deliveries(
     context: &Value,
 ) -> (&'static str, Vec<Value>) {
     let denied = || ("scope_denied", Vec::new());
+    if record["capabilityId"] == peer_protocol::WORKING_PLAN_CAPABILITY {
+        return denied();
+    }
     let Some(ctx_obj) = context.as_object() else {
         return denied();
     };

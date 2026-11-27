@@ -24,14 +24,17 @@ use crate::{
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
 use peer_protocol::{
-    HostSurface,
+    HostSurface, WorkingPlanSnapshot,
     interactive_result::{
         INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, InteractiveOwner,
     },
 };
 use peer_runtime::{
     CancellationToken,
-    conversation_host::{ConversationOptions, NativeConversationRuntime},
+    conversation_host::{
+        ConversationOptions, DelegatedCriterionFact, DelegatedTaskContract,
+        NativeConversationRuntime,
+    },
     model::NativeModel,
     native_exec::{execute_plan, recover_plan},
     providers::{CapabilityProvider, RuntimeMode},
@@ -40,6 +43,7 @@ use peer_runtime::{
 use peer_store::{
     ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, DirectoryLock,
     EvidenceIndexStore, HostApproval, HostToolEvidence, NewConversation, NewProjectConversation,
+    WorkingPlanStore,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -553,6 +557,8 @@ pub struct WorkSessionReport {
     pub failure_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_plan: Option<WorkingPlanSnapshot>,
 }
 
 pub struct SessionSupervisor {
@@ -2579,32 +2585,7 @@ impl SessionSupervisor {
                 return Err(ProjectError::code("worker_budget_exhausted"));
             }
             let effective_max_turns = remaining_turns;
-            prompt.push_str(&format!(
-                "\nExecution Guidance:\n\
-                 - Turn budget: {effective_max_turns} turns. Batch independent read/search/check tool calls into the same turn whenever possible instead of issuing one small lookup per turn.\n\
-                 - Once all required edits and verification commands succeed, stop calling tools and deliver a concise factual final report citing exact file paths, line numbers, and observed command results.\n"
-            ));
-            let has_web_search = session_profile
-                .allowlist
-                .iter()
-                .any(|c| c == "local.web.search");
-            let has_web_fetch = session_profile
-                .allowlist
-                .iter()
-                .any(|c| c == "local.web.fetch");
-            if has_web_search && has_web_fetch {
-                prompt.push_str(
-                    "- `web_search` and `web_fetch` ARE projected in this session for read-only web research. Use `web_search` to discover authoritative documentation/repository URLs and highlights, follow up with `web_fetch` when full page details are needed, and cite direct URLs for all external claims.\n",
-                );
-            } else if has_web_search {
-                prompt.push_str(
-                    "- `web_search` IS projected in this session for read-only web search. Cite direct URLs from search results and never fabricate unverified claims.\n",
-                );
-            } else if has_web_fetch {
-                prompt.push_str(
-                    "- `web_fetch` IS projected in this session for read-only HTTP/HTTPS URL fetching. Fetch authoritative documentation/repository URLs directly via `web_fetch` and never fabricate unverified claims.\n",
-                );
-            }
+            prompt.push_str(&format!("\nTurn budget: {effective_max_turns} turns.\n"));
             let anchor_ids: Vec<String> = plan["delegationOrigin"]["anchorMessageIds"]
                 .as_array()
                 .map(|arr| {
@@ -2751,10 +2732,38 @@ impl SessionSupervisor {
             let epoch = plan["delegationOrigin"]["followUpEpoch"]
                 .as_u64()
                 .unwrap_or(0);
+            let success_criteria = plan["successCriteria"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, criterion)| DelegatedCriterionFact {
+                    id: criterion["id"]
+                        .as_str()
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("c-{}", index + 1)),
+                    kind: criterion["kind"].as_str().unwrap_or("manual").to_owned(),
+                    description: criterion["description"].as_str().unwrap_or("").to_owned(),
+                })
+                .collect();
+            let contract = DelegatedTaskContract {
+                session_id: session_id.to_owned(),
+                title: plan["title"].as_str().unwrap_or("").to_owned(),
+                goal: plan["goal"].as_str().unwrap_or("").to_owned(),
+                success_criteria,
+                read_only: session_profile.read_only,
+                follow_up_epoch: epoch,
+                follow_up_prompt: plan["delegationOrigin"]["followUpPrompt"]
+                    .as_str()
+                    .map(str::to_owned),
+                turn_budget: Some(effective_max_turns),
+            };
             let image_home = self.data_home.clone();
             let image_workspace = workspace_id.to_owned();
             let runtime = NativeConversationRuntime::new(&self.data_home, access)
                 .with_capability_overrides(worker_cap_overrides)
+                .with_delegated_contract(contract)
                 .with_delegated_attachments(input_attachments, move |attachment| {
                     crate::attachments::resolve_workspace_image_data_url(
                         &image_home,
@@ -3260,13 +3269,9 @@ impl SessionSupervisor {
     }
 
     pub fn indexed_evidence_refs(&self, plan_id: &str) -> HashSet<String> {
-        let store = EvidenceIndexStore::new(&self.data_home);
-        store
-            .list_for_plan(plan_id, None)
+        EvidenceIndexStore::new(&self.data_home)
+            .refs_for_plan_and_conversations(Some(plan_id), &[], None)
             .unwrap_or_default()
-            .into_iter()
-            .filter_map(|row| row["evidenceRef"].as_str().map(str::to_owned))
-            .collect()
     }
 
     pub fn indexed_evidence_refs_for_plan(&self, plan: &Value) -> HashSet<String> {
@@ -3504,9 +3509,18 @@ impl SessionSupervisor {
                 same_family_as_worker: plan["delegationOrigin"]["sameFamilyAsWorker"].as_bool(),
             },
         );
+        let worker_cid = plan["delegationOrigin"]["workerConversationId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .or_else(|| plan["conversationId"].as_str())
+            .unwrap_or(session_id);
         Ok(WorkSessionReport {
             summary: self.summarize(&plan),
             task_brief: plan["goal"].as_str().unwrap_or("").to_owned(),
+            working_plan: WorkingPlanStore::new(&self.data_home)
+                .read(worker_cid)
+                .ok()
+                .flatten(),
             evidence_refs: verdict.evidence_refs,
             changed_files: self.session_changed_files(&plan),
             verdict_outcome: verdict.outcome,

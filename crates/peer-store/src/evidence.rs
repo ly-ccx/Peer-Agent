@@ -257,7 +257,8 @@ impl EvidenceIndexStore {
             file: data_home.as_ref().join("goal-plans/evidence-index.jsonl"),
         }
     }
-    /// Bounded read of indexed Evidence refs for `plan_id` and `conversation_ids` in one cached scan.
+    /// Bounded read of completion Evidence refs for a plan and its conversations.
+    /// The underlying index also records tool settlement and recovery facts.
     pub fn refs_for_plan_and_conversations(
         &self,
         plan_id: Option<&str>,
@@ -294,6 +295,9 @@ impl EvidenceIndexStore {
         let mut by_plan: HashMap<String, HashSet<String>> = HashMap::new();
         let mut by_conv: HashMap<String, HashSet<String>> = HashMap::new();
         scan_records(&self.file, cancel, &[], |row| {
+            if row["capabilityId"] == peer_protocol::WORKING_PLAN_CAPABILITY {
+                return Ok(());
+            }
             let Some(ev_ref) = row["evidenceRef"].as_str() else {
                 return Ok(());
             };

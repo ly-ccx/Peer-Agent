@@ -10045,3 +10045,191 @@ async fn wake_delivery_round_limit_wraps_up_before_the_tool_limit() {
         "policy"
     );
 }
+
+#[tokio::test]
+async fn working_plan_projects_worker_progress_and_archives_on_in_place_followup() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    fs::write(workspace.path().join("readme.md"), "# Fixture").unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(workspace.path(), Some("Working plan"))
+        .unwrap();
+    let workspace_id = &entry.workspace_id;
+    let parent_id = profile.agent_conversation_id.unwrap();
+    let cancel = CancellationToken::new();
+    host.ensure_lease(workspace_id).unwrap();
+    host.recover_workspace_barrier(workspace_id, &cancel)
+        .await
+        .unwrap();
+    let session = spawn_autonomy_fixture(&host, workspace_id, &parent_id, workspace.path());
+    let id = &session.session_id;
+    let server = start_mock_server(vec![
+        Box::new(|request| {
+            assert!(tool_names_from_request(request).contains(&"update_plan".to_owned()));
+            let system = request["messages"][0]["content"].as_str().unwrap();
+            assert!(system.contains("Delegated task contract"));
+            assert!(system.contains("readme.md exists"));
+            assert!(
+                !request["messages"]
+                    .to_string()
+                    .contains("Execution Guidance")
+            );
+            sse_tool_call(
+                "working-first",
+                "update_plan",
+                &json!({
+                    "summary": "Check the README",
+                    "invariants": ["Read-only workspace"],
+                    "steps": [{"title": "Confirm the README exists", "check": "Inspect readme.md", "status": "completed"}],
+                }),
+            )
+        }),
+        Box::new(|request| {
+            let result = last_tool_result_json(request).unwrap();
+            assert_eq!(result["output"]["revision"], 1, "{result}");
+            sse_text("The README exists.")
+        }),
+        Box::new(|request| {
+            let system = request["messages"][0]["content"].as_str().unwrap();
+            assert!(system.contains("Most recent archived epoch 0"));
+            assert!(system.contains("Confirm the README title."));
+            sse_tool_call(
+                "working-second",
+                "update_plan",
+                &json!({
+                    "steps": [{"title": "Confirm the README title", "status": "completed"}],
+                }),
+            )
+        }),
+        Box::new(|_| sse_tool_call("working-proof", "read_file", &json!({"path": "readme.md"}))),
+        Box::new(|request| {
+            assert!(
+                last_tool_result_json(request)
+                    .unwrap()
+                    .to_string()
+                    .contains("# Fixture")
+            );
+            sse_text("The title is Fixture.")
+        }),
+    ]);
+    let model = mock_model(&server.endpoint);
+    let supervisor = host.supervisor();
+    let mut permission = AutoAllowPermission;
+    supervisor.promote_queued(workspace_id, true).unwrap();
+    supervisor
+        .run_session_episode(workspace_id, id, &model, &mut permission, 8, &cancel, true)
+        .await
+        .unwrap();
+
+    let initial =
+        peer_project_agent::get_session_projected(home.path(), id, Some("report")).unwrap();
+    assert_eq!(
+        initial["workingPlan"],
+        json!({
+            "epoch": 0, "revision": 1, "updatedAt": initial["workingPlan"]["updatedAt"],
+            "summary": "Check the README", "invariants": ["Read-only workspace"],
+            "completed": 1, "total": 1, "blocked": 0,
+            "steps": [{"title": "Confirm the README exists", "status": "completed", "check": "Inspect readme.md", "note": null}]
+        })
+    );
+    let session_report = supervisor.read_report(workspace_id, id).unwrap();
+    let report = session_report.working_plan.unwrap();
+    assert_eq!(report.summary.as_deref(), Some("Check the README"));
+    let worker_cid = report.conversation_id.clone();
+    let evidence = EvidenceIndexStore::new(home.path());
+    let audit_rows = evidence.list_for_conversation(&worker_cid, None).unwrap();
+    assert_eq!(audit_rows.len(), 1);
+    assert_eq!(
+        audit_rows[0]["capabilityId"],
+        peer_protocol::WORKING_PLAN_CAPABILITY
+    );
+    let plan_ref = audit_rows[0]["evidenceRef"].as_str().unwrap();
+    assert!(
+        !session_report
+            .evidence_refs
+            .iter()
+            .any(|reference| reference == plan_ref)
+    );
+    assert!(
+        !initial["report"]["evidenceRefs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(plan_ref))
+    );
+    assert!(
+        evidence
+            .refs_for_plan_and_conversations(None, &[&worker_cid], None)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        evidence.find(&[plan_ref.to_owned()], None).unwrap(),
+        audit_rows
+    );
+
+    let resumed = supervisor
+        .message_session_full(peer_project_agent::MessageSessionRequest {
+            workspace_id,
+            session_id: id,
+            text: "Confirm the README title.",
+            intent: "followup",
+            expected_epoch: Some(0),
+            anchor_message_ids: Vec::new(),
+            worker_model_selection: Some(
+                json!({"providerName":"openai", "modelId":"mock-e2e-model"}),
+            ),
+            holds_lease: true,
+        })
+        .unwrap();
+    assert_eq!(resumed.delivery, "resumed_followup");
+    assert_eq!(resumed.follow_up_epoch, 1);
+
+    let plans = peer_store::WorkingPlanStore::new(home.path());
+    let archived = plans.read(&worker_cid).unwrap().unwrap();
+    assert_eq!(archived.epoch, 1);
+    assert!(archived.steps.is_empty());
+    assert_eq!(archived.archived, [report.to_archived_entry()]);
+    assert!(
+        peer_project_agent::get_session_projected(home.path(), id, None)
+            .unwrap()
+            .get("workingPlan")
+            .is_none()
+    );
+
+    supervisor.promote_queued(workspace_id, true).unwrap();
+    supervisor
+        .run_session_episode(workspace_id, id, &model, &mut permission, 8, &cancel, true)
+        .await
+        .unwrap();
+    let next = plans.read(&worker_cid).unwrap().unwrap();
+    assert_eq!(next.epoch, 1);
+    assert_eq!(next.revision, archived.revision + 1);
+    assert_eq!(next.archived, archived.archived);
+    let projected = peer_project_agent::get_session_projected(home.path(), id, None).unwrap();
+    assert_eq!(
+        projected["workingPlan"]["steps"][0]["title"],
+        "Confirm the README title"
+    );
+    assert_eq!(projected["workingPlan"]["epoch"], 1);
+    let audit_rows = evidence.list_for_conversation(&worker_cid, None).unwrap();
+    let observed = audit_rows
+        .iter()
+        .find(|row| row["capabilityId"] == "local.file.read")
+        .unwrap();
+    let observed_ref = observed["evidenceRef"].as_str().unwrap();
+    assert_eq!(
+        evidence
+            .refs_for_plan_and_conversations(None, &[&worker_cid], None)
+            .unwrap(),
+        std::collections::HashSet::from([observed_ref.to_owned()]),
+    );
+    let report =
+        peer_project_agent::get_session_projected(home.path(), id, Some("report")).unwrap();
+    assert!(
+        report["report"]["evidenceRefs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(observed_ref))
+    );
+}

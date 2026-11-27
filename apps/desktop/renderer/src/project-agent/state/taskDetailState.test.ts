@@ -76,3 +76,17 @@ test('compact progress uses a matching reply, not task instructions or another t
   assert.equal(taskProgressPreview(session, { ...note, sessionId: 'other' }, i18n), i18n.t('projectAgent.drawer.task.progressPending'));
   assert.equal(taskProgressPreview(session, null, i18n), i18n.t('projectAgent.drawer.task.progressPending'));
 });
+
+test('working plan merges matching detail and survives a detail payload without plans', () => {
+  const progress = {
+    epoch: 0, revision: 1, updatedAt: '2026-11-27T00:00:00Z',
+    total: 1, completed: 0, blocked: 0, steps: [{ title: 'Read', status: 'pending' }],
+  };
+  const selected = readDrawerSession({ sessionId: 'work', workingPlan: progress })!;
+  const detail = readDrawerSession({ sessionId: 'work', workingPlan: { ...progress, revision: 2 } })!;
+  const noPlan = readDrawerSession({ sessionId: 'work' })!;
+  assert.equal(mergeTaskDetail(selected, detail)?.workingPlan, detail.workingPlan);
+  assert.equal(mergeTaskDetail(selected, noPlan)?.workingPlan, selected.workingPlan);
+  assert.equal(mergeTaskDetail(noPlan, detail)?.workingPlan, detail.workingPlan);
+  assert.equal(mergeTaskDetail(selected, { ...detail, sessionId: 'other' })?.workingPlan, selected.workingPlan);
+});

@@ -339,6 +339,13 @@ impl SessionSupervisor {
             plan["modelReviewSourceRevision"] = Value::Null;
             queue(&mut plan, &at);
             self.write_plan(&plan)?;
+            if let Some(worker_cid) = plan["delegationOrigin"]["workerConversationId"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+            {
+                let _ = WorkingPlanStore::new(&self.data_home)
+                    .archive_for_epoch(worker_cid, next_epoch, &at);
+            }
             self.emit_event(
                 req.workspace_id,
                 "session_resumed",

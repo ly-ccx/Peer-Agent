@@ -16,6 +16,7 @@ mod file;
 mod git;
 pub(crate) mod goal;
 mod mcp;
+pub(crate) mod plan;
 mod projection;
 pub use projection::RuntimeMode;
 mod shell;
@@ -251,6 +252,11 @@ impl ProviderRegistry {
                 interactive_user_input,
             )));
     }
+    pub(crate) fn add_working_plan_tool(&mut self, epoch: u64) {
+        self.providers
+            .push(Box::new(plan::PlanProvider::new(epoch)));
+    }
+
     /// Register an additional governed capability provider into this registry.
     /// All tools still pass through `project_for_mode` before becoming model-visible.
     pub fn register(&mut self, provider: Box<dyn CapabilityProvider>) {
@@ -318,6 +324,12 @@ impl RuntimeProjection {
     }
     pub(crate) fn has_capability(&self, capability: &str) -> bool {
         self.tools.iter().any(|t| t.capability == capability)
+    }
+    pub(crate) fn capabilities(&self) -> Vec<&str> {
+        self.tools
+            .iter()
+            .map(|tool| tool.capability.as_str())
+            .collect()
     }
     pub fn capability(&self, alias: &str) -> Option<&str> {
         self.tools

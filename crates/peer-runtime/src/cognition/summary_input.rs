@@ -4,6 +4,8 @@ use crate::capability::CapabilityError as HostError;
 use peer_protocol::javascript_json_string;
 use serde_json::{Value, json};
 
+pub(super) const WORKING_PLAN_HEADING: &str = "\n\nActive working plan (authoritative session state — preserve open steps, checks, and invariants in the summary):\n";
+
 const INPUT_BYTES: usize = 256 * 1024;
 const TEXT_UNITS: usize = 12_000;
 const TOOL_INPUT_UNITS: usize = 2_000;
@@ -47,7 +49,10 @@ pub(super) fn build(continuity: Option<&Value>, messages: Vec<Value>) -> Result<
 }
 
 pub(super) fn structural_fallback(input: &str) -> Result<String, HostError> {
-    let mut facts: Value = serde_json::from_str(input).map_err(|_| PAIR)?;
+    let (history, protected_plan) = input
+        .split_once(WORKING_PLAN_HEADING)
+        .map_or((input, None), |(history, plan)| (history, Some(plan)));
+    let mut facts: Value = serde_json::from_str(history).map_err(|_| PAIR)?;
     let messages = facts["messages"]
         .as_array_mut()
         .map(std::mem::take)
@@ -56,9 +61,14 @@ pub(super) fn structural_fallback(input: &str) -> Result<String, HostError> {
         .as_u64()
         .unwrap_or(0) as usize;
     let short = fit(facts["continuity"].take(), messages, earlier, &STRUCTURAL)?;
-    Ok(format!(
+    let mut handoff = format!(
         "Structural handoff. Original conversation history and its saved Tool Result / Evidence remain available. Re-read them for omitted details.\n{short}"
-    ))
+    );
+    if let Some(plan) = protected_plan {
+        handoff.push_str(WORKING_PLAN_HEADING);
+        handoff.push_str(plan);
+    }
+    Ok(handoff)
 }
 
 fn fit(
