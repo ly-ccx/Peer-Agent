@@ -1285,7 +1285,11 @@ export function createClassicCoreBridge({
     projectBotHostDesiredEnabled = params?.enabled === true;
     const run = async () => {
       try {
-        const res = await requireClient().request('project.bot.hostConfigure', params || {}, { timeoutMs: 60_000 });
+        // Enabling includes lease acquisition and cold recovery for every Bot.
+        // Keep the bridge alive for recovery of a large existing profile set.
+        const res = await requireClient().request('project.bot.hostConfigure', params || {}, {
+          timeoutMs: params.enabled ? 120_000 : 60_000,
+        });
         applyProjectBotHostStatus(res, null);
         if (res?.enabled !== true) {
           if (mySeq === botHostConfigureSeq) {
