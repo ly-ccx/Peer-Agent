@@ -1,4 +1,4 @@
-//! Explicit user retry history. Only completed call/result pairs are durable;
+//! Explicit turn retry history. Only completed call/result pairs are durable;
 //! opaque live reasoning, signatures and unfinished provider deltas never enter it.
 use super::{NativeModel, Value, json};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,8 @@ pub(super) const MAX_BYTES: u64 = 8 * 1024 * 1024;
 pub(super) struct ProviderCheckpoint {
     conversation_id: String,
     anchors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) wake_event_ids: Vec<String>,
     provider: String,
     provider_id: String,
     model: String,
@@ -23,6 +25,7 @@ impl ProviderCheckpoint {
         Self {
             conversation_id: conversation_id.into(),
             anchors: anchors.to_vec(),
+            wake_event_ids: Vec::new(),
             provider: model.provider().into(),
             provider_id: model.provider_id().into(),
             model: model.model_id().into(),

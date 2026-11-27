@@ -2278,24 +2278,36 @@ impl ProjectAgentRunner {
             Some(&turn_id),
         );
 
+        let wake_event_ids = if opts.kind == "wake" && opts.user_inputs.is_empty() {
+            crate::inbox::wake_event_ids(opts.wake_events).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let resumed = (|| {
             let target = explicit_retry_turn?;
-            let previous = retry_continuity.as_ref()?["previousTurnId"].as_str()?;
-            if opts.kind != "user" || (!target.is_empty() && target != previous) {
+            let previous = if opts.kind == "user" {
+                let previous = retry_continuity.as_ref()?["previousTurnId"].as_str()?;
+                if !target.is_empty() && target != previous {
+                    return None;
+                }
+                previous
+            } else if !wake_event_ids.is_empty() && !target.is_empty() {
+                // The host resolved this target against the durable inbox batch.
+                target
+            } else {
                 return None;
-            }
+            };
             let checkpoint =
                 read_provider_checkpoint(&self.data_home, opts.workspace_id, previous)?;
-            if !checkpoint.matches(model, opts.conversation_id, &current_input_anchors) {
+            if !checkpoint.matches(model, opts.conversation_id, &current_input_anchors)
+                || checkpoint.wake_event_ids != wake_event_ids
+            {
                 return None;
             }
             let messages = checkpoint.canonical_messages()?;
-            Some((checkpoint, messages))
+            Some((previous, checkpoint, messages))
         })();
-        let resumed_from = resumed
-            .as_ref()
-            .and_then(|_| retry_continuity.as_ref())
-            .and_then(|continuity| continuity["previousTurnId"].as_str());
+        let resumed_from = resumed.as_ref().map(|(previous, _, _)| *previous);
 
         if coord_active {
             let _ = self.coordination.ensure_work(
@@ -2754,20 +2766,20 @@ impl ProjectAgentRunner {
 
         // Restore after proactive compaction: saved pairs are not historical summaries.
         let (mut provider_checkpoint, replay_reads) = match resumed {
-            Some((checkpoint, messages)) => {
+            Some((_, checkpoint, messages)) => {
                 let reads = provider_checkpoint::completed_reads(&messages);
                 committed_message_ids.extend(std::iter::repeat_n(None, messages.len()));
                 live_messages.extend(messages);
                 (Some(checkpoint), reads)
             }
-            None if opts.kind == "user" && !current_input_anchors.is_empty() => (
-                Some(ProviderCheckpoint::new(
-                    model,
-                    opts.conversation_id,
-                    &current_input_anchors,
-                )),
-                Vec::new(),
-            ),
+            None if (opts.kind == "user" && !current_input_anchors.is_empty())
+                || !wake_event_ids.is_empty() =>
+            {
+                let mut checkpoint =
+                    ProviderCheckpoint::new(model, opts.conversation_id, &current_input_anchors);
+                checkpoint.wake_event_ids = wake_event_ids;
+                (Some(checkpoint), Vec::new())
+            }
             None => (None, Vec::new()),
         };
         let failure_ctx = TurnFailureCtx {

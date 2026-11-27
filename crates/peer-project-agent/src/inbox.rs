@@ -86,6 +86,22 @@ pub(crate) struct CursorDocument {
     pub cursor: InboxCursor,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pending_deliveries: BTreeMap<String, PendingDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    failed_wake: Option<FailedWake>,
+}
+
+/// Persist dispatch identity and cursor boundary. Delivery events are rebuilt
+/// against the current unsettled result revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailedWake {
+    conversation_id: String,
+    pub turn_id: String,
+    through_seq: u64,
+    pub event_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    delivery_event_ids: Vec<String>,
+    pub retry_requested: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +121,21 @@ pub struct AppendResult {
 pub struct InboxDiagnosticSnapshot {
     pub cursor: u64,
     pub events: Vec<Value>,
+}
+
+pub(crate) fn wake_event_ids(events: &[Value]) -> Option<Vec<String>> {
+    if events.is_empty() {
+        return None;
+    }
+    events
+        .iter()
+        .map(|event| {
+            event["eventId"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 pub struct ProjectInbox {
@@ -239,6 +270,14 @@ impl ProjectInbox {
         };
         let prior = doc.clone();
         update(&mut doc);
+        if doc.cursor.seq > prior.cursor.seq
+            && doc
+                .failed_wake
+                .as_ref()
+                .is_some_and(|failed| doc.cursor.seq >= failed.through_seq)
+        {
+            doc.failed_wake = None;
+        }
         if doc != prior {
             doc.cursor.updated_at = Some(now_iso());
             let body = serde_json::to_string(&doc)
@@ -437,6 +476,97 @@ impl ProjectInbox {
             through_seq,
             wait_ms: 0,
         }
+    }
+
+    pub(crate) fn record_failed_wake(
+        &self,
+        workspace_id: &str,
+        conversation_id: &str,
+        turn_id: &str,
+        through_seq: u64,
+        events: &[Value],
+    ) -> Result<(), ProjectError> {
+        let event_ids =
+            wake_event_ids(events).ok_or_else(|| ProjectError::code("INVALID_WAKE_BATCH"))?;
+        let delivery_event_ids = events
+            .iter()
+            .zip(&event_ids)
+            .filter(|(event, _)| event["payload"]["deliveryRevision"].is_string())
+            .map(|(_, id)| id.clone())
+            .collect();
+        self.update_cursor_document(workspace_id, |doc| {
+            if through_seq > doc.cursor.seq {
+                doc.failed_wake = Some(FailedWake {
+                    conversation_id: conversation_id.to_owned(),
+                    turn_id: turn_id.to_owned(),
+                    through_seq,
+                    event_ids,
+                    delivery_event_ids,
+                    retry_requested: false,
+                });
+            }
+        })?;
+        Ok(())
+    }
+
+    /// Mark an existing failed batch for explicit retry; never append it again.
+    pub(crate) fn request_wake_retry(
+        &self,
+        workspace_id: &str,
+        conversation_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, ProjectError> {
+        if !self.cursor_file(workspace_id).exists() {
+            return Ok(false);
+        }
+        let mut requested = false;
+        self.update_cursor_document(workspace_id, |doc| {
+            if let Some(failed) = doc.failed_wake.as_mut().filter(|failed| {
+                failed.conversation_id == conversation_id
+                    && failed.turn_id == turn_id
+                    && failed.through_seq > doc.cursor.seq
+            }) {
+                failed.retry_requested = true;
+                requested = true;
+            }
+        })?;
+        Ok(requested)
+    }
+
+    pub(crate) fn restore_failed_wake(
+        &self,
+        workspace_id: &str,
+        conversation_id: &str,
+        batch: &mut InboxBatch,
+    ) -> Result<Option<FailedWake>, ProjectError> {
+        let doc = self.read_cursor_document(workspace_id);
+        let Some(failed) = doc.failed_wake.filter(|failed| {
+            failed.conversation_id == conversation_id && failed.through_seq > doc.cursor.seq
+        }) else {
+            return Ok(None);
+        };
+        if batch.through_seq < failed.through_seq {
+            return Err(ProjectError::code("INVALID_WAKE_BATCH"));
+        }
+        batch.events.retain(|event| {
+            event["seq"]
+                .as_u64()
+                .is_some_and(|seq| seq <= failed.through_seq)
+        });
+        let raw_ids: HashSet<_> = batch
+            .events
+            .iter()
+            .filter_map(|event| event["eventId"].as_str())
+            .collect();
+        if failed
+            .event_ids
+            .iter()
+            .any(|id| !raw_ids.contains(id.as_str()) && !failed.delivery_event_ids.contains(id))
+        {
+            return Err(ProjectError::code("INVALID_WAKE_BATCH"));
+        }
+        batch.through_seq = failed.through_seq;
+        Ok(Some(failed))
     }
 
     pub fn commit_batch(
