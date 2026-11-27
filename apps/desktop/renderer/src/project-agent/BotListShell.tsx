@@ -531,6 +531,15 @@ export function BotListShell({
     }
   }, [opened, openBotView, notificationFocus?.requestId]);
 
+  const openTaskConversation = useCallback((request: Omit<TaskConversationRequest, 'id'>) => {
+    if (!opened) return;
+    revealPrimary?.();
+    setInspect(null);
+    setDrawerMemory(current => closeDrawer(current));
+    openBotView(opened.workspaceId);
+    setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
+  }, [opened, openBotView, revealPrimary]);
+
   return (
     <TaskCancellationProvider workspaceId={opened?.workspaceId ?? null} onRefresh={work.reload}>
     <div
@@ -891,6 +900,7 @@ export function BotListShell({
                   onToggleInspector={toggleInspector}
                   onCloseInspector={() => setInspectorOpen(false)}
                   onBackToBot={handleBackToBotFromTask}
+                  onTaskConversation={openTaskConversation}
                   onOpenTask={(nextSessionId) => openTaskView(opened.workspaceId, nextSessionId)}
                   onCiteToBot={handleCiteToBot}
                   onRefreshSessions={work.reload}
@@ -1011,13 +1021,7 @@ export function BotListShell({
           sessions={work.available ? work.sessions : []}
           sessionsAvailable={work.available}
           taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
-          onTaskConversation={request => {
-            revealPrimary?.();
-            setInspect(null);
-            setDrawerMemory(current => closeDrawer(current));
-            openBotView(opened.workspaceId);
-            setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
-          }}
+          onTaskConversation={openTaskConversation}
           onOpenTask={(sessionId) => openTaskView(opened.workspaceId, sessionId)}
           onRefreshSessions={work.reload}
           onCloseInspect={() => {

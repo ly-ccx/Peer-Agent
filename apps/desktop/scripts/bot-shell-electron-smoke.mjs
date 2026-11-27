@@ -72,10 +72,11 @@ const focusedClassicImage = process.argv.includes('--native-classic-image-only')
 const focusedStreaming = process.argv.includes('--streaming-only') || process.argv.includes('--stop-resume-only');
 const focusedQuickChat = process.argv.includes('--quick-chat-bots-only');
 const focusedAttention = process.argv.includes('--attention-only');
+const focusedCancellation = process.argv.includes('--task-cancel-only');
 const focusedReplyQuote = process.argv.includes('--reply-quote-only');
 const focusedWorkSurfaces = process.argv.includes('--work-surfaces-only');
 const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } }
-  : focusedQuickChat || focusedAttention ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
+  : focusedQuickChat || focusedAttention || focusedCancellation ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
   : focusedReplyQuote || focusedWorkSurfaces ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 10000 } }
   : recoveryOnly || focusedStreaming || focusedNativeWork || focusedClassicImage ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
@@ -331,7 +332,16 @@ if (workSurfaces) {
   const workSeam = 'function listSessions(payload = {}) {';
   assert.equal(observedService.split(workSeam).length, 2);
   observedService = observedService.replace(workSeam, `${workSeam}
-    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) return globalThis.rcBotWorkUnavailable ? {ok:false,code:'CONTROLLED_READ_FAILURE'} : {ok:true,sessions:globalThis.rcBotWorkSessions};`);
+    if (payload.workspaceId === globalThis.rcBotWorkWorkspace) {
+      if (globalThis.rcBotWorkUnavailable) return {ok:false,code:'CONTROLLED_READ_FAILURE'};
+      const sessions = globalThis.rcBotWorkSessions;
+      if (payload.scope !== 'history') return {ok:true,sessions};
+      const closed = ['accepted','failed','paused','cancelled','superseded'];
+      const history = sessions.filter(session => session.followUp
+        ? !session.followUp.inCurrentList && session.followUp.reason !== 'obligation_indexed'
+        : closed.includes(session.status));
+      return {ok:true,sessions:history,totalCount:history.length,nextCursor:null};
+    }`);
   const detailSeam = 'async function getSession(payload = {}) {';
   assert.equal(observedService.split(detailSeam).length, 2);
   observedService = observedService.replace(detailSeam, `${detailSeam}
@@ -652,7 +662,7 @@ try {
     await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   } else if (focusedAttention) {
     await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
-  } else if (process.argv.includes('--task-cancel-only')) {
+  } else if (focusedCancellation) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('#bot-msg-rc-message-9999').waitFor();
     await checkBotTaskCancellation({ page, until, report, captureDirectory: root, commandFile: workCommand });
@@ -896,7 +906,8 @@ try {
   await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
-  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
+  if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report,
+    captureDirectory: root, fixtureBot: fixture.bots[0], effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   if (!process.argv.includes('--completion-review-only') && !process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });

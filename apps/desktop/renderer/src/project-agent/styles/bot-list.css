@@ -546,8 +546,8 @@
 }
 
 [data-theme="dark"] .bot-row.is-open {
-  /* Lift the selected surface above both the glass sidebar and its hover fill. */
-  background: color-mix(in srgb, var(--graphite-base) 14%, var(--chrome-active));
+  /* Keep the selected row legible even over bright desktop vibrancy. */
+  background: color-mix(in srgb, var(--chrome-glass-row-active) 12%, var(--paper-active));
 }
 
 .bot-row-copy {

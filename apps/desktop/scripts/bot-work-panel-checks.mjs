@@ -14,6 +14,24 @@ export async function openWorkPanel(page) {
   });
 }
 
+export async function taskEntry(page, session, { history = false } = {}) {
+  if (history) {
+    await page.getByRole('button', { name: /^历史任务(?:\s*\d+)?$/ }).click();
+    return page.locator('.bot-touchbar-tray .bot-tray-row').filter({ has: page.getByText(session.title, { exact: true }) });
+  }
+  await openWorkPanel(page);
+  return page.locator('.bot-work-panel .bot-work-panel-session.is-task')
+    .filter({ has: page.getByText(session.title, { exact: true }) });
+}
+
+export async function openTaskInspector(page) {
+  const toggle = page.getByRole('button', { name: '任务详情', exact: true });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  const inspector = page.getByRole('complementary', { name: '任务详情', exact: true });
+  await inspector.waitFor();
+  return inspector;
+}
+
 /** Opening, closing and responsive reflow retain the actual composer node and draft. */
 export async function checkWorkPanelLayout({ page, report, captureDirectory }) {
   const viewport = page.viewportSize(), theme = await page.evaluate(() => document.documentElement.dataset.theme);
