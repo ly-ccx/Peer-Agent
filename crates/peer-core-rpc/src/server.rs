@@ -595,7 +595,7 @@ pub struct CoreEngine {
     pub streams: ClassicStreamRegistry,
     pub goals: ClassicGoalRegistry,
     pub project_host: Arc<ProjectHostRuntime>,
-    bot_conversation_projection: Arc<Semaphore>,
+    bot_projection_slot: Arc<Semaphore>,
     local_tx: mpsc::UnboundedSender<LocalJob>,
     local_stop: CancellationToken,
     active_background: Arc<AtomicUsize>,
@@ -677,7 +677,7 @@ impl CoreEngine {
             streams: ClassicStreamRegistry::new(),
             goals: ClassicGoalRegistry::new(),
             project_host,
-            bot_conversation_projection: Arc::new(Semaphore::new(1)),
+            bot_projection_slot: Arc::new(Semaphore::new(1)),
             local_tx,
             local_stop,
             active_background,
@@ -905,15 +905,15 @@ impl ServerContext {
         .map_err(|err| RpcError::internal_error(err.to_string()))
     }
 
-    async fn run_bot_conversation_projection(
+    async fn run_bot_projection(
         self: &Arc<Self>,
         params: Value,
         project: fn(&Self, Value) -> Result<Value, RpcError>,
     ) -> Result<Value, RpcError> {
-        // These projections can scan the entire Bot history. Keep them serial
-        // (including the read cursor update) without blocking input RPCs and
+        // History and host-status projections can scan many files. Keep them
+        // serial (including cursor updates) so they don't block input RPCs and
         // transport delivery on the stdio runtime's only async thread.
-        let permit = Arc::clone(&self.engine.bot_conversation_projection)
+        let permit = Arc::clone(&self.engine.bot_projection_slot)
             .acquire_owned()
             .await
             .map_err(|_| RpcError::shutting_down())?;
@@ -1091,23 +1091,20 @@ impl ServerContext {
                 project_bot_read::handle_bot_list_attention(self, params)
             }
             "project.bot.get" => {
-                self.run_bot_conversation_projection(params, project_bot_read::handle_bot_get)
+                self.run_bot_projection(params, project_bot_read::handle_bot_get)
                     .await
             }
             "project.bot.listObligationGrants" => {
                 project_bot_read::handle_bot_list_obligation_grants(self, params)
             }
             "project.bot.readConversation" => {
-                self.run_bot_conversation_projection(
-                    params,
-                    project_bot_read::handle_bot_read_conversation,
-                )
-                .await
+                self.run_bot_projection(params, project_bot_read::handle_bot_read_conversation)
+                    .await
             }
             "project.bot.listSessions" => project_bot_read::handle_bot_list_sessions(self, params),
             "project.bot.getSession" => project_bot_read::handle_bot_get_session(self, params),
             "project.bot.markRead" => {
-                self.run_bot_conversation_projection(params, project_bot::handle_bot_mark_read)
+                self.run_bot_projection(params, project_bot::handle_bot_mark_read)
                     .await
             }
             "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
@@ -1127,7 +1124,10 @@ impl ServerContext {
             "project.bot.hostConfigure" => {
                 project_bot_live::handle_host_configure(self, params).await
             }
-            "project.bot.hostStatus" => project_bot_live::handle_host_status(self, params),
+            "project.bot.hostStatus" => {
+                self.run_bot_projection(params, project_bot_live::handle_host_status)
+                    .await
+            }
             "project.bot.create" => project_bot_live::handle_create(self, params).await,
             "project.bot.delete" => project_bot_live::handle_delete(self, params).await,
             "project.bot.rebindFolder" => {
