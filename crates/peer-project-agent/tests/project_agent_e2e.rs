@@ -9605,6 +9605,7 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
                     attachments,
                 )
                 .unwrap();
+            let queue_elapsed = sent_at.elapsed();
             assert!(
                 input
                     .attachments
@@ -9619,8 +9620,9 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
                 .unwrap();
             let elapsed = sent_at.elapsed();
             eprintln!(
-                "received two 8K images while worker active in {} ms",
-                elapsed.as_millis()
+                "received two 8K images while worker active in {} ms (queue {} ms)",
+                elapsed.as_millis(),
+                queue_elapsed.as_millis()
             );
             assert!(elapsed < Duration::from_secs(10));
             assert_eq!(host.supervisor().list_sessions(&ws_id)[0].status, "running");
