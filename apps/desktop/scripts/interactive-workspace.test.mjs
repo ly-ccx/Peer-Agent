@@ -537,7 +537,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await closedReading;
 
     await electron.evaluate(() => globalThis.workspaceFixture.closeSource());
-    const mainRecovery = page.getByRole('region', { name: 'Previous view input recovery' });
+    const mainRecovery = page.getByRole('region', { name: 'Previous view input recovery' })
+      .filter({ has: page.getByLabel('Preserved local input', { exact: true }) });
     await mainRecovery.getByLabel('Preserved local input', { exact: true }).waitFor();
     assert.ok((await mainRecovery.getByLabel('Preserved local input', { exact: true }).inputValue()).includes('Trial name: Main local recovery'));
     assert.equal(page.isClosed(), false);

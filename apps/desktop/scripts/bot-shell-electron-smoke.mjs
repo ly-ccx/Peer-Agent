@@ -70,7 +70,9 @@ const longHistoryRender = process.argv.includes('--long-history-render-only');
 const focusedNativeWork = process.argv.includes('--native-work-only');
 const focusedClassicImage = process.argv.includes('--native-classic-image-only');
 const focusedStreaming = process.argv.includes('--streaming-only') || process.argv.includes('--stop-resume-only');
+const focusedQuickChat = process.argv.includes('--quick-chat-bots-only');
 const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } }
+  : focusedQuickChat ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
   : recoveryOnly || focusedStreaming || focusedNativeWork || focusedClassicImage ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
@@ -499,6 +501,23 @@ const until = async (read, predicate, timeout = 30000) => {
   throw Error(`Shell acceptance timed out: ${String(read).slice(0, 220)}`);
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
+const checkQuickChatModel = async quick => {
+  const text = 'RC_QUICK_INPUT';
+  await quick.getByLabel('快速会话内容', { exact: true }).fill(text);
+  await quick.getByRole('button', { name: '发送', exact: true }).click();
+  await page.locator('.bot-thread').getByText('RC scripted reply: ' + text, { exact: true }).waitFor();
+  const execution = model.requests.find(request => request.scenario === text);
+  assert.ok(execution, 'Quick Chat input must reach the actual model wire');
+  assert.equal(execution.model, botModelFixtures[1].model);
+  assert.equal(execution.effort, botModelFixtures[1].reasoningEffortLevels.at(-1));
+  const canonical = readFileSync(path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl'), 'utf8')
+    .trim().split('\n').map(line => JSON.parse(line));
+  const inputs = canonical.filter(row => row.kind === 'user_input' && row.content === text);
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].surface, 'quick_chat');
+  report.quickChatBots.sentSelection = true;
+  report.checks.push('real Quick Chat window lists bots and submits one canonical quick_chat input');
+};
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 const checkTypography = async () => {
   const initial = JSON.parse(readFileSync(workCommand, 'utf8'));
@@ -550,11 +569,13 @@ try {
     assert.ok(process.argv.includes('--effort-stability'), '--surface-motion-only requires controlled save latency/failure');
     await checkSurfaceMotion({ page, fixture, until, report, captureDirectory: root,
       failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
-  } else if (process.argv.includes('--quick-chat-bots-only')) {
+  } else if (focusedQuickChat) {
+    await selectBotByName(page, path.basename(fixture.bots[0].path));
     await quickNative('open');
     const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
     await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
       failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
+    await checkQuickChatModel(quick);
   } else if (process.argv.includes('--window-material-only') || process.argv.includes('--flat-window-material-only')) {
     // Exercise the non-vibrancy layout on macOS without claiming native Linux coverage.
     if (process.argv.includes('--flat-window-material-only')) await page.evaluate(() => { document.documentElement.dataset.vibrancy = 'false'; });
@@ -772,18 +793,7 @@ try {
   await quickNative('open');
   await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
     failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
-  await quick.getByLabel('快速会话内容', { exact: true }).fill('RC_QUICK_INPUT');
-  await quick.getByRole('button', { name: '发送', exact: true }).click();
-  await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
-  const quickExecution = model.requests.find(request => request.scenario === 'RC_QUICK_INPUT');
-  assert.ok(quickExecution, 'Quick Chat input must reach the actual model wire');
-  assert.equal(quickExecution.model, botModelFixtures[1].model);
-  assert.equal(quickExecution.effort, botModelFixtures[1].reasoningEffortLevels.at(-1));
-  report.quickChatBots.sentSelection = true;
-  const canonical = readFileSync(path.join(home, 'conversations', fixture.bots[0].conversationId + '.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  const quickInputs = canonical.filter(row => row.kind === 'user_input' && row.content === 'RC_QUICK_INPUT');
-  assert.equal(quickInputs.length, 1); assert.equal(quickInputs[0].surface, 'quick_chat');
-  report.checks.push('real Quick Chat window lists bots and submits one canonical quick_chat input');
+  await checkQuickChatModel(quick);
   await page.bringToFront();
   await selectBotByName(page, path.basename(archiveBot.path));
   await page.locator('.bot-thread').evaluate(node => { node.scrollTop = 0; });

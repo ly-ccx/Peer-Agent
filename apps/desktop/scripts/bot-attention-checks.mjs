@@ -3,11 +3,12 @@ import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { openBotListSearch } from './bot-reply-details-checks.mjs';
 
-/** Production directory, IPC, input queue and real renderer on the standard 10k-message home. */
+/** Production directory, IPC, input queue and real renderer on the writable Bot history. */
 export async function checkBotAttention({ page, attentionNative, until, report, captureDirectory, home, bots }) {
   await (await openBotListSearch(page)).fill('');
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const first = bots[0], other = bots[1];
+  const largeHistoryMessages = store.getPersistedConversationHistory(first.conversationId).messages.length;
   const signal = () => attentionNative('signal', [first.workspaceId, other.workspaceId]);
   const appendQuestion = (bot, id, content) => store.appendMessage(bot.conversationId, {
     id, kind: 'agent_reply', role: 'assistant', content,
@@ -99,5 +100,5 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
 
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   report.attention = { passed: true, realDirectory: true, realQueue: true, duplicateRetired: true, staleClickRejected: true,
-    keyboard: true, notificationFocus: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages: 10000 };
+    keyboard: true, notificationFocus: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages };
 }
