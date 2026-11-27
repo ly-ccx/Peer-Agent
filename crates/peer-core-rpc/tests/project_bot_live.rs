@@ -2390,3 +2390,193 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
     sse_stop.cancel();
     client.shutdown(handle).await;
 }
+
+#[tokio::test]
+async fn queued_question_answer_clears_needs_you_before_consume_and_emits_on_consume() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let ws_dir = dir.path().join("ws-queued-attention");
+    std::fs::create_dir_all(&ws_dir).unwrap();
+
+    // Seed bot + open reply question
+    let seed_host = NativeProjectHost::new(&home, "0.1.0-test", Some(2)).unwrap();
+    let (entry, profile) = seed_host
+        .bind_workspace(&ws_dir, Some("QueuedAttentionBot"))
+        .unwrap();
+    let ws_id = entry.workspace_id.clone();
+    let conv_id = profile.agent_conversation_id.clone().unwrap();
+    seed_host
+        .conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "reply-q-live",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Which option?",
+                "createdAt": "2026-11-27T03:01:00.000Z",
+                "question": { "options": ["Option 1", "Option 2"] }
+            }),
+            "2026-11-27T03:01:00.000Z",
+            None,
+        )
+        .unwrap();
+    // Initialize coordination index so view="cards" succeeds cleanly.
+    let _ = seed_host.ensure_lease(&ws_id);
+    seed_host
+        .recover_workspace_barrier(&ws_id, &CancellationToken::new())
+        .await
+        .unwrap();
+    let _ = seed_host.release_lease(&ws_id);
+    drop(seed_host);
+
+    // Mock model server that holds the response until we release a gate so we can
+    // prove `conversationChanged` fires immediately after `consume()`, BEFORE the turn ends.
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+    let (model_started_tx, model_started_rx) = tokio::sync::oneshot::channel::<()>();
+    let model_started_tx = Arc::new(tokio::sync::Mutex::new(Some(model_started_tx)));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let endpoint = format!("http://{addr}/v1/chat/completions");
+    let sse_stop = CancellationToken::new();
+    let sse_cancel = sse_stop.clone();
+    {
+        let release_rx = Arc::clone(&release_rx);
+        let model_started_tx = Arc::clone(&model_started_tx);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = sse_cancel.cancelled() => break,
+                    Ok((mut stream, _)) = listener.accept() => {
+                        let _ = read_http_request(&mut stream).await;
+                        if let Some(tx) = model_started_tx.lock().await.take() {
+                            let _ = tx.send(());
+                        }
+                        if let Some(rx) = release_rx.lock().await.take() {
+                            let _ = rx.await;
+                        }
+                        let body = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Option 1 received.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                    }
+                }
+            }
+        });
+    }
+
+    let (mut client, handle) = spawn_live_server(&home, Some(make_test_loader(endpoint))).await;
+
+    // 1. Before answering (host still disabled so consume() CANNOT run yet):
+    let list_before = client.call("project.bot.list", json!({})).await;
+    assert_eq!(list_before["items"][0]["state"]["needsYou"], 1);
+    let att_before = client
+        .call("project.bot.listAttention", json!({ "workspaceId": ws_id }))
+        .await;
+    assert_eq!(att_before["items"].as_array().unwrap().len(), 1);
+    let cards_before = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "view": "cards" }),
+        )
+        .await;
+    assert_eq!(
+        cards_before["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["cardId"] == "card:question:reply:reply-q-live")
+            .unwrap()["resolvedState"],
+        "open"
+    );
+
+    // 2. Submit answer while host is disabled -> stays unconsumed in input-queue.jsonl!
+    let submit = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id,
+                "inputId": "ans-live-1",
+                "text": "Option 1",
+                "answerTo": "card:question:reply:reply-q-live",
+            }),
+        )
+        .await;
+    assert_eq!(submit["ok"], true, "submitInput failed: {submit}");
+
+    // Immediately after submit (BEFORE consume()), needsYou / listAttention / cards must all reflect closure!
+    let list_queued = client.call("project.bot.list", json!({})).await;
+    assert_eq!(list_queued["items"][0]["state"]["needsYou"], 0);
+    let att_queued = client
+        .call("project.bot.listAttention", json!({ "workspaceId": ws_id }))
+        .await;
+    assert!(att_queued["items"].as_array().unwrap().is_empty());
+    let cards_queued = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id, "view": "cards" }),
+        )
+        .await;
+    assert_eq!(
+        cards_queued["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["cardId"] == "card:question:reply:reply-q-live")
+            .unwrap()["resolvedState"],
+        "resolved"
+    );
+
+    // Second submission for the same closed question must be rejected as QUESTION_CLOSED.
+    let dup = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id,
+                "inputId": "ans-live-2",
+                "text": "Option 1",
+                "answerTo": "card:question:reply:reply-q-live",
+            }),
+        )
+        .await;
+    assert_eq!(dup["ok"], false);
+    assert_eq!(dup["code"], "QUESTION_CLOSED");
+
+    // 3. Enable host so consume() runs and the model turn blocks on our gate.
+    //    `conversationChanged` with `conversationId` must fire immediately upon consume(),
+    //    BEFORE the gated model turn completes!
+    client.notifications.clear();
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({ "enabled": true, "heartbeatIntervalMs": 60 }),
+        )
+        .await;
+
+    tokio::time::timeout(Duration::from_secs(5), model_started_rx)
+        .await
+        .expect("model turn did not start")
+        .unwrap();
+
+    let consumed_notif = client
+        .wait_for_notification(
+            Duration::from_secs(3),
+            "conversationChanged after consume before turn finishes",
+            |n| {
+                n["method"] == "project.bot.conversationChanged"
+                    && n["params"]["workspaceId"] == ws_id
+                    && n["params"]["conversationId"] == conv_id
+            },
+        )
+        .await;
+    assert_eq!(consumed_notif["params"]["conversationId"], conv_id);
+
+    // Release gated model turn and shut down cleanly.
+    let _ = release_tx.send(());
+    sse_stop.cancel();
+    client.shutdown(handle).await;
+}

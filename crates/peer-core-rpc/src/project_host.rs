@@ -532,6 +532,15 @@ impl ProjectHostRuntime {
                 let _ = act_tx.send((activity, status));
             },
         )));
+        let rt_consumed = Arc::downgrade(self);
+        self.host.set_inputs_consumed_listener(Some(Arc::new(
+            move |workspace_id: &str, conv_id: &str, _count: usize| {
+                if let Some(rt) = rt_consumed.upgrade() {
+                    rt.emit_conversation_changed(workspace_id, Some(conv_id));
+                    rt.emit_changed(vec![workspace_id.to_owned()]);
+                }
+            },
+        )));
         let peer_act = self.peer.clone();
         let cancel_act = cancel.clone();
         let _ = self.spawner.spawn(move |_guard| {
@@ -1360,6 +1369,7 @@ impl ProjectHostRuntime {
     pub fn begin_shutdown(&self) {
         self.enabled.store(false, Ordering::SeqCst);
         self.host.runner().set_activity_listener(None);
+        self.host.set_inputs_consumed_listener(None);
         if let Ok(mut guard) = self.loop_cancel.lock()
             && let Some(token) = guard.take()
         {

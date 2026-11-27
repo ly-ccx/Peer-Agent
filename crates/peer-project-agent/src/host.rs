@@ -140,6 +140,8 @@ impl Drop for WakeAdmission<'_> {
     }
 }
 
+pub type InputsConsumedListener = Arc<dyn Fn(&str, &str, usize) + Send + Sync>;
+
 pub struct NativeProjectHost {
     data_home: PathBuf,
     host_identity: HostIdentity,
@@ -167,6 +169,7 @@ pub struct NativeProjectHost {
     conversations: ConversationStore,
     digests: DigestQueue,
     interactive_results: InteractiveResultStore,
+    inputs_consumed_listener: Mutex<Option<InputsConsumedListener>>,
 }
 
 impl NativeProjectHost {
@@ -227,6 +230,7 @@ impl NativeProjectHost {
             conversations: ConversationStore::new(&home),
             digests: DigestQueue::new(&home),
             interactive_results: InteractiveResultStore::new(&home),
+            inputs_consumed_listener: Mutex::new(None),
             supervisor,
             runner,
             failure_holds: Mutex::new(HashMap::new()),
@@ -313,6 +317,11 @@ impl NativeProjectHost {
     }
     pub fn set_tool_projection_mode(&self, mode: crate::ToolProjectionMode) {
         self.runner.set_projection_mode(mode);
+    }
+    pub fn set_inputs_consumed_listener(&self, listener: Option<InputsConsumedListener>) {
+        if let Ok(mut guard) = self.inputs_consumed_listener.lock() {
+            *guard = listener;
+        }
     }
     pub fn directory(&self) -> &BotDirectory {
         &self.directory
@@ -571,6 +580,12 @@ impl NativeProjectHost {
             .inputs
             .consume(workspace_id, &conv_id, &self.conversations, true)?;
         report.inputs_consumed = consumed.consumed.len();
+        if !consumed.consumed.is_empty()
+            && let Ok(guard) = self.inputs_consumed_listener.lock()
+            && let Some(listener) = guard.as_ref()
+        {
+            listener(workspace_id, &conv_id, consumed.consumed.len());
+        }
 
         if self.takeover_requested(workspace_id) {
             report.held_lease = false;

@@ -92,8 +92,13 @@ export function useBotConversation(workspaceId: string) {
   const refreshRef = useRef<(() => void) | null>(null);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
-    recovery.session.observeReceived(next.filter(message => message.kind === 'user_input').flatMap(message =>
-      message.inputId ? [message.inputId] : message.id.startsWith('input-') ? [message.id.slice(6)] : []));
+    const userInputs = next.filter(message => message.kind === 'user_input');
+    recovery.session.observeReceived(
+      userInputs.flatMap(message =>
+        message.inputId ? [message.inputId] : message.id.startsWith('input-') ? [message.id.slice(6)] : []),
+      userInputs.flatMap(message =>
+        message.answerTo ? [{ answerTo: message.answerTo, text: message.content }] : []),
+    );
   }, [recovery.session]);
 
   useEffect(() => { if (recovery.state.ready) dropEchoed(messages); }, [dropEchoed, messages, recovery.state.ready]);

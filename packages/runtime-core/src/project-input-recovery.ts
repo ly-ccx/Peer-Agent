@@ -43,7 +43,10 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
   let earlyEdits: Partial<InputDraftValue> | null = null;
   let writing: Promise<boolean> | null = null, loading: Promise<boolean> | null = null;
   const listeners = new Set<() => void>(), storedAttachments = new Map<string, import('@peer-agent/protocol').ProjectInputAttachment>(), active = new Map<string, Promise<ProjectAgentSubmitInputResult>>();
+  const draftOrigins = new Map<string, InputDraftValue['quote']>();
   const publish = (patch: Partial<InputRecoveryView>) => { view = { ...view, ...patch }; for (const fn of listeners) fn(); };
+  const isDraftEmpty = (draft: InputDraftValue) => !draft.text && !draft.quote && !draft.attachments.length
+    && !draft.taskRefs?.length && !draft.resourceFeedback?.length;
   async function load(): Promise<boolean> {
     if (loading) return loading;
     loading = (async () => {
@@ -119,10 +122,38 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     if (view.ready) void flush();
   }
   function acknowledge(ids: readonly string[]) {
+    for (const id of ids) draftOrigins.delete(id);
     const pending = view.pending.filter(item => !ids.includes(item.inputId));
     if (pending.length === view.pending.length) return;
     const received = [...view.received, ...view.pending.filter(item => ids.includes(item.inputId))];
     changed++; publish({ pending, received }); void flush();
+  }
+  function dismiss(ids: readonly string[]) {
+    for (const id of ids) draftOrigins.delete(id);
+    const pending = view.pending.filter(item => !ids.includes(item.inputId));
+    if (pending.length === view.pending.length) return;
+    changed++; publish({ pending }); void flush();
+  }
+  function recoverClosedDraft(input: UnconfirmedProjectInput, originalQuote: InputDraftValue['quote']) {
+    if (!view.pending.some(item => item.inputId === input.inputId)) return;
+    if (isDraftEmpty(view.draft)) {
+      const pending = view.pending.filter(item => item.inputId !== input.inputId);
+      const restored: InputDraftValue = {
+        text: input.text,
+        quote: originalQuote,
+        attachments: input.attachments,
+        ...(input.taskRefs?.length ? { taskRefs: input.taskRefs } : {}),
+        ...(input.resourceFeedback?.length ? { resourceFeedback: input.resourceFeedback } : {}),
+      };
+      changed++; publish({ pending, draft: restored }); void flush();
+      return;
+    }
+    const pending = view.pending.map(item => {
+      if (item.inputId !== input.inputId || !item.answerTo) return item;
+      const { answerTo: _closed, ...plain } = item;
+      return plain;
+    });
+    changed++; publish({ pending }); void flush();
   }
   function dispatch(input: UnconfirmedProjectInput): Promise<ProjectAgentSubmitInputResult> {
     const running = active.get(input.inputId); if (running) return running;
@@ -134,6 +165,16 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
         // factual receipt still reconciles the original envelope without resending.
         const submitted = port.submit({ ...address, ...input }).then(result => {
           if (projectInputWasReceived(result, workspaceId, input.inputId)) { acknowledge([input.inputId]); return result; }
+          if (result.code === 'QUESTION_CLOSED') {
+            if (draftOrigins.has(input.inputId)) {
+              const originalQuote = draftOrigins.get(input.inputId) ?? null;
+              draftOrigins.delete(input.inputId);
+              recoverClosedDraft(input, originalQuote);
+            } else {
+              dismiss([input.inputId]);
+            }
+            return { ok: false, code: 'QUESTION_CLOSED' };
+          }
           return { ok: false, code: result.code || 'INPUT_OUTCOME_UNKNOWN' };
         }).catch(() => ({ ok: false, code: 'INPUT_OUTCOME_UNKNOWN' }));
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -157,6 +198,7 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
     if (!text && !attachments.length && !taskRefs.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
     if (!useDraft && options.answerTo) {
+      if (view.received.some(item => item.answerTo === options.answerTo)) return { ok: false, code: 'QUESTION_CLOSED' };
       const existing = view.pending.find(item => item.answerTo === options.answerTo);
       if (existing) return existing.text === text ? dispatch(existing) : { ok: false, code: 'INPUT_PENDING_ANSWER' };
     }
@@ -166,6 +208,7 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     catch (error) { return { ok: false, code: (error as { code?: string }).code ?? 'INVALID_RESOURCE_FEEDBACK' }; }
     const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), ...(taskRefs.length ? { taskRefs } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
       ...(options.answerTo ? { answerTo: options.answerTo } : {}) };
+    if (useDraft) draftOrigins.set(input.inputId, draft.quote);
     changed++; publish({ pending: [...view.pending, input], ...(useDraft ? { draft: emptyInputDraft() } : {}) });
     return dispatch(input);
   }
@@ -173,8 +216,22 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     getSnapshot: () => view,
     subscribe(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     load, edit, flush, acknowledge, send,
-    observeReceived(ids: readonly string[]) {
-      const pending = view.pending.filter(item => !ids.includes(item.inputId));
+    observeReceived(ids: readonly string[], answered?: readonly { readonly answerTo: string; readonly text: string }[]) {
+      const isDuplicateCommittedReplyAnswer = (item: UnconfirmedProjectInput) => Boolean(
+        answered?.length
+        && !active.has(item.inputId)
+        && item.answerTo?.startsWith('card:question:reply:')
+        && !item.attachments.length
+        && !item.taskRefs?.length
+        && !item.resourceFeedback?.length
+        && !item.quoteRefs.length
+        && answered.some(entry => entry.answerTo === item.answerTo && entry.text.trim() === item.text.trim()),
+      );
+      const pending = view.pending.filter(item => {
+        const drop = ids.includes(item.inputId) || isDuplicateCommittedReplyAnswer(item);
+        if (drop) draftOrigins.delete(item.inputId);
+        return !drop;
+      });
       const received = view.received.filter(item => !ids.includes(item.inputId));
       if (pending.length !== view.pending.length) { changed++; publish({ pending, received }); void flush(); }
       else if (received.length !== view.received.length) publish({ received });

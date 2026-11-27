@@ -4,8 +4,8 @@
 //! and `packages/runtime-node/src/project-agent/attention.mjs` (ADR 84, ADR 100).
 
 use crate::{
-    BotProfile, BotProfileStore, FollowUpProjection, ProjectError, ProjectRegistry, atomic_write,
-    cards, is_valid_workspace_id, now_iso, parse_iso_ms,
+    BotProfile, BotProfileStore, FollowUpProjection, InputQueue, ProjectError, ProjectRegistry,
+    QueuedInputMeta, atomic_write, cards, is_valid_workspace_id, now_iso, parse_iso_ms,
 };
 use peer_runtime::tool_markup::strip_literal_tool_call_blocks;
 use peer_store::{ApprovalStore, ConversationStore};
@@ -361,6 +361,88 @@ pub fn project_reply_questions(
     out
 }
 
+/// Extends [`project_reply_questions`] with durably queued (not yet consumed)
+/// `InputQueue` items so attention badges, cards, and submit validation share one
+/// authoritative view of question closure even while a workspace tick holds the lock.
+pub fn project_reply_questions_with_queued(
+    messages: &[Value],
+    queued: &[QueuedInputMeta],
+    now_ms: i64,
+) -> HashMap<String, ReplyQuestionStatus> {
+    let mut out = project_reply_questions(messages, now_ms);
+    if queued.is_empty() || !out.values().any(|s| s.state == QuestionState::Open) {
+        return out;
+    }
+    let mut present_input_ids: HashSet<&str> = HashSet::new();
+    let mut open_created_at: HashMap<&str, Option<i64>> = HashMap::new();
+    for msg in messages {
+        if let Some(iid) = msg["inputId"].as_str().filter(|s| !s.is_empty()) {
+            present_input_ids.insert(iid);
+        }
+        if let Some(id) = msg["id"].as_str().filter(|s| !s.is_empty()) {
+            if let Some(stripped) = id.strip_prefix("input-")
+                && !stripped.is_empty()
+            {
+                present_input_ids.insert(stripped);
+            }
+            if out
+                .get(id)
+                .is_some_and(|st| st.state == QuestionState::Open)
+            {
+                open_created_at.insert(id, msg["createdAt"].as_str().and_then(parse_iso_ms));
+            }
+        }
+    }
+    for item in queued {
+        if present_input_ids.contains(item.input_id.as_str()) {
+            continue;
+        }
+        if let Some(raw_target) = item
+            .answer_to
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let target = raw_target
+                .strip_prefix("card:question:reply:")
+                .unwrap_or(raw_target);
+            if let Some(status) = out.get_mut(target)
+                && status.state == QuestionState::Open
+            {
+                status.state = QuestionState::Answered;
+                status.answered_by = Some(format!("input-{}", item.input_id));
+            }
+        } else {
+            let input_ms = parse_iso_ms(&item.created_at);
+            for (qid, status) in &mut out {
+                if status.state != QuestionState::Open {
+                    continue;
+                }
+                let q_ms = open_created_at.get(qid.as_str()).copied().flatten();
+                let supersedes = match (q_ms, input_ms) {
+                    (Some(q), Some(i)) => q <= i,
+                    _ => true,
+                };
+                if supersedes {
+                    status.state = QuestionState::Superseded;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// True when `answer_to` is already answered in either canonical parent messages
+/// or durably queued unconsumed inputs.
+pub fn is_answer_recorded(messages: &[Value], queued: &[QueuedInputMeta], answer_to: &str) -> bool {
+    messages
+        .iter()
+        .any(|m| m["answerTo"].as_str() == Some(answer_to))
+        || queued
+            .iter()
+            .any(|q| q.answer_to.as_deref().map(str::trim) == Some(answer_to))
+}
+
 pub fn project_bot_attention(
     profile: &BotProfile,
     messages: &[Value],
@@ -380,11 +462,34 @@ pub fn project_bot_attention_with_cards(
     card_resolutions: &[cards::CardResolution],
     now_ms: i64,
 ) -> Vec<AttentionItem> {
+    project_bot_attention_with_cards_and_queued(
+        profile,
+        messages,
+        &[],
+        sessions,
+        approvals,
+        task_question_cards,
+        card_resolutions,
+        now_ms,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn project_bot_attention_with_cards_and_queued(
+    profile: &BotProfile,
+    messages: &[Value],
+    queued: &[QueuedInputMeta],
+    sessions: &[BotListSession],
+    approvals: &[Value],
+    task_question_cards: &[Value],
+    card_resolutions: &[cards::CardResolution],
+    now_ms: i64,
+) -> Vec<AttentionItem> {
     let sessions_by_id: HashMap<&str, &BotListSession> = sessions
         .iter()
         .map(|s| (s.session_id.as_str(), s))
         .collect();
-    let question_states = project_reply_questions(messages, now_ms);
+    let question_states = project_reply_questions_with_queued(messages, queued, now_ms);
     let replies: Vec<&Value> = messages
         .iter()
         .filter(|msg| {
@@ -866,16 +971,28 @@ impl BotDirectory {
             .iter()
             .filter(|s| s.status == "waiting_user")
             .collect();
-        let task_question_cards = cards::project_waiting_user_question_cards(
+        let has_open_reply_question = project_reply_questions(&messages, now_ms)
+            .values()
+            .any(|st| st.state == QuestionState::Open);
+        let queued = if has_open_reply_question || !waiting_sessions.is_empty() {
+            InputQueue::new(&self.data_home)
+                .list_unconsumed_meta(&workspace_id)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let task_question_cards = cards::project_waiting_user_question_cards_with_queued(
             &self.data_home,
             &workspace_id,
             &messages,
+            &queued,
             &waiting_sessions,
             &resolutions,
         );
-        let attention = project_bot_attention_with_cards(
+        let attention = project_bot_attention_with_cards_and_queued(
             &profile,
             &messages,
+            &queued,
             sessions,
             &approvals,
             &task_question_cards,
@@ -1620,7 +1737,18 @@ impl BotDirectory {
             .ok()?;
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
         let states = project_reply_questions(&snap.history.messages, now_ms);
-        states.get(question_id).map(|s| s.state)
+        let state = states.get(question_id).map(|s| s.state)?;
+        if state == QuestionState::Open {
+            let queued = InputQueue::new(&self.data_home)
+                .list_unconsumed_meta(workspace_id)
+                .unwrap_or_default();
+            if !queued.is_empty() {
+                let merged =
+                    project_reply_questions_with_queued(&snap.history.messages, &queued, now_ms);
+                return merged.get(question_id).map(|s| s.state);
+            }
+        }
+        Some(state)
     }
 }
 
@@ -2448,5 +2576,165 @@ mod tests {
             .map(|s| s.session_id.as_str())
             .collect();
         assert_eq!(ids, vec!["s-wait", "s-vf", "s-run"]);
+    }
+
+    #[test]
+    fn queued_reply_answer_clears_needs_you_and_attention_before_consume() {
+        let dir = tempdir().unwrap();
+        let profiles = BotProfileStore::new(dir.path());
+        let convs = ConversationStore::new(dir.path());
+        let at = "2026-11-27T03:01:34.048Z";
+        let conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "peer-dev",
+                    workspace_id: "ws-queued",
+                    workspace_path: Some("/tmp/peer-dev"),
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: at,
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap();
+        profiles
+            .create(&CreateBotProfile {
+                workspace_id: "ws-queued",
+                display_name: "peer-dev",
+                managed: false,
+                agent_conversation_id: conv_id,
+                avatar_salt: "",
+            })
+            .unwrap();
+        convs
+            .append_message_idempotent(
+                conv_id,
+                &json!({
+                    "id": "reply-q-open",
+                    "role": "assistant",
+                    "kind": "agent_reply",
+                    "content": "Choose option A or B?",
+                    "createdAt": at,
+                    "question": { "options": ["Option A", "Option B"] }
+                }),
+                at,
+                None,
+            )
+            .unwrap();
+
+        let directory = BotDirectory::new(dir.path());
+        assert_eq!(directory.list(&HashMap::new())[0].state.needs_you, 1);
+        assert_eq!(
+            directory
+                .list_attention(Some("ws-queued"), &HashMap::new())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            directory.question_state("ws-queued", "reply-q-open"),
+            Some(QuestionState::Open)
+        );
+
+        // Submit answer to InputQueue WITHOUT calling consume() (simulating a long wake turn holding lock).
+        let queue = InputQueue::new(dir.path());
+        queue
+            .submit_input(&crate::SubmitInputRequest {
+                workspace_id: "ws-queued",
+                input_id: "in-queued-ans-1",
+                surface: "desktop",
+                text: "Option A",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                task_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: Some("card:question:reply:reply-q-open".into()),
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+
+        let listed = directory.list(&HashMap::new());
+        assert_eq!(listed[0].state.needs_you, 0);
+        // Unread/preview still come from committed messages only.
+        assert_eq!(listed[0].state.unread, 1);
+        assert!(
+            directory
+                .list_attention(Some("ws-queued"), &HashMap::new())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            directory.question_state("ws-queued", "reply-q-open"),
+            Some(QuestionState::Answered)
+        );
+    }
+
+    #[test]
+    fn queued_freeform_input_respects_timestamps_and_skips_already_consumed_inputs() {
+        let now_ms = parse_iso_ms("2026-11-27T03:10:00.000Z").unwrap();
+        let messages = vec![
+            json!({
+                "id": "reply-q1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Earlier question",
+                "createdAt": "2026-11-27T03:01:00.000Z",
+                "question": { "options": ["A"] }
+            }),
+            json!({
+                "id": "input-already-in-conv",
+                "inputId": "already-in-conv",
+                "role": "user",
+                "kind": "user_input",
+                "content": "Already consumed",
+                "createdAt": "2026-11-27T03:02:00.000Z"
+            }),
+            json!({
+                "id": "reply-q2",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Newer question",
+                "createdAt": "2026-11-27T03:05:00.000Z",
+                "question": { "options": ["B"] }
+            }),
+        ];
+
+        // 1. An already-consumed input (crash before cursor advance) must NOT supersede reply-q2.
+        // 2. An older freeform queued input (03:04) must NOT supersede reply-q2 (03:05).
+        let stale_queued = vec![
+            QueuedInputMeta {
+                input_id: "already-in-conv".into(),
+                created_at: "2026-11-27T03:02:00.000Z".into(),
+                answer_to: None,
+            },
+            QueuedInputMeta {
+                input_id: "older-freeform".into(),
+                created_at: "2026-11-27T03:04:00.000Z".into(),
+                answer_to: None,
+            },
+        ];
+        let states_keep = project_reply_questions_with_queued(&messages, &stale_queued, now_ms);
+        assert_eq!(states_keep["reply-q1"].state, QuestionState::Superseded);
+        assert_eq!(states_keep["reply-q2"].state, QuestionState::Open);
+
+        // 3. A newer freeform queued input (03:06 >= 03:05) supersedes reply-q2 immediately.
+        let newer_queued = vec![QueuedInputMeta {
+            input_id: "newer-freeform".into(),
+            created_at: "2026-11-27T03:06:00.000Z".into(),
+            answer_to: None,
+        }];
+        let states_superseded =
+            project_reply_questions_with_queued(&messages, &newer_queued, now_ms);
+        assert_eq!(
+            states_superseded["reply-q2"].state,
+            QuestionState::Superseded
+        );
     }
 }

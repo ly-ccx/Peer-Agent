@@ -65,7 +65,8 @@ pub use attachments::{
 pub use cards::{
     CardResolution, ConfirmCardInput, TaskQuestionDraft, append_card_resolution,
     latest_task_question, project_cards, project_waiting_user_question_cards,
-    project_workspace_cards, read_card_resolutions,
+    project_waiting_user_question_cards_with_queued, project_workspace_cards,
+    read_card_resolutions,
 };
 pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
@@ -83,9 +84,10 @@ pub use directory::{
     AttentionItem, AttentionKind, BotDetail, BotDirectory, BotListFilter, BotListItem,
     BotListMessage, BotListSession, BotRowProjection, BotRowState, FamiliarizeOffer,
     InteractionPage, MarkReadResult, QuestionState, ReadConversationOptions, ReplyQuestionStatus,
-    default_familiarize_offer, filter_bot_list, is_visible_bot_message, project_bot_attention,
-    project_bot_attention_with_cards, project_bot_list_item, project_bot_list_message,
-    project_reply_questions, sort_bot_list,
+    default_familiarize_offer, filter_bot_list, is_answer_recorded, is_visible_bot_message,
+    project_bot_attention, project_bot_attention_with_cards, project_bot_list_item,
+    project_bot_list_message, project_reply_questions, project_reply_questions_with_queued,
+    sort_bot_list,
 };
 pub use drafts::{
     DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftTaskRef,
@@ -94,14 +96,14 @@ pub use drafts::{
 };
 pub use host::{
     FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, ForegroundTickReport, HostTickReport,
-    LeaseStatus, MaintenanceReport, NativeProjectHost, RESPONSIBILITY_QUESTION,
-    StartFamiliarizeResult, bot_list_json,
+    InputsConsumedListener, LeaseStatus, MaintenanceReport, NativeProjectHost,
+    RESPONSIBILITY_QUESTION, StartFamiliarizeResult, bot_list_json,
 };
 pub use inbox::{InboxBatch, InboxCursor, InboxDiagnosticSnapshot, ProjectInbox};
 pub use inherited_background::{CapturedBackground, capture_inherited_background};
 pub use input_queue::{
-    ConsumeOutcome, InputDiagnosticSnapshot, InputQueue, ProjectInput, SubmitInputRequest,
-    input_message_id,
+    ConsumeOutcome, InputDiagnosticSnapshot, InputQueue, ProjectInput, QueuedInputMeta,
+    SubmitInputRequest, input_message_id,
 };
 pub use interactive_provider::{
     INTERACTIVE_READ_RULES, WorkSessionInteractiveContext, WorkSessionInteractiveProvider,
