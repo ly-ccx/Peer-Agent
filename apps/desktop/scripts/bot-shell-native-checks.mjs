@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { openReplyDetails, closeReplyDetails, selectBotByName, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import {
-  FIRST_PARAGRAPH, PRIVATE_REASONING, RETRY_INPUT, SECOND_PARAGRAPH,
+  CLASSIC_IMAGE_INPUT, FIRST_PARAGRAPH, PRIVATE_REASONING, RETRY_INPUT, SECOND_PARAGRAPH,
   STOP_INPUT, STREAM_INPUT, STREAM_REPLY, WORK_INPUT,
 } from './bot-shell-native-model-fixture.mjs';
 
@@ -209,4 +210,43 @@ export async function checkNativeBotWork({ page, model, until, report, bot, home
   report.nativeWork = { sessionId: child.sessionId, evidenceRef: evidence.evidenceRef, grantId: grant.grantId,
     realRead: true, reported: true, openedOriginalTask: true, draftPreserved: true };
   report.checks.push('a real delegated worker reads the fixture file, reports through a host wake and opens its original task surface');
+}
+
+export async function checkNativeClassicImage({ app, page, model, until, report, bot, home }) {
+  const file = path.join(bot.path, 'classic-image.png');
+  const png = await app.evaluate(({ nativeImage }) => nativeImage
+    .createFromBitmap(Buffer.from([0, 0, 255, 255]), { width: 1, height: 1 }).toPNG().toString('base64'));
+  const bytes = Buffer.from(png, 'base64');
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  writeFileSync(file, bytes);
+  model.setClassicImagePath(file);
+
+  const run = await page.evaluate(async ({ text, workspacePath }) => {
+    const api = window.peerAgent;
+    const observations = { prompts: [], outcomes: [] };
+    const dispose = [api.onChatStreamPermissionRequest(event => observations.prompts.push(event)),
+      api.onChatStreamDone(event => observations.outcomes.push(event))];
+    globalThis.rcClassicImage = { observations, stop: () => dispose.forEach(off => off()) };
+    return api.chatStartTask({ text, workspacePath, mode: 'chat' });
+  }, { text: CLASSIC_IMAGE_INPUT, workspacePath: bot.path });
+  const observations = () => page.evaluate(() => globalThis.rcClassicImage.observations);
+  try {
+    const prompt = await until(async () => (await observations()).prompts.find(event => event.streamId === run.streamId), Boolean);
+    assert.equal(prompt.call.capabilityId, 'local.image.read');
+    assert.equal(wireRequests(model, CLASSIC_IMAGE_INPUT).length, 1, 'no tool result reaches the model before approval');
+    const grant = await page.evaluate(toolCallId => window.peerAgent.approveLocalAction(toolCallId, { duration: 'once' }), prompt.call.toolCallId);
+    assert.equal(grant.granted, true);
+    await until(async () => (await observations()).outcomes.find(event => event.streamId === run.streamId), Boolean);
+    const messages = history(home, { conversationId: run.conversationId });
+    const results = messages.flatMap(message => (message.segments || []).filter(segment => segment.type === 'tool-call' && segment.tool === 'view_image'));
+    assert.equal(results.length, 1);
+    const result = results[0].result;
+    assert.equal(result.status, 'success');
+    assert.ok(result.evidence?.evidenceId);
+    assert.match(JSON.stringify(result.output), new RegExp(digest));
+    assert.equal(wireRequests(model, CLASSIC_IMAGE_INPUT).length, 2);
+    report.nativeClassicImage = { toolCallId: result.toolCallId, evidenceId: result.evidence.evidenceId, digest, readAfterApproval: true };
+  } finally {
+    await page.evaluate(() => { globalThis.rcClassicImage.stop(); delete globalThis.rcClassicImage; });
+  }
 }

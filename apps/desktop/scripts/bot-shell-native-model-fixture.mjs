@@ -6,6 +6,7 @@ export const STOP_INPUT = 'RC_NATIVE_STOP';
 export const LONG_INPUT = 'RC_STREAM_LONG';
 export const RETRY_INPUT = 'RC_NATIVE_RETRY';
 export const WORK_INPUT = 'RC_NATIVE_WORK';
+export const CLASSIC_IMAGE_INPUT = 'RC_NATIVE_CLASSIC_IMAGE';
 export const PRIVATE_REASONING = 'PRIVATE_REASONING_MUST_NOT_RENDER';
 export const FIRST_PARAGRAPH = '我先看看项目的整体情况，整理好后告诉你重点。';
 export const SECOND_PARAGRAPH = '项目把界面和本地执行分开了，我再确认它们如何连接。';
@@ -15,6 +16,7 @@ export async function startBotShellModelFixture() {
   const requests = [];
   const errors = [];
   const active = new Map();
+  let classicImagePath;
 
   function answer(body, res) {
     const messages = body.messages;
@@ -44,6 +46,16 @@ export async function startBotShellModelFixture() {
       record.finished = true;
       send({}, finishReason, { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 });
       res.end('data: [DONE]\n\n');
+    }
+    if (scenario === CLASSIC_IMAGE_INPUT && messages.at(-1)?.role !== 'tool') {
+      assert.ok(classicImagePath, 'Classic image path must belong to the isolated fixture');
+      assert.ok(body.tools.some(tool => tool.function?.name === 'view_image'), 'the real Classic runtime must project view_image');
+      send({ role: 'assistant', tool_calls: [{
+        index: 0, id: 'rc-classic-image', type: 'function',
+        function: { name: 'view_image', arguments: JSON.stringify({ path: classicImagePath }) },
+      }] }, null);
+      finish('tool_calls');
+      return;
     }
     if (scenario === STREAM_INPUT || scenario === LONG_INPUT || (scenario === STOP_INPUT && round === 1)) {
       send({ role: 'assistant', reasoning_content: PRIVATE_REASONING }, null);
@@ -86,7 +98,7 @@ export async function startBotShellModelFixture() {
       ? '正在核对项目说明。'
       : scenario.startsWith('[Host Wake Event Payload')
         ? (scenario.includes('RC_FIXTURE_OK') ? '项目说明已核对，找到 RC_FIXTURE_OK。' : 'NO_REPLY')
-        : scenario.startsWith('RC_') ? 'RC scripted reply: ' + scenario : 'NO_REPLY';
+        : scenario ? 'RC scripted reply: ' + scenario : 'NO_REPLY';
     send({ role: 'assistant', content: reply }, null);
     finish();
   }
@@ -115,6 +127,7 @@ export async function startBotShellModelFixture() {
     url: `http://127.0.0.1:${server.address().port}/v1`,
     requests,
     errors,
+    setClassicImagePath: file => { classicImagePath = file; },
     streaming: scenario => active.has(scenario),
     send(scenario, content) {
       assert.ok(active.has(scenario), `No active request for ${scenario}`);

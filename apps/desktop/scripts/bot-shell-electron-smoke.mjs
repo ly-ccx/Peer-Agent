@@ -7,8 +7,6 @@ import { checkBotLifecycleGates } from './bot-lifecycle-gate-checks.mjs';
 import { checkBotAccessPolicy } from './bot-access-policy-checks.mjs';
 import { checkBotUserReceipt } from './bot-user-receipt-checks.mjs';
 import { checkBotAttention } from './bot-attention-checks.mjs';
-import { checkBotImageLifecycle } from './bot-image-lifecycle-checks.mjs';
-import { checkBotFullAccessImages } from './bot-full-access-image-checks.mjs';
 import { checkBotShellAccessibility } from './bot-shell-accessibility-checks.mjs';
 import { seedUiAutomation, seedClassicUiFixture, checkSharedUiConventions } from './shared-ui-convention-checks.mjs';
 import { checkBotShellDiagnostics } from './bot-shell-diagnostics-checks.mjs';
@@ -30,13 +28,13 @@ import { checkBotMessageLayout } from './bot-message-layout-checks.mjs';
 import { checkFallbackVisionLayout } from './fallback-vision-layout-checks.mjs';
 import { checkBotComposerLayout } from './bot-composer-layout-checks.mjs';
 import { checkBotCompletionReview } from './bot-completion-review-checks.mjs';
-import { checkBotImageApproval } from './bot-image-approval-checks.mjs';
+import { checkConversationTypography } from './bot-conversation-typography-checks.mjs';
 import { seedWorkBudgetMessages } from './work-budget-fixture.mjs';
 import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
 import { createAttentionNativeController } from './bot-attention-native-fixture.mjs';
 import { startBotShellModelFixture } from './bot-shell-native-model-fixture.mjs';
-import { checkNativeBotRetry, checkNativeBotStop, checkNativeBotStreaming, checkNativeBotWork } from './bot-shell-native-checks.mjs';
+import { checkNativeBotRetry, checkNativeBotStop, checkNativeBotStreaming, checkNativeBotWork, checkNativeClassicImage } from './bot-shell-native-checks.mjs';
 import { checkLongHistoryRender } from './long-history-render-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the model wire.
 // This proves shell/IPC/durable input behavior, not live-model latency. The image
@@ -70,9 +68,10 @@ writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const recoveryOnly = process.argv.includes('--recovery-only');
 const longHistoryRender = process.argv.includes('--long-history-render-only');
 const focusedNativeWork = process.argv.includes('--native-work-only');
+const focusedClassicImage = process.argv.includes('--native-classic-image-only');
 const focusedStreaming = process.argv.includes('--streaming-only') || process.argv.includes('--stop-resume-only');
 const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } }
-  : recoveryOnly || focusedStreaming || focusedNativeWork ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
+  : recoveryOnly || focusedStreaming || focusedNativeWork || focusedClassicImage ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
 const classicUiFixture = sharedUiOnly ? seedClassicUiFixture({ home }) : null;
@@ -264,9 +263,10 @@ let observedService = serviceText.replace('function readConversation(payload = {
 if (workSurfaces) observedService = instrumentHistoryReads(observedService);
 const timingSeams = [
   ['function list(payload = {}) {', 'function list(payload = {}) { const rcListStart = performance.now();'],
-  ['return { ok: true, items: items.map(withAgentStatus) };', 'globalThis.rcBotShellRecord(\'list\',{ count: items.length, durationMs: performance.now() - rcListStart }); return { ok: true, items: items.map(withAgentStatus) };'],
+  ['return { ok: true, items: items.map(withAgentStatus) };', 'const result = { ok: true, items: items.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{ count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
   ['return { ok: true, items: filtered.map(withAgentStatus) };', 'const result = { ok: true, items: filtered.map(withAgentStatus) }; globalThis.rcBotShellRecord(\'list\',{  count: result.items.length, durationMs: performance.now() - rcListStart }); return result;'],
   ['function search(payload = {}) {', 'function search(payload = {}) { const rcStart = performance.now(); let rcStampMs = 0, rcIndexMs = 0;'],
+  ['res => ({ ok: true, items: Array.isArray(res?.items) ? res.items : [], hits: Array.isArray(res?.hits) ? res.hits : [] }),', 'res => { const result = { ok: true, items: Array.isArray(res?.items) ? res.items : [], hits: Array.isArray(res?.hits) ? res.hits : [] }; globalThis.rcBotShellRecord(\'search\', { totalMs: performance.now() - rcStart }); return result; },'],
   ['let hits = [];', 'const rcProjectionMs = performance.now() - rcStart; let hits = [];'],
   ["const token = typeof corpusStamp === 'function' ? String(corpusStamp(snapshot?.catalog) ?? '') : null;", "const rcStampStart = performance.now(); const token = typeof corpusStamp === 'function' ? String(corpusStamp(snapshot?.catalog) ?? '') : null; rcStampMs = performance.now() - rcStampStart; const rcIndexStart = performance.now();"],
   ["hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : '');", "hits = searchIndex.search(typeof payload?.query === 'string' ? payload.query : ''); rcIndexMs = performance.now() - rcIndexStart;"],
@@ -348,7 +348,6 @@ writeFileSync(applicationService, observedService);
 const observedFile = path.join(root, 'observations.json');
 writeFileSync(observedFile, JSON.stringify({ reads: [], list: [], search: [], turns: [] }));
 const entry = path.join(root, 'entry.mjs');
-const imageReceipt = path.join(root, 'image-receipt.json');
 const diagnosticsFile = path.join(root, 'exported-diagnostics.json');
 const updaterCommand = path.join(root, 'updater-command.json');
 const updaterReceipt = path.join(root, 'updater-receipt.json');
@@ -461,6 +460,16 @@ if (process.argv.includes('--streaming')) {
     'apps/desktop/scripts/bot-yield-feedback-checks.mjs:12-36 (checkpoint-backed yield and retained ToolCall/Result in the next slice)',
   ];
 }
+if (workSurfaces) {
+  // The read-for-model approval, tool projection and Evidence are still absent
+  // from the native Bot runtime. Keep these legacy Bot scenarios as acceptance
+  // criteria for the A-level migration. Classic exercises its existing decoder.
+  report.deferredBotImageCoverage = [
+    'apps/desktop/scripts/bot-image-approval-checks.mjs:18-47 (scoped stored Bot image grant)',
+    'apps/desktop/scripts/bot-full-access-image-checks.mjs:6-29 (four automatic Bot reads and no new approvals)',
+    'apps/desktop/scripts/bot-image-lifecycle-checks.mjs:7-76 (Bot allow, inheritance, denial, cancellation, stop and timeout)',
+  ];
+}
 let app, handle, page, tracing = false; const logs = [];
 const interaction = async phase => {
   report.interactionBefore = await page.evaluate(phase => ({ phase, frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus() }), phase);
@@ -491,6 +500,16 @@ const until = async (read, predicate, timeout = 30000) => {
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
+const checkTypography = async () => {
+  const initial = JSON.parse(readFileSync(workCommand, 'utf8'));
+  let seq = initial.seq;
+  const send = conversationMessages => {
+    writeFileSync(workCommand + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages }));
+    renameSync(workCommand + '.next', workCommand);
+  };
+  try { await checkConversationTypography({ page, until, report, captureDirectory: root, send }); }
+  finally { send(initial.conversationMessages); }
+};
 let updaterSequence = 0;
 const emitUpdaterEvent = async (event, { afterDownloadCall, operation } = {}) => {
   const seq = ++updaterSequence;
@@ -546,14 +565,12 @@ try {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
-    await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
+    await checkTypography();
   } else if (process.argv.includes('--access-policy-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
   } else if (process.argv.includes('--image-permission-only')) {
-    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
-    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
-    await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
+    throw Error('The retained Bot image permission checks require the A-level native view_image migration. Use --native-classic-image-only for the current Classic authorization path.');
   } else if (sharedUiOnly) {
     await page.locator('.bot-app-menu-button').click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -572,6 +589,8 @@ try {
     await checkBotWorkSurfaces({ page, until, report, captureDirectory: root, commandFile: workCommand });
   } else if (focusedNativeWork) {
     await checkNativeBotWork({ page, model, until, report, bot: fixture.bots[2], home, captureDirectory: root });
+  } else if (focusedClassicImage) {
+    await checkNativeClassicImage({ app, page, model, until, report, bot: fixture.bots[0], home });
   } else if (['--wake-retry-only', '--retry-retirement-only', '--yield-feedback-only'].some(flag => process.argv.includes(flag))) {
     throw Error('The legacy TS continuation scenarios require native checkpoint recovery (ADR 97/111/133/138). Use --streaming-only for the current Rust manual retry.');
   } else if (process.argv.includes('--stop-resume-only') || process.argv.includes('--streaming-only')) {
@@ -836,9 +855,7 @@ try {
     await checkBotComposerLayout({ page, until, report, captureDirectory: root });
     await checkBotAccessPolicy({ page, until, report, captureDirectory: root, home, bots: fixture.bots, commandFile: workCommand });
     await checkBotCompletionReview({ page, until, report, captureDirectory: root, commandFile: workCommand });
-    await checkBotImageApproval({ page, until, report, captureDirectory: root, commandFile: workCommand, home, conversationId: fixture.bots[0].conversationId });
-    await checkBotFullAccessImages({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
-    await checkBotImageLifecycle({ page, until, report, captureDirectory: root, receiptFile: imageReceipt, workspaceId: fixture.bots[0].workspaceId });
+    await checkTypography();
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
@@ -861,6 +878,7 @@ try {
   assert.equal(await page.locator('.app-sidebar .sidebar-version-text').textContent(), `v${classicUpdater.currentVersion}`);
   assert.equal((await page.evaluate(() => window.peerAgent.updaterGetStatus())).preference, 'auto');
   report.checks.push('classic shell opens through settings');
+  if (workSurfaces) await checkNativeClassicImage({ app, page, model, until, report, bot: fixture.bots[0], home });
   // Return through the same settings control, retaining persisted conversations.
   await page.locator('.app-sidebar').getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '界面', exact: true }).click();
