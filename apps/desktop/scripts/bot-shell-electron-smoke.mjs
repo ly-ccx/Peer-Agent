@@ -55,6 +55,11 @@ import { metric } from './perf-project-agent.mjs';
 import { createLlmConfigStore } from '../electron/main/llm-config-store.mjs';
 
 const source = fileURLToPath(new URL('../../..', import.meta.url));
+const outputIndex = process.argv.indexOf('--output');
+const outputFile = outputIndex < 0 ? null : process.argv[outputIndex + 1];
+assert.ok(outputIndex < 0 || outputFile, '--output requires a report file path');
+const artifactDirectory = outputFile ? path.dirname(outputFile) : null;
+if (artifactDirectory) mkdirSync(artifactDirectory, { recursive: true });
 const root = mkdtempSync(path.join(os.tmpdir(), 'peer-bot-shell-smoke-'));
 const home = path.join(root, 'data'); mkdirSync(home);
 const startupOnly = process.argv.includes('--startup-only');
@@ -911,7 +916,7 @@ try {
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
   if (!process.argv.includes('--completion-review-only') && !process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
-  if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
+  if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture, artifactDirectory });
   }
   assert.deepEqual(report.pageErrors, []);
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
@@ -922,21 +927,18 @@ try {
   if (page) report.interactionAfter = await page.evaluate(() => ({ frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus(), search: [...document.querySelectorAll('.bot-search')].map(node => ({ value: node.value, width: node.getBoundingClientRect().width, height: node.getBoundingClientRect().height, visibility: getComputedStyle(node).visibility, display: getComputedStyle(node).display })), composers: document.querySelectorAll('.bot-composer textarea').length })).catch(() => null);
   if (page && app && !sharedUiOnly) await tracePaging('failure').catch(() => {});
   if (page) await page.screenshot({ path: path.join(root, 'failure.png') }).catch(() => {});
-  const failureOutput = process.argv.indexOf('--output');
-  if (page && failureOutput >= 0) await page.screenshot({ path: path.join(path.dirname(process.argv[failureOutput + 1]), 'bot-shell-failure.png') }).catch(() => {});
+  if (page && artifactDirectory) await page.screenshot({ path: path.join(artifactDirectory, 'bot-shell-failure.png') }).catch(() => {});
 } finally {
   report.modelFixture = { requests: model.requests, errors: model.errors };
   model.close();
   if (tracing) {
-    const output = process.argv.indexOf('--output');
-    await app.context().tracing.stop({ path: path.join(output >= 0 ? path.dirname(process.argv[output + 1]) : root, 'bot-shell-trace.zip') }).catch(() => {});
+    await app.context().tracing.stop({ path: path.join(artifactDirectory ?? root, 'bot-shell-trace.zip') }).catch(() => {});
   }
   if (handle) report.ownedStop = await owned.stop({ handleId: handle, reason: 'owned' });
   report.finishedAt = new Date().toISOString();
   report.mainAuthorizationErrors = logs.filter(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED'));
   writeFileSync(path.join(root, 'main.log'), logs.join(''));
   writeFileSync(path.join(root, 'report.json'), JSON.stringify(report, null, 2));
-  const outputIndex = process.argv.indexOf('--output');
-  if (outputIndex >= 0) writeFileSync(process.argv[outputIndex + 1], JSON.stringify(report, null, 2));
+  if (outputFile) writeFileSync(outputFile, JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ root, ...report }));
 }
