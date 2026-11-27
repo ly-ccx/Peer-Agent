@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { openReplyDetails, closeReplyDetails, selectBotByName, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, openBotListSearch, selectBotByName, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 
 /** One canonical reply referencing three tasks must remain one input acknowledgement. */
 export async function checkBotUserReceipt({ page, until, report, captureDirectory, home, bot, commandFile }) {
-  const previousSearch = await page.locator('.bot-search').inputValue();
+  const previousSearch = await (await openBotListSearch(page)).inputValue();
   await selectBotByName(page, 'project-000');
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await page.locator('.bot-thread').focus();
@@ -51,7 +51,7 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   change({ ...initial, seq: initial.seq + 1, sessions });
   // The fixture writes outside the running host, so it emits no conversation
   // update event. A real navigation must reload it even if this Bot is already selected.
-  await page.locator('.bot-search').fill('project-001');
+  await (await openBotListSearch(page)).fill('project-001');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
   await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text?.includes('project-001'));
   await page.locator('.bot-search').fill('project-000');
@@ -107,6 +107,6 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   const savedReply = store.getPersistedConversationHistory(bot.conversationId).messages.find(message => message.id === 'receipt-reply');
   assert.deepEqual(savedReply.sources, sessions.map(session => session.sessionId));
   change({ ...initial, seq: initial.seq + 2 });
-  await page.locator('.bot-search').fill(previousSearch);
+  await (await openBotListSearch(page)).fill(previousSearch);
   report.userReceipt = { singleReceipt: true, noTaskDuplicates: true, sourcesRetained: true, keyboard: true, cases };
 }

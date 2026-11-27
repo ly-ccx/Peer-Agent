@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { openBotListSearch } from './bot-reply-details-checks.mjs';
 
 /** Production directory, IPC, input queue and real renderer on the standard 10k-message home. */
 export async function checkBotAttention({ page, attentionNative, until, report, captureDirectory, home, bots }) {
-  await page.locator('.bot-search').fill('');
+  await (await openBotListSearch(page)).fill('');
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const first = bots[0], other = bots[1];
   const signal = () => attentionNative('signal', [first.workspaceId, other.workspaceId]);
