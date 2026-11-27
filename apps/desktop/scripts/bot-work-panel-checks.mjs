@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 
 export async function openWorkPanel(page) {
   // A closing resource pane changes the work panel's wide/compact preference.
@@ -69,6 +68,9 @@ export async function checkParallelPanelTasks({ page, until, report, captureDire
   const parallel = { ...initial.sessions[0], sessionId: 'rc-independent-work', title: '三处界面改动一起提交到当前分支',
     origin: { ...initial.sessions[0].origin, anchorMessageId: 'rc-message-9498' } };
   const viewport = page.viewportSize(), theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const workspace = page.locator('.bot-task-workspace');
+  const parent = page.locator('.bot-crumb-parent');
+  const inspector = workspace.getByRole('complementary', { name: '任务详情', exact: true });
   const cases = [];
   try {
     change([initial.sessions[0], parallel]);
@@ -86,15 +88,19 @@ export async function checkParallelPanelTasks({ page, until, report, captureDire
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `parallel-work-${width}-${appearance}.png`) });
       for (const session of [initial.sessions[0], parallel]) {
         await rows.filter({ has: page.getByText(session.title, { exact: true }) }).click();
-        await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor();
-        assert.match(await page.locator('.bot-task-detail').innerText(), new RegExp(session.title));
-        await page.locator(BOT_DETAIL_CLOSE).click(); await openWorkPanel(page);
+        await workspace.getByRole('heading', { name: session.title, exact: true }).waitFor();
+        await page.getByRole('button', { name: '任务详情', exact: true }).click();
+        await inspector.getByRole('tab', { name: '边界与信息', exact: true }).click();
+        await inspector.getByText(session.sessionId, { exact: true }).waitFor();
+        await parent.click();
+        await workspace.waitFor({ state: 'hidden' });
+        await openWorkPanel(page);
       }
       cases.push({ width, appearance, sameLevel: true, uniqueRows: true, independentNavigation: true });
     }
     report.parallelWork = { neutralGroup: true, cases };
   } finally {
-    if (await page.locator(BOT_DETAIL_CLOSE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
+    if (await parent.isVisible()) await parent.click();
     await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     change(initial.sessions); await until(() => rows.count(), count => count === 1);
   }

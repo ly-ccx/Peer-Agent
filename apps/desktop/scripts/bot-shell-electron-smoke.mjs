@@ -71,10 +71,12 @@ const focusedNativeWork = process.argv.includes('--native-work-only');
 const focusedClassicImage = process.argv.includes('--native-classic-image-only');
 const focusedStreaming = process.argv.includes('--streaming-only') || process.argv.includes('--stop-resume-only');
 const focusedQuickChat = process.argv.includes('--quick-chat-bots-only');
+const focusedAttention = process.argv.includes('--attention-only');
 const focusedReplyQuote = process.argv.includes('--reply-quote-only');
+const focusedWorkSurfaces = process.argv.includes('--work-surfaces-only');
 const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } }
-  : focusedQuickChat ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
-  : focusedReplyQuote ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 10000 } }
+  : focusedQuickChat || focusedAttention ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
+  : focusedReplyQuote || focusedWorkSurfaces ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 10000 } }
   : recoveryOnly || focusedStreaming || focusedNativeWork || focusedClassicImage ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
@@ -605,7 +607,7 @@ try {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
-  } else if (process.argv.includes('--work-surfaces-only')) {
+  } else if (focusedWorkSurfaces) {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -648,7 +650,7 @@ try {
     await checkBotShellUpdater({ page, app, emitUpdaterEvent, until, report, home, captureDirectory: root });
   } else if (process.argv.includes('--reply-receipt-only')) {
     await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  } else if (process.argv.includes('--attention-only')) {
+  } else if (focusedAttention) {
     await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   } else if (process.argv.includes('--task-cancel-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();

@@ -35,7 +35,8 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   assert.equal(await firstRow.locator('.bot-badge').evaluate(node => document.activeElement === node), true);
   await attentionNative('failRead');
-  const globalButton = page.locator('.bot-need-filter'); await globalButton.click(); await panel.waitFor();
+  const globalButton = page.locator('.bot-dock-actions').getByRole('button', { name: /^需要你 \d+$/ });
+  await globalButton.click(); await panel.waitFor();
   await panel.getByRole('alert').waitFor();
   await panel.getByRole('button', { name: '重新读取', exact: true }).click();
   await until(() => panel.locator('.bot-attention-group').count(), n => n === 2);
@@ -54,7 +55,7 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await page.locator('#bot-msg-attention-current.is-anchored').waitFor({ state: 'visible' });
   await notify();
   await page.locator('#bot-msg-attention-other.is-anchored').waitFor({ state: 'visible' });
-  await page.locator('.bot-need-filter').click(); await panel.waitFor();
+  await globalButton.click(); await panel.waitFor();
 
   const firstItem = panel.locator('[data-attention-id="card:question:reply:attention-current"]');
   await attentionNative('failInput');

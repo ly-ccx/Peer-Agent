@@ -6,8 +6,9 @@
 use crate::{protocol::RpcError, server::ServerContext};
 use peer_project_agent::{
     AvatarPartsPatch, BOT_AVATAR_COLORS, BOT_AVATAR_HEADS, BOT_AVATAR_NECKS, BOT_AVATAR_SHAPES,
-    BotDirectory, BotProfileStore, ConversationSearchIndex, MemoryFilter, MemoryStore,
-    ProjectRegistry, SessionSupervisor, clean_display_name, collect_conversation_search_documents,
+    BotDirectory, BotProfileStore, ConversationSearchDocument, ConversationSearchHit,
+    ConversationSearchIndex, MemoryFilter, MemoryStore, ProjectError, ProjectRegistry,
+    SessionSupervisor, clean_display_name, collect_conversation_search_documents,
     is_effective_memory, is_valid_workspace_id, now_iso, parse_iso_ms,
 };
 use peer_protocol::LocalAccessLevel;
@@ -1142,6 +1143,54 @@ pub fn handle_bot_list_history(ctx: &ServerContext, params_val: Value) -> Result
     }))
 }
 
+#[derive(Default)]
+pub(crate) struct BotSearchIndex {
+    indexed: Option<(Vec<ConversationSearchDocument>, ConversationSearchIndex)>,
+}
+
+impl BotSearchIndex {
+    fn search(
+        &mut self,
+        docs: Vec<ConversationSearchDocument>,
+        query: &str,
+        workspace_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ConversationSearchHit>, ProjectError> {
+        if let Some((previous, index)) = &self.indexed
+            && *previous == docs
+        {
+            return index.search(query, workspace_id, None, limit);
+        }
+        // Compare the newly projected corpus on every request so updates,
+        // deletions and expired memories take effect before any cached lookup.
+        let index = ConversationSearchIndex::open_in_memory()?;
+        index.rebuild(&docs)?;
+        let hits = index.search(query, workspace_id, None, limit)?;
+        let bytes = std::mem::size_of_val(docs.as_slice())
+            + docs
+                .iter()
+                .map(|doc| {
+                    [
+                        doc.id.as_str(),
+                        &doc.kind,
+                        &doc.workspace_id,
+                        &doc.title,
+                        &doc.text,
+                        &doc.updated_at,
+                        doc.message_id.as_deref().unwrap_or_default(),
+                        doc.session_id.as_deref().unwrap_or_default(),
+                        doc.memory_id.as_deref().unwrap_or_default(),
+                    ]
+                    .iter()
+                    .map(|field| field.len())
+                    .sum::<usize>()
+                })
+                .sum::<usize>();
+        self.indexed = (bytes <= 16 * 1024 * 1024).then_some((docs, index));
+        Ok(hits)
+    }
+}
+
 pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value, RpcError> {
     let query = params_val
         .get("query")
@@ -1214,11 +1263,11 @@ pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value
         .collect();
 
     let docs = collect_conversation_search_documents(&bots, &msg_refs, &tasks, &memories);
-    let hits = ConversationSearchIndex::open_in_memory()
-        .and_then(|idx| {
-            idx.rebuild(&docs)?;
-            idx.search(query, workspace_id, None, limit)
-        })
+    let hits = ctx
+        .bot_search
+        .lock()
+        .unwrap_or_else(|lock| lock.into_inner())
+        .search(docs, query, workspace_id, limit)
         .unwrap_or_default();
 
     Ok(json!({ "ok": true, "items": items, "hits": hits }))
@@ -1238,6 +1287,39 @@ mod tests {
         assert_eq!(
             encode_base64(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
             "iVBORw0KGgo="
+        );
+    }
+
+    #[test]
+    fn bot_search_reuses_equal_documents_and_removes_retired_hits() {
+        let mut search = BotSearchIndex::default();
+        let bots = [json!({
+            "workspaceId": "project",
+            "profile": { "displayName": "Build Assistant" },
+            "preview": "old report",
+        })];
+        let mut docs = collect_conversation_search_documents(&bots, &[], &[], &[]);
+        assert_eq!(
+            search
+                .search(docs.clone(), "report", None, 1)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            search
+                .search(docs.clone(), "assistant", None, 1)
+                .unwrap()
+                .len(),
+            1
+        );
+        docs[0].text = "current notes".into();
+        assert!(search.search(docs, "report", None, 1).unwrap().is_empty());
+        assert!(
+            search
+                .search(Vec::new(), "assistant", None, 1)
+                .unwrap()
+                .is_empty()
         );
     }
 }
