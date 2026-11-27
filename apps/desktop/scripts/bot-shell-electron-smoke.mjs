@@ -517,6 +517,9 @@ try {
   // Cold recovery prepares 200 isolated stores, including their durable writer
   // fences. Keep this startup bound separate from interaction action timeouts.
   await page.locator('.bot-shell').waitFor({ timeout: 120000 });
+  const hostStartup = await until(() => logs.join('').match(/^\[peer-core\] (?:bridge ready|startup failed).*$/m)?.[0], Boolean);
+  assert.match(hostStartup, /botHost=active\(owned=[1-9]/, 'the isolated Electron must start the real owning Rust Bot Host');
+  report.nativeHost = hostStartup;
   report.shellReadyMs = Date.now() - Date.parse(report.startedAt);
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
@@ -876,7 +879,6 @@ try {
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   }
   assert.deepEqual(report.pageErrors, []);
-  assert.ok(logs.some(line => /\[peer-core\] bridge ready .*botHost=active\(owned=[1-9]/.test(line)), 'the isolated Electron must start the real owning Rust Bot Host');
   assert.equal(logs.some(line => line.includes('ERR_PEER_DESKTOP_IPC_UNAUTHORIZED')), false, 'no window role may call a forbidden channel');
   assert.deepEqual(model.errors, [], 'controlled model service must complete without fixture errors');
   report.ok = true;
