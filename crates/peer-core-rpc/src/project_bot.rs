@@ -1160,39 +1160,23 @@ pub fn handle_bot_search(ctx: &ServerContext, params_val: Value) -> Result<Value
     let data_home = &ctx.config.data_home;
     let supervisor = SessionSupervisor::new(data_home, None);
     let sessions_by_ws = supervisor.list_all_bot_sessions();
-    let rows = BotDirectory::new(data_home).project_rows(&sessions_by_ws);
+    let mut msg_storage: Vec<(String, Value)> = Vec::new();
+    let rows = BotDirectory::new(data_home).project_rows_with_history(
+        &sessions_by_ws,
+        |ws_id, messages| {
+            msg_storage.extend(
+                messages
+                    .into_iter()
+                    .map(|message| (ws_id.to_owned(), message)),
+            );
+        },
+    );
     let (items, catalog) = BotDirectory::filter_projected_rows(rows, Some(query), false);
     let bots: Vec<Value> = catalog
         .into_iter()
         .filter_map(|item| serde_json::to_value(item).ok())
         .collect();
 
-    let conv_store = ConversationStore::new(data_home);
-    let mut msg_storage: Vec<(String, Value)> = Vec::new();
-    for bot in &bots {
-        let Some(ws_id) = bot["workspaceId"].as_str().filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        let Some(conv_id) = bot["profile"]["agentConversationId"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-        else {
-            continue;
-        };
-        let messages = if let Ok(Some(page)) =
-            conv_store.read_conversation_window(conv_id, None, None, true)
-        {
-            page["window"].as_array().cloned().unwrap_or_default()
-        } else {
-            conv_store
-                .read_committed(conv_id, None, 8 * 1024 * 1024)
-                .map(|s| s.history.messages)
-                .unwrap_or_default()
-        };
-        for m in messages {
-            msg_storage.push((ws_id.to_owned(), m));
-        }
-    }
     let msg_refs: Vec<(&str, &Value)> =
         msg_storage.iter().map(|(ws, m)| (ws.as_str(), m)).collect();
 
