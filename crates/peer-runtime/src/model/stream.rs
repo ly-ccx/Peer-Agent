@@ -164,7 +164,11 @@ fn call(name: String, args: &str) -> Result<ModelToolCall, ModelError> {
     if !arguments.is_object() {
         return Err(ModelError::new("model_arguments_invalid"));
     }
-    Ok(ModelToolCall { name, arguments })
+    Ok(ModelToolCall {
+        name,
+        arguments,
+        native_chat: None,
+    })
 }
 fn finish(
     text: String,

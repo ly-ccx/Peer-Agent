@@ -36,6 +36,7 @@ pub struct NativeModel {
     endpoint: reqwest::Url,
     model: String,
     provider: String,
+    provider_id: Option<String>,
     authentication: Arc<authentication::Access>,
     deadline: Duration,
     wire: wire::Wire,
@@ -68,6 +69,8 @@ pub struct ModelConfig {
 pub struct ModelToolCall {
     pub name: String,
     pub arguments: Value,
+    /// Original Chat tool-call identity and argument text, when supplied by the provider.
+    pub native_chat: Option<(String, String)>,
 }
 pub struct ModelTurn {
     pub content: String,
@@ -131,6 +134,20 @@ impl NativeModel {
     pub fn provider(&self) -> &str {
         &self.provider
     }
+    pub(crate) fn with_provider_id(mut self, provider_id: Option<&str>) -> Self {
+        self.provider_id = provider_id.map(str::to_owned);
+        self
+    }
+    pub fn provider_id(&self) -> &str {
+        self.provider_id.as_deref().unwrap_or(&self.provider)
+    }
+    /// Stable routing identity for local checkpoints, not an authentication token.
+    pub fn checkpoint_route(&self) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{:?}\n{}", self.wire, self.endpoint).as_bytes())
+        )
+    }
     pub fn new(
         config: ModelConfig,
         secret: Option<Secret>,
@@ -163,6 +180,7 @@ impl NativeModel {
             endpoint,
             model: config.model,
             provider: config.provider,
+            provider_id: None,
             authentication: Arc::new(authentication::Access::from_key(secret)),
             deadline,
             wire: config.wire,

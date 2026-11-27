@@ -12,7 +12,7 @@ use peer_store::{ConversationStore, DirectoryLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -72,6 +72,8 @@ struct CursorState {
     executed_input_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     completed_input_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    explicit_retries: BTreeMap<String, String>,
 }
 
 pub struct SubmitInputRequest<'a> {
@@ -596,7 +598,13 @@ impl InputQueue {
         let next_executed = through.map(|idx| inputs[idx].input_id.clone());
         let mut next_completed: Vec<String> = acked.into_iter().collect();
         next_completed.sort();
-        if cursor.executed_input_id != next_executed || cursor.completed_input_ids != next_completed
+        let retries_before = cursor.explicit_retries.len();
+        cursor
+            .explicit_retries
+            .retain(|id, _| pending.iter().any(|row| row.input_id == *id));
+        if cursor.executed_input_id != next_executed
+            || cursor.completed_input_ids != next_completed
+            || retries_before != cursor.explicit_retries.len()
         {
             cursor.executed_input_id = next_executed;
             cursor.completed_input_ids = next_completed;
@@ -611,6 +619,27 @@ impl InputQueue {
         workspace_id: &str,
         input_id: &str,
         holds_lease: bool,
+    ) -> Result<bool, ProjectError> {
+        self.requeue_for_retry(workspace_id, input_id, holds_lease, None)
+    }
+
+    pub(crate) fn explicit_retry_turn(
+        &self,
+        workspace_id: &str,
+        input_id: &str,
+    ) -> Result<Option<String>, ProjectError> {
+        Ok(self
+            .read_cursor_state(workspace_id)?
+            .explicit_retries
+            .remove(input_id))
+    }
+
+    pub(crate) fn requeue_for_retry(
+        &self,
+        workspace_id: &str,
+        input_id: &str,
+        holds_lease: bool,
+        turn_id: Option<&str>,
     ) -> Result<bool, ProjectError> {
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
@@ -658,6 +687,13 @@ impl InputQueue {
                 };
             }
             acked.remove(target_id);
+            if let Some(turn_id) = turn_id {
+                cursor
+                    .explicit_retries
+                    .insert(target_id.to_owned(), turn_id.to_owned());
+            } else {
+                cursor.explicit_retries.remove(target_id);
+            }
             let mut next_completed: Vec<String> = acked.into_iter().collect();
             next_completed.sort();
             cursor.completed_input_ids = next_completed;

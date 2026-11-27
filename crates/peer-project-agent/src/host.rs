@@ -644,6 +644,9 @@ impl NativeProjectHost {
                 .consumed
                 .iter()
                 .any(|item| item.input_id == input.input_id);
+            let retry_turn = self
+                .inputs
+                .explicit_retry_turn(workspace_id, &input.input_id)?;
             let outcome = Box::pin(self.runner.run_turn_with_verifier(
                 &RunTurnOptions {
                     workspace_id,
@@ -658,6 +661,7 @@ impl NativeProjectHost {
                 },
                 model,
                 verifier_model,
+                retry_turn.as_deref(),
                 cancel,
             ))
             .await?;
@@ -1012,6 +1016,7 @@ impl NativeProjectHost {
             },
             model,
             verifier_model,
+            None,
             &wake_cancel,
             Some(&preempted),
         ))
@@ -1680,7 +1685,9 @@ impl NativeProjectHost {
         }
         let trimmed = anchor_or_input_id.trim();
         let input_id = trimmed.strip_prefix("input-").unwrap_or(trimmed);
-        self.inputs.requeue_executed(workspace_id, input_id, true)
+        // The anchor-only surface explicitly retries the last interrupted turn for this input.
+        self.inputs
+            .requeue_for_retry(workspace_id, input_id, true, Some(""))
     }
 
     /// Execute the 7-phase workspace recovery barrier (`lease` -> `inputs` -> `inbox` -> `queue` -> `tasks` -> `watch` -> `digest`).
@@ -2929,7 +2936,10 @@ impl NativeProjectHost {
             }
         } else {
             for iid in &target_inputs {
-                if self.inputs.requeue_executed(workspace_id, iid, true)? {
+                if self
+                    .inputs
+                    .requeue_for_retry(workspace_id, iid, true, Some(trimmed))?
+                {
                     requeued += 1;
                 }
             }

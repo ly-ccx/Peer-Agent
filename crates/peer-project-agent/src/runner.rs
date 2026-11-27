@@ -8,6 +8,9 @@
 //! `agent_turn` / `agent_unavailable` records, and logs canonical usage to
 //! `usage/requests.jsonl`.
 
+mod provider_checkpoint;
+use provider_checkpoint::ProviderCheckpoint;
+
 pub use crate::circuit_breaker::CircuitBreaker;
 use crate::{
     BotProfileStore, CoordinationHub, InteractiveResultStore, MemoryFilter, MemoryStore,
@@ -749,21 +752,54 @@ fn write_agent_turn_trace(
     rounds: &[Value],
     public_updates: &[Value],
     diagnostic_timing: &Value,
+    provider_checkpoint: Option<&ProviderCheckpoint>,
 ) -> bool {
     let Some(path) = turn_trace_path(data_home, workspace_id, turn_id) else {
         return false;
     };
-    let payload = json!({
+    let mut payload = json!({
         "schemaVersion": 1,
         "turnId": turn_id,
         "rounds": rounds,
         "publicUpdates": public_updates,
         "diagnosticTiming": diagnostic_timing,
     });
+    if let Some(checkpoint) = provider_checkpoint
+        && !checkpoint.messages.is_empty()
+        && let Ok(bytes) = serde_json::to_vec(checkpoint)
+        && bytes.len() as u64 <= provider_checkpoint::MAX_BYTES
+        && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+    {
+        payload["providerCheckpoint"] = value;
+    }
     let Ok(bytes) = serde_json::to_vec(&payload) else {
         return false;
     };
     atomic_write(&path, &bytes).is_ok()
+}
+
+fn read_provider_checkpoint(
+    data_home: &Path,
+    workspace_id: &str,
+    turn_id: &str,
+) -> Option<ProviderCheckpoint> {
+    use std::io::Read;
+    let path = turn_trace_path(data_home, workspace_id, turn_id)?;
+    let limit = provider_checkpoint::MAX_BYTES * 2;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > limit {
+        return None;
+    }
+    let mut trace: Value = serde_json::from_slice(&bytes).ok()?;
+    if trace["schemaVersion"] != 1 || trace["turnId"] != turn_id {
+        return None;
+    }
+    serde_json::from_value(trace.get_mut("providerCheckpoint")?.take()).ok()
 }
 
 /// Hydrate an offloaded `agent_turn` stub (`traceRef`) with its persisted `rounds` and
@@ -1857,7 +1893,8 @@ impl ProjectAgentRunner {
         model: &NativeModel,
         cancel: &CancellationToken,
     ) -> Result<AgentTurnOutcome, ProjectError> {
-        self.run_turn_with_verifier(opts, model, None, cancel).await
+        self.run_turn_with_verifier(opts, model, None, None, cancel)
+            .await
     }
 
     pub(crate) async fn run_turn_with_verifier(
@@ -1865,10 +1902,18 @@ impl ProjectAgentRunner {
         opts: &RunTurnOptions<'_>,
         model: &NativeModel,
         verifier_model: Option<&NativeModel>,
+        explicit_retry_turn: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<AgentTurnOutcome, ProjectError> {
-        self.run_turn_with_preempt(opts, model, verifier_model, cancel, None)
-            .await
+        self.run_turn_with_preempt(
+            opts,
+            model,
+            verifier_model,
+            explicit_retry_turn,
+            cancel,
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn run_turn_with_preempt(
@@ -1876,6 +1921,7 @@ impl ProjectAgentRunner {
         opts: &RunTurnOptions<'_>,
         model: &NativeModel,
         verifier_model: Option<&NativeModel>,
+        explicit_retry_turn: Option<&str>,
         cancel: &CancellationToken,
         preempted: Option<&AtomicBool>,
     ) -> Result<AgentTurnOutcome, ProjectError> {
@@ -2231,6 +2277,25 @@ impl ProjectAgentRunner {
             &current_input_anchors,
             Some(&turn_id),
         );
+
+        let resumed = (|| {
+            let target = explicit_retry_turn?;
+            let previous = retry_continuity.as_ref()?["previousTurnId"].as_str()?;
+            if opts.kind != "user" || (!target.is_empty() && target != previous) {
+                return None;
+            }
+            let checkpoint =
+                read_provider_checkpoint(&self.data_home, opts.workspace_id, previous)?;
+            if !checkpoint.matches(model, opts.conversation_id, &current_input_anchors) {
+                return None;
+            }
+            let messages = checkpoint.canonical_messages()?;
+            Some((checkpoint, messages))
+        })();
+        let resumed_from = resumed
+            .as_ref()
+            .and_then(|_| retry_continuity.as_ref())
+            .and_then(|continuity| continuity["previousTurnId"].as_str());
 
         if coord_active {
             let _ = self.coordination.ensure_work(
@@ -2687,6 +2752,24 @@ impl ProjectAgentRunner {
             }
         }
 
+        // Restore after proactive compaction: saved pairs are not historical summaries.
+        let (mut provider_checkpoint, replay_reads) = match resumed {
+            Some((checkpoint, messages)) => {
+                let reads = provider_checkpoint::completed_reads(&messages);
+                committed_message_ids.extend(std::iter::repeat_n(None, messages.len()));
+                live_messages.extend(messages);
+                (Some(checkpoint), reads)
+            }
+            None if opts.kind == "user" && !current_input_anchors.is_empty() => (
+                Some(ProviderCheckpoint::new(
+                    model,
+                    opts.conversation_id,
+                    &current_input_anchors,
+                )),
+                Vec::new(),
+            ),
+            None => (None, Vec::new()),
+        };
         let failure_ctx = TurnFailureCtx {
             conv_store: &conv_store,
             workspace_id: opts.workspace_id,
@@ -2765,6 +2848,7 @@ impl ProjectAgentRunner {
                 Err(err)
                     if err.context_overflow_status.is_some()
                         && !compacted_this_turn
+                        && resumed_from.is_none()
                         && live_messages.len() > 1 =>
                 {
                     compacted_this_turn = true;
@@ -2955,6 +3039,8 @@ impl ProjectAgentRunner {
 
             let mut model_turn = model_turn.expect("nonempty tool calls require a model turn");
             let mut assistant_tool_calls = Vec::new();
+            let mut native_calls = Vec::new();
+            let mut native_results = Vec::new();
             let mut tool_results = Vec::new();
             let mut round_tool_records = Vec::new();
             let mut executed_ids = Vec::new();
@@ -2980,6 +3066,36 @@ impl ProjectAgentRunner {
                 }
                 total_tool_calls += 1;
                 let call_id = format!("tc-{}", uuid::Uuid::new_v4());
+                let (native_id, native_args) = call.native_chat.unwrap_or_else(|| {
+                    (
+                        call_id.clone(),
+                        serde_json::to_string(&call.arguments).expect("JSON arguments"),
+                    )
+                });
+                let native_id = if native_calls.iter().any(|c: &Value| c["id"] == native_id)
+                    || provider_checkpoint
+                        .as_ref()
+                        .is_some_and(|checkpoint| checkpoint.has_call_id(&native_id))
+                {
+                    call_id.clone()
+                } else {
+                    native_id
+                };
+                if call.name == "read_file"
+                    && let Some((_, content)) = replay_reads
+                        .iter()
+                        .find(|(args, _)| args == &call.arguments)
+                {
+                    assistant_tool_calls
+                        .push(json!({"id": call_id, "name": call.name, "arguments": native_args}));
+                    tool_results.push(json!({"role": "tool", "toolCallId": call_id, "name": call.name, "content": content}));
+                    native_calls.push(json!({"id": native_id, "type": "function", "function": {"name": call.name, "arguments": native_args}}));
+                    native_results.push(
+                        json!({"role": "tool", "tool_call_id": native_id, "content": content}),
+                    );
+                    all_pack_activations = false;
+                    continue;
+                }
                 let started_at = now_iso();
                 let started_ms = parse_iso_ms(&started_at).unwrap_or(0);
                 let tool_summary = activity_tool_summary(&call.name, &call.arguments);
@@ -3070,17 +3186,30 @@ impl ProjectAgentRunner {
                     "endedAtMs": ended_ms,
                 }));
 
+                if outcome
+                    .error
+                    .is_some_and(|code| code.ends_with("outcome_unknown"))
+                    || tool_output["error"]
+                        .as_str()
+                        .is_some_and(|code| code.ends_with("outcome_unknown"))
+                {
+                    provider_checkpoint = None;
+                }
+                let content = serde_json::to_string(&tool_output).expect("JSON tool result");
+                native_calls.push(json!({"id": native_id, "type": "function", "function": {"name": call.name, "arguments": native_args}}));
+                native_results
+                    .push(json!({"role": "tool", "tool_call_id": native_id, "content": content}));
                 executed_ids.push(call_id.clone());
                 assistant_tool_calls.push(json!({
                     "id": call_id,
                     "name": call.name,
-                    "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into()),
+                    "arguments": native_args,
                 }));
                 tool_results.push(json!({
                     "role": "tool",
                     "toolCallId": call_id,
                     "name": call.name,
-                    "content": serde_json::to_string(&tool_output).unwrap_or_else(|_| "{}".into()),
+                    "content": content,
                 }));
 
                 if outcome.output["control"]["terminal"] == true {
@@ -3099,6 +3228,10 @@ impl ProjectAgentRunner {
                     &peer_runtime::canonical_history::sanitize_assistant(&model_turn.content),
                 ));
                 let trimmed = peer_protocol::javascript_trim(&sanitized);
+                if let Some(checkpoint) = &mut provider_checkpoint {
+                    checkpoint.messages.push(json!({"role": "assistant", "content": if trimmed.is_empty() { Value::Null } else { json!(trimmed) }, "tool_calls": native_calls}));
+                    checkpoint.messages.extend(native_results);
+                }
                 if !trimmed.is_empty() {
                     live_messages.push(json!({
                         "role": "assistant",
@@ -3538,6 +3671,9 @@ impl ProjectAgentRunner {
             &rounds_record,
             &public_updates,
             &diagnostic_timing,
+            provider_checkpoint
+                .as_ref()
+                .filter(|_| matches!(outcome_label, "stopped" | "error")),
         );
         let mut completed_tools_summary = Vec::new();
         if trace_offloaded && matches!(outcome_label, "stopped" | "error") {
@@ -3568,6 +3704,9 @@ impl ProjectAgentRunner {
             "workId": work_id,
             "diagnosticTiming": diagnostic_timing,
         });
+        if let Some(previous) = resumed_from {
+            meta["providerCheckpointResumedFrom"] = json!(previous);
+        }
         if !completed_tools_summary.is_empty() {
             meta["completedToolsSummary"] = json!(completed_tools_summary);
         }
@@ -4143,6 +4282,7 @@ mod tests {
             &rounds,
             &updates,
             &timing,
+            None,
         ));
         assert!(
             turn_trace_path(dir.path(), ws_id, turn_id)

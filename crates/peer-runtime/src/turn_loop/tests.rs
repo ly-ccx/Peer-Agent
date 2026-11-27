@@ -23,6 +23,7 @@ fn turn(text: &str, names: &[&str]) -> ModelTurn {
             .map(|s| ModelToolCall {
                 name: (*s).into(),
                 arguments: json!({"original":true}),
+                native_chat: None,
             })
             .collect(),
         usage: None,

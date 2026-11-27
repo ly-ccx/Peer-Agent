@@ -150,7 +150,11 @@ impl ChatStream {
         let mut calls = Vec::new();
         let mut ids = std::collections::HashSet::new();
         for (index, c) in self.calls {
-            if index != calls.len() || c.id.is_empty() || !ids.insert(c.id) || c.name.is_empty() {
+            if index != calls.len()
+                || c.id.is_empty()
+                || !ids.insert(c.id.clone())
+                || c.name.is_empty()
+            {
                 return Err(ModelError::new("model_call_id_invalid"));
             }
             let arguments = decode(c.args.as_bytes(), TOOL_ARGUMENT_BYTES)?;
@@ -160,6 +164,7 @@ impl ChatStream {
             calls.push(ModelToolCall {
                 name: c.name,
                 arguments,
+                native_chat: Some((c.id, c.args)),
             })
         }
         let continuation = (!self.thought.is_empty()).then(|| continuation::Continuation {
