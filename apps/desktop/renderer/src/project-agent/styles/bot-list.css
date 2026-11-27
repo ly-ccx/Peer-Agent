@@ -657,13 +657,13 @@
 }
 
 .bot-avatar-backdrop {
-  fill: var(--cat-bg-light, #eef1f7);
-  stroke: var(--cat-ring-light, #d8dfec);
+  fill: var(--cat-bg-light, var(--chrome-hover));
+  stroke: var(--cat-ring-light, var(--chrome-hairline));
 }
 
 [data-theme="dark"] .bot-avatar-backdrop {
-  fill: var(--cat-bg-dark, #2a2f42);
-  stroke: var(--cat-ring-dark, #3c435d);
+  fill: var(--cat-bg-dark, var(--chrome-hover));
+  stroke: var(--cat-ring-dark, var(--chrome-hairline));
 }
 
 .bot-avatar-light-rim {
