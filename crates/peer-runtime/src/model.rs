@@ -18,6 +18,7 @@ mod request;
 mod retry;
 pub use count::ProviderTokenCount;
 const TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+mod reply_draft;
 mod sse;
 pub use continuation::LiveHistory;
 mod error;
@@ -95,6 +96,8 @@ pub enum ModelDelta<'a> {
     Text(&'a str),
     Thinking(&'a str),
     ToolIntent,
+    /// Replacement preview of one structured reply's root text, never execution evidence.
+    ReplyDraft(&'a str),
 }
 
 impl NativeModel {
@@ -448,6 +451,7 @@ impl PreparedRequest<'_> {
             let mut shown = 0;
             let mut shown_thinking = 0;
             let mut reported_tool_intent = false;
+            let mut shown_reply = String::new();
             while let Some(chunk) = response_chunk(&mut response, model.deadline).await? {
                 phase = MidStream;
                 decoder.push(&chunk)?;
@@ -464,6 +468,13 @@ impl PreparedRequest<'_> {
                 if text.len() > shown {
                     publish(ModelDelta::Text(&text[shown..])).await?;
                     shown = text.len();
+                }
+                if reported_tool_intent {
+                    let reply = decoder.reply_draft().unwrap_or_default();
+                    if reply != shown_reply {
+                        publish(ModelDelta::ReplyDraft(&reply)).await?;
+                        shown_reply = reply;
+                    }
                 }
                 if decoder.terminal() {
                     phase = Terminal;

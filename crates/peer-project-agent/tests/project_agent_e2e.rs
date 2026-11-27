@@ -1459,6 +1459,193 @@ async fn bot_turn_records_canonical_usage_ledger_and_durable_agent_turn_with_str
 }
 
 #[tokio::test]
+async fn structured_reply_draft_streams_redacted_then_retracts_or_hands_off() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::oneshot;
+
+    async fn accept_request(listener: &TcpListener) -> (TcpStream, Value) {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut len = None;
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                len = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+        let mut body = vec![0; len.unwrap()];
+        reader.read_exact(&mut body).await.unwrap();
+        (reader.into_inner(), serde_json::from_slice(&body).unwrap())
+    }
+
+    fn event(delta: Value, finish: Option<&str>) -> String {
+        let data = json!({"choices":[{"index":0,"delta":delta,"finish_reason":finish}]});
+        format!("data: {data}\n\n")
+    }
+
+    async fn paused_reply(
+        socket: &mut TcpStream,
+        id: &str,
+        first: &str,
+        last: &str,
+        gate: oneshot::Receiver<()>,
+    ) {
+        let first = event(
+            json!({"reasoning_content":"PRIVATE_REASONING_MARKER","tool_calls":[{
+                "index":0,"id":id,"type":"function","function":{"name":"post_reply","arguments":first}
+            }]}),
+            None,
+        );
+        let last = event(
+            json!({"tool_calls":[{"index":0,"function":{"arguments":last}}]}),
+            Some("tool_calls"),
+        ) + "data: [DONE]\n\n";
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            first.len() + last.len()
+        );
+        socket.write_all(head.as_bytes()).await.unwrap();
+        socket.write_all(first.as_bytes()).await.unwrap();
+        gate.await.unwrap();
+        socket.write_all(last.as_bytes()).await.unwrap();
+    }
+
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("DraftBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let input_id = "in-draft";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Explain the project", None)
+        .unwrap();
+
+    let (activity_tx, mut activities) = tokio::sync::mpsc::unbounded_channel();
+    host.runner()
+        .set_activity_listener(Some(Arc::new(move |activity, _| {
+            let _ = activity_tx.send(activity);
+        })));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = mock_model(&format!(
+        "http://{}/chat/completions",
+        listener.local_addr().unwrap()
+    ));
+    let (finish_rejected, rejected_gate) = oneshot::channel();
+    let (repair_requested, repair_seen) = oneshot::channel();
+    let (start_repair, repair_gate) = oneshot::channel();
+    let (finish_accepted, accepted_gate) = oneshot::channel();
+    let server = async move {
+        let (mut socket, request) = accept_request(&listener).await;
+        assert!(
+            request["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["function"]["name"] == "post_reply")
+        );
+        paused_reply(
+            &mut socket,
+            "draft-1",
+            r#"{"replyTo":["input-missing"],"text":"待确认 sk-s"#,
+            r#"ynthetic123456"}"#,
+            rejected_gate,
+        )
+        .await;
+        drop(socket);
+
+        let (mut socket, request) = accept_request(&listener).await;
+        let rejected = last_tool_result_json(&request).expect("rejected post_reply output");
+        assert_eq!(rejected["ok"], false);
+        assert_eq!(rejected["error"], "anchor_not_found");
+        repair_requested.send(()).unwrap();
+        repair_gate.await.unwrap();
+        paused_reply(
+            &mut socket,
+            "draft-2",
+            &format!(r#"{{"replyTo":["{anchor}"],"text":"项目概况\uD83D\u"#),
+            r#"DE80清楚了。"}"#,
+            accepted_gate,
+        )
+        .await;
+    };
+
+    let replies = || {
+        host.conversations()
+            .read_committed(&conv_id, None, 4 * 1024 * 1024)
+            .unwrap()
+            .history
+            .messages
+            .into_iter()
+            .filter(|m| m["kind"] == "agent_reply")
+            .collect::<Vec<_>>()
+    };
+    let assert_safe = |activity: &peer_project_agent::ProjectAgentActivity| {
+        let snapshot = serde_json::to_string(activity).unwrap();
+        for hidden in ["PRIVATE_REASONING_MARKER", "sk-s", "synthetic123456"] {
+            assert!(!snapshot.contains(hidden), "unsafe activity: {snapshot}");
+        }
+    };
+    let observe = async {
+        let first = loop {
+            let activity = activities.recv().await.unwrap();
+            assert_safe(&activity);
+            if !activity.reply_text.is_empty() {
+                break activity;
+            }
+        };
+        assert_eq!(first.phase, "responding");
+        assert_eq!(first.reply_text, "待确认 [redacted]");
+        assert!(replies().is_empty(), "the preview isn't a committed reply");
+        finish_rejected.send(()).unwrap();
+        repair_seen.await.unwrap();
+        let cleared = host.runner().activity_for(&entry.workspace_id).unwrap();
+        assert_eq!(cleared.turn_id, first.turn_id);
+        assert!(cleared.reply_text.is_empty());
+        assert!(replies().is_empty(), "a rejected draft wasn't committed");
+        start_repair.send(()).unwrap();
+
+        loop {
+            let activity = activities.recv().await.unwrap();
+            assert_safe(&activity);
+            if activity.reply_text == "项目概况" {
+                assert_eq!(activity.phase, "responding");
+                assert_eq!(activity.turn_id, first.turn_id);
+                assert!(replies().is_empty());
+                break;
+            }
+        }
+        finish_accepted.send(()).unwrap();
+        first.turn_id
+    };
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host.tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel);
+    let (tick, turn_id, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(tick, observe, server)
+    })
+    .await
+    .expect("paused SSE fixture and activity snapshots must advance together");
+    assert_eq!(tick.unwrap().bot_turns_run, 1);
+    let replies = replies();
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0]["content"], "项目概况🚀清楚了。");
+    assert_eq!(replies[0]["turnId"], turn_id);
+    // The desktop folds the terminal activity by turnId when the canonical reply arrives.
+    let done = host.runner().activity_for(&entry.workspace_id).unwrap();
+    assert_eq!(done.turn_id, turn_id);
+    assert_eq!(done.phase, "done");
+    assert!(done.finished_at.is_some());
+    while let Ok(activity) = activities.try_recv() {
+        assert_safe(&activity);
+    }
+}
+
+#[tokio::test]
 async fn bot_context_overflow_commits_compaction_marker_and_retries_cleanly() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();

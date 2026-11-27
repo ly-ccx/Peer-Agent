@@ -1,6 +1,7 @@
 //! Bounded provider decoders. Only a valid terminal response exposes tool calls.
 use super::{
-    ModelError, ModelToolCall, ModelTurn, decode, sse::ChatStream, sse_frame::Frames, wire::Wire,
+    ModelError, ModelToolCall, ModelTurn, decode, reply_draft, sse::ChatStream, sse_frame::Frames,
+    wire::Wire,
 };
 use serde_json::Value;
 mod anthropic;
@@ -90,6 +91,17 @@ impl Stream {
                 Decoder::Anthropic(decoder) => decoder.has_tool_intent(),
                 Decoder::Responses(decoder) => decoder.has_tool_intent(),
                 Decoder::Gemini(decoder) => decoder.has_tool_intent(),
+            },
+        }
+    }
+
+    pub fn reply_draft(&self) -> Option<String> {
+        match self {
+            Self::Chat(s) => s.reply_draft(),
+            Self::Other(s) => match &s.decoder {
+                Decoder::Anthropic(d) => d.reply_draft(),
+                Decoder::Responses(d) => d.reply_draft(),
+                Decoder::Gemini(d) => d.reply_draft(),
             },
         }
     }
@@ -285,6 +297,57 @@ mod tests {
         assert_eq!(error.provider_code, Some("length"));
         assert!(!error.is_transient_retryable());
     }
+
+    #[test]
+    fn structured_reply_drafts_by_wire_are_visible_before_terminal_validation() {
+        use serde_json::json;
+        for wire in [Wire::Chat, Wire::Responses, Wire::Anthropic, Wire::Gemini] {
+            for tool in ["post_reply", "read_file"] {
+                let first =
+                    r#"{"extra":{"text":"PRIVATE_NESTED"},"token":"PRIVATE_KEY","text":"项\"#;
+                let second = r#"n\"\uD83D\u"#;
+                let third = r#"DE80目"}"#;
+                let events = match wire {
+                    Wire::Chat => [
+                        json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","type":"function","function":{"name":tool,"arguments":first}}]}}]}),
+                        json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":second}}]}}]}),
+                        json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":third}}]}}]}),
+                    ].to_vec(),
+                    Wire::Responses => std::iter::once(json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"item","call_id":"call","name":tool,"arguments":""}}))
+                        .chain([first,second,third].map(|delta| json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"item","delta":delta}))).collect(),
+                    Wire::Anthropic => [
+                        json!({"type":"message_start","message":{"role":"assistant"}}),
+                        json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call","name":tool,"input":{}}}),
+                    ].into_iter().chain([first,second,third].map(|partial_json| json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":partial_json}}))).collect(),
+                    Wire::Gemini => vec![json!({"candidates":[{"content":{"parts":[{"functionCall":{"name":tool,"args":{"text":"项\n\"🚀目","token":"PRIVATE_KEY"}}}]}}]})],
+                };
+                let mut stream = Stream::new(wire);
+                let mut drafts = Vec::new();
+                for event in events {
+                    // Force transport boundaries inside every UTF-8 scalar in the frames.
+                    for byte in format!("data: {event}\n\n").bytes() {
+                        stream.push(&[byte]).unwrap();
+                    }
+                    assert!(stream.preview_text().is_empty());
+                    assert!(!stream.terminal());
+                    if let Some(text) = stream.reply_draft()
+                        && drafts.last() != Some(&text)
+                    {
+                        drafts.push(text);
+                    }
+                }
+                assert!(stream.has_tool_intent());
+                let expected: &[&str] = match (wire, tool) {
+                    (_, "read_file") => &[],
+                    (Wire::Gemini, _) => &["项\n\"🚀目"],
+                    _ => &["项", "项\n\"", "项\n\"🚀目"],
+                };
+                assert_eq!(drafts, expected);
+                assert!(stream.finish("fingerprint".into()).is_err());
+            }
+        }
+    }
+
     #[test]
     fn fragments_crlf_and_truncation_preserve_terminal_authority() {
         for c in fixtures()["cases"].as_array().unwrap() {

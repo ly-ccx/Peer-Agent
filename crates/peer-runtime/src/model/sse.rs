@@ -22,6 +22,13 @@ impl ChatStream {
         !self.calls.is_empty()
     }
 
+    pub(super) fn reply_draft(&self) -> Option<String> {
+        self.calls
+            .values()
+            .find(|call| call.name == reply_draft::REPLY_TOOL)
+            .and_then(|call| reply_draft::from_json(&call.args))
+    }
+
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
         let mut frames = std::mem::take(&mut self.frames);
         let result = frames.push(chunk, |kind, bytes| {

@@ -2862,7 +2862,8 @@ impl CognitionHost for Host<'_> {
                                     crate::model::ModelDelta::Thinking(thinking) => {
                                         ConversationEvent::ThinkingDelta(thinking)
                                     }
-                                    crate::model::ModelDelta::ToolIntent => return Ok(()),
+                                    crate::model::ModelDelta::ToolIntent
+                                    | crate::model::ModelDelta::ReplyDraft(_) => return Ok(()),
                                 };
                                 preview_dirty = true;
                                 output

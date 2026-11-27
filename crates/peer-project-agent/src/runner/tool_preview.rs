@@ -28,6 +28,19 @@ fn private_field(key: &str) -> bool {
 
 // Inspect more than the visible prefix so a credential crossing the preview
 // boundary is removed, not shortened into a still-sensitive prefix.
+pub(super) fn reply_draft(text: &str) -> String {
+    // The last token may be an unfinished key; do not wait for the usual
+    // minimum length before hiding its payload in an uncommitted snapshot.
+    static PARTIAL_KEY: OnceLock<Regex> = OnceLock::new();
+    let text = redact_text(text);
+    let text = regex(
+        &PARTIAL_KEY,
+        r"(?i)\b(?:(?:sk|pk|rk)-[A-Za-z0-9_-]*|(?:AKIA|ASIA)[0-9A-Z]*)$",
+    )
+    .replace(&text, REDACTED);
+    utf16_prefix(&text, INPUT_LIMIT).0.to_owned()
+}
+
 fn redact_text(text: &str) -> String {
     static PEM: OnceLock<Regex> = OnceLock::new();
     static CREDENTIAL: OnceLock<Regex> = OnceLock::new();
@@ -178,6 +191,37 @@ impl PreviewBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reply_draft_redacts_before_utf16_clipping_and_hides_partial_keys() {
+        for suffix in [
+            "SK-",
+            "pk-a",
+            "rk-ab",
+            "AKIA",
+            "asia01",
+            "AKIA0123456789ABCDEF",
+        ] {
+            assert_eq!(
+                reply_draft(&format!("进度 {suffix}")),
+                "进度 [redacted]",
+                "{suffix}"
+            );
+        }
+        let prefix = "界".repeat(INPUT_LIMIT - 12);
+        let text = format!("{prefix} api_key=\"synthetic value spanning the clip\".");
+        assert_eq!(reply_draft(&text), format!("{prefix} api_key=[re"));
+        // Redaction can move safe text from beyond the original limit into view.
+        let padded_secret = format!("{} sk-{} 😀!", "a".repeat(INPUT_LIMIT - 14), "x".repeat(50));
+        assert_eq!(
+            reply_draft(&padded_secret),
+            format!("{} [redacted] 😀", "a".repeat(INPUT_LIMIT - 14))
+        );
+        assert_eq!(
+            reply_draft(&format!("{}😀", "a".repeat(INPUT_LIMIT - 1))),
+            "a".repeat(INPUT_LIMIT - 1)
+        );
+    }
 
     #[test]
     fn tool_preview_redacts_nested_keys_plaintext_and_private_markers() {

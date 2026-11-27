@@ -1654,12 +1654,17 @@ impl ProjectAgentRunner {
         let mut attempts = 0;
         let mut deadline = None;
         let mut permit = None;
+        let reply_offered = tools_json.as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "post_reply")
+        });
         loop {
             if cancel.is_cancelled() {
                 return Err(ModelError::new("CANCELLED"));
             }
             attempts += 1;
-            let stream_state = Mutex::new(Some(String::new()));
+            let stream_state = Mutex::new((Some(String::new()), String::new()));
             let result = prepared
                 .send_with_deltas(
                     cancel,
@@ -1667,12 +1672,12 @@ impl ProjectAgentRunner {
                     // Preview state belongs to this physical attempt.
                     async |delta| {
                         if let Ok(mut state) = stream_state.lock() {
+                            let (plain, reply) = &mut *state;
                             match delta {
                                 ModelDelta::Thinking(_) => {}
                                 ModelDelta::ToolIntent => {
-                                    // Retract the uncommitted preview. Structured calls
-                                    // are admitted and displayed by the tool host.
-                                    *state = None;
+                                    // Ordinary text is not the body of a structured reply.
+                                    *plain = None;
                                     self.set_activity_phase(
                                         workspace_id,
                                         "thinking",
@@ -1680,13 +1685,31 @@ impl ProjectAgentRunner {
                                         false,
                                     );
                                 }
+                                ModelDelta::ReplyDraft(text) if reply_offered => {
+                                    let text = tool_preview::reply_draft(text);
+                                    if *reply != text {
+                                        let phase = if text.is_empty() {
+                                            "thinking"
+                                        } else {
+                                            "responding"
+                                        };
+                                        self.set_activity_phase(
+                                            workspace_id,
+                                            phase,
+                                            Some(&text),
+                                            false,
+                                        );
+                                        *reply = text;
+                                    }
+                                }
+                                ModelDelta::ReplyDraft(_) => {}
                                 ModelDelta::Text(chunk) => {
-                                    if let Some(raw) = state.as_mut() {
+                                    if let Some(raw) = plain.as_mut() {
                                         let available =
                                             MAX_STREAM_TEXT_BYTES.saturating_sub(raw.len());
                                         raw.push_str(clip_utf8_bytes(chunk, available));
                                         if has_literal_tool_call_syntax(raw) {
-                                            *state = None;
+                                            *plain = None;
                                             self.set_activity_phase(
                                                 workspace_id,
                                                 "thinking",
@@ -1714,6 +1737,13 @@ impl ProjectAgentRunner {
                 )
                 .await;
             drop(permit.take());
+            if result.is_err()
+                && stream_state
+                    .into_inner()
+                    .is_ok_and(|(_, reply)| !reply.is_empty())
+            {
+                self.set_activity_phase(workspace_id, "thinking", Some(""), false);
+            }
             record_attempt_usage(accounting, &result, true);
             match result {
                 Ok(turn) => {
@@ -3067,6 +3097,7 @@ impl ProjectAgentRunner {
             let mut all_pack_activations = true;
 
             let calls = std::mem::take(&mut model_turn.calls);
+            let had_reply_draft = calls.iter().any(|call| call.name == "post_reply");
             for call in calls {
                 if cancel.is_cancelled() {
                     final_end = if is_preempted() {
@@ -3243,6 +3274,13 @@ impl ProjectAgentRunner {
                 }
             }
 
+            if had_reply_draft
+                && !turn_state
+                    .lock()
+                    .is_ok_and(|state| state.reply_committed_id.is_some())
+            {
+                self.update_activity(opts.workspace_id, |act| act.reply_text.clear());
+            }
             rounds_record.push(json!({
                 "text": model_turn.content,
                 "toolCalls": round_tool_records,
