@@ -9,7 +9,9 @@
 //! `usage/requests.jsonl`.
 
 mod provider_checkpoint;
+mod tool_preview;
 use provider_checkpoint::ProviderCheckpoint;
+use tool_preview::{INPUT_LIMIT, PreviewBudget, RESULT_LIMIT, ToolPreview};
 
 pub use crate::circuit_breaker::CircuitBreaker;
 use crate::{
@@ -339,6 +341,7 @@ impl ProjectAgentRunner {
         name: &str,
         summary: Option<&str>,
         started_at: &str,
+        input: Value,
     ) {
         const MAX_ACTIVITY_SEGMENTS: usize = 100;
         self.update_activity(workspace_id, |act| {
@@ -350,6 +353,7 @@ impl ProjectAgentRunner {
                     "name": name,
                     "status": "running",
                     "startedAt": started_at,
+                    "input": input,
                 });
                 if let Some(s) = summary.filter(|s| !s.is_empty()) {
                     seg["summary"] = json!(s);
@@ -365,6 +369,7 @@ impl ProjectAgentRunner {
         call_id: &str,
         ok: bool,
         finished_at: &str,
+        result: Value,
     ) {
         let status = if ok { "done" } else { "error" };
         self.update_activity(workspace_id, |act| {
@@ -372,10 +377,11 @@ impl ProjectAgentRunner {
                 .segments
                 .iter_mut()
                 .rev()
-                .find(|s| s["id"].as_str() == Some(call_id))
+                .find(|s| s["kind"] == "tool" && s["id"].as_str() == Some(call_id))
             {
                 seg["status"] = json!(status);
                 seg["finishedAt"] = json!(finished_at);
+                seg["result"] = result;
             }
         });
     }
@@ -607,7 +613,7 @@ fn activity_tool_summary(name: &str, args: &Value) -> Option<String> {
     {
         return None;
     }
-    Some(trimmed.chars().take(160).collect())
+    Some(tool_preview::summary(trimmed))
 }
 
 fn compact_persisted_value(value: &Value, key: Option<&str>, depth: usize) -> Value {
@@ -2014,6 +2020,7 @@ impl ProjectAgentRunner {
             },
         };
 
+        let mut activity_preview_budget = PreviewBudget::default();
         let (max_rounds, max_tool_calls) = if opts.kind == "user" {
             (USER_MAX_BOT_ROUNDS, USER_MAX_BOT_TOOL_CALLS)
         } else {
@@ -3111,12 +3118,14 @@ impl ProjectAgentRunner {
                 let started_at = now_iso();
                 let started_ms = parse_iso_ms(&started_at).unwrap_or(0);
                 let tool_summary = activity_tool_summary(&call.name, &call.arguments);
+                let input_preview = ToolPreview::new(&call.arguments);
                 self.record_activity_tool_start(
                     opts.workspace_id,
                     &call_id,
                     &call.name,
                     tool_summary.as_deref(),
                     &started_at,
+                    activity_preview_budget.project(&input_preview, INPUT_LIMIT),
                 );
 
                 let cap_id = projection
@@ -3149,11 +3158,14 @@ impl ProjectAgentRunner {
 
                 let completed_at = now_iso();
                 let ended_ms = parse_iso_ms(&completed_at).unwrap_or(started_ms);
+                let tool_output = format_tool_outcome_output(&outcome);
+                let result_preview = ToolPreview::new(&tool_output);
                 self.record_activity_tool_finish(
                     opts.workspace_id,
                     &call_id,
                     outcome.status == "success",
                     &completed_at,
+                    activity_preview_budget.project(&result_preview, RESULT_LIMIT),
                 );
                 let grant = json!({
                     "grantId": format!("grant-{call_id}"),
@@ -3189,11 +3201,12 @@ impl ProjectAgentRunner {
                     None,
                 );
 
-                let tool_output = format_tool_outcome_output(&outcome);
+                // The trace is a display record; model history below still gets the
+                // original tool output. Preserve objects for legacy round readers.
                 round_tool_records.push(json!({
                     "name": call.name,
-                    "input": call.arguments,
-                    "result": compact_persisted_tool_result(&tool_output),
+                    "input": input_preview.value,
+                    "result": compact_persisted_tool_result(&result_preview.value),
                     "startedAtMs": started_ms,
                     "endedAtMs": ended_ms,
                 }));
@@ -3953,6 +3966,7 @@ mod tests {
             "read_file",
             None,
             "2026-11-22T00:00:01.000Z",
+            PreviewBudget::default().project(&ToolPreview::new(&Value::Null), INPUT_LIMIT),
         );
         assert_eq!(
             runner.activity_for("ws-a").unwrap().segments,
@@ -3962,9 +3976,17 @@ mod tests {
                 "name": "read_file",
                 "status": "running",
                 "startedAt": "2026-11-22T00:00:01.000Z",
+                "input": {"text": "", "redacted": false, "truncated": false},
             })]
         );
-        runner.record_activity_tool_finish("ws-a", "tc-1", true, "2026-11-22T00:00:02.000Z");
+        runner.record_activity_tool_finish(
+            "ws-a",
+            "tc-1",
+            true,
+            "2026-11-22T00:00:02.000Z",
+            PreviewBudget::default()
+                .project(&ToolPreview::new(&json!("fixture content")), RESULT_LIMIT),
+        );
         assert_eq!(
             runner.activity_for("ws-a").unwrap().segments,
             vec![json!({
@@ -3974,6 +3996,8 @@ mod tests {
                 "status": "done",
                 "startedAt": "2026-11-22T00:00:01.000Z",
                 "finishedAt": "2026-11-22T00:00:02.000Z",
+                "input": {"text": "", "redacted": false, "truncated": false},
+                "result": {"text": "fixture content", "redacted": false, "truncated": false},
             })]
         );
         runner.set_activity_phase("ws-a", "responding", Some("hello"), false);

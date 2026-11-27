@@ -674,6 +674,132 @@ async fn memory_and_objective_tools_through_governed_provider_with_chinese_fts_a
 }
 
 #[tokio::test]
+async fn tool_preview_projects_real_results_to_activity_and_persisted_rounds() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(
+        ws.path().join("README.md"),
+        format!(
+            "# README fixture content\nPRIVATE_RESULT_SECRET\n{}",
+            "x".repeat(5_000)
+        ),
+    )
+    .unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("PreviewBot")).unwrap();
+    let input_id = "in-preview";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Read README", None)
+        .unwrap();
+
+    let snapshots = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&snapshots);
+    host.runner()
+        .set_activity_listener(Some(Arc::new(move |activity, _| {
+            seen.lock()
+                .unwrap()
+                .push(serde_json::to_value(activity).unwrap());
+        })));
+    let server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("preview-ok", "read_file", &json!({"path": "README.md"}))),
+        Box::new(|req| {
+            // Display redaction must not change the tool result fed back into model history.
+            assert!(
+                last_tool_result_json(req)
+                    .unwrap()
+                    .to_string()
+                    .contains("PRIVATE_RESULT_SECRET")
+            );
+            sse_tool_call(
+                "preview-error",
+                "read_file",
+                &json!({"path": "README.md", "start_line": 100}),
+            )
+        }),
+        Box::new(move |_| {
+            sse_tool_call(
+                "preview-reply",
+                "post_reply",
+                &json!({"replyTo": [anchor], "text": "Read README."}),
+            )
+        }),
+    ]);
+    let tick = host
+        .tick(
+            &entry.workspace_id,
+            &mock_model(&server.endpoint),
+            json!({}),
+            &mut AutoAllowPermission,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let turn_id = tick.last_turn.unwrap().turn_id;
+
+    let snapshots = snapshots.lock().unwrap();
+    let reads: Vec<_> = snapshots
+        .iter()
+        .flat_map(|a| a["segments"].as_array().unwrap())
+        .filter(|s| s["name"] == "read_file")
+        .collect();
+    for (status, content) in [
+        ("done", "README fixture content"),
+        ("error", "start_line_out_of_range"),
+    ] {
+        let settled = reads.iter().find(|s| s["status"] == status).unwrap();
+        let running = reads
+            .iter()
+            .find(|s| s["status"] == "running" && s["id"] == settled["id"])
+            .unwrap();
+        assert_eq!(running["summary"], "README.md");
+        assert!(
+            running["input"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("README.md")
+        );
+        assert!(running.get("result").is_none());
+        assert!(running.get("finishedAt").is_none());
+        assert_eq!(settled["input"], running["input"]);
+        assert_eq!(settled["startedAt"], running["startedAt"]);
+        assert!(settled["finishedAt"].is_string());
+        let result = &settled["result"];
+        let text = result["text"].as_str().unwrap();
+        assert!(text.contains(content), "{result}");
+        assert!(!settled.to_string().contains("PRIVATE_"));
+        assert_eq!(result["redacted"], status == "done");
+        assert_eq!(result["truncated"], status == "done");
+        if status == "done" {
+            assert_eq!(text.encode_utf16().count(), 4_000);
+        }
+    }
+
+    let persisted = host.directory().read_conversation(
+        &entry.workspace_id,
+        &ReadConversationOptions {
+            kinds: Some(vec!["agent_turn".into()]),
+            ..Default::default()
+        },
+    );
+    let turn = persisted["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == turn_id)
+        .unwrap();
+    let success = &turn["rounds"][0]["toolCalls"][0];
+    let failure = &turn["rounds"][1]["toolCalls"][0];
+    assert_eq!(success["input"]["path"], "README.md");
+    let text = success["result"]["content"].as_str().unwrap();
+    assert!(text.contains("README fixture content"));
+    assert!(text.ends_with("…[truncated]"));
+    assert!(!success.to_string().contains("PRIVATE_"));
+    assert_eq!(failure["result"]["error"], "start_line_out_of_range");
+    assert_eq!(failure["result"]["ok"], false);
+    assert!(success["startedAtMs"].as_u64().unwrap() <= success["endedAtMs"].as_u64().unwrap());
+}
+
+#[tokio::test]
 async fn multi_round_bot_tool_loop_encodes_valid_wire_tool_calls_for_chat_and_responses() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
