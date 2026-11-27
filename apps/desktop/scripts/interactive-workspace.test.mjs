@@ -41,7 +41,7 @@ async function renderer(output) {
         const i18n = createI18n('en-US');
         const message = normalizeBotMessage(fixture.textReply);
         return <><ReplyBubble workspaceId={fixture.owner.workspaceId} message={message} referenceIds={[]} anchors={new Map()} highlighted={false} i18n={i18n}
-          onJump={()=>{}} onQuote={()=>{}} workIndex={indexBotWork([],true)} onOpenWork={()=>{}}/>
+          onJump={()=>{}} onQuote={()=>{}} workIndex={indexBotWork([],true)} taskRows={[]} onOpenWork={()=>{}}/>
           <CardView workspaceId={fixture.owner.workspaceId} cards={fixture.governanceCards} i18n={i18n}/></>;
       }
       if(window.peerResource)createRoot(document.getElementById('root')).render(<ConfirmProvider><NativeResourceWindow/></ConfirmProvider>);
