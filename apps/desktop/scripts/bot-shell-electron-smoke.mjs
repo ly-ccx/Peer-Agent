@@ -71,8 +71,10 @@ const focusedNativeWork = process.argv.includes('--native-work-only');
 const focusedClassicImage = process.argv.includes('--native-classic-image-only');
 const focusedStreaming = process.argv.includes('--streaming-only') || process.argv.includes('--stop-resume-only');
 const focusedQuickChat = process.argv.includes('--quick-chat-bots-only');
+const focusedReplyQuote = process.argv.includes('--reply-quote-only');
 const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } }
   : focusedQuickChat ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 0 } }
+  : focusedReplyQuote ? { scale: { bots: 4, messages: 10000, inboxEvents: 0, memories: 10000 } }
   : recoveryOnly || focusedStreaming || focusedNativeWork || focusedClassicImage ? { scale: { bots: 3, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
@@ -657,16 +659,8 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
-  } else if (process.argv.includes('--reply-quote-only')) {
+  } else if (focusedReplyQuote) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
-    await page.locator('#bot-msg-rc-message-9999 .bot-reply-source').click();
-    // This isolated scenario has not paged history like the full smoke. Each
-    // navigation reads at most four pages; continue through its recovery UI.
-    for (let batch = 0; batch < 2; batch++) {
-      await page.locator('.bot-thread-feedback button').click();
-    }
-    await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
-    await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
     await checkBotShellReply({ page, until, report, captureDirectory: root });
   } else if (process.argv.includes('--selection-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();

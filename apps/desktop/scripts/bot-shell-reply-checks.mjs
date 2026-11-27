@@ -1,6 +1,6 @@
 import { BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import { BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
-import { openReplyDetails, closeReplyDetails, scrollToBotMessage, hoverBotReply } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage, hoverBotReply, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
@@ -20,12 +20,41 @@ async function assertQuoteInsideColumn(quote) {
   assert.deepEqual(fit, { inside: true, excerptInside: true, ellipsis: true });
 }
 
+async function selectReplyBody(page, reply) {
+  await wheelBotConversation(page, -1);
+  await scrollToBotMessage(page, reply);
+  const body = reply.locator('.bot-reply-text');
+  // End composer focus through the real UI before creating a body selection.
+  await body.locator('p').first().click();
+  return body.evaluate(node => {
+    const range = document.createRange(); range.selectNodeContents(node);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    return selection.toString().replace(/\s+/g, ' ').trim();
+  });
+}
+
 /** Production reply rendering and callbacks; no model, tool or Evidence claims. */
 export async function checkBotShellReply({ page, until, report, captureDirectory }) {
   const checks = report.replyInteraction = [];
   const reply = page.locator('#bot-msg-rc-message-9999');
   await scrollToBotMessage(page, reply);
   const quote = reply.locator('.bot-reply-source');
+  // The 10k archive and the writable Bot have independent renderer caches.
+  // Load the real source in this Bot before checking the loaded quote.
+  if (await quote.locator('.bot-reply-bar-label').textContent() === '引用') {
+    const anchor = page.locator('#bot-msg-rc-message-9500.is-anchored');
+    const retry = page.locator('.bot-thread-feedback').getByRole('button', { name: '重新读取', exact: true });
+    await quote.click();
+    for (let batch = 0; batch < 2; batch++) {
+      await until(async () => await anchor.isVisible() || await retry.isVisible(), Boolean);
+      if (await anchor.isVisible()) break;
+      await retry.click();
+    }
+    await anchor.waitFor();
+    await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
+    await scrollToBotMessage(page, reply);
+  }
   assert.equal(await quote.evaluate(node => Boolean(node.closest('.bot-reply-body'))), true,
     'reply reference must belong to the reply bubble, rather than a detached short-text card');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
@@ -161,12 +190,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   checks.push('direct reply quote keeps the current draft, identifies the bot and focuses the composer');
 
   // Select an actual rendered range then exercise the product mouse-up handler.
-  const selected = await reply.locator('.bot-reply-text').evaluate(node => {
-    const range = document.createRange(); range.selectNodeContents(node);
-    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    return selection.toString().replace(/\s+/g, ' ').trim();
-  });
+  const selected = await selectReplyBody(page, reply);
   await page.locator('.bot-selection-quote').click();
   const composerQuote = page.locator('.bot-quote-chip');
   assert.equal(selected.includes('原文结束标记'), false, 'selecting the new reply must not capture its quoted source');
@@ -189,11 +213,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   assert.equal(await composer.inputValue(), '保留我的草稿');
   await composer.fill('');
   // Submit a real explicit quote through the existing composer and durable IPC.
-  await reply.locator('.bot-reply-text').evaluate(node => {
-    const range = document.createRange(); range.selectNodeContents(node);
-    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-  });
+  await selectReplyBody(page, reply);
   await page.locator('.bot-selection-quote').click();
   await composer.fill('针对这段原文补充说明'); await composer.press('Enter');
   await composerQuote.waitFor({ state: 'detached' });
