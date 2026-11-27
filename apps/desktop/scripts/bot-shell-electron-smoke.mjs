@@ -767,6 +767,9 @@ try {
   await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text === '给 project-000 发消息');
   assert.equal(await page.locator('.bot-composer textarea').getAttribute('aria-label'), '给 project-000 发消息');
   report.checks.push('composer prompt and accessible name follow the selected bot name');
+  if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
+  await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
+  await checkBotMessageColors({ page, until, report, captureDirectory: root });
   const workspaceId = fixture.bots[0].workspaceId;
   for (let i = 0; i < 5; i++) {
     const text = `RC_UI_RECEIPT_${i}`;
@@ -808,9 +811,6 @@ try {
   report.metrics.visibleReceived = metric('received', report.receiptSamples);
   assert.equal(report.metrics.visibleReceived.pass, true, 'visible receipt p50 must stay below 300ms');
   report.checks.push('five real UI sends, visible durable Received under budget, scripted replies');
-  if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
-  await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
-  await checkBotMessageColors({ page, until, report, captureDirectory: root });
   const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
   await quickNative('open');
   await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
