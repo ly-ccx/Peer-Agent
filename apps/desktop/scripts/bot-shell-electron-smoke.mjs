@@ -561,7 +561,9 @@ const emitUpdaterEvent = async (event, { afterDownloadCall, operation } = {}) =>
 try {
   app = await _electron.launch({ args: [entry], env, cwd: isolation.launch.desktopDir, timeout: 30000 });
   handle = owned.register({ process: app.process(), close: () => app.close() });
-  await app.context().tracing.start({ screenshots: true, snapshots: true }); tracing = true;
+  // Keep action snapshots for diagnostics without recording a continuous
+  // screencast during UI latency measurements. Checks take their own screenshots.
+  await app.context().tracing.start({ snapshots: true }); tracing = true;
   for (const stream of [app.process().stdout, app.process().stderr]) stream.on('data', data => logs.push(String(data)));
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
   report.nativeDisplay = await until(() => readObserved('nativeDisplay'), Boolean);
@@ -768,9 +770,19 @@ try {
   if(workSurfaces) await checkBotProgressiveLoading({page,until,report,captureDirectory:root,commandFile:workCommand});
   await checkBotMessageLayout({ page, until, report, captureDirectory: root, expectedText: longErrorText });
   await checkBotMessageColors({ page, until, report, captureDirectory: root });
+  const workspaceId = fixture.bots[0].workspaceId;
   for (let i = 0; i < 5; i++) {
     const text = `RC_UI_RECEIPT_${i}`;
-    await page.locator('.bot-composer textarea').fill(text);
+    const composer = page.locator('.bot-composer textarea');
+    await page.locator('.bot-stop-response').waitFor({ state: 'hidden' });
+    await page.locator('.bot-thread[aria-busy="false"]').waitFor();
+    await composer.fill(text);
+    // Fill is test setup. Let its autosave and the prior receipt cleanup finish;
+    // Enter still has to persist the new pending envelope and queue the input.
+    await until(() => page.evaluate(async ({ workspaceId, text }) => {
+      const draft = await window.peerAgent.projectAgentReadInputDraft({ workspaceId, surface: 'desktop' });
+      return draft?.ok && draft.snapshot.draft.text === text && draft.snapshot.pending.length === 0;
+    }, { workspaceId, text }), Boolean);
     await page.evaluate(text => {
       let started = null;
       const states = [];
@@ -791,14 +803,13 @@ try {
     }, text);
     (report.inputWindowStates ??= []).push(await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus(), composer: document.querySelectorAll('.bot-composer textarea').length })));
     await interaction(`send-${i}`);
-    await page.locator('.bot-composer textarea').press('Enter');
+    await composer.press('Enter');
     const sample = await page.evaluate(() => globalThis.rcReceiptMeasurement);
     report.receiptSamples.push(sample.elapsed);
     await page.locator('.bot-thread').getByText('RC scripted reply: ' + text, { exact: true }).waitFor();
   }
   report.metrics.visibleReceived = metric('received', report.receiptSamples);
   assert.equal(report.metrics.visibleReceived.pass, true, 'visible receipt p50 must stay below 300ms');
-  await page.locator('.bot-thread').getByText('RC scripted reply: RC_UI_RECEIPT_4', { exact: true }).waitFor();
   report.checks.push('five real UI sends, visible durable Received under budget, scripted replies');
   const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
   await quickNative('open');
