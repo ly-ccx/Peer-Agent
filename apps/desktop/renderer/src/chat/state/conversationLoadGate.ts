@@ -20,15 +20,18 @@ export function shouldHardBeginConversationLoad(input: {
   return true;
 }
 
-/**
- * provider 能力校正只有在已有会话恢复完成后才能持久化。
- * draft 没有持久化元数据，仍允许使用全局默认值立即完成校正。
- */
-export function shouldPersistEffortCorrection(input: {
+/** Cached transcripts can be ready while their stream is still reattaching. */
+export function canPersistRestoredConversationMetadata(input: {
   readonly conversationId: string | null;
-  readonly loadStatus: ConversationLoadStatus | string;
+  readonly loadStatus: ConversationLoadStatus;
+  readonly streamStatus: 'unknown' | 'confirmed';
+  readonly canEdit: boolean;
+  readonly isBusy: boolean;
 }): boolean {
-  return input.conversationId === null || input.loadStatus === 'ready';
+  return input.canEdit && !input.isBusy && (
+    input.conversationId === null
+    || (input.loadStatus === 'ready' && input.streamStatus === 'confirmed')
+  );
 }
 
 /** 会话主加载 effect 是否应把 providers 放进依赖：永远不应。 */

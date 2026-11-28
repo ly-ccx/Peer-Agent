@@ -12,26 +12,22 @@ import { contextAccountingRestoreKey, shouldStartContextAccountingRestore } from
  */
 export function ContextAccountingRestore({
   conversationId,
-  loadStatus,
-  isDraftConversation,
   providerId,
   model,
   modelProviderId,
-  isBusy,
+  canRestore,
 }: {
   readonly conversationId: string | null;
-  readonly loadStatus: 'idle' | 'loading' | 'ready';
-  readonly isDraftConversation: boolean;
   readonly providerId: string | null;
   readonly model: string | null | undefined;
   readonly modelProviderId: string | null;
-  readonly isBusy: boolean;
+  readonly canRestore: boolean;
 }) {
   const contextAccounting = useConversationContextAccounting(conversationId);
   const attemptedKeysRef = useRef(new Set<string>());
 
   useEffect(() => {
-    if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
+    if (!canRestore || !conversationId || conversationId.startsWith('draft-')) return;
     const restoreInput = {
       conversationId,
       snapshot: contextAccounting,
@@ -42,15 +38,20 @@ export function ContextAccountingRestore({
       attemptedKeys: attemptedKeysRef.current,
       ...restoreInput,
     });
-    if (!requiresRestore || isBusy) return;
-    if (typeof clientApi.chatContextRestored !== 'function') return;
+    const restoreContext = clientApi.chatContextRestored;
+    if (!requiresRestore || typeof restoreContext !== 'function') return;
     const restoreKey = contextAccountingRestoreKey(restoreInput);
     let cancelled = false;
-    void clientApi.chatContextRestored({
-      conversationId,
-      modelProviderId: providerId ?? modelProviderId,
-    })
-      .then((snap: ContextAccountingSnapshot | null) => {
+    // The parent load effect can mark a cached conversation as reattaching in this commit.
+    void Promise.resolve()
+      .then(async () => {
+        if (cancelled) return;
+        const current = conversationStore.getSnapshot(conversationId);
+        if (current.streamStatus !== 'confirmed' || current.isStreaming) return;
+        const snap: ContextAccountingSnapshot | null = await restoreContext({
+          conversationId,
+          modelProviderId: providerId ?? modelProviderId,
+        });
         if (cancelled) return;
         attemptedKeysRef.current.add(restoreKey);
         if (!snap) return;
@@ -66,14 +67,12 @@ export function ContextAccountingRestore({
       });
     return () => { cancelled = true; };
   }, [
-    loadStatus,
     conversationId,
-    isDraftConversation,
     contextAccounting,
     providerId,
     model,
     modelProviderId,
-    isBusy,
+    canRestore,
   ]);
 
   return null;
