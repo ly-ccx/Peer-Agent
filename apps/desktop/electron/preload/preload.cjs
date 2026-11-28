@@ -279,6 +279,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentReadInputDraft: (params) => ipcRenderer.invoke('project-agent:read-input-draft', params),
   projectAgentWriteInputDraft: (params) => ipcRenderer.invoke('project-agent:write-input-draft', params),
   projectAgentReadConversation: (params) => ipcRenderer.invoke('project-agent:read-conversation', params),
+  projectAgentReadInputImage: (params) => ipcRenderer.invoke('project-agent:read-input-image', params),
   projectAgentReadEvidence: (params) => ipcRenderer.invoke('project-agent:read-evidence', params),
   projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),
   projectAgentGetSession: (params) => ipcRenderer.invoke('project-agent:get-session', params),

@@ -211,6 +211,8 @@ function readAttachments(value: unknown): ChatAttachment[] {
       name: readString(item.name) || 'file', mimeType: readString(item.mimeType),
       size: typeof item.size === 'number' ? item.size : 0, kind: item.kind,
       ...(typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:image/') ? { dataUrl: item.dataUrl } : {}),
+      ...(item.kind === 'image' && typeof item.blobDigest === 'string' && /^[a-f0-9]{64}$/.test(item.blobDigest)
+        ? { blobDigest: item.blobDigest } : {}),
     }));
 }
 

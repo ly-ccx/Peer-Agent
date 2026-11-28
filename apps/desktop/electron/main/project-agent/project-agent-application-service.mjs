@@ -775,6 +775,15 @@ export function createProjectAgentApplicationService({
     }
   }
 
+  function readInputImage(payload) {
+    if (!open()) return disabled();
+    const { workspaceId, blobDigest, mimeType } = payload ?? {};
+    if (typeof workspaceId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)
+      || directory?.hasActiveBot?.(workspaceId) !== true) return { ok: false, code: 'NOT_FOUND' };
+    const dataUrl = inputQueue?.readImage?.(workspaceId, blobDigest, mimeType);
+    return dataUrl ? { ok: true, dataUrl } : { ok: false, code: 'NOT_FOUND' };
+  }
+
   function readConversation(payload = {}) {
     if (!open()) return disabled();
     const result = classicCoreBridge?.isAvailable?.()
@@ -788,6 +797,20 @@ export function createProjectAgentApplicationService({
           || recoveryControl?.needsAttention?.(payload.workspaceId) === true)
         : (recoveryControl?.needsAttention?.(payload.workspaceId) === true);
       page = { ...page, recoveryAttention };
+      // The JS compatibility host retains inline bytes in storage for model consumers.
+      // Neither history reader needs to ship the body or a host filesystem path with a blob ref.
+      if (Array.isArray(page.messages)) page.messages = page.messages.map(message => {
+        if (!Array.isArray(message?.attachments)) return message;
+        let changed = false;
+        const attachments = message.attachments.map(item => {
+          if (item?.kind !== 'image' || typeof item.blobDigest !== 'string' || !/^[a-f0-9]{64}$/.test(item.blobDigest)
+            || (item.dataUrl === undefined && item.filePath === undefined)) return item;
+          const { dataUrl: _body, filePath: _path, ...reference } = item;
+          changed = true;
+          return reference;
+        });
+        return changed ? { ...message, attachments } : message;
+      });
       const status = readRecovery(payload.workspaceId);
       const recovery = status?.status === 'failed' ? projectBotRecoveryStatus(status.error, status.phase)
         : !page?.ok && page?.code?.startsWith('coordination_') ? projectBotRecoveryStatus(page.code) : null;
@@ -1562,6 +1585,7 @@ export function createProjectAgentApplicationService({
     readInputDraft: payload => draftRequest(payload, 'read'),
     writeInputDraft: payload => draftRequest(payload, 'write'),
     readConversation,
+    readInputImage,
     stopResponse,
     listSessions,
     getSession,
