@@ -3,8 +3,11 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import type { DrawerSession } from '../state/drawerState';
+import type { TaskReportState } from '../state/taskDetailState';
+import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import { TaskVerification } from '../drawer/TaskVerification';
 import { CoordinationDetails } from '../drawer/CoordinationDetails';
+import { EvidencePreview } from '../drawer/EvidencePreview';
 
 export type InspectorTab = 'brief' | 'verdict' | 'coordination';
 
@@ -13,10 +16,16 @@ export interface TaskEvidenceInspectorProps {
   readonly overlay: boolean;
   readonly workspaceId: string;
   readonly session: DrawerSession;
+  readonly reportState: TaskReportState;
+  readonly hasReadReport: boolean;
+  readonly context: TaskConversationContext | null;
+  readonly botName: string;
   readonly initialTab?: InspectorTab;
   readonly i18n: I18nRuntime;
   readonly triggerRef: React.RefObject<HTMLElement | null>;
   readonly onClose: () => void;
+  readonly onRetryReport: () => void;
+  readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
   readonly onSelectSession?: (sessionId: string) => void;
 }
 
@@ -25,10 +34,16 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
   overlay,
   workspaceId,
   session,
+  reportState,
+  hasReadReport,
+  context,
+  botName,
   initialTab = 'brief',
   i18n,
   triggerRef,
   onClose,
+  onRetryReport,
+  onTaskConversation,
   onSelectSession,
 }: TaskEvidenceInspectorProps) {
   const isZh = i18n.locale.startsWith('zh');
@@ -70,6 +85,12 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
       ];
 
   const activeTab: InspectorTab = tab === 'verdict' && !hasVerification ? 'brief' : tab;
+  const ended = session.followUp ? session.followUp.owner === 'none' : ['accepted', 'cancelled'].includes(session.status);
+  const needsYou = session.followUp ? session.followUp.owner === 'user' : ['waiting_user', 'result_ready'].includes(session.status);
+  const question = needsYou ? context?.question : null;
+  const messageId = context?.messageId || session.anchorMessageId || undefined;
+  const updateText = context?.content.replace(/\s+/g, ' ').trim() ?? '';
+  const updatePreview = updateText.length > 240 ? `${updateText.slice(0, 240)}…` : updateText;
 
   return (
     <aside
@@ -107,6 +128,33 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
       <div className="bot-inspector-body">
         {activeTab === 'brief' ? (
           <div className="bot-inspector-brief">
+            {reportState !== 'ready' ? <div className="bot-task-report-read" aria-busy={reportState === 'loading'}>
+              <p role="status">{i18n.t(reportState === 'loading' ? 'projectAgent.drawer.task.readingReport'
+                : hasReadReport ? 'projectAgent.drawer.task.reportStale' : 'projectAgent.drawer.task.reportUnavailable')}</p>
+              {reportState === 'unavailable' ? <button type="button" className="bot-task-btn" onClick={onRetryReport}>
+                {i18n.t('projectAgent.background.retry')}
+              </button> : null}
+            </div> : null}
+            <section className="bot-inspector-section">
+              <h3>{i18n.t(question ? 'projectAgent.drawer.task.question' : ended
+                ? 'projectAgent.drawer.task.followUpEnded' : 'projectAgent.drawer.task.followUp', { name: botName })}</h3>
+              {question ? <p className="bot-task-question">{question.content}</p>
+                : <p className="bot-task-hint">{i18n.t(ended ? 'projectAgent.drawer.task.endedQuestion' : 'projectAgent.drawer.task.noQuestion', { name: botName })}</p>}
+              <button type="button" className="bot-task-btn" onClick={() => onTaskConversation(question
+                ? { messageId, cardId: question.cardId }
+                : { messageId, taskTitle: session.title, draft: i18n.t(ended ? 'projectAgent.drawer.task.askEndedDraft'
+                    : 'projectAgent.drawer.task.askDraft', { title: session.title }) })}>
+                {i18n.t(question ? 'projectAgent.drawer.task.answer' : ended ? 'projectAgent.drawer.task.askEnded'
+                  : 'projectAgent.drawer.task.ask', { name: botName })}
+              </button>
+              {!question && <p className="bot-task-action-note">{i18n.t('projectAgent.drawer.task.draftHint')}</p>}
+            </section>
+            {!question && updatePreview && <section className="bot-inspector-section">
+              <p className="bot-task-update-preview">{updatePreview}</p>
+              <button type="button" className="bot-task-btn" onClick={() => onTaskConversation({ messageId })}>
+                {i18n.t('projectAgent.drawer.task.viewUpdate')}
+              </button>
+            </section>}
             {session.failure ? (
               <section className="bot-inspector-section">
                 <h3>{isZh ? '中止原因' : 'Failure detail'}</h3>
@@ -166,6 +214,13 @@ export const TaskEvidenceInspector = memo(function TaskEvidenceInspector({
                 <div>
                   <dt>{i18n.t('projectAgent.drawer.anchor')}</dt>
                   <dd><code>{session.anchorMessageId}</code></dd>
+                </div>
+              ) : null}
+              {session.evidenceRefs.length > 0 ? (
+                <div>
+                  <dt>{i18n.t('projectAgent.drawer.task.records', { count: session.evidenceRefs.length })}</dt>
+                  <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} inline workspaceId={workspaceId}
+                    task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined} /></dd>
                 </div>
               ) : null}
             </dl>

@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { INPUT_ATTACHMENT_LIMIT, normalizeUserUpload } from './input-attachments.mjs';
+import { persistInputImageBlob, readInputImageBlob } from './input-image-blobs.mjs';
 import { pathOf } from '../data-store.mjs';
 import { acquireInputQueueLock } from './input-queue-lock.mjs';
 
@@ -224,6 +225,7 @@ export function createInputQueue({
         if (!conversationId || normalized.resourceFeedback.some(row => row.recipient.conversationId !== conversationId)) throw Object.assign(new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED'), { code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' });
       }
       mkdirSync(dirFor(workspaceId), { recursive: true });
+      if (normalized.attachments) normalized.attachments = normalized.attachments.map(item => persistInputImageBlob(root(), workspaceId, item));
       const { resourceFeedback: _feedback, attachments: _attachments, ...base } = normalized;
       appendFileSync(queueFile(workspaceId), `${JSON.stringify({ ...base, ...encodeResourceFeedbackTransport(normalized.resourceFeedback, normalized.attachments) })}\n`);
       return normalized;
@@ -367,17 +369,18 @@ export function createInputQueue({
     } catch (error) { release(); throw error; }
   }
   return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot, acquireRetentionInputs,
+    readImage: (workspaceId, blobDigest, mimeType) => readInputImageBlob(root(), workspaceId, blobDigest, mimeType),
     findSubmission: (workspaceId, inputId) => readInputs(workspaceId).find(row => row.inputId === inputId) || null,
     findAnswer: (workspaceId, answerTo) => readInputs(workspaceId).find(row => row.answerTo === answerTo) || null,
   };
 }
 
-function normalizeSubmission(input, workspaceId, createdAt) {
+function normalizeSubmission(input, workspaceId, createdAt, { stored = false } = {}) {
   const inputId = typeof input?.inputId === 'string' ? input.inputId.trim() : '';
   if (!INPUT_ID.test(inputId)) throw new TypeError('inputId is invalid');
   if (!SURFACES.has(input?.surface)) throw new TypeError('surface is invalid');
   const text = typeof input?.text === 'string' ? input.text.trim() : '';
-  const uploaded = normalizeInputAttachments(input?.attachments);
+  const uploaded = normalizeInputAttachments(input?.attachments, { stored });
   const resourceFeedback = restoreResourceFeedbackTransport(input?.resourceFeedback, uploaded);
   encodeResourceFeedbackTransport(resourceFeedback, uploaded);
   const attachments = uploaded.filter(item => !isInteractiveFeedbackAttachment(item));
@@ -411,7 +414,7 @@ function normalizeStored(value, workspaceId) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   if (!WORKSPACE_DIR.test(workspaceId)) return null;
   try {
-    return normalizeSubmission(value, workspaceId, value.createdAt || new Date().toISOString());
+    return normalizeSubmission(value, workspaceId, value.createdAt || new Date().toISOString(), { stored: true });
   } catch (error) {
     if (value.resourceFeedback?.some?.(row => row?.resource?.kind === 'interactive') || value.attachments?.some?.(isInteractiveFeedbackAttachment)) {
       throw Object.assign(Error('INTERACTIVE_INPUT_UNAVAILABLE'), { code: 'INTERACTIVE_INPUT_UNAVAILABLE', cause: error });
@@ -464,13 +467,13 @@ export function boundedImageAttachments(value) {
 }
 
 /** Preserve legacy screenshot refs while strictly admitting explicit uploads. */
-export function normalizeInputAttachments(value) {
+export function normalizeInputAttachments(value, { stored = false } = {}) {
   if (value == null) return [];
   if (!Array.isArray(value)) throw new TypeError('attachments must be an array');
   if (!value.some(item => item?.sourceKind === 'user_upload')) return boundedImageAttachments(value);
   if (value.length > INPUT_ATTACHMENT_LIMIT) throw new TypeError(`at most ${INPUT_ATTACHMENT_LIMIT} attachments are allowed`);
   return value.flatMap(item => item?.sourceKind === 'user_upload'
-    ? [normalizeUserUpload(item)] : boundedImageAttachments([item]));
+    ? [normalizeUserUpload(item, { stored })] : boundedImageAttachments([item]));
 }
 
 function stringRefs(value) {

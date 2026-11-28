@@ -105,7 +105,7 @@ test('install flows detail -> zip download -> installSkillFromZip with meta', as
   const installs = [];
   const service = createQoderMarketplaceService({
     apiClient: client,
-    installSkillFromZip: async (buffer, options) => {
+    prepareSkillFromZip: (buffer) => async (options) => {
       installs.push({ buffer, options });
       return { skillId: 'deep-research' };
     },
@@ -129,7 +129,11 @@ test('install forwards an explicit workspace target', async () => {
   let installOptions;
   const service = createQoderMarketplaceService({
     apiClient: client,
-    installSkillFromZip: async (_buffer, options) => {
+    targetDirectory: {
+      resolve: ([request]) => [{ receipt: { path: request.workspacePath } }],
+      recheck: (target) => target.path,
+    },
+    prepareSkillFromZip: () => async (options) => {
       installOptions = options;
       return { skillId: 'deep-research' };
     },
@@ -149,7 +153,7 @@ test('install normalizes invalid scope to global', async () => {
   const { client } = makeClient(LIST_PAYLOAD, DETAIL_PAYLOAD, { zipBuffer: zipBuffer.buffer });
   const service = createQoderMarketplaceService({
     apiClient: client,
-    installSkillFromZip: async () => ({ skillId: 'deep-research' }),
+    prepareSkillFromZip: () => async () => ({ skillId: 'deep-research' }),
   });
   const result = await service.install({ skillId: 'official03866510', scope: 'bogus' });
   assert.equal(result.scope, 'global');
@@ -160,7 +164,7 @@ test('install surfaces installer failure', async () => {
   const { client } = makeClient(LIST_PAYLOAD, DETAIL_PAYLOAD, { zipBuffer: zipBuffer.buffer });
   const service = createQoderMarketplaceService({
     apiClient: client,
-    installSkillFromZip: async () => null,
+    prepareSkillFromZip: () => async () => null,
   });
   await assert.rejects(() => service.install({ skillId: 'official03866510' }), /qoder_install_failed/);
 });
@@ -245,7 +249,7 @@ test('service exposes listTaxonomies', async () => {
     return jsonResponse(LIST_PAYLOAD);
   };
   const client = createQoderApiClient({ fetchImpl });
-  const service = createQoderMarketplaceService({ apiClient: client, installSkillFromZip: async () => ({ skillId: 'x' }) });
+  const service = createQoderMarketplaceService({ apiClient: client, prepareSkillFromZip: () => async () => ({ skillId: 'x' }) });
   assert.equal(typeof service.listTaxonomies, 'function');
   const result = await service.listTaxonomies();
   assert.ok(result.count >= 0);

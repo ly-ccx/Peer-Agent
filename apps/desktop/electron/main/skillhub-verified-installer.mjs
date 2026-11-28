@@ -1,5 +1,6 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import AdmZip from 'adm-zip';
+import { installMarketplacePackage } from './skill-install-target.mjs';
 
 const MAX_ZIP_BYTES = 25 * 1024 * 1024;
 const MAX_FILES = 2_000;
@@ -22,10 +23,10 @@ function ignoredPath(name) {
 }
 function unixMode(entry) { return (entry.attr >>> 16) & 0xffff; }
 
-export function computeSkillHubContentHash(entries) {
+export function computeSkillHubContentHash(entries, readEntry = (entry) => entry.getData()) {
   const lines = entries
     .filter((entry) => !entry.isDirectory && !ignoredPath(entry.entryName))
-    .map((entry) => `${entry.entryName.replaceAll('\\', '/')}:${digest('sha256', entry.getData())}`)
+    .map((entry) => `${entry.entryName.replaceAll('\\', '/')}:${digest('sha256', readEntry(entry))}`)
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return { contentHash: digest('sha256', `${lines.join('\n')}\n`), fileCount: lines.length };
 }
@@ -65,47 +66,51 @@ function selectPlatformKey(response, keyId) {
   return createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, raw]), format: 'der', type: 'spki' });
 }
 
-export function createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip }) {
-  if (!apiClient || typeof installSkillFromZip !== 'function') throw new TypeError('installer dependencies are required');
+export function createSkillHubVerifiedInstaller({ apiClient, prepareSkillFromZip, targetDirectory }) {
+  if (!apiClient || typeof prepareSkillFromZip !== 'function') throw new TypeError('installer dependencies are required');
   return Object.freeze({
     async install(identity) {
-      const { namespace, slug, version, scope = 'global', workspacePath = null, iconUrl = null } = identity;
-      const installScope = scope === 'workspace' ? 'workspace' : 'global';
-      const [installIdentity, signatureResponse, keyResponse, zipBuffer] = await Promise.all([
-        apiClient.getSkillInstallIdentity(identity), apiClient.getVersionSignature(identity), apiClient.getPlatformKeys(), apiClient.downloadSkill(identity),
-      ]);
-      if (installIdentity.namespace !== namespace || installIdentity.slug !== slug) throw new Error('skillhub_detail_identity_mismatch');
-      const signature = unwrap(signatureResponse);
-      if (signature?.signed !== true || typeof signature.payload !== 'string') throw new Error('skillhub_signature_required');
-      const publicKey = selectPlatformKey(keyResponse, signature.key_id);
-      const signatureBytes = Buffer.from(signature.signature_b64 ?? signature.signature ?? '', 'base64');
-      if (!verify(null, Buffer.from(signature.payload, 'utf8'), publicKey, signatureBytes)) throw new Error('skillhub_signature_invalid');
-      let payload;
-      try { payload = JSON.parse(signature.payload); } catch { throw new Error('skillhub_signature_payload_invalid'); }
-      if (signature.hash_version !== 1 || payload.v !== 1) throw new Error('skillhub_hash_version_unsupported');
-      if (payload.issuer !== 'skillhub.cn') throw new Error('skillhub_signature_issuer_invalid');
-      if (payload.publisher_user_name !== installIdentity.publisher) throw new Error('skillhub_signature_publisher_mismatch');
-      if (payload.skill_slug !== slug || payload.skill_version !== version) throw new Error('skillhub_signature_coordinate_mismatch');
-      if (signature.content_hash && signature.content_hash !== payload.content_hash) throw new Error('skillhub_signature_content_hash_mismatch');
-      const entries = validateArchive(zipBuffer);
-      if (digest('md5', zipBuffer) !== payload.package_md5) throw new Error('skillhub_package_md5_mismatch');
-      const calculated = computeSkillHubContentHash(entries);
-      if (calculated.fileCount !== payload.file_count) throw new Error('skillhub_file_count_mismatch');
-      if (calculated.contentHash !== payload.content_hash) throw new Error('skillhub_content_hash_mismatch');
-      const installed = await installSkillFromZip(zipBuffer, {
-        scope: installScope,
-        workspacePath: installScope === 'workspace' ? workspacePath : null,
-        source: 'skillhub',
-        iconUrl: typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl.trim() : null,
-        meta: {
-          source: 'skillhub',
-          namespace,
-          slug,
-          version,
-        },
-      });
-      if (!installed?.id && !installed?.skillId) throw new Error('skillhub_install_failed');
-      return { ok: true, skillId: installed.skillId ?? installed.id, source: 'skillhub', namespace, slug, version, keyId: signature.key_id, scope: installScope };
+      const { namespace, slug, version, iconUrl = null } = identity;
+      const result = await installMarketplacePackage(identity, targetDirectory, async () => {
+        const [installIdentity, signatureResponse, keyResponse, zipBuffer] = await Promise.all([
+          apiClient.getSkillInstallIdentity(identity), apiClient.getVersionSignature(identity), apiClient.getPlatformKeys(), apiClient.downloadSkill(identity),
+        ]);
+        if (installIdentity.namespace !== namespace || installIdentity.slug !== slug) throw new Error('skillhub_detail_identity_mismatch');
+        const signature = unwrap(signatureResponse);
+        if (signature?.signed !== true || typeof signature.payload !== 'string') throw new Error('skillhub_signature_required');
+        const publicKey = selectPlatformKey(keyResponse, signature.key_id);
+        const signatureBytes = Buffer.from(signature.signature_b64 ?? signature.signature ?? '', 'base64');
+        if (!verify(null, Buffer.from(signature.payload, 'utf8'), publicKey, signatureBytes)) throw new Error('skillhub_signature_invalid');
+        let payload;
+        try { payload = JSON.parse(signature.payload); } catch { throw new Error('skillhub_signature_payload_invalid'); }
+        if (signature.hash_version !== 1 || payload.v !== 1) throw new Error('skillhub_hash_version_unsupported');
+        if (payload.issuer !== 'skillhub.cn') throw new Error('skillhub_signature_issuer_invalid');
+        if (payload.publisher_user_name !== installIdentity.publisher) throw new Error('skillhub_signature_publisher_mismatch');
+        if (payload.skill_slug !== slug || payload.skill_version !== version) throw new Error('skillhub_signature_coordinate_mismatch');
+        if (signature.content_hash && signature.content_hash !== payload.content_hash) throw new Error('skillhub_signature_content_hash_mismatch');
+        const entries = validateArchive(zipBuffer);
+        if (digest('md5', zipBuffer) !== payload.package_md5) throw new Error('skillhub_package_md5_mismatch');
+        const content = new Map();
+        const readEntry = (entry) => {
+          if (!content.has(entry)) content.set(entry, entry.getData());
+          return content.get(entry);
+        };
+        const calculated = computeSkillHubContentHash(entries, readEntry);
+        if (calculated.fileCount !== payload.file_count) throw new Error('skillhub_file_count_mismatch');
+        if (calculated.contentHash !== payload.content_hash) throw new Error('skillhub_content_hash_mismatch');
+        const install = prepareSkillFromZip(zipBuffer, { entries, readEntry });
+        return {
+          install: (destination) => install({
+            ...destination,
+            source: 'skillhub',
+            iconUrl: typeof iconUrl === 'string' && iconUrl.trim() ? iconUrl.trim() : null,
+            meta: { source: 'skillhub', namespace, slug, version },
+          }),
+          metadata: { keyId: signature.key_id },
+        };
+      }, 'skillhub_install_failed');
+      const { installedSkillId, ...receipt } = result;
+      return { ...receipt, skillId: installedSkillId, source: 'skillhub', namespace, slug, version };
     },
   });
 }

@@ -4,7 +4,7 @@ export const INPUT_ATTACHMENT_LIMIT = 100;
 const IMAGE_BYTES = 32 * 1024 * 1024;
 const TEXT_BYTES = 512 * 1024;
 
-export function normalizeUserUpload(item) {
+export function normalizeUserUpload(item, { stored = false } = {}) {
   const token = (value, limit, fallback) => typeof value === 'string' && value.trim()
     ? value.trim().slice(0, limit) : fallback;
   const size = item?.size;
@@ -13,13 +13,18 @@ export function normalizeUserUpload(item) {
     mimeType: token(item.mimeType, 100, 'application/octet-stream'), size, sourceKind: 'user_upload' };
   if (item.kind === 'image') {
     const url = item.dataUrl;
+    const blobDigest = stored && typeof item.blobDigest === 'string' && /^[a-f0-9]{64}$/.test(item.blobDigest)
+      ? item.blobDigest : null;
+    if (!url && blobDigest && /^image\/[a-zA-Z0-9.+-]+$/.test(base.mimeType) && size <= IMAGE_BYTES) {
+      return { ...base, kind: 'image', blobDigest };
+    }
     const match = typeof url === 'string' && /^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/.exec(url);
     if (!match || match[1] !== base.mimeType || !match[2] || match[2].length % 4 !== 0) {
       throw new TypeError('attachment image data is invalid');
     }
     if (size > IMAGE_BYTES || match[2].length > Math.ceil(IMAGE_BYTES / 3) * 4
       || Buffer.from(match[2], 'base64').byteLength > IMAGE_BYTES) throw new TypeError('attachment image exceeds 32 MiB');
-    return { ...base, kind: 'image', dataUrl: url };
+    return { ...base, kind: 'image', dataUrl: url, ...(blobDigest ? { blobDigest } : {}) };
   }
   if (item.kind === 'text') {
     if (typeof item.text !== 'string') throw new TypeError('attachment text is invalid');

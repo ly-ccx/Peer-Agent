@@ -50,8 +50,9 @@ pub struct TurnExecutionState {
     pub valid_user_message_ids: HashSet<String>,
     pub answered_user_message_ids: HashSet<String>,
     pub user_anchor_candidates: Vec<UserAnchorCandidate>,
-    pub unreported_anchor_sessions: Vec<(String, String)>,
+    pub unreported_anchor_sessions: Vec<(String, String, String)>,
     pub prior_report_fact_keys: HashSet<String>,
+    pub read_result_revisions: HashMap<String, String>,
     pub worker_model_selection: Value,
     pub reply_committed_id: Option<String>,
     pub post_reply_rejected: bool,
@@ -1095,15 +1096,24 @@ fn resolve_anchors_for_state(
     })
 }
 
+#[derive(PartialEq, Eq)]
+pub(crate) enum ReplyOrigin {
+    Structured,
+    Natural,
+    DispatchReceipt,
+    FailureNotice,
+}
+
 pub(crate) fn commit_composed_reply(
     args: &Value,
     data_home: &Path,
     supervisor: &SessionSupervisor,
     state: &mut TurnExecutionState,
     tool_call_id: &str,
-    natural: bool,
-    fallback: bool,
+    origin: ReplyOrigin,
 ) -> Result<Value, CapFailure> {
+    let natural = origin != ReplyOrigin::Structured;
+    let fallback = origin == ReplyOrigin::FailureNotice;
     let text = args["text"]
         .as_str()
         .ok_or_else(|| ProjectError::code("invalid_input"))?;
@@ -1200,6 +1210,53 @@ pub(crate) fn commit_composed_reply(
             }
         }
     }
+    let unreported_anchor_sessions: Vec<_> = state
+        .unreported_anchor_sessions
+        .iter()
+        .filter(|(_, sid, revision)| {
+            origin != ReplyOrigin::DispatchReceipt
+                && !state.messaged_session_ids.contains(sid)
+                && !state.cancelled_session_ids.contains(sid)
+                && sessions.iter().any(|session| {
+                    session.session_id == *sid
+                        && session.updated_at == *revision
+                        && session.status == "result_ready"
+                })
+        })
+        .map(|(anchor, sid, _)| (anchor.clone(), sid.clone()))
+        .collect();
+    if natural {
+        for session in sessions
+            .iter()
+            .filter(|session| session.status == "result_ready")
+        {
+            let sid = &session.session_id;
+            let read_this_revision = state.read_result_revisions.get(sid)
+                == Some(&session.updated_at)
+                || state.wake_reports.get(sid).is_some_and(|report| {
+                    report.summary.status == "result_ready"
+                        && report.summary.updated_at == session.updated_at
+                });
+            let anchored = unreported_anchor_sessions
+                .iter()
+                .any(|(anchor, id)| id == sid && reply_to.contains(anchor));
+            let already_reported = state
+                .prior_report_fact_keys
+                .contains(&crate::reply::result_fact_key(sid, &session.updated_at));
+            let cite = origin == ReplyOrigin::Natural
+                && (read_this_revision || anchored)
+                && !already_reported
+                && !state.messaged_session_ids.contains(sid)
+                && !state.cancelled_session_ids.contains(sid);
+            if cite {
+                if seen_sources.insert(sid.clone()) {
+                    sources.push(sid.clone());
+                }
+            } else if seen_sources.remove(sid) {
+                sources.retain(|source| source != sid);
+            }
+        }
+    }
     // When a wake turn posts a reply citing sessions whose originating user input has not yet
     // received any agent_reply (e.g. after `wait_for_sessions`), inherit those unanswered
     // anchors automatically so the user message transitions cleanly to replied.
@@ -1215,19 +1272,6 @@ pub(crate) fn commit_composed_reply(
                         reply_to.push(anc.clone());
                     }
                 }
-            }
-        }
-    }
-    // Natural replies have no model-authored `sources` parameter; auto-cite any unreported
-    // `result_ready` sessions bound to the resolved anchors so `compose_reply` never rejects
-    // with `result_source_required` on retries or merged wakes.
-    if natural && !reply_to.is_empty() {
-        for (anchor, sid) in &state.unreported_anchor_sessions {
-            if reply_to.contains(anchor)
-                && project_session_ids.contains(sid)
-                && seen_sources.insert(sid.clone())
-            {
-                sources.push(sid.clone());
             }
         }
     }
@@ -1252,19 +1296,26 @@ pub(crate) fn commit_composed_reply(
         .zip(&reports)
         .filter_map(|(sid, rep)| {
             let s = sessions.iter().find(|s| s.session_id == *sid)?;
+            let rep = rep.as_ref().filter(|report| {
+                report.summary.status == s.status && report.summary.updated_at == s.updated_at
+            });
             Some(SessionStatusFact {
                 session_id: s.session_id.clone(),
                 status: s.status.clone(),
                 source_revision: Some(s.updated_at.clone()),
                 observation_revision: None,
-                independent_verifier: rep.as_ref().map(|r| r.independent_verifier.clone()),
-                verdict_outcome: rep.as_ref().map(|r| r.verdict_outcome.clone()),
-                verdict_ref: rep
-                    .as_ref()
-                    .map(|r| verdict_ref_for(&s.session_id, &r.verdict_outcome)),
+                independent_verifier: rep.map(|r| r.independent_verifier.clone()),
+                verdict_outcome: rep.map(|r| r.verdict_outcome.clone()),
+                verdict_ref: rep.map(|r| verdict_ref_for(&s.session_id, &r.verdict_outcome)),
             })
         })
         .collect();
+    if session_facts
+        .iter()
+        .any(|fact| fact.status == "result_ready" && fact.verdict_outcome.is_none())
+    {
+        return Err(ProjectError::code("session_state_changed").into());
+    }
     let explicit_claim_ids: HashSet<String> =
         status_claims.iter().map(|c| c.session_id.clone()).collect();
     for fact in &session_facts {
@@ -1324,7 +1375,7 @@ pub(crate) fn commit_composed_reply(
     let ready_sessions: Vec<_> = session_facts
         .iter()
         .filter(|fact| fact.status == "result_ready")
-        .map(|fact| fact.session_id.clone())
+        .filter_map(|fact| Some((fact.session_id.clone(), fact.source_revision.clone()?)))
         .collect();
     let mut interactive_refs = Vec::new();
     let mut other_refs = Vec::new();
@@ -1375,7 +1426,7 @@ pub(crate) fn commit_composed_reply(
         evidence_refs: ev_refs,
         surfacing,
         prior_report_fact_keys: state.prior_report_fact_keys.clone(),
-        unreported_anchor_sessions: state.unreported_anchor_sessions.clone(),
+        unreported_anchor_sessions,
     })?;
 
     if composed.suppressed_duplicate {
@@ -1433,15 +1484,19 @@ pub(crate) fn commit_composed_reply(
         .map_err(ProjectError::from)?;
 
     // Policy auto-acceptance for any cited `result_ready` sessions after reply is durably posted.
-    for sid in &ready_sessions {
-        let _ = supervisor.settle_session(
+    for (sid, revision) in &ready_sessions {
+        // The durable reply is also the recovery receipt if settlement fails.
+        if let Err(error) = supervisor.settle_reported_revision(
             &state.workspace_id,
             sid,
-            true,
-            false,
-            None,
+            revision,
             state.holds_lease,
-        );
+        ) {
+            eprintln!(
+                "project delivery settlement pending: {sid} revision {revision}: {}",
+                error.code
+            );
+        }
     }
     for k in composed.report_fact_keys {
         state.prior_report_fact_keys.insert(k);
@@ -2587,6 +2642,12 @@ fn execute_project_capability(
             if args["detail"].as_str() == Some("summary") {
                 Ok(json!({ "ok": true, "session": report.summary }))
             } else {
+                if report.summary.status == "result_ready" {
+                    state.read_result_revisions.insert(
+                        report.summary.session_id.clone(),
+                        report.summary.updated_at.clone(),
+                    );
+                }
                 // Keep report payload compact and non-redundant so normal session reports
                 // stay inline without triggering unnecessary multi-round read_tool_result paging.
                 let brief_preview: String = if report.task_brief.chars().count() > 400 {
@@ -2863,8 +2924,7 @@ fn execute_project_capability(
                 supervisor,
                 &mut state,
                 tool_call_id,
-                false,
-                false,
+                ReplyOrigin::Structured,
             );
             if res.is_err() {
                 state.post_reply_rejected = true;

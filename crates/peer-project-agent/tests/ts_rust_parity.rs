@@ -381,11 +381,15 @@ fn ts_rust_parity_input_attachments_validation_and_limits() {
         }),
     ];
 
-    let vectors_json = serde_json::to_string(&vectors).unwrap();
+    // One vector intentionally exceeds the per-environment-string limit on Linux.
+    let fixture = tempdir().unwrap();
+    let vectors_file = fixture.path().join("vectors.json");
+    std::fs::write(&vectors_file, serde_json::to_vec(&vectors).unwrap()).unwrap();
     let ts_results = run_node_json(
         r#"
+        import { readFileSync } from 'node:fs';
         import { normalizeUserUpload } from './packages/runtime-node/src/project-agent/input-attachments.mjs';
-        const items = JSON.parse(process.env.VECTORS_JSON);
+        const items = JSON.parse(readFileSync(process.env.VECTORS_FILE, 'utf8'));
         const out = items.map(item => {
           try {
             return { ok: true, value: normalizeUserUpload(item) };
@@ -395,7 +399,7 @@ fn ts_rust_parity_input_attachments_validation_and_limits() {
         });
         console.log(JSON.stringify(out));
         "#,
-        &[("VECTORS_JSON", &vectors_json)],
+        &[("VECTORS_FILE", vectors_file.to_str().unwrap())],
     );
 
     let ts_arr = ts_results.as_array().unwrap();

@@ -18,6 +18,7 @@ import { formatBytes } from '../../state/format';
 import { invalidateLocalImagePreview, loadLocalImageDataUrl } from '../../state/localImagePreview';
 import { useResourceActions, useResourceRead } from '../../../ui/resources/useResourceState';
 import type { ChatAttachment } from '../../state/types';
+import { inputImageReference, loadInputImageDataUrl, type InputImageReference } from '../../state/inputImagePreview';
 
 /** 灯箱数据源：path 必备；name/dataUrl 缺省时组件自行推导或按需加载。 */
 export interface ImageLightboxSource {
@@ -25,19 +26,24 @@ export interface ImageLightboxSource {
   readonly path: string;
   /** 展示名；缺省取 path 最后一段。 */
   readonly name?: string;
-  /** 已就绪的图片 dataUrl；缺失时组件按 path 按需加载。 */
+  /** 已就绪的图片 dataUrl；缺失时按引用或真实路径加载。 */
   readonly dataUrl?: string;
+  readonly inputImage?: InputImageReference;
+  /** An attachment display name alone must never be interpreted as a path. */
+  readonly displayNameOnly?: boolean;
   /** 附加元信息（如附件大小「130.9 KB」），展示在尺寸旁。 */
   readonly sizeLabel?: string;
 }
 
-/** 附件 → 灯箱数据源：优先 dataUrl，缺省回退 filePath（无路径时仅展示图片本身）。 */
-export function imageLightboxSourceFromAttachment(attachment: ChatAttachment): ImageLightboxSource {
+/** 附件 → 灯箱数据源：优先内联图，再用工作区摘要或已有文件路径。 */
+export function imageLightboxSourceFromAttachment(attachment: ChatAttachment, workspaceId?: string): ImageLightboxSource {
   const path = attachment.filePath ?? attachment.name;
   return {
     path,
     name: attachment.name,
     dataUrl: attachment.dataUrl,
+    inputImage: inputImageReference(attachment, workspaceId),
+    displayNameOnly: !attachment.filePath,
     sizeLabel: typeof attachment.size === 'number' ? formatBytes(attachment.size) : undefined,
   };
 }
@@ -60,12 +66,16 @@ export function ImageLightbox({
   readonly onClose: () => void;
 }) {
   const fileName = source.name ?? source.path.split(/[\\/]/).pop() ?? source.path;
-  const realPath = looksLikeRealPath(source.path) ? source.path : null;
-  const identity = useMemo(() => ({ path: source.path, dataUrl: source.dataUrl }), [source.path, source.dataUrl]);
+  const ref = source.inputImage;
+  const realPath = !ref && !source.displayNameOnly && looksLikeRealPath(source.path) ? source.path : null;
+  const identity = useMemo(() => ({ path: source.path, dataUrl: source.dataUrl, realPath,
+    workspaceId: ref?.workspaceId, digest: ref?.blobDigest, mime: ref?.mimeType }),
+  [source.path, source.dataUrl, realPath, ref?.workspaceId, ref?.blobDigest, ref?.mimeType]);
   const [attempt, setAttempt] = useState(0);
-  const retrySource = useMemo(() => ({ fromPath: false }), [identity]);
+  const retrySource = useMemo(() => ({ skipInline: false }), [identity]);
   const image = useResourceRead(identity, async () => {
-    const url = retrySource.fromPath && realPath ? await loadLocalImageDataUrl(realPath) : source.dataUrl || (realPath ? await loadLocalImageDataUrl(realPath) : null);
+    const url = (!retrySource.skipInline && source.dataUrl) ||
+      (ref ? await loadInputImageDataUrl(ref) : realPath ? await loadLocalImageDataUrl(realPath) : null);
     if (!url?.startsWith('data:image/')) throw Error('IMAGE_UNAVAILABLE');
     return url;
   });
@@ -77,7 +87,7 @@ export function ImageLightbox({
   const copied = actions.get('copy').confirmed;
   useEffect(() => { setAttempt(0); setZoomed(false); setDims(null); setDecodeFailed(false); }, [identity]);
   const retry = () => {
-    retrySource.fromPath = true;
+    retrySource.skipInline = Boolean(ref || realPath);
     if (realPath) invalidateLocalImagePreview(realPath);
     setDecodeFailed(false); setDims(null); setZoomed(false); setAttempt(value => value + 1);
     void image.reload();

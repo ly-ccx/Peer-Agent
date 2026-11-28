@@ -37,6 +37,8 @@ export interface ChatAttachment {
    */
   workspaceRelPath?: string;
   dataUrl?: string;
+  /** Host-issued digest for a sent Bot image; never a filesystem path. */
+  blobDigest?: string;
   text?: string;
   /**
    * Appshot（前台窗口快照）附件：本地 artifact 引用。

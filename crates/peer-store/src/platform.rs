@@ -16,6 +16,8 @@ pub(crate) const DIR_LOCK_NAME: &str = ".peer-dir.lock";
 #[cfg(windows)]
 pub(crate) const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 #[cfg(windows)]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+#[cfg(windows)]
 pub(crate) const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
@@ -82,6 +84,22 @@ pub(crate) fn metadata_nlink_is_one(meta: &Metadata) -> bool {
 pub(crate) fn is_reparse_point(meta: &Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+}
+
+#[cfg(windows)]
+pub(crate) fn open_directory_identity(path: &Path) -> io::Result<same_file::Handle> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // Hold the actual NTFS file identity with the handle open. Creation time
+    // can be reused when another directory replaces this path immediately.
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_dir() || is_reparse_point(&meta) {
+        return Err(io::Error::other("not a directory"));
+    }
+    same_file::Handle::from_file(file)
 }
 
 pub(crate) fn open_readonly_nofollow(path: &Path) -> io::Result<File> {

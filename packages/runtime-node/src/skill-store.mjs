@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import AdmZip from 'adm-zip';
@@ -6,6 +6,8 @@ import { parse as parseYaml } from 'yaml';
 
 const SKILL_FILENAME = 'SKILL.md';
 const ASSETS_DIR = 'assets';
+const MAX_MARKETPLACE_ZIP_FILES = 2_000;
+const MAX_MARKETPLACE_EXPANDED_BYTES = 100 * 1024 * 1024;
 const SETTINGS_FILENAME = 'settings.json';
 const MANAGED_INSTALL_SOURCES = new Set(['skillhub', 'qoder-marketplace']);
 
@@ -752,108 +754,121 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     };
   }
 
-  /**
-   * 安装 ZIP Skill。
-   * @param {Buffer} zipBuffer
-   * @param {{
-   *   scope?: 'global' | 'workspace',
-   *   workspacePath?: string | null,
-   *   source?: string | null,
-   *   iconUrl?: string | null,
-   *   meta?: Record<string, unknown>,
-   * }} [options]
-   * - global（默认）：写入 userData/skills
-   * - workspace：优先写入本次明确指定的 workspacePath/skills，否则回退当前工作区；均缺失时抛 workspace_required
-   * - source / iconUrl / meta：安装后合并写入 _meta.json（市场图标与来源）
-   */
-  function installSkillFromZip(zipBuffer, {
-    scope = 'global',
-    workspacePath: requestedWorkspacePath = null,
-    source = null,
-    iconUrl = null,
-    meta = null,
+  // Validate all package paths and read their bytes before returning a reusable installer.
+  function prepareSkillFromZip(zipBuffer, {
+    entries = new AdmZip(zipBuffer).getEntries(),
+    readEntry = (entry) => entry.getData(),
+    requireDescription = true,
   } = {}) {
-    const installScope = scope === 'workspace' ? 'workspace' : 'global';
-    let targetRoot = skillsRoot;
-    if (installScope === 'workspace') {
-      const ws = normalizeWorkspaceKey(requestedWorkspacePath) ?? getWorkspacePath();
-      if (!ws) throw new Error('workspace_required');
-      targetRoot = path.join(ws, 'skills');
-    }
-
-    const zip = new AdmZip(zipBuffer);
-    const entries = zip.getEntries();
-
-    // Find SKILL.md — could be at root or inside a single top-level folder
-    let prefix = '';
-    const rootSkill = entries.find((e) => e.entryName === SKILL_FILENAME);
-    if (!rootSkill) {
-      const nested = entries.find((e) => e.entryName.endsWith(`/${SKILL_FILENAME}`) && e.entryName.split('/').length === 2);
-      if (!nested) throw new Error('zip must contain SKILL.md at the root');
-      prefix = nested.entryName.split('/')[0] + '/';
-    }
-
-    // Parse frontmatter to get skillId — prefer name > skillId > prefix（与 tgz 安装对齐）
-    const skillMdEntry = rootSkill || entries.find((e) => e.entryName === `${prefix}${SKILL_FILENAME}`);
-    const content = skillMdEntry.getData().toString('utf8');
-    const { frontmatter } = parseFrontmatter(content);
-    const rawPrefix = prefix.replace(/\/$/, '');
-    const skillId =
-      frontmatter.name ||
-      frontmatter.skillId ||
-      (rawPrefix && rawPrefix !== 'package' ? rawPrefix : '') ||
-      `skill-${Date.now()}`;
-
-    const destDir = path.join(targetRoot, skillId);
-    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true });
-
-    for (const entry of entries) {
-      if (entry.isDirectory) continue;
-      const relative = prefix ? entry.entryName.slice(prefix.length) : entry.entryName;
-      if (!relative) continue;
-      const target = path.resolve(destDir, relative);
-      const relativeToRoot = path.relative(destDir, target);
-      if (!relativeToRoot || relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
-        throw new Error('zip_path_escape');
+    const packageEntries = entries.map((entry) => ({ entry, filename: entry.entryName.replaceAll('\\', '/') }));
+    if (requireDescription) {
+      const files = entries.filter((entry) => !entry.isDirectory);
+      if (files.length > MAX_MARKETPLACE_ZIP_FILES
+        || files.reduce((size, entry) => size + entry.header.size, 0) > MAX_MARKETPLACE_EXPANDED_BYTES) {
+        throw new Error('zip_expansion_limit');
       }
-      const targetDir = path.dirname(target);
-      if (!existsSync(targetDir)) mkdirSync(targetDir, { recursive: true });
-      writeFileSync(target, entry.getData());
     }
+    const manifest = packageEntries.find(({ filename }) => filename === SKILL_FILENAME)
+      ?? packageEntries.find(({ filename }) => /^[^/]+\/SKILL\.md$/.test(filename));
+    if (!manifest) throw new Error('zip must contain SKILL.md at the root');
 
-    // 市场安装元数据：在 zip 自带 _meta.json 之上合并 source / iconUrl。
-    const metaPatch = {
-      ...(meta && typeof meta === 'object' ? meta : {}),
-    };
-    if (typeof source === 'string' && source.trim()) metaPatch.source = source.trim();
-    if (typeof iconUrl === 'string' && iconUrl.trim()) metaPatch.iconUrl = iconUrl.trim();
-    if (Object.keys(metaPatch).length > 0) {
-      writeSkillMeta(destDir, metaPatch);
+    const prefix = manifest.filename.slice(0, -SKILL_FILENAME.length);
+    const folder = prefix.slice(0, -1);
+    const content = readEntry(manifest.entry);
+    const { frontmatter } = parseFrontmatter(content.toString('utf8'));
+    const skillId = safeSkillDirName(frontmatter.name || frontmatter.skillId
+      || (folder !== 'package' ? folder : '') || `skill-${Date.now()}`);
+    if (!skillId || (process.platform === 'win32' && /[:*?"<>|]|[. ]$/.test(skillId))) {
+      throw new Error('zip_path_escape');
     }
-
-    refresh();
-    const installedInActiveScope = listSkills().find((s) => s.skillId === skillId) ?? null;
-    const installedAtTarget = installedInActiveScope ?? loadSingleSkill(destDir, skillId);
-    if (!installedAtTarget) {
-      // 文件已落盘但无法加载（如 description 为空）时明确失败，避免 UI 假成功。
+    if (requireDescription && (typeof frontmatter.description !== 'string' || !frontmatter.description.trim())) {
       throw new Error('skill_install_unreadable');
     }
-    if (installedInActiveScope) return { ...installedInActiveScope, installScope };
-    return {
-      skillId: installedAtTarget.skillId,
-      name: installedAtTarget.name,
-      description: installedAtTarget.description,
-      whenToUse: installedAtTarget.whenToUse || '',
-      version: installedAtTarget.version,
-      dataLevel: installedAtTarget.dataLevel,
-      enabled: false,
-      scope: 'workspace',
-      workspacePath: normalizeWorkspaceKey(requestedWorkspacePath),
-      iconUrl: installedAtTarget.iconUrl ?? null,
-      source: installedAtTarget.source ?? null,
-      canUninstall: true,
-      installScope,
+
+    const files = new Map();
+    for (const { entry, filename } of packageEntries) {
+      if (entry.isDirectory || !filename.startsWith(prefix)) continue;
+      const parts = filename.slice(prefix.length).split('/');
+      if (parts.some((part) => !part || part === '.' || part === '..' || part.includes('\0') || part.includes(':')
+        || (process.platform === 'win32' && /[*?"<>|]|[. ]$/.test(part)))) {
+        throw new Error('zip_path_escape');
+      }
+      const relative = parts.join(path.sep);
+      if (files.has(relative)) throw new Error('zip_duplicate_path');
+      files.set(relative, entry === manifest.entry ? content : readEntry(entry));
+    }
+    for (const relative of files.keys()) {
+      for (let parent = path.dirname(relative); parent !== '.'; parent = path.dirname(parent)) {
+        if (files.has(parent)) throw new Error('zip_conflicting_paths');
+      }
+    }
+
+    return ({ scope = 'global', workspacePath: requestedWorkspacePath = null, source = null, iconUrl = null, meta = null } = {}) => {
+      const installScope = scope === 'workspace' ? 'workspace' : 'global';
+      const ws = installScope === 'workspace' ? normalizeWorkspaceKey(requestedWorkspacePath) ?? getWorkspacePath() : null;
+      if (installScope === 'workspace' && !ws) throw new Error('workspace_required');
+      const targetRoot = ws ? path.join(ws, 'skills') : skillsRoot;
+      const destDir = path.join(targetRoot, skillId);
+      const metaPatch = { ...(meta && typeof meta === 'object' ? meta : {}) };
+      if (typeof source === 'string' && source.trim()) metaPatch.source = source.trim();
+      if (typeof iconUrl === 'string' && iconUrl.trim()) metaPatch.iconUrl = iconUrl.trim();
+      const hasMetaPatch = Object.keys(metaPatch).length > 0;
+
+      if (ws) {
+        // Create only the skills directory. A workspace removed during download must stay removed.
+        try { mkdirSync(targetRoot); }
+        catch (error) { if (error.code !== 'EEXIST') throw error; }
+        assertSkillInstallPath(targetRoot);
+      } else {
+        mkdirSync(targetRoot, { recursive: true });
+      }
+      const existing = assertSkillInstallPath(destDir);
+      if (existing) {
+        for (const relative of files.keys()) assertSkillInstallFile(destDir, relative);
+        if (hasMetaPatch) assertSkillInstallFile(destDir, '_meta.json');
+      }
+      const staging = existing ? null : mkdtempSync(path.join(targetRoot, '.peer-install-'));
+      const outputDir = staging ? path.join(staging, 'skill') : destDir;
+      try {
+        for (const [relative, data] of files) {
+          const file = path.join(outputDir, relative);
+          mkdirSync(path.dirname(file), { recursive: true });
+          writeFileSync(file, data);
+        }
+        if (hasMetaPatch) writeSkillMeta(outputDir, metaPatch);
+        if (staging) renameSync(outputDir, destDir);
+      } finally {
+        if (staging) rmSync(staging, { recursive: true, force: true });
+      }
+
+      const installed = loadSingleSkill(destDir, skillId);
+      if (!installed) throw new Error('skill_install_unreadable');
+      refresh();
+      const summary = summarizeSkill({ ...installed, scope: installScope, workspacePath: ws }, ws ?? activeWorkspaceKey);
+      return { ...summary, installScope };
     };
+  }
+
+  function assertSkillInstallPath(target, { file = false } = {}) {
+    const info = lstatSync(target, { throwIfNoEntry: false });
+    if (info && (file ? !info.isFile() || info.nlink !== 1 : !info.isDirectory())) {
+      throw new Error('skill_install_path_conflict');
+    }
+    return Boolean(info);
+  }
+
+  function assertSkillInstallFile(root, relative) {
+    const parts = relative.split(path.sep);
+    let parent = root;
+    for (const part of parts.slice(0, -1)) {
+      parent = path.join(parent, part);
+      if (!assertSkillInstallPath(parent)) return;
+    }
+    assertSkillInstallPath(path.join(parent, parts.at(-1)), { file: true });
+  }
+
+  function installSkillFromZip(zipBuffer, options) {
+    return prepareSkillFromZip(zipBuffer, { requireDescription: false })(options);
   }
 
   function installSkillFromTgz(tgzBuffer) {
@@ -916,6 +931,7 @@ export function createSkillStore({ userDataPath, sourceRoots = [], workspacePath
     getWorkspacePath,
     isSkillMounted,
     installSkillFromZip,
+    prepareSkillFromZip,
     installSkillFromTgz,
     listAvailableSkills,
     linkSkill,

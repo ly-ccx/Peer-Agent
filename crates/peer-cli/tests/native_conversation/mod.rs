@@ -333,11 +333,13 @@ fn public_ordinary_max_turns_is_error_after_real_tool_evidence_and_final_usage_c
 fn public_ordinary_sigterm_during_open_stdin_has_no_unowned_reader_or_data_effects() {
     let fixture = Ordinary::new();
     let (reader, writer) = rustix::pipe::pipe().unwrap();
-    let child = fixture
-        .command(None)
-        .stdin(Stdio::from(reader.try_clone().unwrap()))
-        .spawn()
-        .unwrap();
+    let mut child = OwnedChild(Some(
+        fixture
+            .command(None)
+            .stdin(Stdio::from(reader.try_clone().unwrap()))
+            .spawn()
+            .unwrap(),
+    ));
     let mut input = std::fs::File::from(writer);
     // The pipe remains open: EOF is not what makes this process exit.
     // Observe actual consumption instead of assuming a startup delay means the
@@ -345,7 +347,11 @@ fn public_ordinary_sigterm_during_open_stdin_has_no_unowned_reader_or_data_effec
     // duplicate read descriptor and never consumes from it.
     input.write_all(b"x").unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    while rustix::io::ioctl_fionread(&reader).unwrap() != 0 {
+    while rustix::io::retry_on_intr(|| rustix::io::ioctl_fionread(&reader)).unwrap() != 0 {
+        assert!(
+            child.child().try_wait().unwrap().is_none(),
+            "ordinary exec exited before reading stdin"
+        );
         assert!(
             Instant::now() < deadline,
             "ordinary stdin was never consumed"
@@ -353,11 +359,11 @@ fn public_ordinary_sigterm_during_open_stdin_has_no_unowned_reader_or_data_effec
         thread::sleep(Duration::from_millis(10));
     }
     rustix::process::kill_process(
-        rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
+        rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
         rustix::process::Signal::TERM,
     )
     .unwrap();
-    let output = wait(child);
+    let output = wait(child.0.take().unwrap());
     drop(input);
     assert_eq!(
         output.status.code(),
@@ -365,6 +371,7 @@ fn public_ordinary_sigterm_during_open_stdin_has_no_unowned_reader_or_data_effec
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(output.stdout.is_empty());
     assert!(!fixture.home().exists());
 }
 

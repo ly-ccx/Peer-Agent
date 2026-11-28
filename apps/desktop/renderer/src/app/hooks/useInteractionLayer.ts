@@ -9,7 +9,7 @@ export const InteractionLayerContext = createContext<RefObject<InteractionLayer 
 export function useInteractionLayer(active: boolean, options: {
   roots: readonly RefObject<HTMLElement | null>[]; trigger?: RefObject<HTMLElement | null>;
   modal?: boolean; passive?: boolean; outside?: boolean; dismissOnTab?: boolean;
-  restoreFocus?: boolean; closeOnTriggerRemoval?: boolean;
+  restoreFocus?: boolean; restoreFocusOnOutside?: boolean; closeOnTriggerRemoval?: boolean;
   /** A new anchor is a new layer identity; ordinary data refreshes leave focus alone. */
   identity?: unknown;
   onClose?: () => void; onEscape?: () => boolean; onEnter?: () => void;
@@ -54,7 +54,19 @@ export function useInteractionLayer(active: boolean, options: {
       if (!latest.current.outside || !ownsLayerPointer(layer, event)) return;
       const target = event.target;
       if (target instanceof Node && !interactionLayers.contains(layer, target) && !trigger?.contains(target)) {
-        restore = layer.modal; latest.current.onClose?.();
+        const restoreOutside = latest.current.restoreFocusOnOutside === true;
+        restore = layer.modal || restoreOutside;
+        latest.current.onClose?.();
+        if (restoreOutside && trigger) {
+          const modal = interactionLayers.modal();
+          // A pointer on static modal content can move focus to the dialog after cleanup.
+          requestAnimationFrame(() => {
+            const active = document.activeElement;
+            const focusFellBack = active === document.body || modal?.roots().some(root => root === active);
+            if (focusFellBack && interactionLayers.modal() === modal && trigger.isConnected
+              && !trigger.matches(':disabled') && !trigger.closest('[inert],[hidden]')) trigger.focus({ preventScroll: true });
+          });
+        }
       }
     };
     window.addEventListener('keydown', key);
