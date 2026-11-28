@@ -2231,20 +2231,27 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
     );
     let req_count = Arc::new(AtomicUsize::new(0));
     let sse_stop = CancellationToken::new();
+    let (first_received, first_request) = tokio::sync::oneshot::channel();
+    let (fail_first, first_failure) = tokio::sync::oneshot::channel();
     {
         let req_count = Arc::clone(&req_count);
         let stop = sse_stop.clone();
         tokio::spawn(async move {
+            let mut first = Some((first_received, first_failure));
             loop {
                 tokio::select! {
                     biased;
                     _ = stop.cancelled() => break,
                     accepted = listener.accept() => {
                         let Ok((mut socket, _)) = accepted else { break; };
-                        let n = req_count.fetch_add(1, Ordering::SeqCst);
+                        let req_count = Arc::clone(&req_count);
+                        let first = first.take();
                         tokio::spawn(async move {
                             let _ = read_http_request(&mut socket).await;
-                            if n == 0 {
+                            req_count.fetch_add(1, Ordering::SeqCst);
+                            if let Some((received, fail)) = first {
+                                let _ = received.send(());
+                                let _ = fail.await;
                                 let body = json!([{
                                     "error": {
                                         "code": 400,
@@ -2296,16 +2303,21 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
         .unwrap()
         .to_owned();
 
-    client
-        .call(
-            "project.bot.submitInput",
-            json!({
-                "workspaceId": ws_id,
-                "inputId": "inp-hb-fail-1",
-                "text": "Trigger single failure",
-            }),
-        )
-        .await;
+    let input = json!({
+        "workspaceId": ws_id,
+        "inputId": "inp-hb-fail-1",
+        "text": "Trigger single failure",
+    });
+    let submitted = client.call("project.bot.submitInput", input.clone()).await;
+    assert_eq!(submitted["ok"], true);
+    tokio::time::timeout(Duration::from_secs(10), first_request)
+        .await
+        .expect("first model request")
+        .unwrap();
+    // A duplicate submission may queue another host wake, but does not add an input.
+    let duplicate = client.call("project.bot.submitInput", input).await;
+    assert_eq!(duplicate["ok"], true);
+    fail_first.send(()).unwrap();
 
     // Wait for the first failure card with HTTP 400 detail.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);

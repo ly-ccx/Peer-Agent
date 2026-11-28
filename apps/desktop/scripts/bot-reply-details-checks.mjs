@@ -3,9 +3,17 @@ import assert from 'node:assert/strict';
 
 /** Search results can retain the previous snapshot while the new query loads. */
 export async function selectBotByName(page, name) {
-  await page.locator('.bot-search').fill(name);
-  await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: name }) }).click();
+  const row = page.locator('.bot-row').filter({ has: page.getByText(name, { exact: true }) });
+  if (!await row.count()) await (await openBotListSearch(page)).fill(name);
+  await row.click();
   await page.waitForFunction(name => document.querySelector('.bot-composer textarea')?.getAttribute('placeholder')?.includes(name), name);
+}
+
+export async function openBotListSearch(page) {
+  const input = page.locator('.bot-search');
+  await page.keyboard.press('ControlOrMeta+f');
+  await input.waitFor();
+  return input;
 }
 
 export async function wheelBotConversation(page, deltaY) {

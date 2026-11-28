@@ -89,7 +89,14 @@ fn admit_with_limit(history: &Value, wire: Wire, limit: usize) -> Result<(), Mod
             if image_bytes > limit {
                 return Err(ModelError::new("model_request_limit"));
             }
-            let parsed = reqwest::Url::parse(raw).map_err(|_| invalid())?;
+            // A strictly validated base64 payload cannot change the URL scheme.
+            // Parse only the header before inline() validates the original data.
+            // This avoids percent-copying tens of MiB of opaque image text.
+            let scheme_input = raw
+                .split_once(',')
+                .filter(|(header, _)| header.starts_with("data:") && header.ends_with(";base64"))
+                .map_or(raw, |(header, _)| header);
+            let parsed = reqwest::Url::parse(scheme_input).map_err(|_| invalid())?;
             match parsed.scheme() {
                 "data" => {
                     if !raw.starts_with("data:") && matches!(wire, Wire::Anthropic | Wire::Gemini) {

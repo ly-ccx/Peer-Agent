@@ -9547,14 +9547,14 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
             .unwrap()
             .send(())
             .unwrap();
-        finish
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(20))
-            .unwrap();
+        // Foreground assertions release the worker. Dropping their sender on
+        // failure also releases this mock, without a competing wall clock.
+        let _ = finish.lock().unwrap().recv();
         sse_text("Worker completed separately.")
     })]);
-    let worker_model = mock_model(&worker.endpoint);
+    // The worker is deliberately idle while the foreground is measured.
+    let worker_model =
+        mock_model_with_deadline(&worker.endpoint, Wire::Chat, Duration::from_secs(60));
     let bot = start_mock_server(vec![Box::new(move |req| {
         let messages = req["messages"].as_array().unwrap();
         let content = messages
@@ -9589,6 +9589,7 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
             &cancel
         ),
         async {
+            let release_worker = finish_worker;
             tokio::time::timeout(Duration::from_secs(10), started)
                 .await
                 .unwrap()
@@ -9604,6 +9605,7 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
                     attachments,
                 )
                 .unwrap();
+            let queue_elapsed = sent_at.elapsed();
             assert!(
                 input
                     .attachments
@@ -9617,19 +9619,20 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
                 .await
                 .unwrap();
             let elapsed = sent_at.elapsed();
-            assert_eq!(host.supervisor().list_sessions(&ws_id)[0].status, "running");
-            finish_worker.send(()).unwrap();
             eprintln!(
-                "received two 8K images while worker active in {} ms",
-                elapsed.as_millis()
+                "received two 8K images while worker active in {} ms (queue {} ms)",
+                elapsed.as_millis(),
+                queue_elapsed.as_millis()
             );
             assert!(elapsed < Duration::from_secs(10));
+            assert_eq!(host.supervisor().list_sessions(&ws_id)[0].status, "running");
             assert_eq!(
                 host.find_reply_for_input(&ws_id, input_id)
                     .unwrap()
                     .unwrap()["content"],
                 "I received both images."
             );
+            release_worker.send(()).unwrap();
             tick
         },
     );

@@ -746,14 +746,7 @@ impl ProjectHostRuntime {
         }
     }
 
-    fn wake_workspace_from_heartbeat(self: &Arc<Self>, workspace_id: &str) {
-        if self
-            .active_wakes
-            .lock()
-            .is_ok_and(|active| active.contains(workspace_id))
-        {
-            return;
-        }
+    fn is_paused_after_failure(&self, workspace_id: &str) -> bool {
         if let Ok(paused) = self.heartbeat_paused_inputs.lock()
             && let Some(paused_cursor) = paused.get(workspace_id)
         {
@@ -774,9 +767,19 @@ impl ProjectHostRuntime {
                 .host
                 .failure_hold(workspace_id)
                 .is_some_and(|hold| now_ms >= hold.hold_until_ms);
-            if !has_new_unread && !has_queued_sessions && !wake_trial_due {
-                return;
-            }
+            return !has_new_unread && !has_queued_sessions && !wake_trial_due;
+        }
+        false
+    }
+
+    fn wake_workspace_from_heartbeat(self: &Arc<Self>, workspace_id: &str) {
+        if self
+            .active_wakes
+            .lock()
+            .is_ok_and(|active| active.contains(workspace_id))
+            || self.is_paused_after_failure(workspace_id)
+        {
+            return;
         }
         self.wake_workspace(workspace_id);
     }
@@ -833,7 +836,7 @@ impl ProjectHostRuntime {
             .lock()
             .map(|g| g.contains(workspace_id))
             .unwrap_or(false);
-        if missed && self.is_enabled() {
+        if missed && self.is_enabled() && !self.is_paused_after_failure(workspace_id) {
             self.wake_workspace(workspace_id);
         }
     }
@@ -862,6 +865,10 @@ impl ProjectHostRuntime {
         let _ws_guard = lock.lock().await;
 
         if !self.is_enabled() || loop_cancel.is_cancelled() {
+            return;
+        }
+        // A wake queued while the current turn was running can outlive its failure.
+        if self.is_paused_after_failure(workspace_id) {
             return;
         }
         if !self
