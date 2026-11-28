@@ -160,6 +160,11 @@
   --state-denied: #5C5A70;
   /* 运行中/信息指示：冷蓝（对齐 azure-seal，非 Tailwind blue-500） */
   --state-info: #3B7FAB;
+  --state-iridescent-blue: oklch(55% 0.105 235);
+  --state-iridescent-lilac: oklch(55% 0.115 302);
+  --state-iridescent-rose: oklch(55% 0.11 350);
+  --state-iridescent-apricot: oklch(56% 0.105 58);
+  --state-iridescent-mint: oklch(54% 0.085 165);
 
   /* ─── Bot 头像与子 Agent 语义色调 ─── */
   --bot-avatar-ink: #17212b;
@@ -333,6 +338,7 @@
   --za-motion-fast: 120ms;
   --za-motion-medium: 200ms;
   --za-motion-slow: 320ms;
+  --za-motion-iridescent-flow: 3.2s;
   /* 位移上限（克制原则：位移类基元 ≤ 24px，见动效规范准入纪律 §4.3）
    * 语义基元的入场上移 / 退场下移统一引用，禁止在组件里写 magic number。 */
   --za-motion-shift-sm: 6px;
@@ -540,6 +546,11 @@
   --state-danger-soft: rgba(170, 110, 128, 0.14);
   --state-denied: #8C8AA0;
   --state-info: #5D9CBF;
+  --state-iridescent-blue: oklch(80% 0.10 225);
+  --state-iridescent-lilac: oklch(77% 0.12 300);
+  --state-iridescent-rose: oklch(79% 0.11 350);
+  --state-iridescent-apricot: oklch(83% 0.105 65);
+  --state-iridescent-mint: oklch(80% 0.11 165);
   --bot-tone-violet: #b79be9;
   --bot-tone-cyan: #6bc0cf;
   --bot-tone-amber: #e4be68;

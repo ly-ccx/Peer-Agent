@@ -533,9 +533,12 @@
   color: var(--graphite-fade);
 }
 .bot-tray-glyph[data-tone="good"] { color: var(--state-success); }
-.bot-tray-glyph[data-tone="azure"] { color: var(--azure-seal); }
-.bot-tray-glyph[data-tone="warn"] { color: var(--state-confirm); }
+.bot-tray-glyph[data-tone="warn"] { color: var(--bot-tone-amber); }
 .bot-tray-glyph[data-tone="danger"] { color: var(--state-danger); }
+
+@media (forced-colors: active) {
+  .bot-tray-glyph[data-tone] { color: ButtonText; }
+}
 
 .bot-tray-row-main {
   min-width: 0;
