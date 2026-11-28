@@ -1,3 +1,11 @@
+/* Only the ghost text overlays the field. Keep the accept button in flow so it
+   cannot spill into the task strip above or the action row below the field. */
+.composer-input-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
 .input-prediction-mirror {
   position: absolute;
   z-index: 1;
@@ -11,12 +19,14 @@
 }
 .input-prediction-prefix { visibility: hidden; }
 .input-prediction-accept {
-  position: absolute;
-  z-index: 2;
-  inset-block-start: calc(-1 * var(--space-6));
-  inset-inline-end: var(--space-3);
+  align-self: flex-end;
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  margin-block-start: var(--space-1);
   display: inline-flex;
   align-items: center;
+  text-align: start;
+  overflow-wrap: anywhere;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border-color);

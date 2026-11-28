@@ -10,6 +10,8 @@ export { conversationRowKey } from '../state/conversationWindow';
 type Direction = 'up' | 'down' | 'unknown';
 const sourceId = (row: BotConversationViewRow | undefined) => row?.type === 'reply'
   ? row.messages[0]?.id ?? row.activity?.replyTo[0] : row?.type === 'message' ? row.message.id : undefined;
+const isVisibleScroller = (node: HTMLDivElement | null): node is HTMLDivElement =>
+  node !== null && node.isConnected !== false && node.clientWidth > 0 && node.clientHeight > 0;
 
 /** Geometry/reading only. Navigation memory is bounded and never persists conversation facts. */
 export function useConversationWindow(rows: readonly BotConversationViewRow[], highlightedId: string | null, highlightRequestId: number, followRequestId = 0,
@@ -21,6 +23,8 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const reading = useRef<ReadingAnchor | null>(highlightedId ? null : initial.current?.anchor ?? null);
   const resizePoint = useRef<{ row: HTMLElement; element: HTMLElement; delta: number } | null>(null);
   const measuredWidth = useRef(0);
+  const hidden = useRef(false);
+  const lastTop = useRef(initial.current?.top ?? 0);
   const pendingRestore = useRef<ReadingAnchor | null>(!pinned.current ? reading.current : null);
   const located = useRef<string | null>(null), restoration = useRef(0), navigationEpoch = useRef(0);
   const gesture = useRef<{ active: boolean; direction: Direction }>({ active: false, direction: 'unknown' });
@@ -39,20 +43,24 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     return node && marker ? marker.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop : 0;
   };
   const view = conversationViewport(offsets, Math.max(0, top - origin()), height);
-  const updateTop = (value: number) => setTop(current => Math.abs(current - value) < 0.5 ? current : value);
+  const updateTop = (value: number) => {
+    lastTop.current = value;
+    setTop(current => Math.abs(current - value) < 0.5 ? current : value);
+  };
   const persist = () => {
     if (!latest.current.ready || !keys.length || pendingRestore.current) return;
+    const node = scrollerRef.current;
     const center = reading.current ? keys.indexOf(reading.current.key) : keys.length - 1;
     const measured = [...new Set([...keys.slice(Math.max(0, center - 60), center + 80), ...keys.slice(-20)])]
       .flatMap(key => heights.current.has(key) ? [[key, heights.current.get(key)!] as const] : []);
     conversationReadingMemory.save(options.identity, { following: pinned.current, anchor: reading.current,
-      top: scrollerRef.current?.scrollTop ?? top, heights: measured });
+      top: isVisibleScroller(node) ? node.scrollTop : lastTop.current, heights: measured });
   };
   const saveOnLeave = useRef(persist); saveOnLeave.current = persist;
   useLayoutEffect(() => () => saveOnLeave.current(), [options.identity]);
   const remember = () => {
     const node = scrollerRef.current;
-    if (!node || !keys.length) return;
+    if (!isVisibleScroller(node) || !keys.length) return;
     const viewportTop = node.getBoundingClientRect().top;
     const candidate = [...node.querySelectorAll<HTMLElement>('[data-conversation-row]')].find(row => row.getBoundingClientRect().bottom > viewportTop);
     const visible = candidate && candidate.getBoundingClientRect().top < viewportTop + node.clientHeight ? candidate : undefined;
@@ -75,16 +83,29 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     cancelRestore(); gesture.current.active = false; clearTimeout(gestureTimer.current);
     pinned.current = true; reading.current = null; setFollowing(true);
     const node = scrollerRef.current;
-    if (node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); }
+    if (isVisibleScroller(node)) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); }
+    else if (node) hidden.current = true;
     persist();
   };
   const schedulerCallbacks = useRef({ follow: () => {}, refresh: () => {}, readGesture: () => {} });
   schedulerCallbacks.current = {
-    follow: () => { const node = scrollerRef.current; if (pinned.current && node) { node.scrollTop = node.scrollHeight; updateTop(node.scrollTop); } },
-    refresh: () => { const node = scrollerRef.current; if (node) updateTop(node.scrollTop); },
+    follow: () => {
+      const node = scrollerRef.current;
+      if (!pinned.current || !node) return;
+      if (!isVisibleScroller(node)) { hidden.current = true; return; }
+      node.scrollTop = node.scrollHeight; updateTop(node.scrollTop);
+    },
+    refresh: () => {
+      const node = scrollerRef.current;
+      if (!node) return;
+      if (!isVisibleScroller(node)) { hidden.current = true; return; }
+      updateTop(node.scrollTop);
+    },
     readGesture: () => {
+      const node = scrollerRef.current;
+      if (!isVisibleScroller(node)) return;
       if (!pinned.current && !pendingRestore.current && gesture.current.active) {
-        remember(); updateTop(scrollerRef.current?.scrollTop ?? top); persist();
+        remember(); updateTop(node.scrollTop); persist();
       }
     },
   };
@@ -99,6 +120,43 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
       followFrame.current = null;
       if (pinned.current) scheduler.current?.scheduleFollow();
     });
+  };
+  const locateHighlighted = (node: HTMLDivElement, currentOffsets = offsets) => {
+    if (!highlightedId) { located.current = null; return false; }
+    const request = `${highlightRequestId}:${highlightedId}`;
+    if (located.current === request) return false;
+    const index = rows.findIndex(row => replyRowContains(row, highlightedId));
+    cancelRestore(); pinned.current = false; setFollowing(false);
+    if (index < 0) return false;
+    located.current = request;
+    reading.current = { key: keys[index]!, messageId: sourceId(rows[index]), delta: Math.max(0, (node.clientHeight - (heights.current.get(keys[index]!) ?? 72)) / 2) };
+    node.scrollTop = restoreConversationOffset(keys, currentOffsets, reading.current, origin())!;
+    updateTop(node.scrollTop); persist();
+    return true;
+  };
+  const reconcilePosition = (node: HTMLDivElement, currentOffsets = offsets, forceFollow = false) => {
+    if (pinned.current) {
+      if (forceFollow) node.scrollTop = node.scrollHeight;
+      requestFollow();
+    } else if (reading.current) {
+      const anchor = pendingRestore.current ?? reading.current;
+      if (!keys.includes(anchor.key) && anchor.messageId) {
+        const match = rows.findIndex(row => replyRowContains(row, anchor.messageId));
+        if (match >= 0) reading.current = { ...anchor, key: keys[match]! };
+      }
+      const target = restoreConversationOffset(keys, currentOffsets, reading.current, origin());
+      if (target !== null) { node.scrollTop = target; pendingRestore.current = null; setRestoreStatus('none'); }
+    }
+    if (!pinned.current && !pendingRestore.current && (!resizePoint.current || resizePoint.current.element.isConnected === false
+      || resizePoint.current.row.dataset.conversationRow !== reading.current?.key)) remember();
+    updateTop(node.scrollTop); persist();
+  };
+  const revealCallbacks = useRef((_node: HTMLDivElement, _heightsChanged: boolean, _restoredByReflow: boolean) => {});
+  revealCallbacks.current = (node, heightsChanged, restoredByReflow) => {
+    const currentOffsets = heightsChanged ? conversationOffsets(keys, heights.current) : offsets;
+    if (locateHighlighted(node, currentOffsets)) return;
+    if (restoredByReflow) { persist(); return; }
+    reconcilePosition(node, currentOffsets, true);
   };
   useLayoutEffect(() => {
     const node = scrollerRef.current;
@@ -126,31 +184,26 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
-    if (pinned.current) requestFollow();
-    else if (reading.current) {
-      const anchor = pendingRestore.current;
-      if (anchor && !keys.includes(anchor.key) && anchor.messageId) {
-        const match = rows.findIndex(row => replyRowContains(row, anchor.messageId));
-        if (match >= 0) reading.current = { ...anchor, key: keys[match]! };
-      }
-      const target = restoreConversationOffset(keys, offsets, reading.current, origin());
-      if (target !== null) { node.scrollTop = target; pendingRestore.current = null; setRestoreStatus('none'); }
-    }
-    if (!pinned.current && !pendingRestore.current && (!resizePoint.current || resizePoint.current.element.isConnected === false
-      || resizePoint.current.row.dataset.conversationRow !== reading.current?.key)) remember();
-    updateTop(node.scrollTop); persist();
+    if (!isVisibleScroller(node)) { hidden.current = true; return; }
+    const wasHidden = hidden.current;
+    hidden.current = false;
+    if (wasHidden && locateHighlighted(node)) return;
+    reconcilePosition(node, offsets, wasHidden);
   }, [keys, offsets, height]);
 
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     const measure = () => {
+      if (!isVisibleScroller(node)) { hidden.current = true; return; }
+      const wasHidden = hidden.current;
+      hidden.current = false;
       const width = node.clientWidth;
-      if (width === 0 || node.isConnected === false) return;
       const widthChanged = typeof width === 'number' && width > 0 && measuredWidth.current > 0 && width !== measuredWidth.current;
       if (typeof width === 'number' && width > 0) measuredWidth.current = width;
       const point = resizePoint.current;
       const anchor = reading.current;
+      let restoredByReflow = false;
       // Keep the visible paragraph stable through line wrapping. This only
       // reconciles reading geometry; it never resumes following or wins a gesture.
       if (widthChanged && !pinned.current && !pendingRestore.current && !gesture.current.active && point && anchor
@@ -159,6 +212,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
         node.scrollTop += point.element.getBoundingClientRect().top - viewportTop - point.delta;
         reading.current = { ...anchor, delta: point.row.getBoundingClientRect().top - viewportTop };
         updateTop(node.scrollTop);
+        restoredByReflow = true;
       }
       setHeight(current => current === node.clientHeight ? current : node.clientHeight);
       const tail = tailRef.current?.getBoundingClientRect().height ?? 0;
@@ -168,6 +222,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
         if (measured > 0 && Math.abs((heights.current.get(key) ?? -1) - measured) > 0.5) { heights.current.set(key, measured); changed = true; }
       }
       if (changed) setRevision(value => value + 1);
+      if (wasHidden) revealCallbacks.current(node, changed, restoredByReflow);
     };
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
@@ -209,13 +264,10 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     if (!highlightedId) { located.current = null; return; }
     const request = `${highlightRequestId}:${highlightedId}`;
     if (located.current === request) return;
-    const index = rows.findIndex(row => replyRowContains(row, highlightedId)), node = scrollerRef.current;
-    cancelRestore(); pinned.current = false; setFollowing(false);
-    if (index < 0 || !node) return;
-    located.current = request;
-    reading.current = { key: keys[index]!, messageId: sourceId(rows[index]), delta: Math.max(0, (node.clientHeight - (heights.current.get(keys[index]!) ?? 72)) / 2) };
-    node.scrollTop = restoreConversationOffset(keys, offsets, reading.current, origin())!;
-    updateTop(node.scrollTop); persist();
+    const node = scrollerRef.current;
+    if (!node) return;
+    if (!isVisibleScroller(node)) { hidden.current = true; cancelRestore(); pinned.current = false; setFollowing(false); return; }
+    locateHighlighted(node);
   }, [highlightedId, highlightRequestId, keys, offsets, referenceStatus]);
 
   const userGesture = (direction: Direction) => {
@@ -240,7 +292,14 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     wantsOlder: () => gesture.current.active && gesture.current.direction !== 'down' && !pendingRestore.current,
     holdPosition: () => { cancelRestore(); remember(); pinned.current = false; setFollowing(false); persist(); },
     onScroll: () => {
-      const node = scrollerRef.current; if (!node) return;
+      const node = scrollerRef.current;
+      if (!node) return;
+      if (!isVisibleScroller(node)) { hidden.current = true; return; }
+      if (hidden.current) {
+        hidden.current = false;
+        revealCallbacks.current(node, false, false);
+        return;
+      }
       if (pendingRestore.current) { updateTop(node.scrollTop); return; }
       const decision = resolveThreadFollowAfterScroll({ currentlyFollowing: pinned.current, atBottom: node.scrollHeight - node.scrollTop - node.clientHeight < 80,
         userInitiated: gesture.current.active, direction: gesture.current.direction });
