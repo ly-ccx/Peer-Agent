@@ -4,7 +4,7 @@
   padding-inline: var(--space-5);
   border-bottom: 1px solid var(--chrome-hairline);
   background: var(--paper-base);
-  color: var(--ink-soft);
+  color: var(--graphite-soft);
   font-size: var(--ui-font-meta);
   line-height: var(--ui-line-control);
 }
@@ -18,7 +18,7 @@
 
 .bot-working-plan-count {
   flex: none;
-  color: var(--ink-base);
+  color: var(--graphite-base);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -41,7 +41,7 @@
   border: 0;
   border-radius: var(--ui-radius-control-compact);
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--graphite-soft);
   cursor: pointer;
 }
 
@@ -79,7 +79,7 @@
 .bot-working-plan-steps small,
 .bot-working-plan-invariants {
   display: block;
-  color: var(--ink-fade);
+  color: var(--graphite-fade);
   font-size: var(--ui-font-caption);
 }
 
