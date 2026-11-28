@@ -215,9 +215,10 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   // Submit a real explicit quote through the existing composer and durable IPC.
   await selectReplyBody(page, reply);
   await page.locator('.bot-selection-quote').click();
-  await composer.fill('针对这段原文补充说明'); await composer.press('Enter');
+  const explicitText = '针对这段原文补充说明';
+  await composer.fill(explicitText); await composer.press('Enter');
   await composerQuote.waitFor({ state: 'detached' });
-  const explicit = page.locator('.bot-user').filter({ has: page.locator('.bot-user-text', { hasText: '针对这段原文补充说明' }) });
+  const explicit = page.locator('.bot-user').filter({ has: page.getByText(explicitText, { exact: true }) });
   const explicitQuote = explicit.locator('.bot-user-quote');
   await explicitQuote.waitFor();
   assert.equal(await explicitQuote.locator('.bot-reply-bar-label').textContent(), 'project-000');
@@ -247,6 +248,9 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await page.locator('#bot-msg-rc-message-9999.is-anchored').waitFor();
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   if (originalViewport) await page.setViewportSize(originalViewport);
+  // Let the quoted turn commit before a subsequent smoke scenario submits input.
+  await page.locator('article[data-kind="agent_reply"] .bot-reply-text')
+    .getByText(`RC scripted reply: ${explicitText}`, { exact: true }).waitFor();
   checks.push('selected quote shows its actual source, fits a 760px viewport and cancels by keyboard without losing the draft');
   checks.push('explicit quote leaves the composer on send, names the real bot source inside the user bubble and navigates to that source by keyboard');
 }

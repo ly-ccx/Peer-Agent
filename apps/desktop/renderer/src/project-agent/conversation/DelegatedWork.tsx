@@ -16,13 +16,14 @@ export function DelegatedWork({ rows, botName, i18n, onOpen, disclosure }: { rea
   </section>;
 }
 function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: BotWorkRow; readonly botName: string; readonly i18n: I18nRuntime; readonly onOpen: (id: string) => void; readonly disclosure?: ProcessDisclosure }) {
-  const active = isTaskStatusSpinning(row.session ?? { status: row.status });
+  const session = row.status ? row.session : undefined;
+  const active = isTaskStatusSpinning(session ?? { status: row.status });
   const handoff = row.status === 'waiting_user' || row.status === 'result_ready';
   const statusKey = row.status === 'waiting_user' ? 'projectAgent.chat.work.waiting'
     : row.status === 'result_ready' ? 'projectAgent.chat.work.resultReady'
     : row.status ? `projectAgent.chat.sessionState.${row.status}` as const : 'projectAgent.chat.work.unavailable';
   const title = row.session?.title && row.session.title !== row.id ? row.session.title : i18n.t('projectAgent.chat.work.related');
-  const status = row.session ? formatDrawerSessionStatus(row.session, i18n, i18n.t(statusKey)) : i18n.t(statusKey);
+  const status = session ? formatDrawerSessionStatus(session, i18n, i18n.t(statusKey)) : i18n.t(statusKey);
   return <MotionDetails className="bot-work-row" data-status={row.status ?? 'unavailable'} open={disclosure ? disclosure.open[`work:${row.id}`] ?? false : undefined} onToggle={event => { if (event.target === event.currentTarget) disclosure?.toggle(`work:${row.id}`, event.currentTarget.open); }}>
     <summary><PeerIcon name={row.status === 'waiting_user' ? 'info' : 'terminal'} size={14} />
       <span className="bot-work-title">{title}</span>
@@ -33,7 +34,7 @@ function WorkRow({ row, botName, i18n, onOpen, disclosure }: { readonly row: Bot
       {handoff ? <p className="bot-work-hint">{i18n.t('projectAgent.chat.work.handoff', { name: botName })}</p> : null}
       <div className="bot-work-actions">
         <button type="button" onClick={() => onOpen(row.id)}>{i18n.t('projectAgent.chat.work.open')}<PeerIcon name="arrowUpRight" size={13} /></button>
-        <TaskCancelButton task={{ ...row.session, sessionId: row.id, status: row.session?.status ?? row.status, title }} i18n={i18n} />
+        <TaskCancelButton task={{ ...session, sessionId: row.id, status: row.status, title }} i18n={i18n} />
       </div>
     </div>
   </MotionDetails>;

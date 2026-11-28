@@ -167,13 +167,13 @@ try {
   });
   assert.deepEqual(alignment, [0, '0px', 'rgba(0, 0, 0, 0)']);
   await electron.evaluate(() => { globalThis.setADR135Status('verifying'); });
-  await feed.first().getByText('核验中').waitFor();
+  await feed.first().getByText('核验中', { exact: true }).waitFor();
   await electron.evaluate(() => { globalThis.setADR135Status('running'); });
   await feed.first().getByText('执行中').waitFor();
   await feed.first().hover();
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.bot-inline-worker-row')).backgroundColor !== 'rgba(0, 0, 0, 0)');
   const summary = page.locator('.bot-touchbar-summary');
-  assert.match(await summary.innerText(), /5 个任务 · 1 个运行中/);
+  assert.equal(await summary.locator('.bot-tb-status-text').innerText(), '5 个任务 · 待你决定 1 · 核验未通过 1 · 执行中 1 · 排队中 2');
   await summary.locator('.bot-tb-status').click();
   await page.locator('.bot-tray-row-title-line [data-executor-kind="peer"]').last().waitFor();
   await page.keyboard.press('Escape');

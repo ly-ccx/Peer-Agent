@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as react from 'react';
 import ts from 'typescript';
 import { createI18n } from '@peer-agent/i18n';
-import { canCancelTask, indexBotWork, replyTaskReferences } from './state/botWorkState.ts';
+import { canCancelTask, indexBotWork, replyTaskReferences, replyWork, workProgress } from './state/botWorkState.ts';
 import { recencyBucketOf, sidebarActiveSessionsOf, summarizeActiveSessions } from './state/botNavigationState.ts';
 import type { BotListItem, BotProfile } from '@peer-agent/protocol';
 import { normalizeBotMessage } from './state/botConversationState.ts';
@@ -57,6 +57,17 @@ const { ReplyTaskReferences } = loadComponent<{ ReplyTaskReferences: typeof Inli
   '../ExecutorIcon': executors,
   '../state/botWorkState': { replyTaskReferences },
   '../state/workerStatus': status,
+});
+const { DelegatedWork } = loadComponent<typeof import('./conversation/DelegatedWork')>('./conversation/DelegatedWork.tsx', {
+  '../../app/components/MotionDetails': { MotionDetails: 'details' },
+  '../../ui/icons': icons,
+  '../state/botWorkState': { workProgress },
+  '../state/drawerState': drawerState,
+  '../state/TaskCancellation': {
+    TaskCancelButton: ({ task }: { task: { status: string | null; cancelable?: boolean } }) =>
+      canCancelTask(task.status, task.cancelable) ? createElement('button', { 'data-cancel-task': true }) : null,
+  },
+  '../styles/bot-reply-context.css': {},
 });
 const { BotWorkSessionRow } = loadComponent<{ BotWorkSessionRow: typeof WorkPanelRow }>('./conversation/BotWorkSessionRow.tsx', {
   '@peer-agent/protocol': protocol,
@@ -241,6 +252,25 @@ test('inline workers prefer live status, keep the recorded fallback and retain u
   }));
   assert.match(liveMarkup, /data-session-id="live-research" data-tone="active" title="调研主流 Agent 的 ACP 支持 · 执行中"/);
   assert.match(liveMarkup, /class="bot-inline-worker-dot"/);
+});
+
+test('delegated work keeps the task title when live facts are unavailable', () => {
+  const session = readDrawerSession({ sessionId: 'review', title: '复核变更', status: 'verifying',
+    verificationActive: true, cancelable: true })!;
+  const reply = { sources: [session.sessionId], marks: [], meta: {}, replyTo: [] };
+  const render = (available: boolean) => renderToStaticMarkup(createElement(DelegatedWork, {
+    rows: replyWork(reply, indexBotWork([session], available)), botName: 'Peer', i18n, onOpen() {},
+  }));
+  const current = render(true);
+  assert.match(current, /data-status="verifying"/);
+  assert.match(current, /class="bot-work-status is-running">正在核对结果</);
+  assert.match(current, /data-cancel-task/);
+
+  const unavailable = render(false);
+  assert.match(unavailable, /data-status="unavailable"/);
+  assert.match(unavailable, /class="bot-work-title">复核变更</);
+  assert.match(unavailable, /class="bot-work-status">状态暂不可用</);
+  assert.doesNotMatch(unavailable, /is-running|正在核对结果|data-cancel-task/);
 });
 
 test('work panel rows and agent activity rows unify on Peer ExecutorIcon matching sidebar tasks', () => {
