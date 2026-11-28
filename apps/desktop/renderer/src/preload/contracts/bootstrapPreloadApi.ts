@@ -1029,6 +1029,7 @@ export interface BootstrapPreloadApi {
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;
   readonly listShellPermissionRules: () => Promise<readonly Record<string, unknown>[]>;
   readonly addShellPermissionRule: (rule: Record<string, unknown>) => Promise<readonly Record<string, unknown>[]>;
+  readonly listSkillInstallTargets: () => Promise<readonly import('@peer-agent/protocol').SkillInstallTarget[]>;
   readonly listSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
   readonly getSkillDetail: (skillId: string, workspacePath?: string | null) => Promise<SkillDetail | null>;
   readonly refreshSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
@@ -1055,7 +1056,7 @@ export interface BootstrapPreloadApi {
   readonly getSkillHubSkillDetail: (identity: Omit<SkillHubInstallRequest, 'version'>) => Promise<Record<string, unknown>>;
   readonly getSkillHubSyncStatus: () => Promise<SkillHubSyncStatus>;
   readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
-  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
+  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<import('@peer-agent/protocol').SkillHubInstallResult>;
   readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
   readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
   readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;

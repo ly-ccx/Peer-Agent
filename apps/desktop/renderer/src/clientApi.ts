@@ -80,6 +80,7 @@ const unavailableApi: ClientApi = {
   stopShellTask: unavailableMethod('stopShellTask'),
   listShellPermissionRules: unavailableMethod('listShellPermissionRules'),
   addShellPermissionRule: unavailableMethod('addShellPermissionRule'),
+  listSkillInstallTargets: unavailableMethod('listSkillInstallTargets'),
   listSkills: unavailableMethod('listSkills'),
   getSkillDetail: unavailableMethod('getSkillDetail'),
   refreshSkills: unavailableMethod('refreshSkills'),

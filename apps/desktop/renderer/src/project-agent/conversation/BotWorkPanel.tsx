@@ -134,7 +134,8 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
         <button type="button" className="ui-button is-compact bot-work-panel-history" onClick={() => leave(onOpenHistory)}>
           <PeerIcon name="history" size={14} />{i18n.t('projectAgent.workPanel.history')}</button>
         {workspacePath || groups.length || materials.outputs.length || materials.references.length ? <div className="bot-work-panel-foundation">
-          <details><summary>{i18n.t('projectAgent.workPanel.outputs')} <span>{materials.outputs.length}</span></summary>
+          <details><summary><PeerIcon name="chevronRight" size={12} />
+            {i18n.t('projectAgent.workPanel.outputs')} <span>{materials.outputs.length}</span></summary>
             {data.error ? <ReadFailure message={i18n.t(workspacePath ? 'resources.readFailed' : 'projectAgent.workPanel.scopeUnavailable')}
               retry={workspacePath ? data.reload : undefined} i18n={i18n} /> : null}
             {!data.loaded && data.loading ? <p className="bot-work-panel-note bot-reading-shimmer" role="status">{i18n.t('resources.loading')}</p> : null}
@@ -146,7 +147,8 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
             {data.loaded ? <button type="button" className="ui-button is-compact" disabled={data.loading} onClick={data.loadMore}>
               {i18n.t('projectAgent.workPanel.loadMore')}</button> : null}
           </details>
-          <details><summary>{i18n.t('projectAgent.workPanel.references')} <span>{materials.references.length}</span></summary>
+          <details><summary><PeerIcon name="chevronRight" size={12} />
+            {i18n.t('projectAgent.workPanel.references')} <span>{materials.references.length}</span></summary>
             <BotWorkMaterials materials={materials.references} i18n={i18n} onOpenTask={actions.onOpenTask} />
             {!materials.references.length ? <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.emptyReferences')}</p> : null}
           </details>

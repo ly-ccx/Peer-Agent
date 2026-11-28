@@ -33,6 +33,61 @@ pub struct InboxCursor {
     pub updated_at: Option<String>,
 }
 
+const DELIVERY_RETRY_DELAYS_MS: [i64; 2] = [15_000, 60_000];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PendingDelivery {
+    pub revision: String,
+    #[serde(default)]
+    pub stage: DeliveryStage,
+    pub attempts: usize,
+    pub next_attempt_ms: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+impl PendingDelivery {
+    pub fn new(revision: &str) -> Self {
+        Self {
+            revision: revision.into(),
+            stage: DeliveryStage::Wake,
+            attempts: 0,
+            next_attempt_ms: Some(0),
+            last_error: None,
+        }
+    }
+
+    pub fn is_due(&self, now_ms: i64) -> bool {
+        self.next_attempt_ms.is_some_and(|next| now_ms >= next)
+    }
+
+    pub fn record_failure(&mut self, now_ms: i64, reason: &str) {
+        self.next_attempt_ms = DELIVERY_RETRY_DELAYS_MS
+            .get(self.attempts)
+            .map(|delay| now_ms.saturating_add(*delay));
+        self.attempts = self.attempts.saturating_add(1);
+        self.last_error = Some(reason.into());
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum DeliveryStage {
+    #[default]
+    Wake,
+    Digest,
+    Settlement,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CursorDocument {
+    #[serde(flatten)]
+    pub cursor: InboxCursor,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pending_deliveries: BTreeMap<String, PendingDelivery>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct InboxBatch {
     pub events: Vec<Value>,
@@ -156,23 +211,41 @@ impl ProjectInbox {
         ids
     }
 
-    pub fn read_cursor(&self, workspace_id: &str) -> InboxCursor {
-        let file = self.cursor_file(workspace_id);
-        let Ok(raw) = fs::read_to_string(&file) else {
-            return InboxCursor::default();
-        };
-        serde_json::from_str::<InboxCursor>(&raw).unwrap_or_default()
+    pub(crate) fn read_cursor_document(&self, workspace_id: &str) -> CursorDocument {
+        fs::read_to_string(self.cursor_file(workspace_id))
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
     }
 
-    fn write_cursor(&self, workspace_id: &str, seq: u64) -> Result<InboxCursor, ProjectError> {
-        let cursor = InboxCursor {
-            seq,
-            updated_at: Some(now_iso()),
+    pub fn read_cursor(&self, workspace_id: &str) -> InboxCursor {
+        self.read_cursor_document(workspace_id).cursor
+    }
+
+    pub(crate) fn update_cursor_document(
+        &self,
+        workspace_id: &str,
+        update: impl FnOnce(&mut CursorDocument),
+    ) -> Result<CursorDocument, ProjectError> {
+        let file = self.cursor_file(workspace_id);
+        fs::create_dir_all(self.dir_for(workspace_id))
+            .map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+        let _lock = DirectoryLock::acquire(&file, LOCK_TIMEOUT, None)?;
+        let mut doc = match fs::read_to_string(&file) {
+            Ok(raw) => serde_json::from_str(&raw)
+                .map_err(|_| ProjectError::code("CORRUPT_INBOX_CURSOR"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => CursorDocument::default(),
+            Err(error) => return Err(ProjectError::new("IO_ERROR", error.to_string())),
         };
-        let body = serde_json::to_string(&cursor)
-            .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
-        atomic_write(&self.cursor_file(workspace_id), body.as_bytes())?;
-        Ok(cursor)
+        let prior = doc.clone();
+        update(&mut doc);
+        if doc != prior {
+            doc.cursor.updated_at = Some(now_iso());
+            let body = serde_json::to_string(&doc)
+                .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
+            atomic_write(&file, body.as_bytes())?;
+        }
+        Ok(doc)
     }
 
     pub fn append(
@@ -190,7 +263,8 @@ impl ProjectInbox {
             .iter()
             .filter_map(|e| e["seq"].as_u64())
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(self.read_cursor(workspace_id).seq);
         let mut appended = 0usize;
         let mut duplicates = Vec::new();
         let mut lines = String::new();
@@ -375,7 +449,10 @@ impl ProjectInbox {
         if !ok || through_seq <= current.seq {
             return Ok(current);
         }
-        self.write_cursor(workspace_id, through_seq)
+        self.update_cursor_document(workspace_id, |doc| {
+            doc.cursor.seq = doc.cursor.seq.max(through_seq);
+        })
+        .map(|doc| doc.cursor)
     }
 
     pub fn list_recent(&self, workspace_id: &str, limit: usize) -> Vec<Value> {

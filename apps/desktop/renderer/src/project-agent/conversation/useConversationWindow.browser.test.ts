@@ -29,10 +29,17 @@ function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
   if (snapshot) memory.save('clicked-bot', snapshot);
   const resizeCallbacks = new Set<() => void>();
   let rowHeight = 72, paragraphOffset = 40;
+  const states: unknown[] = [];
   const modules: Record<string, unknown> = {
     react: {
       useRef: (current: unknown) => ({ current }),
-      useState: (value: unknown) => [typeof value === 'function' ? value() : value, () => {}],
+      useState: (value: unknown) => {
+        const index = states.length;
+        states.push(typeof value === 'function' ? (value as () => unknown)() : value);
+        return [states[index], (next: unknown) => {
+          states[index] = typeof next === 'function' ? (next as (current: unknown) => unknown)(states[index]) : next;
+        }];
+      },
       useMemo: (read: () => unknown) => read(),
       useEffect: (effect: () => void | (() => void)) => effects.push(effect),
       useLayoutEffect: (effect: () => void | (() => void)) => layoutEffects.push(effect),
@@ -78,9 +85,22 @@ function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
   view.scrollerRef.current = scroller;
   const cleanups = [...layoutEffects, ...effects].map(effect => effect());
   return { view, scroller, memory, frames, layoutEffects, cleanups, nativeScroll,
+    get top() { return states[1] as number; },
+    get following() { return states[3] as boolean; },
     resize(width: number, nextRowHeight: number, nextParagraphOffset: number) {
       scroller.clientWidth = width; rowHeight = nextRowHeight; paragraphOffset = nextParagraphOffset;
       scroller.scrollHeight = rows.length * rowHeight;
+      resizeCallbacks.forEach(measure => measure());
+    },
+    hide() {
+      scroller.clientWidth = 0; scroller.clientHeight = 0; scroller.scrollHeight = 0; scrollTop = 0;
+      resizeCallbacks.forEach(measure => measure());
+    },
+    reveal(options: { scrollTop?: number; scrollHeight?: number; width?: number; height?: number } = {}) {
+      scroller.clientWidth = options.width ?? 800;
+      scroller.clientHeight = options.height ?? 320;
+      scroller.scrollHeight = options.scrollHeight ?? (rows.length ? rows.length * rowHeight : 1040);
+      scrollTop = options.scrollTop ?? 0;
       resizeCallbacks.forEach(measure => measure());
     },
     get requested() { return requested; }, get cancelled() { return cancelled; },
@@ -173,4 +193,68 @@ test('native scroll captures the applied gesture position before delayed React d
   mounted.dispose();
   assert.equal(mounted.frames.size, 0, 'leaving cancels pending follow frames');
   assert.equal(mounted.nativeScroll.size, 0, 'leaving releases native reading capture');
+});
+
+test('hiding a following thread via display:none keeps virtual top intact and reconciles bottom on return', () => {
+  const rows = Array.from({ length: 80 }, (_, index) => ({
+    type: 'message', message: { id: `m${index}`, kind: 'user_input' },
+  }));
+  const mounted = mountConversation(rows);
+  mounted.flush();
+  const initialBottom = mounted.scroller.scrollTop;
+  assert.equal(mounted.top, initialBottom);
+
+  // Switch to a subtask (display: none -> 0x0 box, scrollTop reads 0).
+  mounted.hide();
+  // Background activity updates rows while hidden; must not overwrite top or reading memory with 0.
+  mounted.layoutEffects[3]!();
+  mounted.flush();
+  assert.equal(mounted.top, initialBottom, 'hidden layout commits must not reset virtual top to 0');
+  assert.equal(mounted.memory.read('clicked-bot')?.top, initialBottom, 'hidden commits must not persist top=0');
+
+  // Switch back to main bot after scrollHeight grew while hidden (both browser-preserved and 0-reset scrollTop).
+  mounted.reveal({ scrollTop: initialBottom, scrollHeight: 85 * 72 });
+  assert.equal(mounted.scroller.scrollTop, 85 * 72 - 320, 'returning from hidden jumps to the latest bottom');
+  assert.equal(mounted.top, 85 * 72 - 320, 'virtual top stays synchronized with restored scrollTop');
+  assert.equal(mounted.following, true);
+
+  // Also cover zero-box collapse where the browser clamps scrollTop to 0 and dispatches scroll while hidden.
+  mounted.hide();
+  mounted.view.onScroll();
+  mounted.reveal({ scrollTop: 0, scrollHeight: 85 * 72 });
+  assert.equal(mounted.scroller.scrollTop, 85 * 72 - 320, 'zero-box collapse recovers bottom on reveal');
+  assert.equal(mounted.top, 85 * 72 - 320);
+  assert.equal(mounted.following, true);
+  mounted.dispose();
+});
+
+test('hiding while reading history preserves the reading anchor and restores it on return or leave', () => {
+  const rows = Array.from({ length: 80 }, (_, index) => ({
+    type: 'message', message: { id: `m${index}`, kind: 'user_input' },
+  }));
+  const mounted = mountConversation(rows, {
+    following: false,
+    anchor: { key: 'm40', delta: -24 },
+    top: 2904,
+    heights: rows.map((_, index) => [`m${index}`, 72] as const),
+  });
+  assert.equal(mounted.scroller.scrollTop, 2904);
+
+  mounted.hide();
+  mounted.layoutEffects[3]!();
+  mounted.view.onScroll();
+  assert.equal(mounted.top, 2904, 'hidden updates must not wipe virtual top');
+  assert.equal(mounted.memory.read('clicked-bot')?.anchor?.key, 'm40', 'hidden updates must not corrupt reading anchor');
+
+  // Browser resets scrollTop to 0 while hidden; reveal must restore the exact reading offset without resuming follow.
+  mounted.reveal({ scrollTop: 0, scrollHeight: 85 * 72 });
+  assert.equal(mounted.scroller.scrollTop, 2904);
+  assert.equal(mounted.top, 2904);
+  assert.equal(mounted.following, false);
+
+  // Unmounting while hidden (switching directly from subtask to another bot) must still persist last visible top.
+  mounted.hide();
+  mounted.dispose();
+  assert.equal(mounted.memory.read('clicked-bot')?.top, 2904, 'leaving while hidden keeps last visible top');
+  assert.equal(mounted.memory.read('clicked-bot')?.anchor?.key, 'm40');
 });

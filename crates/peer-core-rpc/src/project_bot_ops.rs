@@ -506,20 +506,13 @@ pub fn handle_bot_diagnostics(ctx: &ServerContext, params_val: Value) -> Result<
         let turns: Vec<Value> = if conv_id.is_empty() {
             Vec::new()
         } else {
-            match conv_store.read_committed(conv_id, None, 8 * 1024 * 1024) {
-                Ok(snap) => {
-                    let agent_turns: Vec<&Value> = snap
-                        .history
-                        .messages
-                        .iter()
-                        .filter(|m| m.get("kind").and_then(Value::as_str) == Some("agent_turn"))
-                        .collect();
-                    let start = agent_turns.len().saturating_sub(20);
-                    agent_turns[start..]
-                        .iter()
-                        .map(|m| turn_timing(m))
-                        .collect()
-                }
+            match conv_store.read_recent_committed_by_kind(
+                conv_id,
+                "agent_turn",
+                20,
+                8 * 1024 * 1024,
+            ) {
+                Ok(turns) => turns.iter().map(turn_timing).collect(),
                 Err(StoreError::NotFound) => Vec::new(),
                 Err(_) => {
                     push_unique_code(&mut faults, "TURNS_UNAVAILABLE");

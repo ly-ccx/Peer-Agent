@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { LONG_INPUT } from './bot-shell-native-model-fixture.mjs';
 
 /**
  * 真实 Electron 渲染。输入是合成文字，不按回车。
  * 连续小块走本机脚本认知，不接外部模型。操作系统输入法不在这里。
  */
-export async function checkLongHistoryRender({ page, until, report, commandFile }) {
+export async function checkLongHistoryRender({ page, until, report, model }) {
   const blocked = [];
   await page.route(/https?:\/\//, route => {
     blocked.push(route.request().url());
@@ -56,24 +56,25 @@ export async function checkLongHistoryRender({ page, until, report, commandFile 
   const draft = '测'.repeat(40);
   await composer.click();
   await mark('operationStart');
-  await composer.pressSequentially('RC_STREAM_LONG');
-  assert.equal(await composer.inputValue(), 'RC_STREAM_LONG');
-  writeStreamingCommand(commandFile, 'RC_STREAM_LONG', 0, { chunks });
+  await composer.pressSequentially(LONG_INPUT);
+  assert.equal(await composer.inputValue(), LONG_INPUT);
   await composer.press('Enter');
   await until(() => composer.inputValue(), value => value === '', 10000);
+  await until(() => model.streaming(LONG_INPUT), Boolean);
   const typingStarted = Date.now();
   let inputWallMs = 0;
   const typing = composer.pressSequentially(draft, { delay: keyDelayMs }).then(() => { inputWallMs = Date.now() - typingStarted; });
   const chunkStarted = Date.now();
   for (let index = 1; index <= chunks; index += 1) {
     const stepStarted = Date.now();
-    writeStreamingCommand(commandFile, 'RC_STREAM_LONG', index, { chunks });
     const token = `〔${String(index).padStart(2, '0')}〕`;
+    model.send(LONG_INPUT, token);
     await page.locator('.bot-thread').getByText(token, { exact: false }).first().waitFor({ timeout: 10000 });
     const remaining = chunkIntervalMs - (Date.now() - stepStarted);
     if (remaining > 0) await page.waitForTimeout(remaining);
   }
   const chunkWallMs = Date.now() - chunkStarted;
+  model.finish(LONG_INPUT);
   await typing;
   await page.locator('.bot-thread').getByText('〔40〕', { exact: false }).first().waitFor();
   await mark('operationEnd');

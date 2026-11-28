@@ -3,6 +3,23 @@ use crate::recorder::stop_owned_group;
 use peer_store::ShellArtifacts;
 use std::{process::Stdio, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+const MAX_TIMEOUT_MS: u64 = 600_000;
+pub(crate) const INVALID_TIMEOUT: &str = "invalid_timeout";
+pub(crate) const TIMEOUT_DETAIL: &str = "`timeoutMs` must be an integer from 1 to 600000 milliseconds; omit it or use null for the 120000 ms default.";
+
+fn shell_timeout(args: &Value) -> Result<Duration, HostError> {
+    let Some(value) = args.get("timeoutMs").filter(|value| !value.is_null()) else {
+        return Ok(Duration::from_millis(DEFAULT_TIMEOUT_MS));
+    };
+    // JSON Schema integer includes integral JSON numbers written as 1.0 or 1e0.
+    let millis = value
+        .as_f64()
+        .filter(|n| (1.0..=MAX_TIMEOUT_MS as f64).contains(n) && n.fract() == 0.0)
+        .ok_or(HostError(INVALID_TIMEOUT))?;
+    Ok(Duration::from_millis(millis as u64))
+}
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod foreground;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -44,7 +61,7 @@ impl CapabilityProvider for ShellProvider {
         };
         let mut manifests = vec![(
             "bash".into(),
-            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":description,"riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeoutMs":{"type":"number"},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
+            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":description,"riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":["string","null"],"description":"Omit or use null for the current session directory, or the workspace root if unset."},"timeoutMs":{"type":["integer","null"],"minimum":1,"maximum":MAX_TIMEOUT_MS,"default":DEFAULT_TIMEOUT_MS,"description":TIMEOUT_DETAIL},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
         )];
         if self.background {
             manifests.push((
@@ -68,6 +85,7 @@ impl CapabilityProvider for ShellProvider {
             return Err(HostError("tool_not_projected"));
         }
         validate_shape(&args, &["command", "cwd", "timeoutMs", "background"])?;
+        let timeout = shell_timeout(&args)?;
         let background = args
             .get("background")
             .map(|value| value.as_bool().ok_or(HostError("invalid_background")))
@@ -90,7 +108,7 @@ impl CapabilityProvider for ShellProvider {
                 .filter(|shell| !shell.is_retired())
                 .cloned()
         };
-        let cwd = if let Some(c) = args.get("cwd") {
+        let cwd = if let Some(c) = args.get("cwd").filter(|value| !value.is_null()) {
             resolve(workspace, c.as_str().ok_or(HostError("invalid_cwd"))?)?
         } else {
             #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -115,21 +133,12 @@ impl CapabilityProvider for ShellProvider {
         let foreground = foreground
             .map(|actor| foreground::ShellScope::observe(&cwd).map(|scope| (actor, scope)))
             .transpose()?;
-        let timeout = args
-            .get("timeoutMs")
-            .map(|v| {
-                v.as_u64()
-                    .filter(|n| *n > 0 && *n <= 600000)
-                    .ok_or(HostError("invalid_timeout"))
-            })
-            .transpose()?
-            .unwrap_or(120_000);
         Ok(Box::new(ShellEffect {
             args,
             cwd,
             command,
             background,
-            timeout: Duration::from_millis(timeout),
+            timeout,
             handle: format!("shell_{}", uuid::Uuid::new_v4()),
             home: home.into(),
             risk,
@@ -650,6 +659,65 @@ pub(crate) fn restore_background_start_fields(
 mod tests {
     use super::*;
     use crate::effect_admission::AdmissionRequest;
+
+    #[test]
+    fn shell_timeout_defaults_bounds_and_invalid_values_match_schema() {
+        for (args, ms) in [
+            (json!({}), 120_000),
+            (json!({"timeoutMs": null}), 120_000),
+            (json!({"timeoutMs": 1}), 1),
+            (json!({"timeoutMs": 1.0}), 1),
+            (json!({"timeoutMs": 600_000}), 600_000),
+        ] {
+            assert_eq!(shell_timeout(&args).unwrap(), Duration::from_millis(ms));
+        }
+        for value in [
+            json!(600_001),
+            json!(u64::MAX),
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!("500"),
+            json!(false),
+            json!([]),
+            json!({}),
+        ] {
+            assert_eq!(
+                shell_timeout(&json!({"timeoutMs": value})).unwrap_err().0,
+                INVALID_TIMEOUT
+            );
+        }
+        for non_json in ["NaN", "Infinity", "1e999"] {
+            assert!(serde_json::from_str::<Value>(non_json).is_err());
+        }
+        let projected = ShellProvider::new(ShellHostMode::OneShot).manifests();
+        let schema = &projected[0].1["inputSchema"]["properties"]["timeoutMs"];
+        let manifest: Value = serde_json::from_str(include_str!(
+            "../../../../capabilities/local.shell.exec.json"
+        ))
+        .unwrap();
+        for key in ["type", "minimum", "maximum", "default"] {
+            assert_eq!(
+                schema[key],
+                manifest["inputSchema"]["properties"]["timeoutMs"][key]
+            );
+        }
+    }
+
+    #[test]
+    fn null_cwd_uses_the_same_scope_as_an_omitted_cwd() {
+        let root = tempfile::tempdir().unwrap();
+        let mut provider = ShellProvider::new(ShellHostMode::OneShot);
+        let prepare = |provider: &mut ShellProvider, args| {
+            provider
+                .prepare("local.shell.exec", args, root.path(), root.path())
+                .unwrap()
+        };
+        let omitted = prepare(&mut provider, json!({"command":"pwd"}));
+        let null = prepare(&mut provider, json!({"command":"pwd","cwd":null}));
+        assert_eq!(null.scopes().unwrap(), omitted.scopes().unwrap());
+    }
+
     #[tokio::test]
     async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
         let root = tempfile::tempdir().unwrap();

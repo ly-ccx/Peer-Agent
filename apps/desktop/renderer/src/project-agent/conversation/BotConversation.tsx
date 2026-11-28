@@ -44,6 +44,7 @@ export function BotConversation({
   focusRequestId = 0,
   contextSessionId = null,
   onTaskContext,
+  onTaskConversation,
   taskRequest = null,
   replyDetailsId = null,
   replyDetailsTarget = null,
@@ -71,6 +72,7 @@ export function BotConversation({
   readonly focusRequestId?: number;
   readonly contextSessionId?: string | null;
   readonly onTaskContext?: (context: TaskConversationContext | null) => void;
+  readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
   readonly taskRequest?: TaskConversationRequest | null;
   readonly replyDetailsId?: string | null;
   readonly replyDetailsTarget?: HTMLElement | null;
@@ -146,12 +148,6 @@ export function BotConversation({
 
   const obligations = useObligationGrants(workspaceId, profile.agentConversationId, onRefreshWork);
   const thread = useRef<HTMLDivElement>(null);
-  const [boardFocus, setBoardFocus] = useState<TaskConversationRequest | null>(null);
-  const focusConversation = (messageId: string, cardId?: string) => {
-    setHighlightedId(messageId);
-    setHighlightRequestId(value => value + 1);
-    setBoardFocus(current => ({ id: (current?.id ?? 0) - 1, messageId, cardId }));
-  };
   return (
     <BotInputContext.Provider value={conversation.answer}>
     <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
@@ -159,11 +155,11 @@ export function BotConversation({
       avatar={<BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} interactive={false} />}
       obligationGrants={obligations.grants} onOpenHistory={onOpenHistory} onOpenSettings={() => onOpenManagement()}
       onOpenObjective={onOpenManagement} onOpenTask={onLocateSession} onRefreshWork={onRefreshWork}
-      onOpenCard={({ messageId, cardId }) => focusConversation(messageId, cardId)}
+      onOpenCard={({ messageId, cardId }) => onTaskConversation({ messageId, cardId })}
       onOpenBlocker={sessionId => {
         const context = taskConversationContext(workspaceId, sessionId, conversation.messages, workIndex);
         const messageId = context?.messageId ?? workIndex.byId.get(sessionId)?.anchorMessageId;
-        if (messageId) focusConversation(messageId, context?.question?.cardId);
+        if (messageId) onTaskConversation({ messageId, cardId: context?.question?.cardId });
         else onLocateSession(sessionId);
       }}
       onOpenGrant={grantId => {
@@ -209,7 +205,7 @@ export function BotConversation({
           onLoadOlder={conversation.loadOlder}
           highlightedId={highlightedId}
           highlightRequestId={highlightRequestId}
-          focusTaskRequest={boardFocus?.messageId === highlightedId && boardFocus ? boardFocus : taskRequest?.draft ? null : taskRequest}
+          focusTaskRequest={taskRequest?.draft ? null : taskRequest}
           i18n={i18n}
           onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
           onQuote={(messageId, excerpt) => {

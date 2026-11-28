@@ -1,4 +1,4 @@
-import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openTaskInspector, taskEntry } from './bot-work-panel-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -32,36 +32,37 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
         assert.equal(item[field], decision[field]); assert.equal(session[field], decision[field]);
       }
       assert.equal(session.status,'waiting_user'); assert.equal(session.statusLabel,expected); assert.equal(session.cancelable,true);
-      const command = {...initial,seq:++seq,sessions:[session],detailReports:{},reportReadMode:'ready',conversationMessages:[]};
+      const sourceReply = { id: `rc-lifecycle-source-${key}`, kind: 'agent_reply', role: 'assistant',
+        content: expected, sources: [session.sessionId], createdAt: now };
+      const command = {...initial,seq:++seq,sessions:[session],detailReports:{},reportReadMode:'ready',conversationMessages:[sourceReply]};
       writeFileSync(commandFile+'.next',JSON.stringify(command));renameSync(commandFile+'.next',commandFile);
-      await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-      await page.getByRole('tab',{name:'任务',exact:true}).click();
-      if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
-      const row = page.locator('.bot-task-row').filter({hasText:plan.title});
-      await until(()=>row.innerText(),text=>text.includes(expected));
-      assert.equal(await row.locator('xpath=ancestor::section[1]').locator('h2').innerText(),'需要你');
-      assert.doesNotMatch(await row.innerText(),/已完成|已读/);
+      const row = await taskEntry(page, session);
+      await until(() => row.innerText(), text => text.includes(expected));
+      assert.equal(await row.getAttribute('data-needs-user'), 'true');
+      assert.doesNotMatch(await row.innerText(), /已完成|已读/);
       const readableStatus = await row.evaluate(node =>
-        getComputedStyle(node.querySelector('.bot-task-row-meta')).color ===
-        getComputedStyle(node.querySelector('.bot-task-row-title')).color);
+        getComputedStyle(node.querySelector('.bot-work-panel-session-detail')).color ===
+        getComputedStyle(node.querySelector('.bot-work-panel-session-heading strong')).color);
       assert.ok(readableStatus, 'human gate status uses the primary text color');
-      await page.screenshot({path:path.join(captureDirectory,`lifecycle-${key}-list-${width}-${appearance}.png`),animations:'disabled'});
-      await row.focus();await page.keyboard.press('Enter');
-      const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
-      await until(()=>detail.locator('.bot-task-progress-text').innerText(),text=>text===expected);
-      assert.equal(await detail.getAttribute('data-status'),decision.status);
-      assert.equal(await detail.locator('.bot-task-full').isVisible(),false);
-      assert.equal(await detail.locator('.bot-task-full-toggle').getAttribute('aria-expanded'),'false');
-      assert.equal(await detail.locator('.bot-task-scene').isVisible(),true);
-      assert.equal(await detail.getByRole('button',{name:`取消任务 ${plan.title}`,exact:true}).isVisible(),false);
-      await openFullTask(page);
-      assert.equal(await detail.getByRole('button',{name:`取消任务 ${plan.title}`,exact:true}).isVisible(),decision.cancelable);
-      assert.doesNotMatch(await detail.innerText(),/已完成/);
-      assert.equal(await detail.evaluate(node=>node.scrollWidth<=node.clientWidth),true);
-      await page.screenshot({path:path.join(captureDirectory,`lifecycle-${key}-detail-${width}-${appearance}.png`),animations:'disabled'});
-      await page.locator(BOT_DETAIL_CLOSE).click();
-      await detail.waitFor({state:'hidden'});
-      await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
+      await page.screenshot({ path: path.join(captureDirectory, `lifecycle-${key}-list-${width}-${appearance}.png`), animations: 'disabled' });
+      await row.focus(); await page.keyboard.press('Enter');
+      const source = page.locator(`#bot-msg-${sourceReply.id}`);
+      await until(() => source.evaluate(node => node === document.activeElement), Boolean);
+      const activeRow = await taskEntry(page, session, { source: 'active' });
+      await activeRow.focus(); await page.keyboard.press('Enter');
+      const detail = page.locator('.bot-task-workspace');
+      await until(() => detail.locator('.bot-task-status-pill').innerText(), text => text === expected);
+      assert.equal(await detail.getAttribute('data-status'), decision.status);
+      assert.equal(await detail.locator('.bot-task-inspector').count(), 0);
+      assert.equal(await page.getByRole('button', { name: '任务详情', exact: true }).getAttribute('aria-expanded'), 'false');
+      assert.equal(await detail.locator('.bot-task-conversation-stage').isVisible(), true);
+      const inspector = await openTaskInspector(page);
+      assert.equal(await detail.getByRole('button', { name: '停止', exact: true }).isVisible(), decision.cancelable);
+      assert.doesNotMatch(await inspector.innerText(), /已完成/);
+      assert.equal(await detail.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+      await page.screenshot({ path: path.join(captureDirectory, `lifecycle-${key}-detail-${width}-${appearance}.png`), animations: 'disabled' });
+      await page.locator('.bot-crumb-parent').click();
+      await detail.waitFor({ state: 'hidden' });
       cases.push({key,width,appearance,listVisible:true,detailVisible:true,cancellationFromDecision:true,sameFacts:true});
     }
   }

@@ -1,5 +1,5 @@
 import { checkWorkPanelLayout, checkParallelPanelTasks, openWorkPanel } from './bot-work-panel-checks.mjs';
-import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import { checkBotEvidence } from './bot-evidence-checks.mjs';
 import assert from 'node:assert/strict';
@@ -176,10 +176,9 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await page.setViewportSize(waitingViewport);
   await page.evaluate(value => { document.documentElement.dataset.theme = value; }, waitingTheme);
   await work.getByRole('button', { name: '查看任务详情', exact: true }).focus(); await page.keyboard.press('Enter');
-  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor();
-  await openFullTask(page);
-  await page.getByRole('button', { name: '查看对话中的完整说明', exact: true }).click();
-  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
+  await workspace.getByRole('heading', { name: initial.sessions[0].title, exact: true }).waitFor();
+  await page.locator('.bot-crumb-parent').click();
+  await workspace.waitFor({ state: 'hidden' });
   assert.equal(await page.locator('.bot-composer textarea').isVisible(), true);
   checks.push('waiting work stays a factual status in reply and the work panel; named main bot owns follow-up, optional detail returns to main dialogue');
   report.delegatedWorkHandoff = { reply: true, workPanel: true, noDirectHandling: true, detailReturnsToBot: true, hintChecks };
@@ -196,7 +195,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   change([{ ...initial.sessions[0], status: 'accepted' }]);
   await until(() => work.getAttribute('data-status'), value => value === 'accepted');
   assert.match(await work.locator(':scope > summary').textContent(), /已签收/);
-  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task').count(), 0);
+  await page.locator('.bot-work-panel [data-lane="delivered"] .bot-work-panel-session.is-task').waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task').count(), 1);
   change([]);
   await until(() => work.getAttribute('data-status'), value => value === 'unavailable');
   assert.match(await work.innerText(), /状态暂不可用/);

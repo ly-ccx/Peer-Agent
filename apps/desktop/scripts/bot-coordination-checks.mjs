@@ -1,4 +1,4 @@
-import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openTaskInspector, taskEntry } from './bot-work-panel-checks.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
@@ -12,7 +12,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
   const replacement={...base,sessionId:'rc-coordination-corrected',title:'检查引用卡片圆角',status:'running'};
   const update=patch=>{writeFileSync(commandFile+'.next',JSON.stringify({...initial,...patch,seq:++seq}));renameSync(commandFile+'.next',commandFile);};
   const cases=[];
-  await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
+  const workspace = page.locator('.bot-task-workspace');
   for (const [width,appearance] of [[1280,'dark'],[760,'light']]) {
     await page.setViewportSize({width,height:850}); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},appearance);
     for (const state of ['stopping','awaiting_outcome','cancelled','handoff']) {
@@ -20,32 +20,26 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         reason:'根据补充说明，检查对象改为引用卡片，保留已经做过的检查。',goalRevision:2,priorSessionId:base.sessionId,
         ...(state==='cancelled'?{replacementSessionId:replacement.sessionId,replacementTitle:replacement.title}:{})};
       update({sessions:[{...base,status:state==='handoff'?'starting':state,coordination},replacement]});
-      await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-      await page.getByRole('tab',{name:'任务',exact:true}).click();
-      if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
-      await until(()=>page.locator('.bot-task-row').filter({hasText:base.title}).count(),count=>count===1);
-      await page.locator('.bot-task-row').filter({hasText:base.title}).click();
-      const detail=page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
-      const label=state==='handoff'?'正在接手':state==='stopping'?'正在停止':state==='cancelled'?'已取消':'执行结果待核实';
-      await until(()=>detail.locator('.bot-task-status').innerText(),text=>text===label);
-      await openFullTask(page);
-      const info=detail.locator('.bot-task-information');
-      if (await info.getAttribute('open')===null) await info.locator(':scope > summary').click();
-      await until(()=>info.getAttribute('open'),value=>value!==null);
-      await until(()=>info.innerText(),value=>value.includes('调整记录'));
-      assert.match(await info.innerText(),/调整记录/);
-      assert.equal(await detail.locator('.bot-task-question').count(),0);
-      if (state==='stopping') assert.equal(await detail.locator('.bot-task-cancel button').isDisabled(),true);
-      if (state==='awaiting_outcome') assert.match(await info.innerText(),/核实前不会重复执行/);
-      if (state==='cancelled') assert.match(await info.innerText(),/后续任务：检查引用卡片圆角/);
-      await page.screenshot({path:path.join(captureDirectory,`coordination-${state}-${width}-${appearance}.png`),animations:'disabled'});
-      if (state==='cancelled') {
-        await detail.getByRole('button',{name:'后续任务：检查引用卡片圆角',exact:true}).click();
-        await until(()=>detail.locator('h2').innerText(),text=>text===replacement.title);
+      const row = await taskEntry(page, base, { source: state === 'cancelled' ? 'history' : 'board' });
+      await row.click();
+      const label = state === 'handoff' ? '正在接手' : state === 'stopping' ? '正在停止' : state === 'cancelled' ? '已取消' : '执行结果待核实';
+      await until(() => workspace.locator('.bot-task-status-pill').innerText(), text => text === label);
+      const inspector = await openTaskInspector(page);
+      assert.equal(await inspector.locator('.bot-task-question').count(), 0);
+      await inspector.getByRole('tab', { name: '边界与信息', exact: true }).click();
+      const info = inspector.locator('.bot-inspector-scope');
+      await until(() => info.innerText(), text => text.includes('调整记录'));
+      if (state === 'stopping') assert.equal(await workspace.getByRole('button', { name: '正在停止…', exact: true }).isDisabled(), true);
+      if (state === 'awaiting_outcome') assert.match(await info.innerText(), /核实前不会重复执行/);
+      if (state === 'cancelled') assert.match(await info.innerText(), /后续任务：检查引用卡片圆角/);
+      await page.screenshot({ path: path.join(captureDirectory, `coordination-${state}-${width}-${appearance}.png`), animations: 'disabled' });
+      if (state === 'cancelled') {
+        await inspector.getByRole('button', { name: '后续任务：检查引用卡片圆角', exact: true }).click();
+        await workspace.getByRole('heading', { name: replacement.title, exact: true }).waitFor();
       }
+      await page.locator('.bot-crumb-parent').click();
+      await workspace.waitFor({ state: 'hidden' });
       cases.push({state,width,appearance,truthful:true,relationship:state==='cancelled',humanQuestionAbsent:true});
-      await page.locator(BOT_DETAIL_CLOSE).click();
-      await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
     }
   }
   update({sessions:initial.sessions}); await page.setViewportSize(viewport); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},theme);

@@ -18,7 +18,7 @@ use crate::{
     coordination_work_id,
     interactive_provider::{WorkSessionInteractiveContext, WorkSessionInteractiveProvider},
     is_effective_memory, is_valid_workspace_id, memory_secret_reason, now_iso, parse_iso_ms,
-    provider::{ProjectCapabilityProvider, TurnExecutionState, commit_composed_reply},
+    provider::{ProjectCapabilityProvider, ReplyOrigin, TurnExecutionState, commit_composed_reply},
     quiet_reply::{parse_quiet_reply, without_growing_quiet_marker},
     skill_packs::{
         ACTIVATE_SKILL_PACK_TOOL, auto_activated_packs, build_allowlist, ordered_definitions,
@@ -1338,6 +1338,32 @@ fn unreported_wake_failures(
         .collect()
 }
 
+fn has_undelivered_wake_result(
+    supervisor: &SessionSupervisor,
+    state: &TurnExecutionState,
+    wake_events: &[Value],
+) -> bool {
+    supervisor
+        .list_sessions(&state.workspace_id)
+        .iter()
+        .any(|session| {
+            let sid = &session.session_id;
+            session.status == "result_ready"
+                && wake_events.iter().any(|event| {
+                    wake_event_session_id(event) == Some(sid)
+                        && crate::wake_envelope::is_result_delivery_event(event)
+                        && event["payload"]["deliveryRevision"]
+                            .as_str()
+                            .is_none_or(|revision| revision == session.updated_at)
+                })
+                && !state.messaged_session_ids.contains(sid)
+                && !state.cancelled_session_ids.contains(sid)
+                && !state
+                    .prior_report_fact_keys
+                    .contains(&crate::reply::result_fact_key(sid, &session.updated_at))
+        })
+}
+
 fn commit_natural_reply(
     data_home: &Path,
     supervisor: &SessionSupervisor,
@@ -1352,7 +1378,9 @@ fn commit_natural_reply(
     let parsed = parse_quiet_reply(clean.trim());
     if state.kind == "wake" && parsed.is_quiet {
         return Ok(
-            if unreported_wake_failures(supervisor, state, wake_events).is_empty() {
+            if unreported_wake_failures(supervisor, state, wake_events).is_empty()
+                && !has_undelivered_wake_result(supervisor, state, wake_events)
+            {
                 NaturalReplyOutcome::QuietSettled
             } else {
                 NaturalReplyOutcome::NoReply
@@ -1360,6 +1388,7 @@ fn commit_natural_reply(
         );
     }
     let mut text = parsed.leading_text;
+    let mut generated_receipt = false;
     if state.kind == "user" && (parsed.is_pure_quiet || text.is_empty()) {
         let has_work =
             !state.spawned_session_ids.is_empty() || !state.messaged_session_ids.is_empty();
@@ -1375,6 +1404,7 @@ fn commit_natural_reply(
             .map(|candidate| candidate.text.as_str())
             .unwrap_or("");
         let is_zh = user_text.chars().any(|ch| matches!(ch, '㐀'..='鿿'));
+        generated_receipt = true;
         text = match (has_work, is_zh) {
             (true, true) => "已安排后台处理，有结果我第一时间告诉你。",
             (true, false) => "I’ve started working on this in the background and will share the result when it’s ready.",
@@ -1402,6 +1432,7 @@ fn commit_natural_reply(
                     | "needs_user"
                     | "worker_question"
                     | "result_ready"
+                    | "session_completed"
                     | "failed"
                     | "session_failed"
             ) || (kind == "session_ended"
@@ -1420,8 +1451,11 @@ fn commit_natural_reply(
         supervisor,
         state,
         &turn_id,
-        true,
-        false,
+        if generated_receipt {
+            ReplyOrigin::DispatchReceipt
+        } else {
+            ReplyOrigin::Natural
+        },
     )
     .map_err(|failure| failure.err)?;
     Ok(
@@ -1465,8 +1499,7 @@ fn commit_wake_failure_notice(
         supervisor,
         state,
         &id,
-        true,
-        true,
+        ReplyOrigin::FailureNotice,
     )
     .map_err(|failure| failure.err)?;
     Ok(())
@@ -1840,7 +1873,6 @@ impl ProjectAgentRunner {
         let mut valid_user_ids = HashSet::new();
         let mut answered_user_ids = HashSet::new();
         let mut prior_report_fact_keys = HashSet::new();
-        let mut reported_session_ids = HashSet::new();
         let mut anchor_seen = HashSet::new();
         let mut user_anchor_candidates = Vec::new();
         for msg in &history_messages {
@@ -1870,22 +1902,10 @@ impl ProjectAgentRunner {
                         }
                     }
                 }
-                if let Some(srcs) = msg["sources"].as_array() {
-                    for s in srcs {
-                        if let Some(sid) = s.as_str().filter(|v| !v.is_empty()) {
-                            reported_session_ids.insert(sid.to_owned());
-                        }
-                    }
-                }
                 if let Some(keys) = msg["meta"]["reportFactKeys"].as_array() {
                     for k in keys {
                         if let Some(s) = k.as_str() {
                             prior_report_fact_keys.insert(s.to_owned());
-                            if let Some((sid, _)) = s.split_once('|')
-                                && !sid.is_empty()
-                            {
-                                reported_session_ids.insert(sid.to_owned());
-                            }
                         }
                     }
                 }
@@ -2050,9 +2070,24 @@ impl ProjectAgentRunner {
         let memory_enabled = profile.as_ref().is_none_or(|p| p.is_memory_enabled());
         let mut unreported_anchor_sessions = Vec::new();
         for s in &sessions {
-            if s.status == "result_ready" && !reported_session_ids.contains(&s.session_id) {
+            if s.status != "result_ready" {
+                continue;
+            }
+            let key = crate::reply::result_fact_key(&s.session_id, &s.updated_at);
+            // Historical queued/running citations and older terminal revisions never
+            // discharge the current result. Require a matching formal reply.
+            prior_report_fact_keys.remove(&key);
+            if history_messages.iter().any(|message| {
+                crate::reply::reports_result_revision(message, &s.session_id, &s.updated_at)
+            }) {
+                prior_report_fact_keys.insert(key);
+            } else {
                 for anchor in &s.anchor_message_ids {
-                    unreported_anchor_sessions.push((anchor.clone(), s.session_id.clone()));
+                    unreported_anchor_sessions.push((
+                        anchor.clone(),
+                        s.session_id.clone(),
+                        s.updated_at.clone(),
+                    ));
                 }
             }
         }
@@ -2398,6 +2433,7 @@ impl ProjectAgentRunner {
             user_anchor_candidates,
             unreported_anchor_sessions,
             prior_report_fact_keys,
+            read_result_revisions: HashMap::new(),
             worker_model_selection: opts.worker_model_selection.clone(),
             reply_committed_id: None,
             post_reply_rejected: false,
@@ -2530,6 +2566,8 @@ impl ProjectAgentRunner {
         let mut delivery_repair_used = false;
         let mut protocol_repair_attempts = 0usize;
         let mut round = 0usize;
+        let mut wake_budget_nudged = false;
+        let mut budget_exhausted = false;
         while round < max_rounds {
             round += 1;
             if cancel.is_cancelled() {
@@ -2537,12 +2575,24 @@ impl ProjectAgentRunner {
                 break;
             }
             self.set_activity_phase(opts.workspace_id, "thinking", None, false);
-            let near_cutoff = (round >= max_rounds
-                || max_tool_calls.saturating_sub(total_tool_calls) <= 2)
-                && turn_state
-                    .lock()
-                    .map(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty())
-                    .unwrap_or(false);
+            let can_deliver = turn_state
+                .lock()
+                .is_ok_and(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty());
+            if opts.kind == "wake"
+                && can_deliver
+                && !wake_budget_nudged
+                && (max_rounds - round <= 2 || max_tool_calls.saturating_sub(total_tool_calls) <= 4)
+            {
+                wake_budget_nudged = true;
+                live_messages.push(json!({
+                    "role": "user",
+                    "content": "This background review is approaching its safety limit. If the Worker report is sufficient, stop extra file reads and deliver the result directly in natural language. If a detail genuinely needs investigation, use message_session to ask the original Worker to check it with its full context. Do not redo the research during this wake.",
+                }));
+                committed_message_ids.push(None);
+            }
+            let near_cutoff = opts.kind == "user"
+                && can_deliver
+                && (round >= max_rounds || max_tool_calls.saturating_sub(total_tool_calls) <= 2);
             fn round_prompt_for(base: &str, near_cutoff: bool) -> std::borrow::Cow<'_, str> {
                 if near_cutoff {
                     std::borrow::Cow::Owned(format!(
@@ -2772,6 +2822,7 @@ impl ProjectAgentRunner {
                     break;
                 }
                 if total_tool_calls >= max_tool_calls {
+                    budget_exhausted = true;
                     final_end = TurnEndKind::Yielded;
                     stop_loop = true;
                     break;
@@ -2944,12 +2995,21 @@ impl ProjectAgentRunner {
                 }
             }
 
+            if opts.kind == "wake" && (total_tool_calls >= max_tool_calls || round == max_rounds) {
+                budget_exhausted = true;
+                break;
+            }
             if stop_loop {
                 break;
             }
         }
 
-        let needs_synthesis = opts.kind == "user"
+        let wake_synthesis = opts.kind == "wake"
+            && budget_exhausted
+            && turn_state.lock().is_ok_and(|state| {
+                has_undelivered_wake_result(&self.supervisor, &state, opts.wake_events)
+            });
+        let needs_synthesis = (opts.kind == "user" || wake_synthesis)
             && !cancel.is_cancelled()
             && !matches!(
                 final_end,
@@ -2972,7 +3032,11 @@ impl ProjectAgentRunner {
             let mut synthesis_messages = live_messages.clone();
             synthesis_messages.push(json!({
                 "role": "user",
-                "content": "Tool rounds for this turn are now exhausted and tools are disabled. Do not call post_reply or any tool, do not output DSML/XML tool-call markup, and do not mention internal tool names or runtime round limits. Write your final natural plain-text reply directly to the user summarizing verified findings so far and what still remains if incomplete.",
+                "content": if wake_synthesis {
+                    "Tools are disabled. Deliver the pending Worker result to the user in natural plain text using the Worker reports and verified facts already in this turn. State any uncertainty. Do not output NO_REPLY, tool syntax, or mention the runtime limit."
+                } else {
+                    "Tool rounds for this turn are now exhausted and tools are disabled. Do not call post_reply or any tool, do not output DSML/XML tool-call markup, and do not mention internal tool names or runtime round limits. Write your final natural plain-text reply directly to the user summarizing verified findings so far and what still remains if incomplete."
+                },
             }));
             match self
                 .call_model_with_retry(
@@ -2990,7 +3054,8 @@ impl ProjectAgentRunner {
                 .await
             {
                 Ok(first_turn) => {
-                    let turn_to_finalize = if has_literal_tool_call_syntax(&first_turn.content)
+                    let turn_to_finalize = if !wake_synthesis
+                        && has_literal_tool_call_syntax(&first_turn.content)
                         && !cancel.is_cancelled()
                     {
                         rounds_record.push(json!({
@@ -3026,39 +3091,48 @@ impl ProjectAgentRunner {
                                 "text": t.content,
                                 "toolCalls": [],
                             }));
-                            let delivery = match turn_state.lock() {
-                                Ok(mut state) => commit_natural_reply(
-                                    &self.data_home,
-                                    &self.supervisor,
-                                    &mut state,
-                                    &t.content,
-                                    opts.wake_events,
-                                ),
-                                Err(_) => Err(ProjectError::code("turn_state_unavailable")),
-                            };
-                            match delivery {
-                                Ok(NaturalReplyOutcome::Committed(text)) => {
-                                    push_public_update(
-                                        &mut public_updates,
-                                        &mut public_update_chars,
-                                        &text,
-                                    );
-                                }
-                                Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
-                                    trial_in_flight = false;
-                                    let code = if has_literal_tool_call_syntax(&t.content) {
-                                        "unsupported_tool_response"
-                                    } else {
-                                        "empty_model_response"
-                                    };
-                                    final_end =
-                                        self.record_turn_failure(&failure_ctx, code, cancel);
-                                }
-                                Ok(_) => {}
-                                Err(err) => {
-                                    trial_in_flight = false;
-                                    final_end =
-                                        self.record_turn_failure(&failure_ctx, err.code, cancel);
+                            if wake_synthesis
+                                && (!t.calls.is_empty() || has_literal_tool_call_syntax(&t.content))
+                            {
+                                final_end = TurnEndKind::Yielded;
+                            } else {
+                                let delivery = match turn_state.lock() {
+                                    Ok(mut state) => commit_natural_reply(
+                                        &self.data_home,
+                                        &self.supervisor,
+                                        &mut state,
+                                        &t.content,
+                                        opts.wake_events,
+                                    ),
+                                    Err(_) => Err(ProjectError::code("turn_state_unavailable")),
+                                };
+                                match delivery {
+                                    Ok(NaturalReplyOutcome::Committed(text)) => {
+                                        push_public_update(
+                                            &mut public_updates,
+                                            &mut public_update_chars,
+                                            &text,
+                                        );
+                                    }
+                                    Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
+                                        trial_in_flight = false;
+                                        let code = if has_literal_tool_call_syntax(&t.content) {
+                                            "unsupported_tool_response"
+                                        } else {
+                                            "empty_model_response"
+                                        };
+                                        final_end =
+                                            self.record_turn_failure(&failure_ctx, code, cancel);
+                                    }
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        trial_in_flight = false;
+                                        final_end = self.record_turn_failure(
+                                            &failure_ctx,
+                                            err.code,
+                                            cancel,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -3067,6 +3141,9 @@ impl ProjectAgentRunner {
                             final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                         }
                     }
+                }
+                Err(err) if wake_synthesis && err.code == "model_empty_response" => {
+                    final_end = TurnEndKind::Yielded;
                 }
                 Err(err) => {
                     trial_in_flight = false;
@@ -3290,6 +3367,9 @@ impl ProjectAgentRunner {
             "durationMs": duration_ms,
             "outcome": outcome_label,
             "wakeReportReadDegraded": wake_report_read_degraded,
+            "wakeBudgetNudged": wake_budget_nudged,
+            "wakeBudgetExhausted": opts.kind == "wake" && budget_exhausted,
+            "wakeWrapUpAttempted": wake_synthesis && needs_synthesis,
         });
         let trace_offloaded = write_agent_turn_trace(
             &self.data_home,

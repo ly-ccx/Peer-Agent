@@ -146,6 +146,14 @@ pub(crate) fn start_mock_server(handlers: Vec<ScriptHandler>) -> MockModelServer
 }
 
 pub(crate) fn mock_model_with_wire(endpoint: &str, wire: Wire) -> NativeModel {
+    mock_model_with_deadline(endpoint, wire, Duration::from_secs(10))
+}
+
+pub(crate) fn mock_model_with_deadline(
+    endpoint: &str,
+    wire: Wire,
+    deadline: Duration,
+) -> NativeModel {
     NativeModel::new(
         ModelConfig {
             endpoint: endpoint.to_owned(),
@@ -155,7 +163,7 @@ pub(crate) fn mock_model_with_wire(endpoint: &str, wire: Wire) -> NativeModel {
             generation: GenerationOptions::default(),
         },
         None,
-        Duration::from_secs(10),
+        deadline,
     )
     .unwrap()
 }
