@@ -41,7 +41,7 @@ test('draft input stays in the composer leaf and never becomes context token aut
   assert.match(tokenUsage, /activeUsage=\{activeUsage\}/);
   assert.doesNotMatch(surface, /const activeUsage = convState\.activeUsage/);
   assert.doesNotMatch(surface, /const contextAccounting = convState\.contextAccounting/);
-  assert.match(surface, /<ContextAccountingRestore/);
+  assert.match(surface, /<ContextAccountingRestore[^>]*canRestore=\{canPersistRestoredMetadata\}/);
   assert.match(tokenUsage, /emptyContext=\{conversationId == null\}/);
   assert.doesNotMatch(tokenUsage, /useConversationDraft|estimateDraftTokens|estimateStreamDeltaTokens/);
 });

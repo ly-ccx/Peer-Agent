@@ -10,7 +10,6 @@ import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core
 import type {
   AutomationProposalAction,
   ClientToolCall,
-  ContextAccountingSnapshot,
   GoalRunnerStatus,
   LlmProviderConfigView,
   SelectionRange,
@@ -59,7 +58,7 @@ import {
   COMPOSER_ENV_ISOLATION_OFF,
   COMPOSER_ENV_ISOLATION_ON
 } from '../state/taskBoundBranch';
-import { canAutoDispatchQueuedMessage, dispatchQueuedMessage } from '../state/messageQueueDispatch';
+import { canAutoDispatchQueuedMessage, dispatchQueuedMessage, isGoalRunnerHoldingQueue } from '../state/messageQueueDispatch';
 import { ContextAccountingRestore } from './ContextAccountingRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import { getStreamProfiler } from '../state/streamProfiler.ts';
@@ -124,7 +123,7 @@ import {
   shouldShowConversationEmptyHome,
   shouldShowConversationLoadingPlaceholder,
 } from '../state/conversationEmptyStatePolicy';
-import { shouldHardBeginConversationLoad, shouldPersistEffortCorrection } from '../state/conversationLoadGate';
+import { canPersistRestoredConversationMetadata, shouldHardBeginConversationLoad } from '../state/conversationLoadGate';
 import { resolveTurnStartedAt } from '../state/turnStartedAt';
 import { getTurnUserMessage, groupMessagesIntoTurnsIncremental, shouldVirtualizeChatTurns, type ChatTurnGroupCache } from '../state/chatTurns';
 import { useWorkbenchOptional } from '../../workbench/WorkbenchContext';
@@ -335,7 +334,7 @@ export function ChatSurface({
   // provider)。初值给默认,真实值由会话加载 effect 按当前会话 meta 覆盖(见下方 conversationId
   // effect)。真值最终经 chatSend → IPC → 会话 meta 兜底进入后端 provider 选择。逻辑见
   // hooks/useConversationModelEffort。
-  const { effort, modelProviderId, setEffort, setModelProviderId, changeEffort, changeModelProviderId } =
+  const { effort, modelProviderId: storedModelProviderId, setEffort, setModelProviderId, saveModelEffort } =
     useConversationModelEffort(conversationId);
   // 对话模式按会话持久化在会话 meta 上(非全局设置):模式是「每会话状态」,切换会话
   // 各自独立、互不影响,与计划数据同口径。初值给 'chat',真实值由会话加载 effect 按
@@ -394,10 +393,6 @@ export function ChatSurface({
   // activeUsage / contextAccounting 由用量叶子自己订阅，壳层只保留写入句柄。
   const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
-  >;
-  // ADR 52：主进程随回合结束下发下一次最终请求投影。
-  const setContextAccountingSnapshot = useMemo(() => makeSetter('contextAccounting'), [makeSetter]) as Dispatch<
-    SetStateAction<ContextAccountingSnapshot | null>
   >;
   const providerRecoveryNotice = convState.providerRecoveryNotice;
   const setProviderRecoveryNotice = useMemo(() => makeSetter('providerRecoveryNotice'), [makeSetter]) as Dispatch<
@@ -917,9 +912,8 @@ export function ChatSurface({
   // 只有勾选时才显示思考强度选择器；OpenAI 暴露额外 xhigh 档。
   // 优先取会话绑定的已配置模型记录，使推理档位/思考强度随会话选中的模型走；
   // 兼容历史 groupId::model 绑定；会话未绑定或绑定失效时回退全局默认 → 首个已配置 Key。
-  const boundProvider = modelProviderId
-    ? resolveProviderById(providers, modelProviderId)
-    : null;
+  const boundProvider = resolveProviderById(providers, storedModelProviderId);
+  const modelProviderId = boundProvider?.id ?? storedModelProviderId;
   const activeProvider = (boundProvider?.apiKeyConfigured ? boundProvider : null)
     || providers.find((p) => p.isDefault && p.apiKeyConfigured)
     || providers.find((p) => p.apiKeyConfigured)
@@ -935,27 +929,10 @@ export function ChatSurface({
     () => (activeProviderSupportsReasoning && hasTunableEffortLevels(effortLevels) ? effortLevels : EMPTY_EFFORT_LEVELS),
     [activeProviderSupportsReasoning, effortLevels],
   );
-  // 渠道能力变化后（如切到 Grok 仅 low/medium/high），把会话旧档位投影到合法默认值。
-  // 已有会话恢复完成前，当前 effort/provider 只是临时种子，不能把校正结果当成用户选择持久化。
-  useEffect(() => {
-    if (!activeProviderSupportsReasoning) return;
-    if (effortLevels.includes(effort)) return;
-    if (!shouldPersistEffortCorrection({ conversationId, loadStatus })) return;
-    const preferred = resolvePreferredEffort(
-      effortLevels,
-      activeProvider?.reasoningDefaultEffort,
-    );
-    if (preferred !== effort) changeEffort(preferred);
-  }, [
-    activeProvider?.reasoningDefaultEffort,
-    activeProviderSupportsReasoning,
-    changeEffort,
-    conversationId,
-    effort,
-    effortLevels,
-    loadStatus,
-  ]);
-  const handleModelChange = useCallback((providerId: string) => {
+  const changeEffort = useCallback(async (level: EffortLevel) => {
+    await saveModelEffort({ effort: level });
+  }, [saveModelEffort]);
+  const handleModelChange = useCallback(async (providerId: string) => {
     const targetProvider = providers.find((provider) => provider.id === providerId && provider.apiKeyConfigured);
     const targetEffortLevels = normalizeEffortLevels(targetProvider?.reasoningEffortLevels);
     const transition = resolveModelSwitchState({
@@ -965,13 +942,16 @@ export function ChatSurface({
       preferredDefault: targetProvider?.reasoningDefaultEffort,
     });
 
+    if (!await saveModelEffort(transition)) return;
+
     const countCapability =
       targetProvider?.provider === 'anthropic'
         ? { kind: 'provider_count_api' as const }
         : { kind: 'observed_usage_only' as const };
-    const accounting = conversationStore.getSnapshot(conversationId).contextAccounting;
-    setContextAccountingSnapshot(
-      createUnknownContextAccountingSnapshot({
+    const current = conversationStore.getSnapshot(conversationId);
+    const accounting = current.contextAccounting;
+    convActions.set({
+      contextAccounting: createUnknownContextAccountingSnapshot({
         identity: {
           conversationId: conversationId || '__draft__',
           contentRevision: accounting?.contentRevision ?? 0,
@@ -982,19 +962,15 @@ export function ChatSurface({
         phase: 'model_changed',
         revision: (accounting?.revision ?? 0) + 1,
         compactionEpoch: accounting?.compactionEpoch ?? 0,
-        pendingUncountedChanges: messages.length > 0,
+        pendingUncountedChanges: current.messages.length > 0,
       }),
-    );
-    changeModelProviderId(transition.modelProviderId);
-    if (transition.effort !== effort) changeEffort(transition.effort);
+    });
   }, [
-    changeEffort,
-    changeModelProviderId,
     conversationId,
+    convActions,
     effort,
-    messages.length,
     providers,
-    setContextAccountingSnapshot,
+    saveModelEffort,
   ]);
   const isZh = i18n.locale === 'zh-CN';
   const actOnAutomationProposal = useCallback(async (action: AutomationProposalAction) => {
@@ -1205,24 +1181,11 @@ export function ChatSurface({
       // 思考强度 + 模型 provider 随会话恢复:与 mode 同口径,切换会话即切到该会话自己的绑定值。
       // 直接 setState(不触发回写),避免恢复动作被当成用户切换而反写 meta。
       setEffort(convEffort);
-      // 兼容历史 groupId::model 绑定：能解析到真实记录就回写真实 id，并迁移会话 meta。
-      const resolvedBound = resolveProviderById(providersRef.current, convModelProviderId);
-      const restoredModelProviderId = resolvedBound?.id ?? convModelProviderId;
-      setModelProviderId(restoredModelProviderId);
-      if (
-        convModelProviderId
-        && resolvedBound?.id
-        && resolvedBound.id !== convModelProviderId
-      ) {
-        void clientApi.conversationsUpdateModelEffort({
-          id: conversationId,
-          modelProviderId: resolvedBound.id,
-        }).catch(() => {
-          // 迁移失败不影响本轮 UI；下次进入仍会再尝试。
-        });
-      }
+      setModelProviderId(convModelProviderId);
       // 会话恢复的模型也写共享记忆，让 Quick 跟主聊天「当前/上次」模型一致。
-      writeLastModelProviderId(restoredModelProviderId);
+      if (showComposer) {
+        writeLastModelProviderId(resolveProviderById(providersRef.current, convModelProviderId)?.id ?? convModelProviderId);
+      }
 
       // 压缩横幅按会话恢复:压缩态真值在主进程登记表,切回正在压缩的会话时恢复横幅与进度,
       // 并把 streamIdRef 指向压缩流,使后续 progress/done 事件(按 streamId 门控)能继续匹配收尾。
@@ -1341,7 +1304,43 @@ export function ChatSurface({
       });
     })();
     return () => { cancelled = true; };
-  }, [conversationId, convActions, setTurnStartedAt]);
+  }, [conversationId, convActions, setTurnStartedAt, showComposer]);
+
+  const canPersistRestoredMetadata = canPersistRestoredConversationMetadata({
+    conversationId,
+    loadStatus,
+    streamStatus,
+    canEdit: showComposer,
+    isBusy: isBusy || externalStreaming || isGoalRunnerHoldingQueue(goalRunnerStatus),
+  });
+  useEffect(() => {
+    if (!canPersistRestoredMetadata) return;
+    // The load effect above can start reattaching a cached conversation during this commit.
+    const current = conversationStore.getSnapshot(conversationId);
+    if (current.streamStatus !== 'confirmed' || current.isStreaming) return;
+    if (current.modelProviderId !== storedModelProviderId || current.effort !== effort) return;
+
+    // Defer legacy model ID migration and unsupported effort correction to the same idle write.
+    const nextProviderId = modelProviderId !== storedModelProviderId ? modelProviderId : undefined;
+    const nextEffort = activeProviderSupportsReasoning && !effortLevels.includes(effort)
+      ? resolvePreferredEffort(effortLevels, activeProvider?.reasoningDefaultEffort)
+      : undefined;
+    if (nextProviderId === undefined && nextEffort === undefined) return;
+    void saveModelEffort({
+      ...(nextProviderId !== undefined ? { modelProviderId: nextProviderId } : {}),
+      ...(nextEffort !== undefined ? { effort: nextEffort } : {}),
+    }, { passive: true });
+  }, [
+    activeProvider?.reasoningDefaultEffort,
+    activeProviderSupportsReasoning,
+    canPersistRestoredMetadata,
+    conversationId,
+    effort,
+    effortLevels,
+    modelProviderId,
+    saveModelEffort,
+    storedModelProviderId,
+  ]);
 
   useEffect(() => {
     if (workspaceIsGit === false) setPreferredWorktree(false);
@@ -2353,12 +2352,10 @@ export function ChatSurface({
     <div className="chat-workspace">
     <ContextAccountingRestore
       conversationId={conversationId}
-      loadStatus={loadStatus}
-      isDraftConversation={isDraftConversation}
       providerId={activeProvider?.id ?? null}
       model={activeProvider?.model}
       modelProviderId={modelProviderId}
-      isBusy={isBusy}
+      canRestore={canPersistRestoredMetadata}
     />
     <div
       className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}${taskMonitorOpen ? ' chat-surface--with-monitor' : ''}${!showComposer ? ' chat-surface--process' : ''}`}
