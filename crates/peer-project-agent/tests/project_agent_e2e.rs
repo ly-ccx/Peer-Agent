@@ -9640,3 +9640,408 @@ async fn two_8k_images_reach_main_bot_while_worker_stays_running() {
     assert_eq!(tick.bot_turns_run, 1);
     assert_eq!(bot.requests.lock().unwrap().len(), 1);
 }
+
+async fn completed_delivery_fixture(
+    host: &NativeProjectHost,
+    ws_id: &str,
+    conv_id: &str,
+    workspace: &std::path::Path,
+) -> peer_project_agent::WorkSessionSummary {
+    fs::write(workspace.join("readme.md"), "Delivery fixture").unwrap();
+    host.ensure_lease(ws_id).unwrap();
+    let session = spawn_autonomy_fixture(host, ws_id, conv_id, workspace);
+    let stamp = peer_project_agent::now_iso();
+    host.conversations().append_message_idempotent(conv_id, &json!({
+        "id": format!("dispatch-{}", session.session_id),
+        "role": "assistant",
+        "kind": "agent_reply",
+        "replyTo": session.anchor_message_ids,
+        "sources": [session.session_id],
+        "content": "I’ve started the README research.",
+        "meta": {
+            "reportFactKeys": [format!("session:{}:queued:{}", session.session_id, session.updated_at)],
+            "sessionStates": [{
+                "sessionId": session.session_id, "status": "queued", "sourceRevision": session.updated_at
+            }]
+        }
+    }), &stamp, None).unwrap();
+    host.supervisor().promote_queued(ws_id, true).unwrap();
+    let worker = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("read", "read_file", &json!({"path": "readme.md"}))),
+        Box::new(|_| sse_text("WORKER_RESULT: The README says Delivery fixture.")),
+    ]);
+    host.run_promoted_session(
+        ws_id,
+        &session.session_id,
+        &mock_model(&worker.endpoint),
+        None,
+        &mut AutoAllowPermission,
+        5,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let report = host
+        .supervisor()
+        .read_report(ws_id, &session.session_id)
+        .unwrap();
+    assert_eq!(report.summary.status, "result_ready");
+    assert_eq!(report.verdict_outcome, "passed");
+    assert_eq!(report.independent_verifier, "not_required");
+    report.summary
+}
+
+fn budget_exhausting_wake_requests() -> Vec<ScriptHandler> {
+    (0..4)
+        .map(|round| {
+            Box::new(move |request: &Value| {
+                let messages = request["messages"].as_array().unwrap();
+                assert!(request["tools"].is_array());
+                assert!(messages.iter().any(|msg| {
+                    msg["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("WORKER_RESULT:"))
+                }));
+                let nudge: Vec<_> = messages
+                    .iter()
+                    .filter_map(|msg| msg["content"].as_str())
+                    .filter(|text| text.contains("approaching its safety limit"))
+                    .collect();
+                if round == 3 {
+                    assert_eq!(nudge.len(), 1);
+                    assert!(nudge[0].contains("message_session"));
+                } else {
+                    assert!(nudge.is_empty());
+                }
+                let calls: Vec<_> = (0..4).map(|index| json!({
+                "index": index,
+                "id": format!("budget-{round}-{index}"),
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{\"path\":\"readme.md\"}"}
+            })).collect();
+                let chunk = json!({"choices": [{
+                    "index": 0, "delta": {"tool_calls": calls}, "finish_reason": "tool_calls"
+                }]});
+                format!("data: {chunk}\n\ndata: [DONE]\n\n")
+            }) as ScriptHandler
+        })
+        .collect()
+}
+
+fn assert_wake_synthesis_request(request: &Value) {
+    assert!(request["tools"].as_array().is_none_or(Vec::is_empty));
+    let messages = request["messages"].as_array().unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .filter_map(|msg| msg["content"].as_str())
+            .filter(|text| text.contains("approaching its safety limit"))
+            .count(),
+        1
+    );
+    assert!(
+        messages.last().unwrap()["content"]
+            .as_str()
+            .unwrap()
+            .contains("Deliver the pending Worker result")
+    );
+}
+
+#[tokio::test]
+async fn wake_delivery_tool_budget_wraps_up_and_accepts_after_queued_receipt() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(workspace.path(), Some("Wake Budget"))
+        .unwrap();
+    let ws = entry.workspace_id;
+    let conv = profile.agent_conversation_id.unwrap();
+    let session = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+
+    let mut requests = budget_exhausting_wake_requests();
+    requests.push(Box::new(|request| {
+        assert_wake_synthesis_request(request);
+        sse_text("The README says Delivery fixture.")
+    }));
+    let server = start_mock_server(requests);
+    let cancel = CancellationToken::new();
+    let tick = host
+        .tick_foreground(&ws, &mock_model(&server.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.last_turn.unwrap().tool_calls, 16);
+    assert_eq!(server.requests.lock().unwrap().len(), 5);
+    let plan = host.supervisor().read_plan(&session.plan_id).unwrap();
+    assert_eq!(plan["resultAcceptance"]["acceptedBy"], "policy");
+    let messages = host
+        .conversations()
+        .read_committed(&conv, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let reply = messages
+        .iter()
+        .find(|msg| msg["content"] == "The README says Delivery fixture.")
+        .unwrap();
+    assert_eq!(reply["sources"], json!([session.session_id]));
+    assert_eq!(
+        reply["meta"]["sessionStates"][0]["sourceRevision"],
+        session.updated_at
+    );
+    assert_eq!(
+        host.tick_foreground(&ws, &mock_model(&server.endpoint), json!({}), &cancel)
+            .await
+            .unwrap()
+            .wake_turns_run,
+        0
+    );
+    assert!(!host.has_pending_work(&ws));
+}
+
+#[tokio::test]
+async fn wake_delivery_invalid_wrap_up_retains_durable_revision_and_backoff() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(workspace.path(), Some("Wake Backoff"))
+        .unwrap();
+    let ws = entry.workspace_id;
+    let conv = profile.agent_conversation_id.unwrap();
+    let session = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+    let mut requests = budget_exhausting_wake_requests();
+    requests.push(Box::new(|request| {
+        assert_wake_synthesis_request(request);
+        sse_text("NO_REPLY")
+    }));
+    let server = start_mock_server(requests);
+    let cancel = CancellationToken::new();
+    let tick = host
+        .tick_foreground(&ws, &mock_model(&server.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.last_turn.unwrap().end, TurnEndKind::Yielded);
+    let cursor_path = home
+        .path()
+        .join("project-runtime")
+        .join(&ws)
+        .join("inbox-cursor.json");
+    let cursor: Value = serde_json::from_str(&fs::read_to_string(cursor_path).unwrap()).unwrap();
+    let retained = &cursor["pendingDeliveries"][&session.session_id];
+    assert_eq!(retained["revision"], session.updated_at);
+    assert_eq!(retained["attempts"], 1);
+    assert_eq!(retained["lastError"], "result_delivery_missing");
+    assert!(
+        retained["nextAttemptMs"].as_i64().unwrap()
+            > peer_project_agent::parse_iso_ms(&peer_project_agent::now_iso()).unwrap()
+    );
+    assert!(!host.has_pending_work(&ws));
+    assert_eq!(
+        host.tick_foreground(&ws, &mock_model(&server.endpoint), json!({}), &cancel)
+            .await
+            .unwrap()
+            .wake_turns_run,
+        0
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 5);
+    let messages = host
+        .conversations()
+        .read_committed(&conv, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|msg| msg["kind"] == "agent_reply")
+            .count(),
+        1
+    );
+    assert_eq!(
+        host.supervisor()
+            .read_report(&ws, &session.session_id)
+            .unwrap()
+            .summary
+            .status,
+        "result_ready"
+    );
+}
+
+#[tokio::test]
+async fn wake_delivery_revisits_consumed_results_in_quiet_mode_and_skips_withdrawn_work() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, mut profile) = host
+        .bind_workspace(workspace.path(), Some("Wake Recovery"))
+        .unwrap();
+    let ws = entry.workspace_id;
+    let conv = profile.agent_conversation_id.clone().unwrap();
+    profile.proactivity = Some("quiet".into());
+    host.profiles().save(profile).unwrap();
+    let cancelled = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+    host.supervisor()
+        .control_session(&ws, &cancelled.session_id, "cancel", "user_withdrawn", true)
+        .unwrap();
+    let stranded = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+    let claim = host.inbox().take_batch(&ws, 0, true);
+    host.inbox()
+        .commit_batch(&ws, claim.through_seq, true)
+        .unwrap();
+    assert!(!host.inbox().has_pending(&ws));
+
+    let cancel = CancellationToken::new();
+    host.recover_workspace_barrier(&ws, &cancel).await.unwrap();
+    assert!(host.has_pending_work(&ws));
+    let withdrawn_id = cancelled.session_id.clone();
+    let server = start_mock_server(vec![Box::new(move |request| {
+        let wake = request["messages"].as_array().unwrap().last().unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(wake.contains("WORKER_RESULT"));
+        assert!(!wake.contains(&withdrawn_id));
+        sse_text("Recovered README research.")
+    })]);
+    let bot = mock_model(&server.endpoint);
+    assert_eq!(
+        host.tick_foreground(&ws, &bot, json!({}), &cancel)
+            .await
+            .unwrap()
+            .wake_turns_run,
+        1
+    );
+    assert_eq!(host.digests().pending(&ws), 1);
+    assert!(host.supervisor().read_plan(&stranded.plan_id).unwrap()["resultAcceptance"].is_null());
+    assert_eq!(
+        host.tick_foreground(&ws, &bot, json!({}), &cancel)
+            .await
+            .unwrap()
+            .wake_turns_run,
+        0
+    );
+    let digest = host
+        .flush_due_digest(&ws, "2099-11-26T10:00:00.000Z", "09:00")
+        .unwrap()
+        .unwrap();
+    assert_eq!(digest["sources"], json!([stranded.session_id]));
+    assert_eq!(
+        host.supervisor().read_plan(&stranded.plan_id).unwrap()["resultAcceptance"]["acceptedBy"],
+        "policy"
+    );
+    assert_eq!(
+        host.supervisor().read_plan(&cancelled.plan_id).unwrap()["delegationOrigin"]["cancellation"]
+            ["disposition"],
+        "user_withdrawn"
+    );
+}
+
+#[tokio::test]
+async fn natural_reply_to_continue_only_cites_result_revision_read_during_that_turn() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(workspace.path(), Some("Cross Anchor"))
+        .unwrap();
+    let ws = entry.workspace_id;
+    let conv = profile.agent_conversation_id.unwrap();
+    let intended = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+    let unrelated = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+    let target = intended.session_id.clone();
+    let server = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "inspect",
+                "get_session",
+                &json!({"sessionId": target, "detail": "report"}),
+            )
+        }),
+        Box::new(|request| {
+            assert!(latest_autonomy_tool_result(request).contains("WORKER_RESULT"));
+            sse_text("The README check is complete.")
+        }),
+        Box::new(|_| sse_text("NO_REPLY")),
+    ]);
+    host.submit_user_input(&ws, "continue-in", "继续", None)
+        .unwrap();
+    host.tick_foreground(
+        &ws,
+        &mock_model(&server.endpoint),
+        json!({}),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let messages = host
+        .conversations()
+        .read_committed(&conv, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let reply = messages
+        .iter()
+        .find(|msg| msg["content"] == "The README check is complete.")
+        .unwrap();
+    assert_eq!(reply["replyTo"], json!(["input-continue-in"]));
+    assert_eq!(reply["sources"], json!([intended.session_id]));
+    assert_eq!(
+        host.supervisor().read_plan(&intended.plan_id).unwrap()["resultAcceptance"]["acceptedBy"],
+        "policy"
+    );
+    assert!(host.supervisor().read_plan(&unrelated.plan_id).unwrap()["resultAcceptance"].is_null());
+}
+
+#[tokio::test]
+async fn wake_delivery_round_limit_wraps_up_before_the_tool_limit() {
+    let home = tempdir().unwrap();
+    let workspace = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host
+        .bind_workspace(workspace.path(), Some("Wake Rounds"))
+        .unwrap();
+    let ws = entry.workspace_id;
+    let conv = profile.agent_conversation_id.unwrap();
+    let session = completed_delivery_fixture(&host, &ws, &conv, workspace.path()).await;
+
+    let mut requests: Vec<ScriptHandler> = (0..8)
+        .map(|round| {
+            Box::new(move |request: &Value| {
+                assert!(!tool_names_from_request(request).is_empty());
+                let nudge_count = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|msg| msg["content"].as_str())
+                    .filter(|text| text.contains("approaching its safety limit"))
+                    .count();
+                assert_eq!(nudge_count, usize::from(round >= 5));
+                sse_tool_call(
+                    &format!("round-{round}"),
+                    "read_file",
+                    &json!({"path": "readme.md"}),
+                )
+            }) as ScriptHandler
+        })
+        .collect();
+    requests.push(Box::new(|request| {
+        assert_wake_synthesis_request(request);
+        sse_text("The root README check is complete.")
+    }));
+    let server = start_mock_server(requests);
+    let report = host
+        .tick_foreground(
+            &ws,
+            &mock_model(&server.endpoint),
+            json!({}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.last_turn.unwrap().tool_calls, 8);
+    assert_eq!(server.requests.lock().unwrap().len(), 9);
+    assert_eq!(
+        host.supervisor().read_plan(&session.plan_id).unwrap()["resultAcceptance"]["acceptedBy"],
+        "policy"
+    );
+}

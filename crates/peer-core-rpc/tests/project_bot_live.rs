@@ -2402,3 +2402,129 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
     sse_stop.cancel();
     client.shutdown(handle).await;
 }
+
+#[tokio::test]
+async fn explicit_reverification_withdrawal_cancels_the_live_request_and_notifies() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let workspace = temp.path().join("verify-workspace");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(workspace.join("README.md"), "Retained Worker evidence").unwrap();
+
+    let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        socket.local_addr().unwrap()
+    );
+    let (requested_tx, requested_rx) = tokio::sync::oneshot::channel();
+    let verifier = tokio::spawn(async move {
+        let (mut stream, _) = socket.accept().await.unwrap();
+        let request = read_http_request(&mut stream).await;
+        assert!(request.contains("Check verification liveness"), "{request}");
+        requested_tx.send(()).unwrap();
+        let mut data = [0];
+        assert_eq!(
+            stream.read(&mut data).await.unwrap(),
+            0,
+            "cancel should close the outstanding verifier request"
+        );
+    });
+    let (mut client, handle) = spawn_live_server(&home, Some(make_test_loader(endpoint))).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({"enabled": true, "heartbeatIntervalMs": 5000}),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({
+                "path": workspace, "name": "Verifier Cancel Test", "startFamiliarize": false,
+            }),
+        )
+        .await;
+    let ws = created["profile"]["workspaceId"].as_str().unwrap();
+    let parent = created["profile"]["agentConversationId"].as_str().unwrap();
+    let plan_id = "plan-explicit-verify";
+    let sid = "explicit-verify";
+    let fixture = NativeProjectHost::new(&home, "test-fixture", Some(1)).unwrap();
+    fixture.supervisor().save_plan_json(&json!({
+        "planId": plan_id, "conversationId": sid, "title": "Explicit verify fixture",
+        "targetWorkspacePath": workspace, "status": "completed",
+        "updatedAt": "2026-11-26T00:00:00.000Z",
+        "successCriteria": [{"id":"exists","kind":"file-exists","path":"README.md"}],
+        "delegationOrigin": {
+            "workspaceId": ws, "sessionId": sid, "parentConversationId": parent, "phase": "completed",
+            "readOnly": true, "independentVerifier": "not_required", "lastWorkerOutput": "Durable worker report"
+        }
+    })).unwrap();
+
+    let verify_id = client.next_id;
+    client.next_id += 1;
+    client
+        .send(
+            &json!({"jsonrpc":"2.0", "id": verify_id, "method":"project.bot.verifySession",
+        "params":{"workspaceId":ws, "sessionId":sid, "focus":"Check verification liveness"}}),
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(5), requested_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        fixture.supervisor().read_plan(plan_id).unwrap()["delegationOrigin"]["phase"],
+        "verifying"
+    );
+    let cancel_id = client.next_id;
+    client.next_id += 1;
+    client
+        .send(
+            &json!({"jsonrpc":"2.0", "id":cancel_id, "method":"project.bot.cancelSession",
+        "params":{"workspaceId":ws, "sessionId":sid, "reason":"user_withdrawn"}}),
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut saw_cancel = false;
+        let mut saw_verify = false;
+        let mut saw_conversation_change = false;
+        while !(saw_cancel && saw_verify && saw_conversation_change) {
+            let frame = client.read_frame().await;
+            if frame["id"] == cancel_id {
+                assert_eq!(frame["result"]["ok"], true, "{frame}");
+                saw_cancel = true;
+            } else if frame["id"] == verify_id {
+                assert_eq!(frame["result"]["ok"], false, "{frame}");
+                assert!(
+                    matches!(
+                        frame["result"]["code"].as_str(),
+                        Some("CANCELLED" | "session_state_changed")
+                    ),
+                    "{frame}"
+                );
+                saw_verify = true;
+            } else if frame["method"] == "project.bot.conversationChanged"
+                && frame["params"]["workspaceId"] == ws
+            {
+                saw_conversation_change = true;
+            }
+        }
+        verifier.await.unwrap();
+    })
+    .await
+    .unwrap();
+    let plan = fixture.supervisor().read_plan(plan_id).unwrap();
+    assert_eq!(plan["delegationOrigin"]["phase"], "cancelled");
+    assert_eq!(
+        plan["delegationOrigin"]["cancellation"]["disposition"],
+        "user_withdrawn"
+    );
+    assert_eq!(
+        plan["delegationOrigin"]["lastWorkerOutput"],
+        "Durable worker report"
+    );
+    assert_eq!(plan["runner"]["verifierRuns"][0]["status"], "interrupted");
+    assert!(plan["resultAcceptance"].is_null());
+    client.shutdown(handle).await;
+}

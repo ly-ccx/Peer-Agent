@@ -567,7 +567,7 @@ pub struct SessionSupervisor {
     worktrees: GoalWorktreeAdapter,
     plan_cache: Mutex<PlanIndexCache>,
     transitions: Mutex<()>,
-    verifying_sessions: Mutex<HashSet<String>>,
+    verifying_sessions: Mutex<HashMap<String, verification::ActiveVerification>>,
     interactive_bridge: RwLock<Option<Arc<dyn InteractiveContentBridge>>>,
     interactive_enabled_override: RwLock<Option<bool>>,
 }
@@ -1315,7 +1315,7 @@ impl SessionSupervisor {
             data_home: home,
             plan_cache: Mutex::new(PlanIndexCache::default()),
             transitions: Mutex::new(()),
-            verifying_sessions: Mutex::new(HashSet::new()),
+            verifying_sessions: Mutex::new(HashMap::new()),
             interactive_bridge: RwLock::new(None),
             interactive_enabled_override: RwLock::new(None),
         }
@@ -1780,6 +1780,27 @@ impl SessionSupervisor {
             .collect();
         items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         items
+    }
+
+    pub(crate) fn pending_result_sessions(
+        &self,
+        workspace_id: &str,
+        conversation_id: &str,
+    ) -> Vec<WorkSessionSummary> {
+        self.list_workspace_plans(workspace_id)
+            .iter()
+            .filter(|plan| {
+                plan["status"] == "completed"
+                    && plan["delegationOrigin"]["cancellation"]["disposition"] != "user_withdrawn"
+                    && !plan["delegationOrigin"]["supersededBy"].is_string()
+                    && plan["delegationOrigin"]["parentConversationId"] == conversation_id
+                    && derive_session_status(plan) == "result_ready"
+                    && plan["updatedAt"]
+                        .as_str()
+                        .is_some_and(|revision| !revision.is_empty())
+            })
+            .map(|plan| self.summarize(plan))
+            .collect()
     }
 
     pub fn list_bot_sessions(&self, workspace_id: &str) -> Vec<BotListSession> {
@@ -2383,6 +2404,32 @@ impl SessionSupervisor {
         cancel: &CancellationToken,
         holds_lease: bool,
     ) -> Result<EpisodeOutcome, ProjectError> {
+        Box::pin(self.run_session_episode_with_verifier_owned(
+            workspace_id,
+            session_id,
+            worker_model,
+            verifier_model,
+            permission,
+            max_turns,
+            cancel,
+            || holds_lease,
+        ))
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn run_session_episode_with_verifier_owned(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        worker_model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
+        permission: &mut impl PermissionInput,
+        max_turns: usize,
+        cancel: &CancellationToken,
+        owns_lease: impl Fn() -> bool,
+    ) -> Result<EpisodeOutcome, ProjectError> {
+        let holds_lease = owns_lease();
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
@@ -2842,6 +2889,9 @@ impl SessionSupervisor {
         };
 
         let at = now_iso();
+        // Declare before the transition guard so even unwinding releases the lock before
+        // verifier cleanup runs. Keep it registered through the final plan write.
+        let verification;
         let mut transition = Some(self.transition_lock()?);
         if let Ok(mut updated) = self.read_plan(&plan_id) {
             if matches!(
@@ -2967,13 +3017,34 @@ impl SessionSupervisor {
                     updated["status"] = json!("executing");
                     updated["delegationOrigin"]["phase"] = json!("verifying");
                     let run_id = Self::record_verifier_run(&mut updated);
+                    if !owns_lease() {
+                        return Err(ProjectError::code("LEASE_REQUIRED"));
+                    }
+                    verification = self.register_verification(
+                        workspace_id,
+                        session_id,
+                        &plan_id,
+                        run_id.clone(),
+                        cancel,
+                        &owns_lease,
+                    )?;
                     self.write_plan(&updated)?;
                     let started = updated.clone();
                     drop(transition.take());
                     let vmodel = verifier_model.unwrap_or(worker_model);
-                    self.verify_plan(&mut updated, &mut ev_refs, &run_id, None, vmodel, cancel)
-                        .await;
+                    self.verify_plan(
+                        &mut updated,
+                        &mut ev_refs,
+                        &run_id,
+                        None,
+                        vmodel,
+                        verification.token(),
+                    )
+                    .await;
                     transition = Some(self.transition_lock()?);
+                    if !owns_lease() {
+                        return Err(ProjectError::code("LEASE_REQUIRED"));
+                    }
                     if self.read_plan(&plan_id)? != started {
                         return Err(ProjectError::code("session_state_changed"));
                     }
@@ -3227,6 +3298,46 @@ impl SessionSupervisor {
         independent_verifier: Option<&str>,
         holds_lease: bool,
     ) -> Result<AcceptanceDecision, ProjectError> {
+        self.settle_session_inner(
+            workspace_id,
+            session_id,
+            reported,
+            user_confirm,
+            independent_verifier,
+            holds_lease,
+            None,
+        )
+    }
+
+    pub(crate) fn settle_reported_revision(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        revision: &str,
+        holds_lease: bool,
+    ) -> Result<AcceptanceDecision, ProjectError> {
+        self.settle_session_inner(
+            workspace_id,
+            session_id,
+            true,
+            false,
+            None,
+            holds_lease,
+            Some(revision),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn settle_session_inner(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        reported: bool,
+        user_confirm: bool,
+        independent_verifier: Option<&str>,
+        holds_lease: bool,
+        revision: Option<&str>,
+    ) -> Result<AcceptanceDecision, ProjectError> {
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
@@ -3234,6 +3345,11 @@ impl SessionSupervisor {
         let mut plan = self
             .find_plan_by_session(workspace_id, session_id)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        if revision.is_some_and(|expected| {
+            plan["updatedAt"] != expected || derive_session_status(&plan) != "result_ready"
+        }) {
+            return Err(ProjectError::code("session_state_changed"));
+        }
         if plan["delegationOrigin"]["phase"] == "verifying" {
             return Err(ProjectError::code("verifier_in_progress"));
         }
@@ -3862,6 +3978,10 @@ impl SessionSupervisor {
             _ => return Err(ProjectError::code("invalid_action")),
         }
         if action == "cancel" {
+            let canonical_session_id = plan["delegationOrigin"]["sessionId"]
+                .as_str()
+                .unwrap_or(session_id);
+            self.cancel_live_verification(canonical_session_id);
             self.persist_terminal_transition(
                 &mut plan,
                 if initiated_by_agent {
@@ -3889,6 +4009,7 @@ impl SessionSupervisor {
         if !matches!(priority, "high" | "normal" | "low") {
             return Err(ProjectError::code("invalid_priority"));
         }
+        let _transition = self.transition_lock()?;
         let mut plan = self
             .find_plan_by_session(workspace_id, session_id)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
@@ -3928,6 +4049,9 @@ impl SessionSupervisor {
         for plan in &mut plans {
             {
                 let _transition = self.transition_lock()?;
+                if let Some(plan_id) = plan["planId"].as_str() {
+                    *plan = self.read_plan(plan_id)?;
+                }
                 let event = &plan["delegationOrigin"]["terminalEvent"];
                 if event["kind"] == "session_ended" && event["workspaceId"] == workspace_id {
                     self.inbox

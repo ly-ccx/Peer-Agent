@@ -167,6 +167,19 @@ pub(crate) struct LiveApprovalWaiter {
     tx: oneshot::Sender<LocalPermissionDecision>,
 }
 
+struct VerificationNotification {
+    runtime: Arc<ProjectHostRuntime>,
+    workspace_id: String,
+}
+
+impl Drop for VerificationNotification {
+    fn drop(&mut self) {
+        self.runtime
+            .emit_conversation_changed(&self.workspace_id, None);
+        self.runtime.emit_changed(vec![self.workspace_id.clone()]);
+    }
+}
+
 pub struct ProjectHostRuntime {
     data_home: PathBuf,
     host: Arc<NativeProjectHost>,
@@ -723,7 +736,9 @@ impl ProjectHostRuntime {
                 .host
                 .run_background_maintenance(&ws_id, &at, model_opt.as_ref(), cancel)
                 .await
-                && report.flushed_digest
+                && (report.flushed_digest
+                    || report.recovered_verifications > 0
+                    || report.settled_deliveries > 0)
             {
                 self.emit_conversation_changed(&ws_id, None);
                 self.emit_changed(vec![ws_id]);
@@ -918,6 +933,7 @@ impl ProjectHostRuntime {
             Some(bot_model.clone())
         };
         let had_failure_hold = self.host.failure_hold(workspace_id).is_some();
+        let inbox_cursor = self.host.inbox().read_cursor(workspace_id).seq;
         let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
             workspace_id,
             &bot_model,
@@ -967,6 +983,9 @@ impl ProjectHostRuntime {
                 {
                     self.emit_conversation_changed(workspace_id, conv_id.as_deref());
                     self.emit_changed(vec![workspace_id.to_owned()]);
+                } else if self.host.inbox().read_cursor(workspace_id).seq > inbox_cursor {
+                    // Policy-settlement events can be reconciled without a Bot response.
+                    self.emit_changed(vec![workspace_id.to_owned()]);
                 }
             }
             Err(_) => {
@@ -1011,7 +1030,27 @@ impl ProjectHostRuntime {
             .spawner
             .spawn(move |_guard| {
                 tokio::task::spawn_local(async move {
-                    rt.run_worker_task(&ws, &sid, &cancel).await;
+                    let worker = Arc::clone(&rt);
+                    let worker_ws = ws.clone();
+                    let worker_sid = sid.clone();
+                    let worker_cancel = cancel.clone();
+                    let joined = tokio::task::spawn_local(async move {
+                        worker
+                            .run_worker_task(&worker_ws, &worker_sid, &worker_cancel)
+                            .await;
+                    })
+                    .await;
+                    if let Err(error) = joined {
+                        eprintln!("project worker task {sid} exited: {error}");
+                    }
+                    if let Ok(mut active) = rt.active_workers.lock() {
+                        active.remove(&sid);
+                    }
+                    rt.emit_changed(vec![ws.clone()]);
+                    rt.emit_conversation_changed(&ws, None);
+                    if rt.is_enabled() && !cancel.is_cancelled() {
+                        rt.wake_workspace(&ws);
+                    }
                 });
             })
             .is_err()
@@ -1027,9 +1066,17 @@ impl ProjectHostRuntime {
         session_id: &str,
         focus: Option<&str>,
     ) -> Result<Value, peer_project_agent::ProjectError> {
-        if !self.is_enabled() || !self.host.holds_lease(workspace_id) {
-            return Err(peer_project_agent::ProjectError::code("LEASE_REQUIRED"));
-        }
+        let notify = VerificationNotification {
+            runtime: Arc::clone(self),
+            workspace_id: workspace_id.to_owned(),
+        };
+        let epoch = self
+            .host
+            .lease_epoch(workspace_id)
+            .filter(|epoch| {
+                self.is_enabled() && self.host.holds_lease_generation(workspace_id, epoch)
+            })
+            .ok_or_else(|| ProjectError::code("LEASE_REQUIRED"))?;
         let Some(plan) = self
             .host
             .supervisor()
@@ -1044,6 +1091,7 @@ impl ProjectHostRuntime {
             .and_then(|g| g.clone())
             .unwrap_or_else(|| self.peer.shutdown_child_token())
             .child_token();
+        let _cancel_on_drop = cancel.clone().drop_guard();
         let profile = self.host.profiles().read(workspace_id);
         let model = if has_role_model_config(
             &self.data_home,
@@ -1073,12 +1121,13 @@ impl ProjectHostRuntime {
         let runtime = tokio::runtime::Handle::current();
         self.emit_changed(vec![workspace_id.to_owned()]);
         let result = tokio::task::spawn_blocking(move || {
+            let _notify = notify;
             runtime.block_on(host.supervisor().reverify_session(
                 plan,
                 focus_owned.as_deref(),
                 &model,
                 &cancel,
-                || host.holds_lease(&ws),
+                || host.holds_lease_generation(&ws, &epoch),
             ))
         })
         .await
@@ -1094,8 +1143,6 @@ impl ProjectHostRuntime {
                 self.wake_workspace(workspace_id);
             }
         }
-        self.emit_conversation_changed(workspace_id, None);
-        self.emit_changed(vec![workspace_id.to_owned()]);
         Ok(result)
     }
 
@@ -1141,7 +1188,10 @@ impl ProjectHostRuntime {
                 ))
                 .await
                     && !cancel.is_cancelled()
-                    && err.code != "LEASE_HELD_BY_OTHER"
+                    && !matches!(
+                        err.code,
+                        "LEASE_HELD_BY_OTHER" | "LEASE_REQUIRED" | "session_state_changed"
+                    )
                 {
                     let _ = self.host.supervisor().fail_session(
                         workspace_id,
@@ -1163,14 +1213,6 @@ impl ProjectHostRuntime {
                     );
                 }
             }
-        }
-        if let Ok(mut active) = self.active_workers.lock() {
-            active.remove(session_id);
-        }
-        self.emit_changed(vec![workspace_id.to_owned()]);
-        self.emit_conversation_changed(workspace_id, None);
-        if self.is_enabled() && !cancel.is_cancelled() {
-            self.wake_workspace(workspace_id);
         }
     }
 
@@ -1288,6 +1330,7 @@ impl ProjectHostRuntime {
     }
 
     pub fn cancel_live_worker(&self, session_id: &str) {
+        self.host.supervisor().cancel_live_verification(session_id);
         if let Ok(workers) = self.active_workers.lock()
             && let Some(entry) = workers.get(session_id)
         {

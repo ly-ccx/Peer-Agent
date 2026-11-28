@@ -56,6 +56,13 @@ pub(crate) fn wake_event_session_id(event: &Value) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+pub(crate) fn is_result_delivery_event(event: &Value) -> bool {
+    matches!(
+        event["kind"].as_str(),
+        Some("report_available" | "session_completed" | "result_ready")
+    ) || (event["kind"] == "session_ended" && event["payload"]["status"] == "completed")
+}
+
 fn priority(event: &Value) -> u8 {
     let kind = event["kind"].as_str().unwrap_or_default();
     let status = event["payload"]["status"].as_str().unwrap_or_default();
@@ -265,12 +272,12 @@ fn build_with_reports(
             index + 1,
             budget,
         );
-        if let Some(report) = report {
-            reports.insert(report.summary.session_id.clone(), report);
-        }
         if row.len() > budget {
             omitted = true;
             continue;
+        }
+        if let Some(report) = report {
+            reports.insert(report.summary.session_id.clone(), report);
         }
         message.push_str(&row);
     }
