@@ -1218,6 +1218,181 @@ async fn cancel_resume_confirm_result_and_handoff_answer() {
 }
 
 #[tokio::test]
+async fn decide_approval_stale_image_scope_and_replay() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-image-approvals");
+    fs::create_dir_all(&ws_dir).unwrap();
+    let host = NativeProjectHost::new_for_surface(&home, HostSurface::Desktop, "0.1.0-test", None)
+        .unwrap();
+    let (entry, profile) = host.bind_workspace(&ws_dir, Some("Image Bot")).unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let at = peer_project_agent::now_iso();
+    let policies = PolicyStore::new(&home);
+    policies
+        .initialize(LocalAccessLevel::AskBeforeLocal, &at, None)
+        .unwrap();
+    let policy = policies.read_or_register(&ws_id, &at).unwrap();
+    let stamp = format!("bot:{ws_id}:{conv_id}:{}", policy.revision);
+    let image = ws_dir.join("shot.png");
+    let scope = json!({"capabilityId": "local.image.read", "action": "read_image_for_model",
+        "path": image, "workspacePath": ws_dir, "fileIdentity": {"dev": 1, "ino": 2,
+        "size": 123, "mtimeMs": 4.125, "ctimeMs": 5.125}});
+    let row = |id, capability, state| {
+        json!({"approvalId": id, "workspaceId": ws_id,
+        "conversationId": conv_id, "capabilityId": capability, "state": state,
+        "summary": "permission fixture", "policyRevision": stamp, "createdAt": at,
+        "argsDigest": javascript_json_digest(&json!({"path": image, "fileIdentity": scope["fileIdentity"]})).unwrap()})
+    };
+    let other = row("other", "local.file.write", "open");
+    let mut rows = vec![other.clone(), row("ordinary", "local.file.write", "stale")];
+    for (id, state) in [
+        ("task", "stale"),
+        ("once", "stale"),
+        ("missing", "stale"),
+        ("invalid", "stale"),
+        ("reject", "stale"),
+        ("cancel", "stale"),
+        ("expired", "stale"),
+        ("drifted", "stale"),
+        ("open-task", "open"),
+        ("open-reject", "open"),
+    ] {
+        let mut image_row = row(id, "local.image.read", state);
+        if id != "missing" {
+            image_row["imageReadScope"] = scope.clone();
+        }
+        if id == "invalid" {
+            image_row["imageReadScope"]["fileIdentity"]["ctimeMs"] = Value::Null;
+        }
+        if id == "expired" {
+            image_row["deadlineAt"] = json!("2020-01-01T00:00:00.000Z");
+        }
+        if id == "drifted" {
+            image_row["policyRevision"] = json!(format!("bot:{ws_id}:{conv_id}:0"));
+        }
+        rows.push(image_row);
+    }
+    let dir = home.join("project-runtime").join(&ws_id);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("approvals.jsonl"),
+        rows.iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+
+    let (mut client, handle) = spawn_live_server(&home, None).await;
+    let params = |id, decision, duration| {
+        json!({"workspaceId": ws_id, "approvalId": id,
+        "decision": decision, "duration": duration})
+    };
+    let method = "project.bot.decideApproval";
+    let mut request = params("task", "approve", "task");
+    // Neither capability nor scope from IPC may substitute the durable request.
+    request["capabilityId"] = json!("local.file.write");
+    request["imageReadScope"] = json!({"path": "/spoofed.png"});
+    let before = now_ms();
+    let approved = client.call(method, request.clone()).await;
+    assert_eq!(approved["ok"], true, "{approved}");
+    assert_eq!(approved["approval"]["state"], "approved");
+    assert_eq!(client.call(method, request).await, approved);
+    for (id, code) in [
+        ("ordinary", "NOT_FOUND"),
+        ("missing", "IMAGE_AUTHORIZATION_UNAVAILABLE"),
+        ("invalid", "IMAGE_AUTHORIZATION_UNAVAILABLE"),
+    ] {
+        assert_eq!(
+            client.call(method, params(id, "approve", "task")).await,
+            json!({"ok": false, "code": code}),
+            "{id}"
+        );
+    }
+    for (id, decision, duration, state, reason) in [
+        ("once", "approve", "once", "approved", Value::Null),
+        (
+            "reject",
+            "reject",
+            "denied",
+            "denied",
+            json!("local_user_denied"),
+        ),
+        (
+            "cancel",
+            "cancel",
+            "denied",
+            "cancelled",
+            json!("permission_cancelled"),
+        ),
+        (
+            "expired",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_timeout"),
+        ),
+        (
+            "drifted",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_policy_changed"),
+        ),
+        // A persisted open row cannot stand in for a live waiter.
+        (
+            "open-task",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_unavailable"),
+        ),
+        (
+            "open-reject",
+            "reject",
+            "denied",
+            "expired",
+            json!("permission_unavailable"),
+        ),
+    ] {
+        let response = client.call(method, params(id, decision, duration)).await;
+        assert_eq!(response["ok"], true, "{id}: {response}");
+        assert_eq!(response["approval"]["state"], state, "{id}");
+        assert_eq!(response["approval"]["decisionReason"], reason, "{id}");
+    }
+    let stored = ApprovalStore::new(&home).list(Some(&ws_id), None).unwrap();
+    assert!(stored.contains(&other));
+    for id in ["ordinary", "missing", "invalid"] {
+        assert_eq!(
+            stored.iter().find(|r| r["approvalId"] == id).unwrap()["state"],
+            "stale"
+        );
+    }
+    let grants: Vec<_> = stored
+        .iter()
+        .filter(|r| r.get("imageReadGrant").is_some())
+        .collect();
+    let [grant] = grants.as_slice() else {
+        panic!("expected one grant, got {grants:?}")
+    };
+    assert_eq!(grant["kind"], "image_read_grant");
+    assert_eq!(grant["state"], "approved");
+    assert_eq!(grant["decidedBy"], "local_ui");
+    let expires = grant["imageReadGrant"]["expiresAt"].as_i64().unwrap();
+    let issued = peer_project_agent::parse_iso_ms(grant["decidedAt"].as_str().unwrap()).unwrap();
+    assert!((before..=now_ms()).contains(&issued));
+    assert_eq!(expires - issued, 1_800_000);
+    assert_eq!(
+        grant["imageReadGrant"],
+        json!({"schemaVersion": 1, "grantId": grant["approvalId"],
+        "workspaceId": ws_id, "conversationId": conv_id, "policyRevision": stamp, "expiresAt": expires,
+        "scope": scope})
+    );
+    client.shutdown(handle).await;
+}
+
+#[tokio::test]
 async fn decide_approval_plan_live_worker_and_policy_drift() {
     let temp = TempDir::new().unwrap();
     let home = temp.path().join("home");

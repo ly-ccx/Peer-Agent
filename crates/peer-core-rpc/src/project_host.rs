@@ -1707,3 +1707,152 @@ impl PermissionInput for BotApprovalPermissionInput {
         })
     }
 }
+
+#[cfg(test)]
+mod image_approval_tests {
+    use super::*;
+    use crate::{
+        project_bot_live::handle_decide_approval,
+        server::{CoreEngine, CoreServerConfig},
+    };
+
+    #[tokio::test]
+    async fn open_image_read_requires_live_claim_and_only_task_writes_grant() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path();
+        let engine = CoreEngine::new(
+            CoreServerConfig::new("0.1.0-test", path.to_owned()),
+            CancellationToken::new(),
+            None,
+        )
+        .unwrap();
+        let ctx = engine.context_for_client(1);
+        let workspace = "ws-image";
+        let at = now_iso();
+        let scope = json!({"capabilityId": "local.image.read", "action": "read_image_for_model",
+            "path": path.join("shot.png"), "workspacePath": null,
+            "fileIdentity": {"dev": 1, "ino": 2, "size": 3, "mtimeMs": 4.5, "ctimeMs": 5.5}});
+        let dir = path.join("project-runtime").join(workspace);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixtures = ["once", "reject", "cancel", "invalid", "task"].map(|id| {
+            json!({"approvalId": id, "workspaceId": workspace, "capabilityId": "local.image.read",
+                "conversationId": "conversation", "state": "open", "summary": "image",
+                "createdAt": at, "policyRevision": "1", "argsDigest": "0".repeat(64),
+                "imageReadScope": if id == "invalid" { Value::Null } else { scope.clone() }})
+        });
+        std::fs::write(
+            dir.join("approvals.jsonl"),
+            fixtures
+                .iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        let store = ApprovalStore::new(path);
+        for (id, decision, duration, expected, expected_state, reason) in [
+            (
+                "once",
+                "approve",
+                "once",
+                LocalPermissionDecision::Approve,
+                ApprovalState::Approved,
+                None,
+            ),
+            (
+                "reject",
+                "reject",
+                "denied",
+                LocalPermissionDecision::Deny,
+                ApprovalState::Denied,
+                Some("local_user_denied"),
+            ),
+            (
+                "cancel",
+                "cancel",
+                "denied",
+                LocalPermissionDecision::Cancel,
+                ApprovalState::Cancelled,
+                Some("permission_cancelled"),
+            ),
+            (
+                "invalid",
+                "approve",
+                "task",
+                LocalPermissionDecision::Deny,
+                ApprovalState::Open,
+                None,
+            ),
+            (
+                "task",
+                "approve",
+                "task",
+                LocalPermissionDecision::Approve,
+                ApprovalState::Approved,
+                None,
+            ),
+        ] {
+            let (tx, rx) = oneshot::channel();
+            ctx.project_host.live_approvals.lock().unwrap().insert(
+                id.to_owned(),
+                LiveApprovalWaiter {
+                    workspace_id: workspace.to_owned(),
+                    mirrored_in_workspace: true,
+                    tx,
+                },
+            );
+            let row = store
+                .list(Some(workspace), None)
+                .unwrap()
+                .into_iter()
+                .find(|row| row["approvalId"] == id)
+                .unwrap();
+            let mut params = json!({"workspaceId": workspace, "approvalId": id, "decision": decision, "duration": duration});
+            if id == "invalid" {
+                let result = handle_decide_approval(&ctx, params.clone()).await.unwrap();
+                assert_eq!(
+                    result,
+                    json!({"ok": false, "code": "IMAGE_AUTHORIZATION_UNAVAILABLE"})
+                );
+                assert_eq!(ctx.project_host.is_live_approval_mirrored(id), Some(true));
+                // Rejecting a malformed request must still settle the waiter.
+                params["decision"] = json!("reject");
+            }
+            let state = if id == "invalid" {
+                ApprovalState::Denied
+            } else {
+                expected_state
+            };
+            let reason = if id == "invalid" {
+                Some("local_user_denied")
+            } else {
+                reason
+            };
+            let waiter = async {
+                let actual = rx.await.unwrap();
+                assert_eq!(actual, expected);
+                store
+                    .decide(
+                        &row,
+                        state,
+                        ApprovalDecision::LocalUser,
+                        &now_iso(),
+                        reason,
+                        None,
+                    )
+                    .unwrap()
+            };
+            let (result, decided) = tokio::join!(handle_decide_approval(&ctx, params), waiter);
+            assert_eq!(result.unwrap(), json!({"ok": true, "approval": decided}));
+            let rows = store.list(Some(workspace), None).unwrap();
+            let grants: Vec<_> = rows
+                .iter()
+                .filter(|row| row.get("imageReadGrant").is_some())
+                .collect();
+            assert_eq!(grants.len(), usize::from(id == "task"), "{id}");
+            if id == "task" {
+                assert_eq!(grants[0]["imageReadGrant"]["scope"], scope);
+            }
+        }
+        engine.shutdown_and_drain().await;
+    }
+}

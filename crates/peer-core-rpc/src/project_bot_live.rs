@@ -7,8 +7,11 @@ use peer_project_agent::{
     execute_recovery_retain, get_session_projected, inspect_recovery, is_valid_workspace_id,
     now_iso, occupied_recovery_view, parse_iso_ms,
 };
-use peer_runtime::session_host::LocalPermissionDecision;
-use peer_store::{ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, PolicyStore};
+use peer_runtime::{goal_facts::TuiGoalProjector, session_host::LocalPermissionDecision};
+use peer_store::{
+    ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, GoalStore, PolicyStore,
+    StoreError,
+};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::Duration;
@@ -99,6 +102,53 @@ fn check_policy_stamp_for_approval(data_home: &Path, record: &Value) -> Result<(
     } else {
         Err(())
     }
+}
+
+// The scope is stored on the request; the grant principal may instead be the
+// current host-owned ancestor conversation, just as in the desktop image gate.
+fn image_grant_conversation(data_home: &Path, row: &Value, at: &str) -> Option<String> {
+    let conversation = row["conversationId"].as_str();
+    let Some(plan_id) = row["planId"].as_str() else {
+        return conversation.map(str::to_owned);
+    };
+    let workspace = row["workspaceId"].as_str()?;
+    let goals = GoalStore::new(data_home);
+    let projector = TuiGoalProjector::new(at).ok()?;
+    let plan = goals.read(plan_id, &projector, None).ok()?.facts;
+    if plan["inheritanceStopped"] != false {
+        return None;
+    }
+    let origin = &plan["delegationOrigin"];
+    if origin.is_null() {
+        return conversation
+            .filter(|c| plan["conversationId"] == *c)
+            .map(str::to_owned);
+    }
+    let session = row["sessionId"].as_str()?;
+    if origin["workspaceId"] != workspace
+        || origin["sessionId"] != session
+        || conversation.is_some_and(|c| plan["conversationId"] != c)
+    {
+        return None;
+    }
+    let mut parent = origin["parentConversationId"].as_str()?.to_owned();
+    for _ in 0..4 {
+        let selection = goals
+            .active_by_conversation(&parent, &projector, None)
+            .ok()?;
+        let Some(ancestor) = selection.snapshot else {
+            return Some(parent);
+        };
+        let origin = &ancestor.facts["delegationOrigin"];
+        if origin.is_null() {
+            return Some(parent);
+        }
+        if ancestor.facts["inheritanceStopped"] != false || origin["workspaceId"] != workspace {
+            return None;
+        }
+        parent = origin["parentConversationId"].as_str()?.to_owned();
+    }
+    None
 }
 
 fn approval_terminal_state(state: &str) -> bool {
@@ -1118,6 +1168,7 @@ pub async fn handle_decide_approval(ctx: &ServerContext, params: Value) -> Resul
                 }
             });
         } else {
+            let was_stale = current["state"] == "stale";
             let saved = store
                 .decide(
                     &current,
@@ -1132,6 +1183,9 @@ pub async fn handle_decide_approval(ctx: &ServerContext, params: Value) -> Resul
                 let _ = ctx
                     .project_host
                     .settle_live_approval(approval_id, LocalPermissionDecision::Timeout);
+            }
+            if was_stale && saved["state"] == "expired" {
+                ctx.project_host.emit_changed(vec![workspace_id.to_owned()]);
             }
             current = saved;
         }
@@ -1265,9 +1319,33 @@ pub async fn handle_decide_approval(ctx: &ServerContext, params: Value) -> Resul
         }
     }
 
+    let image_read = current["capabilityId"] == "local.image.read";
     if current["state"].as_str() == Some("open") {
+        let image_conversation = if image_read
+            && decision == "approved"
+            && ctx
+                .project_host
+                .is_live_approval_mirrored(approval_id)
+                .is_some()
+        {
+            if ApprovalStore::image_read_scope(&current).is_none() {
+                return Ok(ok_fail("IMAGE_AUTHORIZATION_UNAVAILABLE"));
+            }
+            if duration == "task" {
+                let Some(conversation) = image_grant_conversation(data_home, &current, &now_iso())
+                else {
+                    return Ok(ok_fail("IMAGE_AUTHORIZATION_UNAVAILABLE"));
+                };
+                Some(conversation)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let perm_dec = match (decision, duration) {
-            ("approved", "task") => LocalPermissionDecision::ApproveSession,
+            // The generic session cache cannot replace the exact image grant.
+            ("approved", "task") if !image_read => LocalPermissionDecision::ApproveSession,
             ("approved", _) => LocalPermissionDecision::Approve,
             ("cancelled", _) => LocalPermissionDecision::Cancel,
             _ => LocalPermissionDecision::Deny,
@@ -1287,8 +1365,18 @@ pub async fn handle_decide_approval(ctx: &ServerContext, params: Value) -> Resul
             let _ = mirrored;
             let final_row = latest
                 .or_else(|| find_approval(data_home, workspace_id, approval_id))
-                .unwrap_or(current);
+                .unwrap_or_else(|| current.clone());
+            let remember_failed = image_conversation.is_some_and(|conversation| {
+                final_row["state"] == "approved"
+                    && (check_policy_stamp_for_approval(data_home, &final_row).is_err()
+                        || store
+                            .remember_live_image_read(&current, &final_row, &conversation)
+                            .is_err())
+            });
             ctx.project_host.emit_changed(vec![workspace_id.to_owned()]);
+            if remember_failed {
+                return Ok(ok_fail("IMAGE_AUTHORIZATION_UNAVAILABLE"));
+            }
             return Ok(json!({ "ok": true, "approval": final_row }));
         }
         // No live waiter: fail closed by marking expired (`permission_unavailable`).
@@ -1317,15 +1405,38 @@ pub async fn handle_decide_approval(ctx: &ServerContext, params: Value) -> Resul
         ApprovalState::Denied => Some("local_user_denied"),
         _ => None,
     };
-    let saved = match store.decide(
-        &current,
-        target_state,
-        ApprovalDecision::LocalUser,
-        &now_iso(),
-        reason,
-        None,
-    ) {
+    let decided_at = now_iso();
+    let saved = if image_read && current["state"] == "stale" {
+        let grant_conversation = if target_state == ApprovalState::Approved && duration == "task" {
+            let Some(conversation) = image_grant_conversation(data_home, &current, &decided_at)
+            else {
+                return Ok(ok_fail("IMAGE_AUTHORIZATION_UNAVAILABLE"));
+            };
+            Some(conversation)
+        } else {
+            None
+        };
+        store.decide_stale_image_read(
+            &current,
+            target_state,
+            &decided_at,
+            grant_conversation.as_deref(),
+        )
+    } else {
+        store.decide(
+            &current,
+            target_state,
+            ApprovalDecision::LocalUser,
+            &decided_at,
+            reason,
+            None,
+        )
+    };
+    let saved = match saved {
         Ok(row) => row,
+        Err(StoreError::InvalidInput) if image_read => {
+            return Ok(ok_fail("IMAGE_AUTHORIZATION_UNAVAILABLE"));
+        }
         Err(_) => return Ok(ok_fail("NOT_FOUND")),
     };
 
