@@ -3,6 +3,7 @@ import type { CapabilityManifest } from '@peer-agent/protocol';
 import { useId, useMemo, useState } from 'react';
 import { useResourceRead } from '../../ui/resources/useResourceState';
 import { clientApi } from '../../clientApi';
+import { readInstalledSkills } from './read-installed-skills';
 import { PeerIcon } from '../../ui/icons';
 import {
   buildCapabilityWorkbenchItems,
@@ -41,9 +42,8 @@ export function CapabilityWorkbench({
   );
   const [skillsUploadOpen, setSkillsUploadOpen] = useState(false);
   const installed = useResourceRead('capability-counts', async () => {
-    const workspace = await clientApi.workspaceList();
-    const [skills, mcp] = await Promise.all([clientApi.listSkills(workspace.workspaces.map(row => row.path)), clientApi.mcpListInstalled()]);
-    return { skills: skills.length, mcp: mcp.length };
+    const [skills, mcp] = await Promise.all([readInstalledSkills(), clientApi.mcpListInstalled()]);
+    return { skills: skills.list.length, mcp: mcp.length };
   });
   const [skillsCount, setSkillsCount] = useState<number | null>(null);
   const [mcpCount, setMcpCount] = useState<number | null>(null);

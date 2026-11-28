@@ -11,6 +11,7 @@ function createHarness() {
   const registrations = createSkillsIpcRegistrations({
     skills: {
       list: port('list'),
+      listInstallTargets: port('list-install-targets'),
       getDetail: port('get-detail'),
       refresh: port('refresh'),
       upload: port('upload'),
@@ -57,6 +58,7 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
     'skills:link',
     'skills:list',
     'skills:list-available',
+    'skills:list-install-targets',
     'skills:marketplace:get-detail',
     'skills:marketplace:install',
     'skills:marketplace:list',
@@ -80,6 +82,7 @@ test('skills IPC has one owner for the exact canonical channel set', () => {
 test('skills IPC preserves payload and result projection', async () => {
   const { calls, handlers } = createHarness();
 
+  assert.equal(await handlers.get('skills:list-install-targets')(), 'list-install-targets');
   assert.equal(await handlers.get('skills:list')(null, { workspacePaths: ['/workspace/a', '/workspace/b'] }), 'list');
   assert.equal(await handlers.get('skills:get-detail')(null, { skillId: 'skill-1', workspacePath: '/workspace/b' }), 'get-detail');
   assert.equal(await handlers.get('skills:get-detail')(null), 'get-detail');
@@ -102,10 +105,12 @@ test('skills IPC preserves payload and result projection', async () => {
   assert.equal(await handlers.get('skills:skillhub:list-categories')(), 'skillhub-list-categories');
   assert.equal(await handlers.get('skills:qoder:query')(null, { page: 1, keyword: 'pdf' }), 'qoder-query');
   assert.equal(await handlers.get('skills:qoder:get-detail')(null, { skillId: 'official03866510' }), 'qoder-get-detail');
-  assert.equal(await handlers.get('skills:qoder:install')(null, { skillId: 'official03866510' }), 'qoder-install');
+  const batch = { skillId: 'official03866510', scope: 'workspace', targets: [{ workspaceId: 'peer-dev' }, { workspaceId: 'st' }] };
+  assert.equal(await handlers.get('skills:qoder:install')(null, batch), 'qoder-install');
   assert.equal(await handlers.get('skills:qoder:list-taxonomies')(), 'qoder-list-taxonomies');
 
   assert.deepEqual(calls, [
+    ['list-install-targets'],
     ['list', ['/workspace/a', '/workspace/b']],
     ['get-detail', 'skill-1', '/workspace/b'],
     ['get-detail', undefined, undefined],
@@ -128,7 +133,7 @@ test('skills IPC preserves payload and result projection', async () => {
     ['skillhub-list-categories'],
     ['qoder-query', { page: 1, keyword: 'pdf' }],
     ['qoder-get-detail', { skillId: 'official03866510' }],
-    ['qoder-install', { skillId: 'official03866510' }],
+    ['qoder-install', batch],
     ['qoder-list-taxonomies'],
   ]);
 });

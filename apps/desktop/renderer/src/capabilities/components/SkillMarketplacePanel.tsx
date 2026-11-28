@@ -1,12 +1,12 @@
 import { PeerIcon } from '../../ui/icons';
-import type { SkillHubCategory, SkillHubInstallScope, SkillHubMarketplaceEntry, SkillHubMarketplacePage, SkillHubMarketplaceSort } from '@peer-agent/protocol';
+import type { SkillHubCategory, SkillHubMarketplaceEntry, SkillHubMarketplacePage, SkillHubMarketplaceSort } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { clientApi } from '../../clientApi';
 import { formatSkillHubInstallError } from '../skillHubInstallError';
 import { buildPageItems } from './marketplace-pagination';
-import { getMarketplaceWorkspaceTarget, getMarketplaceWorkspaceTargets, type MarketplaceWorkspaceTarget } from './marketplace-workspace-target';
+import { MarketplaceSkillInstall } from './MarketplaceSkillInstall';
 
 const PAGE_SIZE = 24;
 const EMPTY_PAGE: SkillHubMarketplacePage = {
@@ -92,17 +92,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 安装失败提示必须落在弹窗内；页面级 error 会被 Overlay 挡住。
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [installScope, setInstallScope] = useState<SkillHubInstallScope>('global');
-  const [workspaceTargets, setWorkspaceTargets] = useState<readonly MarketplaceWorkspaceTarget[]>([]);
-  const [workspaceTarget, setWorkspaceTarget] = useState<MarketplaceWorkspaceTarget | null>(null);
-  const hasWorkspace = workspaceTargets.length > 0;
-  const workspaceOptions = useMemo(
-    () => workspaceTargets.map((target) => ({ value: target.path, label: target.optionLabel })),
-    [workspaceTargets],
-  );
+  const [installPending, setInstallPending] = useState(false);
 
   const categoryNameByKey = useMemo(() => {
     const map = new Map<string, string>();
@@ -134,21 +124,6 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     void clientApi.listSkillHubCategories()
       .then((items) => { if (!cancelled && Array.isArray(items)) setCategories(items); })
       .catch(() => { /* 分类字典缺失时回退显示原始 key */ });
-    void clientApi.workspaceList()
-      .then((result) => {
-        if (cancelled) return;
-        const targets = getMarketplaceWorkspaceTargets(result);
-        const target = getMarketplaceWorkspaceTarget(result);
-        setWorkspaceTargets(targets);
-        setWorkspaceTarget(target);
-        if (!target) setInstallScope('global');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkspaceTargets([]);
-          setWorkspaceTarget(null);
-        }
-      });
     return () => { cancelled = true; };
   }, []);
 
@@ -174,46 +149,6 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     } catch {
       setError('skillhub 市场暂时无法刷新，请稍后重试');
     } finally { setSyncing(false); }
-  };
-
-  const openEntry = (entry: SkillHubMarketplaceEntry) => {
-    setInstallError(null);
-    setSelected(entry);
-  };
-
-  const closeSelected = () => {
-    setInstallError(null);
-    setSelected(null);
-  };
-
-  const chooseInstallScope = (scope: SkillHubInstallScope) => {
-    setInstallError(null);
-    setInstallScope(scope);
-  };
-
-  const install = async (entry: SkillHubMarketplaceEntry) => {
-    if (installScope === 'workspace' && !hasWorkspace) {
-      setInstallError(formatSkillHubInstallError('workspace_required'));
-      return;
-    }
-    setInstalling(entry.catalogId);
-    setInstallError(null);
-    try {
-      const value = await clientApi.installSkillHubSkill({
-        namespace: entry.namespace,
-        slug: entry.slug,
-        version: entry.version,
-        scope: installScope,
-        workspacePath: installScope === 'workspace' ? workspaceTarget?.path : undefined,
-        iconUrl: entry.iconUrl ?? null,
-      });
-      if (!value.ok) throw new Error(value.error || 'install_failed');
-      onInstalled?.();
-      closeSelected();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setInstallError(formatSkillHubInstallError(message));
-    } finally { setInstalling(null); }
   };
 
   const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
@@ -262,7 +197,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         {result.items.map((entry) => (
           <article className="skill-marketplace-card" key={entry.catalogId}>
             {/* 标题+描述合并为一个可点击区域，避免描述区单独 button 产生焦点条 */}
-            <button type="button" className="skill-marketplace-card-body" onClick={() => openEntry(entry)}>
+            <button type="button" className="skill-marketplace-card-body" onClick={() => setSelected(entry)}>
               <span className="skill-marketplace-card-heading">
                 <SkillIcon name={entry.name} iconUrl={entry.iconUrl} />
                 <span>
@@ -281,7 +216,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                 </em>
                 {entry.verified ? <em>已认证</em> : null}
               </span>
-              <button type="button" className="skill-marketplace-install" onClick={() => openEntry(entry)}>安装</button>
+              <button type="button" className="skill-marketplace-install" onClick={() => setSelected(entry)}>安装</button>
             </div>
           </article>
         ))}
@@ -308,7 +243,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         </nav>
       ) : null}
       {selected ? (
-        <Overlay onClose={closeSelected} ariaLabel={selected.name} panelClassName="skill-marketplace-detail">
+        <Overlay onClose={() => setSelected(null)} ariaLabel={selected.name} panelClassName="skill-marketplace-detail" onRequestClose={() => !installPending}>
           {({ requestClose }) => (<>
             <header className="skill-detail-header"><SkillIcon name={selected.name} iconUrl={selected.iconUrl} className="skill-avatar skill-detail-avatar" /><div className="skill-detail-heading"><div className="skill-detail-title-row"><h2>{selected.name}</h2><span className="skill-scope-badge">SkillHub</span></div><p>{selected.description || selected.descriptionOriginal}</p></div><button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></button></header>
             <div className="skill-detail-meta"><span>{categoryLabel(selected.category)}</span><span>v{selected.version}</span><code>{selected.namespace}/{selected.slug}</code></div>
@@ -344,63 +279,19 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                   <strong>{selected.stars.toLocaleString()}</strong>
                 </span>
                 </div>
-              <div className="skill-marketplace-install-row">
-                <div className="skill-marketplace-install-actions">
-                  <span className="skill-marketplace-install-label">安装位置</span>
-                  <div className="skill-marketplace-install-targets">
-                    <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={installScope === 'global'}
-                        className={installScope === 'global' ? 'is-active' : undefined}
-                        onClick={() => chooseInstallScope('global')}
-                      >
-                        全局
-                      </button>
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={installScope === 'workspace'}
-                        className={installScope === 'workspace' ? 'is-active' : undefined}
-                        disabled={!hasWorkspace}
-                        onClick={() => chooseInstallScope('workspace')}
-                      >
-                        机器人
-                      </button>
-                    </div>
-                    {installScope === 'workspace' ? (
-                      <div className="skill-marketplace-workspace-picker">
-                        <Dropdown
-                          ariaLabel="选择安装机器人"
-                          value={workspaceTarget?.path ?? ''}
-                          options={workspaceOptions}
-                          placeholder="选择机器人"
-                          disabled={!hasWorkspace}
-                          onChange={(value) => setWorkspaceTarget(workspaceTargets.find((target) => target.path === value) ?? null)}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="skill-marketplace-install skill-marketplace-install--primary"
-                  disabled={installing === selected.catalogId || (installScope === 'workspace' && !hasWorkspace)}
-                  onClick={() => void install(selected)}
-                >
-                  {installing === selected.catalogId
-                    ? '正在校验并安装…'
-                    : installScope === 'workspace'
-                      ? '验证并安装到机器人'
-                      : '验证并安装到全局'}
-                </button>
-                {installError ? (
-                  <p className="skill-marketplace-install-error" role="alert">
-                    {installError}
-                  </p>
-                ) : null}
-              </div>
+              <MarketplaceSkillInstall
+                verb="验证并安装"
+                install={(destination) => clientApi.installSkillHubSkill({
+                  ...destination,
+                  namespace: selected.namespace,
+                  slug: selected.slug,
+                  version: selected.version,
+                  iconUrl: selected.iconUrl ?? null,
+                })}
+                formatError={formatSkillHubInstallError}
+                onPendingChange={setInstallPending}
+                onInstalled={() => { setSelected(null); onInstalled?.(); }}
+              />
             </div>
           </>)}
         </Overlay>
