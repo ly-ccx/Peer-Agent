@@ -100,7 +100,7 @@ export function MarketplaceSkillInstall({ verb, install, formatError, onPendingC
           void submit(scope, selected.map(({ workspaceId, path }) => ({ workspaceId, workspacePath: path })));
         }}
       >
-        {pending ? `正在${verb}…` : scope === 'workspace' && complete ? '查看已安装'
+        {pending ? `正在${verb}` : scope === 'workspace' && complete ? '查看已安装'
           : marketplaceInstallLabel(verb, scope, selected.length)}
       </button>
       {scope === 'workspace' && (
