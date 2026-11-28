@@ -5,6 +5,7 @@ pub(super) struct Frames {
     line: Vec<u8>,
     event: Vec<u8>,
     bytes: usize,
+    error_kind: Option<&'static str>,
 }
 impl Frames {
     pub fn complete(&self) -> bool {
@@ -13,7 +14,7 @@ impl Frames {
     pub fn push(
         &mut self,
         chunk: &[u8],
-        mut emit: impl FnMut(&[u8]) -> Result<bool, ModelError>,
+        mut emit: impl FnMut(Option<&'static str>, &[u8]) -> Result<bool, ModelError>,
     ) -> Result<bool, ModelError> {
         self.bytes = self
             .bytes
@@ -34,8 +35,9 @@ impl Frames {
                 self.line.pop();
             }
             if self.line.is_empty() {
+                let kind = self.error_kind.take();
                 if !self.event.is_empty() {
-                    let terminal = emit(&self.event)?;
+                    let terminal = emit(kind, &self.event)?;
                     self.event.clear();
                     if terminal {
                         return Ok(true);
@@ -52,6 +54,13 @@ impl Frames {
                     self.event.push(b'\n');
                 }
                 self.event.extend_from_slice(data);
+            } else if let Some(kind) = self.line.strip_prefix(b"event:") {
+                self.error_kind = match kind.strip_prefix(b" ").unwrap_or(kind) {
+                    b"error" => Some("error"),
+                    b"response.failed" => Some("response.failed"),
+                    b"response.incomplete" => Some("response.incomplete"),
+                    _ => None,
+                };
             }
             self.line.clear();
         }

@@ -427,7 +427,10 @@ async fn current_authority_is_rechecked_after_owned_materialization_before_any_n
             &mut accounting,
         )
         .await;
-    assert!(matches!(result, Err(HostError("test_authority_changed"))));
+    assert!(matches!(
+        result,
+        Err(TurnError::Host(HostError("test_authority_changed")))
+    ));
     assert_eq!(host.admitted, 0);
     assert_eq!(accounting.snapshot().provider_request_count, 0);
 }
@@ -449,7 +452,10 @@ async fn concurrent_canonical_input_is_not_overwritten_and_a_fresh_host_request_
             &mut accounting,
         )
         .await;
-    assert!(matches!(result, Err(HostError("CONTEXT_SNAPSHOT_CHANGED"))));
+    assert!(matches!(
+        result,
+        Err(TurnError::Host(HostError("CONTEXT_SNAPSHOT_CHANGED")))
+    ));
     assert_eq!(host.admitted, 0);
     let history = ConversationStore::new(root.path())
         .read_committed(&host.conversation, None, 8 * 1024 * 1024)

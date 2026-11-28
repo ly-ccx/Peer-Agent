@@ -8,7 +8,11 @@ use crate::{
     CancellationToken,
     canonical_history::project_history,
     context_accounting::ContextCapacity,
-    model::{LiveHistory, ModelError, ModelObservation, ModelTurn, NativeModel, PreparedRequest},
+    model::{
+        LiveHistory, ModelDelta, ModelError, ModelObservation, ModelRetryNotice, ModelTurn,
+        NativeModel, PreparedRequest, SameProviderRetryPolicy,
+    },
+    turn_loop::TurnError,
     usage_accounting::RuntimeUsageAccounting,
 };
 use peer_store::{ConversationMetadataPublication, ConversationStore, HistorySnapshot};
@@ -59,16 +63,36 @@ pub(crate) trait CognitionHost {
         owned: &CancellationToken,
         external: &CancellationToken,
     ) -> Result<F::Output, HostError>;
+    /// Each step is admitted through the host. Replaying is only legal while
+    /// it has no unsettled external effect.
+    fn can_retry(&self) -> Result<bool, HostError> {
+        Ok(true)
+    }
+    fn retry_policy(&self) -> SameProviderRetryPolicy {
+        SameProviderRetryPolicy::default()
+    }
+    async fn on_retry(
+        &mut self,
+        _notice: ModelRetryNotice,
+        _deadline: tokio::time::Instant,
+    ) -> Result<(), HostError> {
+        Ok(())
+    }
     async fn send_prepared(
         &mut self,
-        prepared: PreparedRequest<'_>,
+        prepared: &PreparedRequest<'_>,
         request: &CognitionRequest<'_>,
         observed: &mut Option<ModelObservation>,
         _primary: bool,
+        retry_deadline: Option<tokio::time::Instant>,
     ) -> Result<Result<ModelTurn, ModelError>, HostError> {
         self.wait(
             async {
-                let result = prepared.send(request.owned).await;
+                let result = prepared
+                    .send_with_deltas(request.owned, retry_deadline, async |_: ModelDelta<'_>| {
+                        Ok(())
+                    })
+                    .await;
                 *observed = Some(ModelObservation::capture(&result));
                 result
             },
@@ -98,7 +122,7 @@ impl ContextPipeline {
         accounting: &mut RuntimeUsageAccounting,
         history: &HistorySnapshot,
         projected: &Value,
-    ) -> Result<RequestResult, HostError> {
+    ) -> Result<RequestResult, TurnError> {
         Self::guard(host, f)?;
         let system = host.assemble(&[])?;
         let encoding = self.result_views(host, f, history, projected).await?;
@@ -118,7 +142,7 @@ impl ContextPipeline {
             .send_attempts(host, f, accounting, prepared, history, false)
             .await?;
         Ok(RequestResult {
-            turn: turn.map_err(|error| HostError(error.code))?,
+            turn: turn?,
             system,
             history,
         })
@@ -213,14 +237,14 @@ impl ContextPipeline {
         host: &mut impl CognitionHost,
         f: &CognitionRequest<'_>,
         accounting: &mut RuntimeUsageAccounting,
-    ) -> Result<RequestResult, HostError> {
+    ) -> Result<RequestResult, TurnError> {
         let mut compacted = false;
         loop {
             Self::guard(host, f)?;
             let store = ConversationStore::new(f.home);
             let history = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
             if history.history.excluded_from_message_id.is_some() {
-                return Err(HostError("native_execution_recovery_required"));
+                return Err(HostError("native_execution_recovery_required").into());
             }
             let mut projected = if let Some(resolve) = host.workspace_image_resolver() {
                 let rows = history.history.messages.clone();
@@ -277,7 +301,7 @@ impl ContextPipeline {
                     .await?
                 {
                     Ok(v) => Ok(v),
-                    Err(e) if e.code == "CANCELLED" => return Err(HostError("CANCELLED")),
+                    Err(e) if e.code == "CANCELLED" => return Err(HostError("CANCELLED").into()),
                     Err(_) => Err(()),
                 }
             } else {
@@ -299,7 +323,7 @@ impl ContextPipeline {
                 .is_some_and(|v| v["shouldCompact"] == true)
             {
                 if compacted {
-                    return Err(HostError("native_context_pressure"));
+                    return Err(HostError("native_context_pressure").into());
                 }
                 drop(prepared);
                 let _ = self
@@ -319,7 +343,7 @@ impl ContextPipeline {
                     compacted = true;
                     continue;
                 }
-                other => other.map_err(|e| HostError(e.code))?,
+                other => other?,
             };
             return Ok(RequestResult {
                 turn,

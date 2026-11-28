@@ -1,33 +1,101 @@
 use peer_protocol::UsageAmounts;
+use serde_json::Value;
 
-/// A failed request may still have provider-observed usage. No raw response body,
-/// credential, assistant text or executable tool call is retained here.
+/// A failed request may still have provider-observed usage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRequestObservation {
     pub request_fingerprint: String,
     pub usage: Option<UsageAmounts>,
 }
-#[derive(Clone, PartialEq, Eq)]
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFailurePhase {
+    Connect,
+    Headers,
+    FirstByte,
+    MidStream,
+    Terminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelError {
     pub code: &'static str,
     pub observation: Option<Box<ModelRequestObservation>>,
     pub context_overflow_status: Option<u16>,
     pub http_status: Option<u16>,
-    pub retry_after_seconds: Option<u64>,
-    /// Bounded, credential-scrubbed structured error summary extracted from a JSON provider error.
-    pub http_detail: Option<String>,
+    pub sse_event_kind: Option<&'static str>,
+    pub provider_code: Option<&'static str>,
+    pub failure_phase: Option<ModelFailurePhase>,
+    pub retry_after_ms: Option<u64>,
+    pub attempts_used: u32,
+    /// Generated from recognized provider assertions. Never contains body text.
+    pub http_detail: Option<&'static str>,
 }
-impl std::fmt::Debug for ModelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModelError")
-            .field("code", &self.code)
-            .field("observation", &self.observation)
-            .field("context_overflow_status", &self.context_overflow_status)
-            .field("http_status", &self.http_status)
-            .field("has_http_detail", &self.http_detail.is_some())
-            .finish()
-    }
-}
+
+const TRANSIENT_CODES: &[&str] = &[
+    "server_error",
+    "internal_error",
+    "internal",
+    "api_error",
+    "overloaded_error",
+    "overloaded",
+    "service_unavailable",
+    "unavailable",
+    "timeout",
+    "upstream_timeout",
+    "deadline_exceeded",
+    "bad_gateway",
+    "stream_interrupted",
+    "connection_reset",
+    "connection_error",
+    "rate_limit",
+    "rate_limit_error",
+    "rate_limit_exceeded",
+    "too_many_requests",
+];
+const QUOTA_CODES: &[&str] = &[
+    "insufficient_quota",
+    "quota_exceeded",
+    "billing_hard_limit_reached",
+    "billing_not_active",
+    "billing_error",
+    "usage_limit_reached",
+    "monthly_limit_exceeded",
+    "credits_exhausted",
+];
+const TERMINAL_CODES: &[&str] = &[
+    "invalid_api_key",
+    "invalid_request_error",
+    "invalid_argument",
+    "authentication_error",
+    "permission_error",
+    "permission_denied",
+    "unauthenticated",
+    "not_found",
+    "resource_exhausted",
+    "policy_violation",
+    "content_policy_violation",
+    "content_filter",
+    "safety",
+    "recitation",
+    "prohibited_content",
+    "blocklist",
+    "spii",
+    "refusal",
+    "max_output_tokens",
+    "max_tokens",
+    "length",
+    "model_length",
+    "malformed_function_call",
+    "unexpected_tool_call",
+    "other",
+    "context_length_exceeded",
+    "prompt_too_long",
+    "failed_precondition",
+    "cancelled",
+    "request_too_large",
+];
+
 impl ModelError {
     pub const AUTH_REJECTED: &'static str = "model_auth_rejected";
 
@@ -37,56 +105,139 @@ impl ModelError {
             observation: None,
             context_overflow_status: None,
             http_status: None,
-            retry_after_seconds: None,
+            sse_event_kind: None,
+            provider_code: None,
+            failure_phase: None,
+            retry_after_ms: None,
+            attempts_used: 0,
             http_detail: None,
         }
     }
-    pub(super) fn with_detail(mut self, detail: impl AsRef<str>) -> Self {
-        self.http_detail = sanitize_provider_error_text(detail.as_ref());
+
+    pub(super) fn at(mut self, phase: ModelFailurePhase) -> Self {
+        self.failure_phase.get_or_insert(phase);
         self
     }
-    pub(super) fn provider_event(value: &serde_json::Value) -> Self {
-        let mut err = Self::new("model_provider_error");
-        err.http_detail = extract_safe_value_detail(value);
-        err
+
+    pub(super) fn response(mut self, status: u16, retry_after_ms: Option<u64>) -> Self {
+        self.http_status = Some(status);
+        self.retry_after_ms = retry_after_ms;
+        self
     }
+
+    pub(super) fn request_failed(error: reqwest::Error) -> Self {
+        let phase = if error.is_connect() {
+            ModelFailurePhase::Connect
+        } else {
+            ModelFailurePhase::Headers
+        };
+        if request_error_matches(&error, |cause| {
+            cause.to_string() == "tunnel error: proxy authorization required"
+        }) {
+            return Self::new("model_http_rejected")
+                .response(407, None)
+                .at(phase);
+        }
+        let code = if is_certificate_error(&error) {
+            "model_tls_certificate_invalid"
+        } else if error.is_timeout() {
+            "model_timeout"
+        } else if error.is_builder() {
+            "model_request_invalid"
+        } else {
+            "model_transport_failed"
+        };
+        Self::new(code).at(phase)
+    }
+
+    pub(super) fn provider_event(kind: &'static str, value: &Value) -> Self {
+        let mut error = Self::new("model_provider_error");
+        error.sse_event_kind = Some(kind);
+        error.provider_code = if kind == "response.incomplete" {
+            value
+                .pointer("/response/incomplete_details/reason")
+                .and_then(Value::as_str)
+                .and_then(safe_code)
+        } else {
+            provider_code(error_object(value))
+        };
+        if matches!(
+            error.provider_code,
+            Some("context_length_exceeded" | "prompt_too_long")
+        ) {
+            error.code = "model_context_overflow";
+            // Capacity recovery expects the equivalent rejection status.
+            error.context_overflow_status = Some(400);
+        }
+        error.at(ModelFailurePhase::Terminal)
+    }
+
+    pub(super) fn terminal_stop(kind: &'static str, reason: Option<&str>) -> Self {
+        let mut error = Self::new("model_stream_incomplete");
+        error.sse_event_kind = Some(kind);
+        error.provider_code = reason.and_then(safe_code);
+        error.at(ModelFailurePhase::Terminal)
+    }
+
     pub(super) fn http_access_rejection(status: u16) -> Option<Self> {
-        matches!(status, 401 | 403).then(|| Self {
-            http_status: Some(status),
-            ..Self::new(Self::AUTH_REJECTED)
+        matches!(status, 401 | 403).then(|| {
+            Self::new(Self::AUTH_REJECTED)
+                .response(status, None)
+                .at(ModelFailurePhase::Headers)
         })
     }
+
     pub(super) fn http(status: u16, body: &[u8]) -> Self {
+        let parsed = serde_json::from_slice::<Value>(body).ok();
+        let error = parsed.as_ref().map(error_object);
+        let provider_code = error.and_then(provider_code);
+        // Keep the pre-existing capacity recovery for textual HTTP assertions.
+        // The response bytes never leave this function.
         let text = std::str::from_utf8(body).unwrap_or("").to_ascii_lowercase();
         let overflow = status == 413
-            || [
-                "prompt_too_long",
-                "context_length_exceeded",
-                "maximum context length",
-                "maximum prompt length",
-                "context window",
-                "context too long",
-                "input is too long",
-                "exceeds model context",
-                "too many tokens",
-                "token limit",
-            ]
-            .iter()
-            .any(|s| text.contains(s));
-        let http_detail = (!overflow && !matches!(status, 401 | 403 | 407))
-            .then(|| extract_safe_http_detail(body))
-            .flatten();
-        Self {
-            context_overflow_status: overflow.then_some(status),
-            http_status: Some(status),
-            http_detail,
-            ..Self::new(if overflow {
-                "model_context_overflow"
-            } else {
-                "model_http_rejected"
-            })
+            || matches!(status, 400 | 422)
+                && [
+                    "prompt_too_long",
+                    "context_length_exceeded",
+                    "maximum context length",
+                    "maximum prompt length",
+                    "context window",
+                    "context too long",
+                    "input is too long",
+                    "exceeds model context",
+                    "too many tokens",
+                    "token limit",
+                ]
+                .iter()
+                .any(|marker| text.contains(marker));
+        let mut result = Self::new(if overflow {
+            "model_context_overflow"
+        } else {
+            "model_http_rejected"
+        });
+        result.context_overflow_status = overflow.then_some(status);
+        result.provider_code = provider_code;
+        if status == 400 && provider_code == Some("invalid_argument") {
+            let assertion = error.and_then(|e| e["message"].as_str());
+            result.http_detail = match assertion {
+                Some("bad schema") => Some("INVALID_ARGUMENT: bad schema"),
+                Some(message)
+                    if message.starts_with(
+                        "Invalid JSON payload received. Unknown name \"additionalProperties\"",
+                    ) =>
+                {
+                    Some(
+                        "INVALID_ARGUMENT: Invalid JSON payload. Unsupported schema field additionalProperties.",
+                    )
+                }
+                _ => None,
+            };
         }
+        result
+            .response(status, None)
+            .at(ModelFailurePhase::Terminal)
     }
+
     pub(super) fn observed(mut self, fingerprint: String, usage: Option<UsageAmounts>) -> Self {
         self.observation = Some(Box::new(ModelRequestObservation {
             request_fingerprint: fingerprint,
@@ -98,83 +249,108 @@ impl ModelError {
     pub fn is_usage_limit(&self) -> bool {
         self.http_status == Some(429)
             || self.code.contains("rate_limit")
-            || self.http_detail.as_deref().is_some_and(|detail| {
-                let lower = detail.to_ascii_lowercase();
-                [
-                    "rate_limit",
-                    "rate limit",
-                    "quota",
-                    "overloaded",
-                    "resource_exhausted",
-                    "too many requests",
-                ]
-                .iter()
-                .any(|marker| lower.contains(marker))
+            || self.provider_code.is_some_and(|code| {
+                QUOTA_CODES.contains(&code)
+                    || matches!(
+                        code,
+                        "rate_limit"
+                            | "rate_limit_error"
+                            | "rate_limit_exceeded"
+                            | "too_many_requests"
+                            | "overloaded"
+                            | "overloaded_error"
+                            | "resource_exhausted"
+                    )
             })
     }
 
     pub fn is_transient_retryable(&self) -> bool {
-        if self.code == "CANCELLED"
-            || self.code == Self::AUTH_REJECTED
-            || self.context_overflow_status.is_some()
+        if matches!(
+            self.code,
+            "CANCELLED" | Self::AUTH_REJECTED | "model_tls_certificate_invalid"
+        ) || self.context_overflow_status.is_some()
+            || self.provider_code.is_some_and(|code| {
+                QUOTA_CODES.contains(&code)
+                    || (TERMINAL_CODES.contains(&code) && !TRANSIENT_CODES.contains(&code))
+            })
         {
             return false;
         }
-        if self.code == "model_stream_incomplete" {
-            return self.is_retryable_incomplete_stream();
+        if self.sse_event_kind.is_some() {
+            return self.code == "model_provider_error"
+                && self.provider_code.is_some_and(|code| {
+                    TRANSIENT_CODES.contains(&code)
+                        && (self.sse_event_kind != Some("response.incomplete")
+                            || !matches!(
+                                code,
+                                "rate_limit"
+                                    | "rate_limit_error"
+                                    | "rate_limit_exceeded"
+                                    | "too_many_requests"
+                            ))
+                });
         }
-        matches!(self.http_status, Some(408 | 429 | 500 | 502 | 503 | 504))
-            || matches!(
-                self.code,
-                "model_timeout" | "model_transport_failed" | "model_stream_interrupted"
-            )
-    }
-
-    fn is_retryable_incomplete_stream(&self) -> bool {
-        let Some(detail) = self.http_detail.as_deref() else {
-            return true;
-        };
-        let upper = detail.to_ascii_uppercase();
-        // Deterministic terminal stop reasons (token cap or safety/policy blocks) will not
-        // recover by replaying the identical request; premature EOF and transient Gemini
-        // MALFORMED_FUNCTION_CALL / OTHER flakes recover on retry.
-        !(upper.contains("MAX_TOKENS")
-            || upper.contains("LENGTH")
-            || upper.contains("SAFETY")
-            || upper.contains("RECITATION")
-            || upper.contains("PROHIBITED_CONTENT")
-            || upper.contains("BLOCKLIST")
-            || upper.contains("SPII")
-            || upper.contains("CONTENT_FILTER"))
+        if let Some(status) = self.http_status.filter(|status| *status >= 300) {
+            return match status {
+                429 => self.code == "model_http_rejected", // The complete body can distinguish quota.
+                408 | 500 | 502 | 503 | 504 | 520..=524 => true,
+                _ => false,
+            };
+        }
+        matches!(
+            self.code,
+            "model_timeout"
+                | "model_transport_failed"
+                | "model_stream_interrupted"
+                | "model_stream_incomplete"
+        )
     }
 
     pub fn observed_usage(&self) -> Option<&UsageAmounts> {
         self.observation.as_deref().and_then(|o| o.usage.as_ref())
     }
 
-    /// Safe user-facing summary for HTTP rejections (e.g. `HTTP 400 (model_http_rejected): INVALID_ARGUMENT: ...`).
     pub fn format_http_rejection(&self) -> Option<String> {
         let status = self.http_status?;
         if self.code != "model_http_rejected" {
             return None;
         }
-        Some(match self.http_detail.as_deref() {
-            Some(detail) if !detail.is_empty() => {
-                format!("HTTP {status} ({}): {detail}", self.code)
-            }
-            _ => format!("HTTP {status} ({})", self.code),
+        Some(match self.http_detail {
+            Some(detail) => format!("HTTP {status} ({}): {detail}", self.code),
+            None => format!("HTTP {status} ({})", self.code),
         })
     }
 
-    /// Safe user-facing diagnostic summary for HTTP rejections and structured stream failures.
+    /// Stable error category and bounded metadata. Safe to forward or log.
     pub fn format_diagnostic(&self) -> Option<String> {
-        if let Some(http) = self.format_http_rejection() {
-            return Some(http);
+        let mut fields = Vec::new();
+        if let Some(phase) = self.failure_phase {
+            fields.push(format!("failure_phase={phase:?}"));
         }
-        let detail = self.http_detail.as_deref().filter(|s| !s.is_empty())?;
-        Some(format!("{} ({detail})", self.code))
+        if let Some(status) = self.http_status {
+            fields.push(format!("http_status={status}"));
+        }
+        if let Some(kind) = self.sse_event_kind {
+            fields.push(format!("sse_event_kind={kind}"));
+        }
+        if let Some(code) = self.provider_code {
+            fields.push(format!("provider_code={code}"));
+        }
+        if let Some(delay) = self.retry_after_ms {
+            fields.push(format!("retry_after_ms={delay}"));
+        }
+        if self.attempts_used != 0 {
+            fields.push(format!("attempts_used={}", self.attempts_used));
+        }
+        (!fields.is_empty()).then(|| {
+            let label = self
+                .format_http_rejection()
+                .unwrap_or_else(|| self.code.into());
+            format!("{label} [{}]", fields.join(", "))
+        })
     }
 }
+
 impl std::fmt::Display for ModelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.code)
@@ -182,184 +358,139 @@ impl std::fmt::Display for ModelError {
 }
 impl std::error::Error for ModelError {}
 
-fn extract_safe_http_detail(body: &[u8]) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_slice(body).ok()?;
-    extract_safe_value_detail(&parsed)
-}
-
-fn extract_safe_value_detail(parsed: &serde_json::Value) -> Option<String> {
-    let root = match parsed {
-        serde_json::Value::Array(items) => items.first()?,
-        other => other,
-    };
-    let response_err = root
-        .get("response")
-        .and_then(|r| r.get("error").or_else(|| r.get("incomplete_details")));
-    let err = root
-        .get("error")
-        .filter(|v| !v.is_null())
-        .or_else(|| response_err.filter(|v| !v.is_null()))
-        .or_else(|| root.get("promptFeedback").filter(|v| !v.is_null()))
+fn error_object(root: &Value) -> &Value {
+    let root = root
+        .as_array()
+        .and_then(|items| items.first())
         .unwrap_or(root);
-    if let Some(reason) = err.get("blockReason").and_then(serde_json::Value::as_str) {
-        return sanitize_provider_error_text(&format!("prompt_blocked: {reason}"));
-    }
-    let status = err
-        .get("status")
-        .or_else(|| err.get("type"))
-        .or_else(|| err.get("code"))
-        .or_else(|| err.get("reason"))
-        .and_then(|v| match v {
-            serde_json::Value::String(s) => Some(s.trim().to_owned()),
-            _ => None,
-        })
-        .filter(|s| !s.is_empty() && s.len() <= 64);
-    let message = err
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let combined = match (status, message) {
-        (Some(s), Some(m)) => format!("{s}: {m}"),
-        (None, Some(m)) => m.to_owned(),
-        (Some(s), None) => s,
-        (None, None) => return None,
-    };
-    sanitize_provider_error_text(&combined)
+    root.get("error")
+        .filter(|v| !v.is_null())
+        .or_else(|| root.pointer("/response/error").filter(|v| !v.is_null()))
+        .or_else(|| root.get("promptFeedback").filter(|v| !v.is_null()))
+        .unwrap_or(root)
 }
 
-fn sanitize_provider_error_text(raw: &str) -> Option<String> {
-    let mut normalized = String::with_capacity(raw.len().min(256));
-    let mut prev_space = false;
-    for ch in raw.chars() {
-        let c = if ch.is_control() || ch.is_whitespace() {
-            ' '
-        } else {
-            ch
-        };
-        if c == ' ' {
-            if !prev_space && !normalized.is_empty() {
-                normalized.push(' ');
-                prev_space = true;
-            }
-        } else {
-            normalized.push(c);
-            prev_space = false;
+fn provider_code(error: &Value) -> Option<&'static str> {
+    let codes = ["code", "reason", "blockReason", "status", "type"]
+        .into_iter()
+        .filter_map(|key| error[key].as_str().and_then(safe_code));
+    // A deterministic code wins even when a second field reports a broad
+    // upstream category (e.g. insufficient_quota + rate_limit_error).
+    codes
+        .clone()
+        .find(|code| !TRANSIENT_CODES.contains(code))
+        .or_else(|| codes.into_iter().next())
+}
+
+fn safe_code(raw: &str) -> Option<&'static str> {
+    (raw.len() <= 64)
+        .then(|| {
+            TRANSIENT_CODES
+                .iter()
+                .chain(QUOTA_CODES)
+                .chain(TERMINAL_CODES)
+                .copied()
+                .find(|code| code.eq_ignore_ascii_case(raw))
+        })
+        .flatten()
+}
+
+fn is_certificate_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    request_error_matches(error, |cause| {
+        matches!(
+            cause.downcast_ref::<rustls::Error>(),
+            Some(
+                rustls::Error::InvalidCertificate(_)
+                    | rustls::Error::NoCertificatesPresented
+                    | rustls::Error::UnsupportedNameType
+            )
+        )
+    })
+}
+
+fn request_error_matches(
+    error: &(dyn std::error::Error + 'static),
+    predicate: impl Fn(&(dyn std::error::Error + 'static)) -> bool,
+) -> bool {
+    let mut cause = Some(error);
+    while let Some(error) = cause {
+        if predicate(error) {
+            return true;
         }
+        // io::Error may omit its embedded error from source() itself.
+        cause = error
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .map(|error| error as &(dyn std::error::Error + 'static))
+            .or_else(|| error.source());
     }
-    let trimmed = normalized.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    // Never surface credential-shaped substrings in diagnostics.
-    let lower = trimmed.to_ascii_lowercase();
-    if trimmed.contains("AIza")
-        || lower.contains("bearer ")
-        || lower.contains("sk-")
-        || lower.contains("x-goog-api-key")
-        || lower.contains("x-api-key")
-        || lower.contains("api_key=")
-        || lower.contains("key=")
-    {
-        return None;
-    }
-    let clipped: String = trimmed.chars().take(240).collect();
-    Some(clipped)
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn extracts_safe_structured_detail_from_gemini_array_and_scrubs_secrets() {
-        let gemini_400 = br#"[{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \"additionalProperties\" at 'tools[0].function_declarations[0].parameters'.","status":"INVALID_ARGUMENT"}}]"#;
-        let err = ModelError::http(400, gemini_400);
-        assert_eq!(err.code, "model_http_rejected");
-        assert_eq!(err.http_status, Some(400));
-        let formatted = err.format_http_rejection().unwrap();
-        assert!(formatted.starts_with("HTTP 400 (model_http_rejected): INVALID_ARGUMENT:"));
-        assert!(formatted.contains("additionalProperties"));
-
-        let secret_body = br#"{"error":{"status":"INVALID_ARGUMENT","message":"bad key AIzaSySecretToken123456789"}}"#;
-        let scrubbed = ModelError::http(400, secret_body);
-        assert!(scrubbed.http_detail.is_none());
-        assert_eq!(
-            scrubbed.format_http_rejection().as_deref(),
-            Some("HTTP 400 (model_http_rejected)")
+    fn redacts_all_provider_text_and_gives_terminal_codes_priority() {
+        let error = ModelError::provider_event(
+            "response.failed",
+            &json!({
+                "response":{"error":{
+                    "type":"rate_limit_error", "code":"insufficient_quota",
+                    "message":"prompt echo and plain unrecognizable credentials"
+                }}
+            }),
         );
-
-        let html_body = b"<html><body>502 Bad Gateway</body></html>";
-        let html_err = ModelError::http(502, html_body);
-        assert!(html_err.http_detail.is_none());
-        assert_eq!(
-            html_err.format_http_rejection().as_deref(),
-            Some("HTTP 502 (model_http_rejected)")
+        assert_eq!(error.provider_code, Some("insufficient_quota"));
+        assert!(error.is_usage_limit());
+        assert!(!error.is_transient_retryable());
+        assert!(!error.format_diagnostic().unwrap().contains("prompt echo"));
+        let error = ModelError::provider_event(
+            "error",
+            &json!({
+                "error":{"code":"oauth_token_11111111111111111","message":"Bearer secret"}
+            }),
         );
-
-        // Incomplete stream retries transient EOF / MALFORMED_FUNCTION_CALL, not deterministic caps.
-        let eof =
-            ModelError::new("model_stream_incomplete").with_detail("eof_before_finish_reason");
-        assert!(eof.is_transient_retryable());
-        assert_eq!(
-            eof.format_diagnostic().as_deref(),
-            Some("model_stream_incomplete (eof_before_finish_reason)")
-        );
-        let malformed_call = ModelError::new("model_stream_incomplete")
-            .with_detail("finishReason=MALFORMED_FUNCTION_CALL");
-        assert!(malformed_call.is_transient_retryable());
-        assert_eq!(
-            malformed_call.format_diagnostic().as_deref(),
-            Some("model_stream_incomplete (finishReason=MALFORMED_FUNCTION_CALL)")
-        );
-        let max_tokens =
-            ModelError::new("model_stream_incomplete").with_detail("finishReason=MAX_TOKENS");
-        assert!(!max_tokens.is_transient_retryable());
-        assert_eq!(
-            max_tokens.format_diagnostic().as_deref(),
-            Some("model_stream_incomplete (finishReason=MAX_TOKENS)")
-        );
+        assert_eq!(error.provider_code, None);
+        assert!(!error.format_diagnostic().unwrap().contains("secret"));
+        assert!(!error.is_transient_retryable());
     }
 
     #[test]
-    fn provider_event_extracts_safe_detail_and_scrubs_secrets() {
-        let responses_failed = serde_json::json!({
-            "type": "response.failed",
-            "response": {
-                "error": { "code": "rate_limit_exceeded", "message": "Too many requests" }
-            }
-        });
-        let err = ModelError::provider_event(&responses_failed);
-        assert_eq!(err.code, "model_provider_error");
-        assert_eq!(
-            err.format_diagnostic().as_deref(),
-            Some("model_provider_error (rate_limit_exceeded: Too many requests)")
-        );
+    fn bad_request_diagnostic_keeps_only_allowlisted_provider_code() {
+        for (code, expected_code) in [
+            ("invalid_request_error", Some("invalid_request_error")),
+            ("invalid_request", None),
+        ] {
+            let body = json!({"error": {
+                "code": code,
+                "message": "RC controlled provider rejection",
+                "headers": {"Authorization": "Bearer synthetic-key", "Cookie": "synthetic-cookie"}
+            }});
+            let error = ModelError::http(400, body.to_string().as_bytes());
+            assert!(!error.is_transient_retryable());
+            assert_eq!(error.provider_code, expected_code);
+            assert_eq!(error.http_detail, None);
+            let provider_field = expected_code
+                .map(|code| format!(", provider_code={code}"))
+                .unwrap_or_default();
+            assert_eq!(
+                error.format_diagnostic().unwrap(),
+                format!(
+                    "HTTP 400 (model_http_rejected) [failure_phase=Terminal, http_status=400{provider_field}]"
+                )
+            );
+        }
+    }
 
-        let anthropic_err = serde_json::json!({
-            "type": "error",
-            "error": { "type": "overloaded_error", "message": "Overloaded" }
-        });
-        assert_eq!(
-            ModelError::provider_event(&anthropic_err)
-                .format_diagnostic()
-                .as_deref(),
-            Some("model_provider_error (overloaded_error: Overloaded)")
-        );
-
-        let gemini_blocked = serde_json::json!({
-            "promptFeedback": { "blockReason": "SAFETY" }
-        });
-        assert_eq!(
-            ModelError::provider_event(&gemini_blocked)
-                .format_diagnostic()
-                .as_deref(),
-            Some("model_provider_error (prompt_blocked: SAFETY)")
-        );
-
-        let secret_event = serde_json::json!({
-            "error": { "code": "invalid_api_key", "message": "Incorrect key sk-live-secret123" }
-        });
-        assert_eq!(ModelError::provider_event(&secret_event).http_detail, None);
+    #[test]
+    fn generates_safe_http_detail_for_known_schema_assertion() {
+        let error = ModelError::http(400, br#"[{"error":{"status":"INVALID_ARGUMENT","message":"Invalid JSON payload received. Unknown name \"additionalProperties\". secret tail"}}]"#);
+        let label = error.format_http_rejection().unwrap();
+        assert!(label.starts_with("HTTP 400 (model_http_rejected): INVALID_ARGUMENT:"));
+        assert!(label.contains("additionalProperties"));
+        assert!(!label.contains("secret tail"));
     }
 }

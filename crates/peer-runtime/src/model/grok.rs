@@ -141,13 +141,7 @@ impl Compatibility {
                 .body(body.to_vec())
                 .send()
                 .await
-                .map_err(|e| {
-                    ModelError::new(if e.is_timeout() {
-                        "model_timeout"
-                    } else {
-                        "model_transport_failed"
-                    })
-                })
+                .map_err(ModelError::request_failed)
         };
         let response = send(&version).await?;
         if response.status() != reqwest::StatusCode::UPGRADE_REQUIRED {

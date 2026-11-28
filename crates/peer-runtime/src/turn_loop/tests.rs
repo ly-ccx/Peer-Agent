@@ -31,12 +31,15 @@ fn turn(text: &str, names: &[&str]) -> ModelTurn {
     }
 }
 impl TurnHost for Host {
-    async fn request(&mut self) -> Result<ModelTurn, CapabilityError> {
+    async fn request(&mut self) -> Result<ModelTurn, TurnError> {
         self.events.push("request".into());
         if let Some(cancel) = self.request_cancel.take() {
             cancel.cancel()
         }
-        self.turns.pop_front().expect("unexpected extra cognition")
+        self.turns
+            .pop_front()
+            .expect("unexpected extra cognition")
+            .map_err(Into::into)
     }
     async fn record_assistant(&mut self, turn: &ModelTurn) -> Result<(), CapabilityError> {
         self.events.push(format!("assistant:{}", turn.content));
@@ -154,7 +157,7 @@ async fn initial_cancel_and_zero_limit_admit_neither_cognition_nor_a_call() {
         let mut h = Host::default();
         assert!(matches!(
             run(&mut h, None, &owned, &external).await,
-            Err(CapabilityError("CANCELLED"))
+            Err(TurnError::Host(CapabilityError("CANCELLED")))
         ));
         assert!(h.events.is_empty());
     }
@@ -167,7 +170,7 @@ async fn initial_cancel_and_zero_limit_admit_neither_cognition_nor_a_call() {
             &CancellationToken::new()
         )
         .await,
-        Err(CapabilityError("invalid_max_turns"))
+        Err(TurnError::Host(CapabilityError("invalid_max_turns")))
     ));
     assert!(h.events.is_empty());
 }
@@ -181,7 +184,7 @@ async fn a_late_model_response_after_cancellation_cannot_record_text_or_dispatch
     };
     assert!(matches!(
         run(&mut h, None, &cancel, &CancellationToken::new()).await,
-        Err(CapabilityError("CANCELLED"))
+        Err(TurnError::Host(CapabilityError("CANCELLED")))
     ));
     assert_eq!(h.events, ["request"]);
 }
@@ -195,7 +198,7 @@ async fn cancellation_after_one_actual_host_completion_cannot_admit_the_next_cal
     };
     assert!(matches!(
         run(&mut h, None, &cancel, &CancellationToken::new()).await,
-        Err(CapabilityError("CANCELLED"))
+        Err(TurnError::Host(CapabilityError("CANCELLED")))
     ));
     assert_eq!(h.events, ["request", "call:first"]);
     assert!(h.completed.is_empty());
@@ -214,7 +217,7 @@ async fn provider_unknown_commit_and_continuation_errors_are_never_retried_by_th
             &CancellationToken::new()
         )
         .await,
-        Err(CapabilityError("provider_failed"))
+        Err(TurnError::Host(CapabilityError("provider_failed")))
     ));
     assert_eq!(provider.events, ["request"]);
     for (assistant_error, call_error, complete_error, wanted, events) in [
@@ -256,7 +259,7 @@ async fn provider_unknown_commit_and_continuation_errors_are_never_retried_by_th
         .await
         .err()
         .unwrap();
-        assert_eq!(error.0, wanted);
+        assert_eq!(error.code(), wanted);
         assert_eq!(h.events, events);
     }
 }

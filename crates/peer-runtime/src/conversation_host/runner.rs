@@ -285,7 +285,7 @@ impl Host<'_> {
                 self.runner.as_mut().expect("owned Runner").tick = None;
 
                 if let Some(tick_id) = tick_stream_id {
-                    let tick_err = turn.as_ref().err().map(|e| e.0).or_else(|| {
+                    let tick_err = turn.as_ref().err().map(TurnError::code).or_else(|| {
                         turn.as_ref()
                             .ok()
                             .filter(|t| t.stop == turn_loop::LoopStop::MaxTurns)

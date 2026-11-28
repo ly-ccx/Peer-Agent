@@ -55,8 +55,14 @@ impl Stream {
         match self {
             Self::Chat(stream) => stream.push(chunk),
             Self::Other(stream) => {
-                stream.frames.push(chunk, |bytes| {
-                    let event = decode(bytes, 1024 * 1024)?;
+                stream.frames.push(chunk, |kind, bytes| {
+                    let mut event = decode(bytes, 1024 * 1024)?;
+                    if let (Some(kind), Some(fields)) = (kind, event.as_object_mut()) {
+                        let event_type = fields.entry("type").or_insert_with(|| kind.into());
+                        if event_type != kind {
+                            return Err(ModelError::new("model_stream_invalid"));
+                        }
+                    }
                     match &mut stream.decoder {
                         Decoder::Anthropic(d) => d.event(&event),
                         Decoder::Responses(d) => d.event(&event),
@@ -108,13 +114,24 @@ impl Stream {
             },
         }
     }
+    pub fn terminal_stop_error(&self) -> Option<ModelError> {
+        match self {
+            Self::Chat(stream) => stream.terminal_stop_error(),
+            Self::Other(stream) => match &stream.decoder {
+                Decoder::Anthropic(decoder) => decoder.terminal_stop_error(),
+                _ => None,
+            },
+        }
+    }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
+        if let Some(error) = self.terminal_stop_error() {
+            return Err(error);
+        }
         match self {
             Self::Chat(s) => s.finish(fingerprint),
             Self::Other(s) => {
                 if !s.frames.complete() {
-                    return Err(ModelError::new("model_stream_incomplete")
-                        .with_detail("unfinished_sse_frame"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 match s.decoder {
                     Decoder::Anthropic(d) => d.finish(fingerprint),
@@ -181,6 +198,88 @@ mod tests {
             "../../../../packages/protocol/contracts/native-cli/model-streams.json"
         ))
         .unwrap()
+    }
+    #[test]
+    fn provider_decoders_classify_known_errors_and_explicit_terminal_stops() {
+        for (wire, body, kind, code, retry) in [
+            (
+                Wire::Responses,
+                r#"{"response":{"error":{"code":"server_error"}}}"#,
+                "response.failed",
+                "server_error",
+                true,
+            ),
+            (
+                Wire::Anthropic,
+                r#"{"error":{"type":"overloaded_error","message":"do not retain"}}"#,
+                "error",
+                "overloaded_error",
+                true,
+            ),
+            (
+                Wire::Anthropic,
+                r#"{"error":{"type":"authentication_error"}}"#,
+                "error",
+                "authentication_error",
+                false,
+            ),
+            (
+                Wire::Chat,
+                r#"{"code":"rate_limit_exceeded"}"#,
+                "error",
+                "rate_limit_exceeded",
+                true,
+            ),
+            (
+                Wire::Gemini,
+                r#"{"error":{"code":503,"status":"UNAVAILABLE"}}"#,
+                "error",
+                "unavailable",
+                true,
+            ),
+            (
+                Wire::Gemini,
+                r#"{"error":{"code":403,"status":"PERMISSION_DENIED"}}"#,
+                "error",
+                "permission_denied",
+                false,
+            ),
+        ] {
+            let error = Stream::new(wire)
+                .push(format!("event: {kind}\ndata: {body}\n\n").as_bytes())
+                .unwrap_err();
+            assert_eq!(error.sse_event_kind, Some(kind));
+            assert_eq!(error.provider_code, Some(code));
+            assert_eq!(error.is_transient_retryable(), retry);
+        }
+        for reason in [
+            "MAX_TOKENS",
+            "SAFETY",
+            "RECITATION",
+            "PROHIBITED_CONTENT",
+            "BLOCKLIST",
+            "SPII",
+            "MALFORMED_FUNCTION_CALL",
+            "OTHER",
+            "UNKNOWN_FUTURE_REASON",
+        ] {
+            let body = serde_json::json!({"candidates":[{"finishReason":reason}]});
+            let error = Stream::new(Wire::Gemini)
+                .push(format!("data: {body}\n\n").as_bytes())
+                .unwrap_err();
+            assert_eq!(error.sse_event_kind, Some("finishReason"));
+            assert!(!error.is_transient_retryable(), "{reason}");
+        }
+        let mut chat = Stream::new(Wire::Chat);
+        chat.push(
+            b"data: {\"choices\":[{\"index\":0,\"finish_reason\":\"length\",\"delta\":{}}]}\n\n",
+        )
+        .unwrap();
+        let Err(error) = chat.finish(String::new()) else {
+            panic!("length stop must fail")
+        };
+        assert_eq!(error.provider_code, Some("length"));
+        assert!(!error.is_transient_retryable());
     }
     #[test]
     fn fragments_crlf_and_truncation_preserve_terminal_authority() {

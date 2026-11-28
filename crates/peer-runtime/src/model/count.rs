@@ -187,7 +187,7 @@ mod tests {
             let request = PreparedRequest {
                 owner: &model,
                 body,
-                bytes,
+                bytes: bytes.into(),
                 fingerprint,
             };
             assert_eq!(

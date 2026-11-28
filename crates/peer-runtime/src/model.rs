@@ -15,6 +15,7 @@ pub(crate) use tool_results::ToolResultEncoding;
 mod count;
 mod grok;
 mod request;
+mod retry;
 pub use count::ProviderTokenCount;
 const TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
 mod sse;
@@ -23,7 +24,10 @@ mod error;
 mod sse_frame;
 mod stream;
 mod usage;
-pub use error::{ModelError, ModelRequestObservation};
+pub use error::{ModelError, ModelFailurePhase, ModelRequestObservation};
+pub use retry::{
+    ModelRetry, ModelRetryNotice, SAME_PROVIDER_RETRY_DELAYS_MS, SameProviderRetryPolicy,
+};
 pub mod wire;
 pub(crate) use wire::REQUEST_BYTES;
 #[derive(Clone)]
@@ -42,11 +46,11 @@ pub struct NativeModel {
     compatibility: Option<Arc<grok::Compatibility>>,
 }
 /// An encoded request bound to the exact provider instance that built it.
-/// Counting can borrow it; sending consumes its original immutable wire bytes.
+/// Preflight counting and all physical sends use its original immutable wire bytes.
 pub struct PreparedRequest<'a> {
     owner: &'a NativeModel,
     body: Value,
-    bytes: Vec<u8>,
+    bytes: bytes::Bytes,
     fingerprint: String,
 }
 impl PreparedRequest<'_> {
@@ -90,38 +94,6 @@ pub enum ModelDelta<'a> {
     ToolIntent,
 }
 
-pub const SAME_PROVIDER_RETRY_DELAYS_MS: [u64; 3] = [500, 1_500, 3_000];
-
-/// Bounded same-provider transient HTTP/transport backoff (ADR 30).
-pub struct SameProviderRetryPolicy {
-    delays_ms: Vec<u64>,
-    generic_attempts: usize,
-}
-
-impl Default for SameProviderRetryPolicy {
-    fn default() -> Self {
-        Self::with_delays_ms(SAME_PROVIDER_RETRY_DELAYS_MS.to_vec())
-    }
-}
-
-impl SameProviderRetryPolicy {
-    pub fn with_delays_ms(delays_ms: Vec<u64>) -> Self {
-        Self {
-            delays_ms,
-            generic_attempts: 0,
-        }
-    }
-
-    pub fn next_delay(&mut self, error: &ModelError) -> Result<Option<Duration>, &'static str> {
-        if error.is_transient_retryable()
-            && let Some(&ms) = self.delays_ms.get(self.generic_attempts)
-        {
-            self.generic_attempts += 1;
-            return Ok(Some(Duration::from_millis(ms)));
-        }
-        Ok(None)
-    }
-}
 impl NativeModel {
     pub fn context_window(&self) -> Option<u64> {
         self.context_window
@@ -238,6 +210,32 @@ impl NativeModel {
         cancel: &CancellationToken,
         publish: impl std::ops::AsyncFnMut(ModelDelta<'_>) -> Result<(), ModelError>,
     ) -> Result<ModelTurn, ModelError> {
+        self.prepare_materialized_request(
+            home,
+            conversation_id,
+            context,
+            history,
+            tools,
+            live,
+            cancel,
+        )
+        .await?
+        .send_with_deltas(cancel, None, publish)
+        .await
+    }
+
+    /// Freeze a logical inference request after materializing its tool-result views.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_materialized_request<'a>(
+        &'a self,
+        home: &std::path::Path,
+        conversation_id: &str,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
+        cancel: &CancellationToken,
+    ) -> Result<PreparedRequest<'a>, ModelError> {
         let sources = ToolResultEncoding::collect(history)?;
         let home_buf = home.to_path_buf();
         let conv = conversation_id.to_owned();
@@ -246,9 +244,7 @@ impl NativeModel {
             tokio::task::spawn_blocking(move || sources.materialize(&home_buf, &conv, &mat_cancel))
                 .await
                 .map_err(|_| ModelError::new("model_tool_result_encoding_unavailable"))??;
-        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)?
-            .send_with_deltas(cancel, publish)
-            .await
+        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)
     }
     /// Run a model turn that materializes oversized tool results (> 6000 UTF-16 chars)
     /// into `<home>/conversations/<conversation_id>.tool-results/` before wire encoding,
@@ -359,22 +355,26 @@ impl NativeModel {
     }
 }
 impl PreparedRequest<'_> {
-    pub async fn send(self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
-        self.send_with_deltas(cancel, async |_: ModelDelta<'_>| Ok(()))
+    pub async fn send(&self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
+        self.send_with_deltas(cancel, None, async |_: ModelDelta<'_>| Ok(()))
             .await
     }
 
-    /// Observe only newly decoded assistant text and reasoning deltas.
-    /// The terminal validation below still controls the returned turn and all tool intent.
-    pub(crate) async fn send_with_deltas(
-        self,
+    /// Every physical send starts a new request and decoder from these immutable
+    /// preflight bytes. Only a validated terminal result exposes tool calls.
+    pub async fn send_with_deltas(
+        &self,
         cancel: &CancellationToken,
+        retry_deadline: Option<tokio::time::Instant>,
         mut publish: impl std::ops::AsyncFnMut(ModelDelta<'_>) -> Result<(), ModelError>,
     ) -> Result<ModelTurn, ModelError> {
+        use ModelFailurePhase::{Connect, FirstByte, Headers, MidStream, Terminal};
+
         let model = self.owner;
-        let request_fingerprint = self.fingerprint;
         let mut stream = Some(stream::Stream::new(model.wire));
         let mut final_observation = None;
+        let mut phase = Connect;
+        let mut response_metadata = None;
         let read = async {
             let send_request = async {
                 match &model.compatibility {
@@ -382,72 +382,56 @@ impl PreparedRequest<'_> {
                     None => model
                         .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
                         .await?
-                        .body(self.bytes)
+                        .body(self.bytes.clone())
                         .send()
                         .await
-                        .map_err(|e| {
-                            ModelError::new(if e.is_timeout() {
-                                "model_timeout"
-                            } else {
-                                "model_transport_failed"
-                            })
-                        }),
+                        .map_err(ModelError::request_failed),
                 }
             };
             let mut response = tokio::time::timeout(model.deadline, send_request)
                 .await
-                .map_err(|_| ModelError::new("model_timeout"))??;
-            if !response.status().is_success() {
-                let status = response.status().as_u16();
-                let retry_after_seconds = response
-                    .headers()
-                    .get(reqwest::header::RETRY_AFTER)
-                    .and_then(|header| header.to_str().ok())
-                    .and_then(|header| header.trim().parse::<u64>().ok());
-                // The status is sufficient for access rejection. An error body
-                // cannot turn it into context pressure or a retry.
-                if let Some(error) = ModelError::http_access_rejection(status) {
-                    return Err(error);
-                }
-                let mut body = Vec::new();
-                while let Some(chunk) = tokio::time::timeout(model.deadline, response.chunk())
-                    .await
-                    .map_err(|_| ModelError::new("model_timeout"))?
-                    .map_err(|e| {
-                        ModelError::new(if e.is_timeout() {
-                            "model_timeout"
-                        } else {
-                            "model_transport_failed"
-                        })
-                    })?
-                {
-                    if body.len() + chunk.len() > 65536 {
-                        return Err(ModelError::new("model_error_body_limit"));
-                    }
-                    body.extend_from_slice(&chunk);
-                }
-                let mut error = ModelError::http(status, &body);
-                error.retry_after_seconds = retry_after_seconds;
+                .map_err(|_| ModelError::new("model_timeout").at(Headers))??;
+            let status = response.status().as_u16();
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|header| header.to_str().ok())
+                .and_then(|raw| retry::retry_after_ms(raw, time::OffsetDateTime::now_utc()));
+            response_metadata = Some((status, retry_after));
+            phase = Headers;
+            if let Some(error) = ModelError::http_access_rejection(status) {
                 return Err(error);
             }
+            if status == 407 {
+                return Err(ModelError::new("model_http_rejected"));
+            }
+            phase = FirstByte;
+            if !response.status().is_success() {
+                let read_error = async {
+                    let mut body = Vec::new();
+                    while let Some(chunk) = response_chunk(&mut response, model.deadline).await? {
+                        phase = MidStream;
+                        if body.len() + chunk.len() > 64 * 1024 {
+                            return Err(ModelError::new("model_error_body_limit"));
+                        }
+                        body.extend_from_slice(&chunk);
+                    }
+                    Ok(body)
+                };
+                let body = tokio::time::timeout(model.deadline, read_error)
+                    .await
+                    .map_err(|_| ModelError::new("model_timeout"))??;
+                return Err(ModelError::http(status, &body));
+            }
             if !sse_content_type_allowed(response.headers()) {
-                return Err(ModelError::new("model_content_type_invalid"));
+                return Err(ModelError::new("model_content_type_invalid").at(Headers));
             }
             let decoder = stream.as_mut().expect("one request decoder");
             let mut shown = 0;
             let mut shown_thinking = 0;
             let mut reported_tool_intent = false;
-            while let Some(chunk) = tokio::time::timeout(model.deadline, response.chunk())
-                .await
-                .map_err(|_| ModelError::new("model_timeout"))?
-                .map_err(|e| {
-                    ModelError::new(if e.is_timeout() {
-                        "model_timeout"
-                    } else {
-                        "model_stream_interrupted"
-                    })
-                })?
-            {
+            while let Some(chunk) = response_chunk(&mut response, model.deadline).await? {
+                phase = MidStream;
                 decoder.push(&chunk)?;
                 if !reported_tool_intent && decoder.has_tool_intent() {
                     publish(ModelDelta::ToolIntent).await?;
@@ -464,6 +448,7 @@ impl PreparedRequest<'_> {
                     shown = text.len();
                 }
                 if decoder.terminal() {
+                    phase = Terminal;
                     break;
                 }
             }
@@ -471,18 +456,59 @@ impl PreparedRequest<'_> {
             let mut turn = stream
                 .take()
                 .expect("one request decoder")
-                .finish(request_fingerprint.clone())?;
+                .finish(self.fingerprint.clone())?;
             if let Some(c) = &mut turn.continuation {
                 c.binding = model.binding.clone();
                 c.text = turn.content.clone();
             }
             Ok(turn)
         };
-        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=read=>r};
+        let retry_timeout = async {
+            match retry_deadline {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(ModelError::new("CANCELLED")),
+            _ = retry_timeout => Err(ModelError::new("model_timeout")),
+            result = read => result,
+        };
         let observation =
             final_observation.or_else(|| stream.as_ref().and_then(stream::Stream::observed_usage));
-        result.map_err(|error| error.observed(request_fingerprint, observation))
+        result.map_err(|error| {
+            let error = if matches!(error.code, "model_timeout" | "model_stream_interrupted") {
+                stream
+                    .as_ref()
+                    .and_then(stream::Stream::terminal_stop_error)
+                    .unwrap_or(error)
+            } else {
+                error
+            }
+            .at(phase);
+            let error = match response_metadata {
+                Some((status, delay)) => error.response(status, delay),
+                None => error,
+            };
+            error.observed(self.fingerprint.clone(), observation)
+        })
     }
+}
+async fn response_chunk(
+    response: &mut reqwest::Response,
+    timeout: Duration,
+) -> Result<Option<bytes::Bytes>, ModelError> {
+    tokio::time::timeout(timeout, response.chunk())
+        .await
+        .map_err(|_| ModelError::new("model_timeout"))?
+        .map_err(|e| {
+            ModelError::new(if e.is_timeout() {
+                "model_timeout"
+            } else {
+                "model_stream_interrupted"
+            })
+        })
 }
 fn sse_content_type_allowed(headers: &reqwest::header::HeaderMap) -> bool {
     let Some(raw) = headers.get(reqwest::header::CONTENT_TYPE) else {
@@ -570,58 +596,5 @@ mod tests {
                 c["name"]
             );
         }
-    }
-
-    #[test]
-    fn same_provider_retry_policy_retries_transient_only_and_bounds_attempts() {
-        let mut policy = SameProviderRetryPolicy::default();
-        assert_eq!(
-            policy
-                .next_delay(&ModelError::http(503, b"service unavailable"))
-                .unwrap(),
-            Some(Duration::from_millis(500))
-        );
-        assert_eq!(
-            policy
-                .next_delay(&ModelError::http(429, b"rate limit"))
-                .unwrap(),
-            Some(Duration::from_millis(1500))
-        );
-        assert_eq!(
-            policy
-                .next_delay(&ModelError::new("model_timeout"))
-                .unwrap(),
-            Some(Duration::from_millis(3000))
-        );
-        assert_eq!(
-            policy
-                .next_delay(&ModelError::http(500, b"internal error"))
-                .unwrap(),
-            None
-        );
-
-        let mut non_retry = SameProviderRetryPolicy::default();
-        assert_eq!(
-            non_retry
-                .next_delay(&ModelError::http_access_rejection(401).unwrap())
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            non_retry
-                .next_delay(&ModelError::http(400, b"bad request"))
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            non_retry
-                .next_delay(&ModelError::http(413, b"context_length_exceeded"))
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            non_retry.next_delay(&ModelError::new("CANCELLED")).unwrap(),
-            None
-        );
     }
 }

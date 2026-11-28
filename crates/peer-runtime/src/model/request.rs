@@ -8,7 +8,7 @@ impl NativeModel {
         Ok(PreparedRequest {
             owner: self,
             body,
-            bytes,
+            bytes: bytes.into(),
             fingerprint,
         })
     }
