@@ -59,6 +59,10 @@ test('pasted image paths are messages, not invalid slash commands',()=>{
   expect(parseProjectCommand('/help')).toEqual({kind:'help'});
   expect(parseProjectCommand('/task 3')).toEqual({kind:'task',number:3});
   expect(parseProjectCommand('/answer 2 please try again')).toEqual({kind:'card',operation:'answer',number:2,text:'please try again'});
+  expect(parseProjectCommand('/discard-input input-1')).toEqual({kind:'discard_input',inputId:'input-1'});
+  expect(parseProjectCommand('/restore-input input-1')).toEqual({kind:'restore_input',inputId:'input-1'});
+  expect(parseProjectCommand('/discard-input')).toEqual({kind:'invalid'});
+  expect(parseProjectCommand('/restore-input a b')).toEqual({kind:'invalid'});
   // An unknown command is still rejected; only paths are exempt.
   expect(parseProjectCommand('/nope')).toEqual({kind:'invalid'});
 });

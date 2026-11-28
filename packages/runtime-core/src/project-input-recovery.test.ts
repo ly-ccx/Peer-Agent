@@ -259,3 +259,168 @@ test('observeReceived heals pre-existing stuck duplicate reply answers and prese
   assert.deepEqual(reopened.getSnapshot().pending.map(item => item.text), ['Custom unsent note']);
   assert.deepEqual(f.stored().pending.map(item => item.text), ['Custom unsent note']);
 });
+
+test('discard persists removal across reload and refuses false success on write failure', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const file: ProjectInputAttachment = { id: 'f1', kind: 'text', name: 'a.txt', mimeType: 'text/plain', size: 3, text: 'abc', sourceKind: 'user_upload' };
+  session.edit({ text: 'stuck', attachments: [file] });
+  f.lose();
+  await session.send();
+  const inputId = session.getSnapshot().pending[0]!.inputId;
+  assert.equal(f.stored().pending.length, 1);
+
+  f.failWrite();
+  const failed = await session.discard(inputId);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.code, 'DRAFT_SAVE_FAILED');
+  assert.equal(session.getSnapshot().pending.length, 1);
+  assert.equal(session.getSnapshot().error, 'DRAFT_SAVE_FAILED');
+
+  // Recover write capability and discard cleanly; reopening must not resurrect the item.
+  const f2 = fixture(), s2 = f2.make(); await s2.load();
+  s2.edit({ text: 'stuck', attachments: [file] });
+  f2.lose();
+  await s2.send();
+  const id2 = s2.getSnapshot().pending[0]!.inputId;
+  assert.deepEqual(await s2.discard(id2), { ok: true });
+  assert.equal(s2.getSnapshot().pending.length, 0);
+  assert.equal(f2.stored().pending.length, 0);
+  const reopened = f2.make(); await reopened.load();
+  assert.equal(reopened.getSnapshot().pending.length, 0);
+});
+
+test('discard and restoreToDraft are blocked while sending; a late receipt after discard is a safe no-op', async () => {
+  const f = fixture(), session = f.make(10); await session.load();
+  session.edit({ text: 'slow send' });
+  const gate = f.defer();
+  const sending = session.send();
+  await Promise.resolve();
+  const input = session.getSnapshot().pending[0]!;
+  assert.deepEqual(await session.discard(input.inputId), { ok: false, code: 'INPUT_SENDING' });
+  assert.deepEqual(await session.restoreToDraft(input.inputId), { ok: false, code: 'INPUT_SENDING' });
+
+  // Wait for presentation timeout -> now unknown -> user discards it -> late receipt arrives later.
+  const timedOut = await sending;
+  assert.equal(timedOut.code, 'INPUT_OUTCOME_UNKNOWN');
+  session.edit({ text: 'fresh draft' });
+  assert.deepEqual(await session.discard(input.inputId), { ok: true });
+  assert.equal(session.getSnapshot().pending.length, 0);
+
+  gate.resolve(f.received(input));
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(session.getSnapshot().received.length, 0);
+  assert.equal(session.getSnapshot().draft.text, 'fresh draft');
+});
+
+test('restoreToDraft atomically restores text, quote, attachments and taskRefs while protecting non-empty drafts', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const upload: ProjectInputAttachment = { id: 'img-1', kind: 'text', name: 'spec.md', mimeType: 'text/markdown', size: 4, text: 'spec', sourceKind: 'user_upload' };
+  const taskRef = { sessionId: 'sess-1', title: 'Fix timeout', status: 'running' };
+  session.edit({ text: 'Review this', quote: { messageId: 'reply-9', text: 'quoted excerpt' }, attachments: [upload], taskRefs: [taskRef] });
+  f.lose();
+  await session.send({ quoteRefs: ['reply-9', 'quoted excerpt'], answerTo: 'card:question:reply:q-9' });
+  const inputId = session.getSnapshot().pending[0]!.inputId;
+
+  // Non-empty draft blocks restore without clobbering.
+  session.edit({ text: 'currently typing' });
+  await session.flush();
+  assert.deepEqual(await session.restoreToDraft(inputId), { ok: false, code: 'DRAFT_NOT_EMPTY' });
+  assert.equal(session.getSnapshot().draft.text, 'currently typing');
+  assert.equal(session.getSnapshot().pending.length, 1);
+
+  // Clearing draft lets restoreToDraft atomically move content back without old answerTo.
+  session.edit({ text: '' });
+  await session.flush();
+  assert.deepEqual(await session.restoreToDraft(inputId), { ok: true });
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(f.stored().pending.length, 0);
+  assert.equal(session.getSnapshot().draft.text, 'Review this');
+  assert.deepEqual(session.getSnapshot().draft.quote, { messageId: 'reply-9', text: 'quoted excerpt' });
+  assert.deepEqual(session.getSnapshot().draft.attachments, [upload]);
+  assert.deepEqual(session.getSnapshot().draft.taskRefs, [taskRef]);
+  assert.equal(f.stored().draft.text, 'Review this');
+});
+
+test('definite host rejections mark rejected state while non-whitelist failures remain unknown; resource rejection strips invalid feedback on restore', async () => {
+  const f = fixture();
+  let nextResponse: ProjectAgentSubmitInputResult = { ok: false, code: 'CONTROLLED_SUBMIT_FAILURE' };
+  f.port.submit = async input => { f.calls.push(input); return nextResponse; };
+  const session = f.make(); await session.load();
+
+  session.edit({ text: 'transient fail' });
+  await session.send();
+  const unknownId = session.getSnapshot().pending[0]!.inputId;
+  assert.equal(session.getSnapshot().rejected[unknownId], undefined);
+
+  const hash = 'sha256:' + 'b'.repeat(64);
+  const feedback = { id: 'sel-1', recipient: { workspaceId: 'ws', conversationId: 'conv-old' }, capturedAt: '2026-11-27T00:00:00.000Z',
+    resource: { kind: 'document' as const, mode: 'preview' as const, reference: { workspaceId: 'ws', path: '/repo/a.md', kind: 'file' as const } },
+    version: { kind: 'content' as const, resourceId: hash, contentVersion: hash }, excerpt: 'sel', selection: { kind: 'discussion' as const } };
+  nextResponse = { ok: false, code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' };
+  session.edit({ text: 'with stale ref', resourceFeedback: [feedback] });
+  await session.send();
+  const rejectedId = session.getSnapshot().pending[1]!.inputId;
+  assert.equal(session.getSnapshot().rejected[rejectedId], 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
+
+  assert.deepEqual(await session.restoreToDraft(rejectedId), { ok: true });
+  assert.equal(session.getSnapshot().rejected[rejectedId], undefined);
+  assert.equal(session.getSnapshot().draft.text, 'with stale ref');
+  assert.equal(session.getSnapshot().draft.resourceFeedback, undefined);
+});
+
+test('restarted legacy stuck QUESTION_CLOSED pending input transitions to rejected on retry without silent text loss and can be discarded', async () => {
+  const f = fixture(), first = f.make(); await first.load();
+  f.lose();
+  await first.send({ text: '排查并修复 macOS 流式超时（推荐）', answerTo: 'card:question:reply:reply-tc-1', useDraft: false });
+  await first.flush();
+  const stuckId = first.getSnapshot().pending[0]!.inputId;
+
+  // Simulate app restart where origin maps are empty and the original answer scrolled off page 1.
+  f.port.submit = async input => { f.calls.push(input); return { ok: false, code: 'QUESTION_CLOSED' }; };
+  const reopened = f.make(); await reopened.load();
+  const retried = await reopened.retry(stuckId);
+  assert.equal(retried.code, 'QUESTION_CLOSED');
+  assert.equal(reopened.getSnapshot().pending.length, 1);
+  assert.equal(reopened.getSnapshot().rejected[stuckId], 'QUESTION_CLOSED');
+
+  // User deletes it cleanly.
+  assert.deepEqual(await reopened.discard(stuckId), { ok: true });
+  assert.equal(reopened.getSnapshot().pending.length, 0);
+  assert.equal(reopened.getSnapshot().rejected[stuckId], undefined);
+  assert.equal(f.stored().pending.length, 0);
+});
+
+test('concurrent send while discard is writing waits until the new input is persisted before submitting', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  f.lose();
+  session.edit({ text: 'old stuck' });
+  await session.send();
+  const oldId = session.getSnapshot().pending[0]!.inputId;
+
+  const writeGate = deferred<void>();
+  let holdNextWrite = true;
+  const origWrite = f.port.write;
+  f.port.write = async request => {
+    if (holdNextWrite) { holdNextWrite = false; await writeGate.promise; }
+    return origWrite(request);
+  };
+  let persistedBeforeSecondSubmit = false;
+  f.port.submit = async input => {
+    f.calls.push(input);
+    persistedBeforeSecondSubmit = f.stored().pending.some(item => item.inputId === input.inputId);
+    return f.received(input);
+  };
+
+  const discarding = session.discard(oldId);
+  await Promise.resolve();
+  session.edit({ text: 'new concurrent' });
+  const sending = session.send();
+  writeGate.resolve();
+
+  assert.deepEqual(await discarding, { ok: true });
+  assert.equal((await sending).ok, true);
+  assert.equal(persistedBeforeSecondSubmit, true);
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(f.stored().pending.length, 0);
+});

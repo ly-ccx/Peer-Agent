@@ -57,6 +57,7 @@
 }
 
 .bot-thread-feedback p { margin: 0; }
+.bot-thread-feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-shrink: 0; }
 .bot-thread-feedback button, .bot-thread-failed button { flex-shrink: 0; padding: 6px 10px; color: var(--graphite-base); cursor: pointer; }
 .bot-thread-feedback button:focus-visible, .bot-thread-failed button:focus-visible { outline: 2px solid var(--graphite-soft); outline-offset: 2px; }
 .bot-thread-failed { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 0; padding: 24px; }
@@ -412,6 +413,30 @@
 .bot-quote-action:active,
 .bot-user-marks button:active {
   transform: scale(0.98);
+}
+
+.bot-user-marks button.bot-user-action-danger,
+.bot-thread-feedback button.bot-user-action-danger {
+  color: var(--state-danger);
+  border-color: color-mix(in srgb, var(--state-danger) 36%, transparent);
+}
+
+.bot-user-marks button.bot-user-action-danger:hover,
+.bot-thread-feedback button.bot-user-action-danger:hover {
+  color: var(--state-danger);
+  background: color-mix(in srgb, var(--state-danger) 10%, var(--paper-sheet));
+}
+
+.bot-user-marks button:disabled,
+.bot-thread-feedback button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bot-user-marks-feedback {
+  flex-basis: 100%;
+  text-align: right;
+  color: var(--graphite-soft);
 }
 
 .bot-user-images {

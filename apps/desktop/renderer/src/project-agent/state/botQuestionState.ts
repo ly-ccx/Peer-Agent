@@ -2,7 +2,7 @@ import type { BotChatMessage } from './botConversationState';
 
 /** Only conversational questions can bind a freeform composer answer. */
 export function questionForInput(messages: readonly BotChatMessage[], quoteRefs: readonly string[]): string | undefined {
-  const last = messages.filter(message => ['user_input', 'agent_reply'].includes(message.kind) && message.pending !== 'failed').at(-1);
+  const last = messages.filter(message => ['user_input', 'agent_reply'].includes(message.kind) && message.pending !== 'failed' && message.pending !== 'rejected').at(-1);
   if (last?.kind !== 'agent_reply' || (quoteRefs.length && quoteRefs[0] !== last.id)) return;
   const id = `card:question:reply:${last.id}`;
   return last.cards.some(card => card.cardId === id && card.kind === 'question' && card.resolvedState !== 'resolved') ? id : undefined;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TranslationKey } from '@peer-agent/i18n';
 import { clientApi } from '../../clientApi';
 import { useInputRecoverySession, useInputRecoveryState } from './useInputRecovery';
 import { conversationInputKeys } from './inputRecoveryProjection';
@@ -69,7 +70,22 @@ export function useBotConversation(workspaceId: string) {
   const [familiarizeOffer, setFamiliarizeOffer] = useState<FamiliarizeOffer | null>(null);
   const session = useInputRecoverySession(workspaceId);
   const recovery = { session, state: useInputRecoveryState(session, conversationInputKeys) };
-  const pending = useMemo<readonly PendingBotInput[]>(() => [...recovery.state.pending.map(item => ({ ...item, state: recovery.state.sending.includes(item.inputId) ? 'sending' as const : 'unknown' as const })), ...recovery.state.received.map(item => ({ ...item, state: 'received' as const }))], [recovery.state.pending, recovery.state.received, recovery.state.sending]);
+  const pending = useMemo<readonly PendingBotInput[]>(() => [
+    ...recovery.state.pending.map(item => {
+      const rejectionCode = recovery.state.rejected[item.inputId];
+      const state = recovery.state.sending.includes(item.inputId)
+        ? 'sending' as const
+        : rejectionCode ? 'rejected' as const : 'unknown' as const;
+      return {
+        ...item,
+        state,
+        ...(rejectionCode ? { rejectionCode } : {}),
+        ...(recovery.state.mutating.includes(item.inputId) ? { busy: true } : {}),
+      };
+    }),
+    ...recovery.state.received.map(item => ({ ...item, state: 'received' as const })),
+  ], [recovery.state.pending, recovery.state.received, recovery.state.sending, recovery.state.rejected, recovery.state.mutating]);
+  const [restoredNotice, setRestoredNotice] = useState<TranslationKey | null>(null);
   const [status, setStatus] = useState<BotConversationStatus>('loading');
   const [cards, setCards] = useState<readonly Record<string, unknown>[]>([]);
   const [cardsError, setCardsError] = useState(false);
@@ -115,7 +131,7 @@ export function useBotConversation(workspaceId: string) {
     setStatus('loading');
     setRuntimeRecovery(null); setRecoveryAttention(false);
     setCards([]); setCardsError(false); setRefreshError(false); setCatchUpRequired(false);
-    setActivity(null); setStopping(false); setStopError(false);
+    setActivity(null); setStopping(false); setStopError(false); setRestoredNotice(null);
     replyIdentitiesRef.current = new Map();
     const pager = createConversationPager({
       read: async params => {
@@ -217,10 +233,19 @@ export function useBotConversation(workspaceId: string) {
     }
     return result;
   }, [workspaceId]);
+  const clearRestoredNotice = useCallback(() => setRestoredNotice(null), []);
   const send = useCallback(async (_text?: string, quoteRefs: readonly string[] = []) => {
     const ticket = generationRef.current;
+    setRestoredNotice(null);
     const answerTo = questionForInput(applyOptimistic(decorated, pending), quoteRefs);
-    return received(await recovery.session.send({ quoteRefs, answerTo }), ticket);
+    const result = await recovery.session.send({ quoteRefs, answerTo });
+    if (generationRef.current === ticket && result.code === 'QUESTION_CLOSED') {
+      const draft = recovery.session.getSnapshot().draft;
+      if (draft.text || draft.quote || draft.attachments.length || draft.taskRefs?.length || draft.resourceFeedback?.length) {
+        setRestoredNotice('projectAgent.chat.restoredClosedQuestionNotice');
+      }
+    }
+    return received(result, ticket);
   }, [recovery.session, decorated, pending, received]);
   const answer = useCallback(async (text: string, answerTo?: string) => {
     const ticket = generationRef.current;
@@ -230,6 +255,18 @@ export function useBotConversation(workspaceId: string) {
     const ticket = generationRef.current;
     return received(await recovery.session.retry(inputId), ticket);
   }, [recovery.session, received]);
+  const discardPending = useCallback(async (inputId: string) => (
+    recovery.session.discard(inputId)
+  ), [recovery.session]);
+  const restorePendingToDraft = useCallback(async (inputId: string) => {
+    const ticket = generationRef.current;
+    const wasRejected = Boolean(recovery.session.getSnapshot().rejected[inputId]);
+    const result = await recovery.session.restoreToDraft(inputId);
+    if (result.ok && generationRef.current === ticket) {
+      setRestoredNotice(wasRejected ? null : 'projectAgent.chat.restoredUnconfirmedNotice');
+    }
+    return result;
+  }, [recovery.session]);
 
   useEffect(() => { if (!isActivityRunning(activity)) setStopping(false); }, [activity]);
 
@@ -281,5 +318,9 @@ export function useBotConversation(workspaceId: string) {
     send,
     answer,
     retry,
+    discardPending,
+    restorePendingToDraft,
+    restoredNotice,
+    clearRestoredNotice,
   };
 }

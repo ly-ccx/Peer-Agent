@@ -73,7 +73,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   async function perform(run:()=>Promise<any>|any,success=copy('done')) {
     if(operationPending.current)return {ok:false};
     operationPending.current=true;setBusy(true);
-    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(result?.approval ? projectStatus(locale,result.approval.state) : success);refresh();return result;}
+    try {const result=await run();if(result?.ok===false){setNotice(result.error==='desktop_approval_required'?copy('desktop'):result.code==='DRAFT_NOT_EMPTY'?copy('draftNotEmpty'):`${copy('error')}: ${terminalText(result.error??result.code??'')}`);}else setNotice(result?.approval ? projectStatus(locale,result.approval.state) : success);refresh();return result;}
     catch {setNotice(copy('error'));}
     finally {operationPending.current=false;setBusy(false);}
   }
@@ -113,6 +113,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       return inputDraft.session.send({text:command.text});
     },copy('received'));return;}
     if(command.kind==='retry_input'){void perform(()=>inputDraft.session.retry(command.inputId),copy('received')).then(result=>{if((result?.ok||result?.input)&&inputDraft.session.getSnapshot().draft.text===text)inputDraft.session.edit({text:''});});return;}
+    if(command.kind==='discard_input'){void perform(()=>inputDraft.session.discard(command.inputId),copy('discarded')).then(result=>{if(result?.ok&&inputDraft.session.getSnapshot().draft.text===text)inputDraft.session.edit({text:''});});return;}
+    if(command.kind==='restore_input'){
+      const currentDraft=inputDraft.session.getSnapshot().draft;
+      const replaceDraft=currentDraft.text.trim()===text.trim()&&!currentDraft.quote&&!currentDraft.attachments.length&&!currentDraft.taskRefs?.length&&!currentDraft.resourceFeedback?.length;
+      void perform(()=>inputDraft.session.restoreToDraft(command.inputId,{replaceDraft}),copy('restoredToDraft'));
+      return;
+    }
     if(command.kind==='save_draft'){void (inputDraft.state.ready?inputDraft.session.flush():inputDraft.session.load());return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
     if(command.kind==='view'){inputDraft.session.edit({text:''});setView(command.view);setSelected(0);setCardIndex(0);setOption(0);return;}

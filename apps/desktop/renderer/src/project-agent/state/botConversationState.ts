@@ -120,7 +120,9 @@ export interface BotChatMessage {
   readonly quoteRefs: readonly string[];
   readonly taskRefs?: readonly string[];
   readonly separatorLabel: string;
-  readonly pending?: 'sending' | 'received' | 'failed' | 'unknown';
+  readonly pending?: 'sending' | 'received' | 'failed' | 'unknown' | 'rejected';
+  readonly rejectionCode?: string;
+  readonly pendingBusy?: boolean;
   readonly attachments?: readonly ChatAttachment[];
   readonly resourceFeedback?: readonly ResourceFeedback[];
   readonly resourceFeedbackInvalid?: boolean;
@@ -130,11 +132,14 @@ export interface BotChatMessage {
 export interface PendingBotInput {
   readonly resourceFeedback?: readonly ResourceFeedback[];
   readonly attachments?: readonly ProjectInputAttachment[];
+  readonly taskRefs?: readonly import('@peer-agent/protocol').InputDraftTaskRef[];
   readonly inputId: string;
   readonly text: string;
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
-  readonly state: 'sending' | 'received' | 'failed' | 'unknown';
+  readonly state: 'sending' | 'received' | 'failed' | 'unknown' | 'rejected';
+  readonly rejectionCode?: string;
+  readonly busy?: boolean;
   readonly answerTo?: string;
 }
 
@@ -299,8 +304,11 @@ export function applyOptimistic(
       proactive: false,
       cards: [],
       quoteRefs: item.quoteRefs,
+      ...(item.taskRefs?.length ? { taskRefs: item.taskRefs.map(ref => ref.sessionId) } : {}),
       separatorLabel: '',
       pending: item.state,
+      ...(item.rejectionCode ? { rejectionCode: item.rejectionCode } : {}),
+      ...(item.busy ? { pendingBusy: true } : {}),
       attachments: item.attachments,
       ...(item.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(item.resourceFeedback) ?? [] } : {}),
       ...imageField(item.attachments),
@@ -610,7 +618,7 @@ export function showAgentThinking(
   pending: readonly PendingBotInput[],
   awaitingReply: boolean,
 ): boolean {
-  if (pending.some((item) => item.state === 'sending' || item.state === 'failed' || item.state === 'unknown')) return false;
+  if (pending.some((item) => item.state === 'sending' || item.state === 'failed' || item.state === 'unknown' || item.state === 'rejected')) return false;
   return awaitingReply;
 }
 

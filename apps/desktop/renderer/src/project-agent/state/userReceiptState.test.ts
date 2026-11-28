@@ -28,13 +28,38 @@ test('pending delivery and failure take precedence over historical replies, and 
   assert.equal(userReceipt({ dispositions: [] }, false).labelKey, null);
 });
 
-
-test('unknown delivery is neither received nor a definitive failure and retains the retry identity', () => {
-  const receipt = userReceipt({inputId:'same-id',pending:'unknown',dispositions:[]},false);
-  assert.equal(receipt.labelKey,'projectAgent.chat.inputUnconfirmed');
-  assert.equal(receipt.retryInputId,'same-id');
+test('unknown delivery is neither received nor a definitive failure and retains retry, restore and confirmed discard actions', () => {
+  const receipt = userReceipt({ inputId: 'same-id', pending: 'unknown', dispositions: [] }, false);
+  assert.equal(receipt.labelKey, 'projectAgent.chat.inputUnconfirmed');
+  assert.equal(receipt.retryInputId, 'same-id');
+  assert.equal(receipt.restoreInputId, 'same-id');
+  assert.equal(receipt.discardInputId, 'same-id');
+  assert.equal(receipt.requiresDiscardConfirm, true);
 });
 
+test('definitive rejection hides retry, maps specific causes, and only disables restore when the target is unavailable', () => {
+  const closed = userReceipt({ inputId: 'q1', pending: 'rejected', rejectionCode: 'QUESTION_CLOSED', dispositions: [] }, false);
+  assert.equal(closed.labelKey, 'projectAgent.chat.inputRejectedQuestionClosed');
+  assert.equal(closed.retryInputId, undefined);
+  assert.equal(closed.restoreInputId, 'q1');
+  assert.equal(closed.discardInputId, 'q1');
+  assert.equal(closed.requiresDiscardConfirm, false);
+
+  const resource = userReceipt({ inputId: 'r1', pending: 'rejected', rejectionCode: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED', dispositions: [] }, false);
+  assert.equal(resource.labelKey, 'projectAgent.chat.inputRejectedResourceFeedback');
+  assert.equal(resource.restoreInputId, 'r1');
+
+  const missing = userReceipt({ inputId: 'm1', pending: 'rejected', rejectionCode: 'NOT_FOUND', dispositions: [] }, false);
+  assert.equal(missing.labelKey, 'projectAgent.chat.inputRejectedTargetUnavailable');
+  assert.equal(missing.retryInputId, undefined);
+  assert.equal(missing.restoreInputId, undefined);
+  assert.equal(missing.discardInputId, 'm1');
+  assert.equal(missing.requiresDiscardConfirm, false);
+
+  const invalid = userReceipt({ inputId: 'i1', pending: 'rejected', rejectionCode: 'INVALID_INPUT', dispositions: [] }, false);
+  assert.equal(invalid.labelKey, 'projectAgent.chat.inputRejected');
+  assert.equal(invalid.restoreInputId, 'i1');
+});
 
 test('waiting receipt has localized copy without implying queued execution', () => {
   const base = { inputId: 'u', dispositions: [] };

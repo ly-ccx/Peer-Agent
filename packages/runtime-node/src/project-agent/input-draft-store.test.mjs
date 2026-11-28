@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createProjectInputRecovery } from '@peer-agent/runtime-core';
 import { createProjectInputDraftStore } from './input-draft-store.mjs';
 
 const address = { workspaceId: 'ws-a', surface: 'desktop' };
@@ -64,4 +65,98 @@ test('a live writer lock is not stolen', t => {
   mkdirSync(lock, { recursive: true }); writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
   assert.deepEqual(store.write(request), { ok: false, code: 'DRAFT_BUSY' });
   assert.equal(readFileSync(path.join(lock, 'owner.json'), 'utf8'), JSON.stringify({ pid: process.pid }));
+});
+
+test('real store + recovery heals pre-existing stuck desktop.json via discard, handles CAS conflict honestly, and restores attachments atomically', async t => {
+  const { root, store } = fixture(t);
+  const file = path.join(root, address.workspaceId, 'input-drafts/desktop.json');
+  mkdirSync(path.dirname(file), { recursive: true });
+  const stuckId = '5c17d46f-ac61-4b0f-a8b7-dddfd37fe1d7';
+  writeFileSync(file, JSON.stringify({
+    schemaVersion: 1,
+    revision: 3425,
+    draft: { text: '', quote: null, attachmentIds: [] },
+    pending: [{
+      inputId: stuckId,
+      text: '排查并修复 macOS 流式超时（推荐）',
+      createdAt: '2026-11-27T03:06:38.383Z',
+      quoteRefs: [],
+      answerTo: 'card:question:reply:reply-tc-1',
+      attachmentIds: [],
+    }],
+    uploads: {},
+  }));
+
+  const makeSession = () => createProjectInputRecovery({
+    workspaceId: address.workspaceId,
+    surface: 'desktop',
+    createId: () => 'next-id',
+    port: {
+      read: async req => store.read(req),
+      write: async req => store.write(req),
+      submit: async () => ({ ok: false, code: 'QUESTION_CLOSED' }),
+    },
+  });
+
+  // 1. Stale revision (external concurrent write) causes discard to fail honestly without hiding the stuck item.
+  const stale = makeSession();
+  assert.equal(await stale.load(), true);
+  assert.equal(stale.getSnapshot().pending.length, 1);
+  assert.equal(store.write({
+    ...address,
+    revision: 3425,
+    draft: { text: 'other window edit', quote: null, attachmentIds: [] },
+    pending: [{
+      inputId: stuckId,
+      text: '排查并修复 macOS 流式超时（推荐）',
+      createdAt: '2026-11-27T03:06:38.383Z',
+      quoteRefs: [],
+      answerTo: 'card:question:reply:reply-tc-1',
+      attachmentIds: [],
+    }],
+    uploads: [],
+  }).ok, true);
+  assert.deepEqual(await stale.discard(stuckId), { ok: false, code: 'DRAFT_CONFLICT' });
+  assert.equal(stale.getSnapshot().pending.length, 1);
+  assert.equal(stale.getSnapshot().error, 'DRAFT_CONFLICT');
+
+  // 2. Fresh session retries -> QUESTION_CLOSED transitions to rejected -> discard persists cleanly across reload.
+  const fresh = makeSession();
+  assert.equal(await fresh.load(), true);
+  assert.equal((await fresh.retry(stuckId)).code, 'QUESTION_CLOSED');
+  assert.equal(fresh.getSnapshot().rejected[stuckId], 'QUESTION_CLOSED');
+  assert.deepEqual(await fresh.discard(stuckId), { ok: true });
+  assert.equal(fresh.getSnapshot().pending.length, 0);
+  const reloaded = store.read(address);
+  assert.equal(reloaded.ok, true);
+  assert.equal(reloaded.snapshot.revision, 3427);
+  assert.equal(reloaded.snapshot.pending.length, 0);
+  assert.equal(reloaded.snapshot.draft.text, 'other window edit');
+
+  // 3. Restoring an unknown pending item with an attachment keeps the blob and atomically clears pending on disk.
+  const withFile = createProjectInputRecovery({
+    workspaceId: address.workspaceId,
+    surface: 'desktop',
+    createId: () => 'with-file-id',
+    port: {
+      read: async req => store.read(req),
+      write: async req => store.write(req),
+      submit: async () => ({ ok: false, code: 'INPUT_OUTCOME_UNKNOWN' }),
+    },
+  });
+  assert.equal(await withFile.load(), true);
+  withFile.edit({ text: 'with file', attachments: [attachment] });
+  await withFile.flush();
+  assert.equal((await withFile.send()).code, 'INPUT_OUTCOME_UNKNOWN');
+  assert.equal(withFile.getSnapshot().pending.length, 1);
+  assert.equal(withFile.getSnapshot().draft.text, '');
+  assert.deepEqual(await withFile.restoreToDraft('with-file-id'), { ok: true });
+  assert.equal(withFile.getSnapshot().pending.length, 0);
+  assert.equal(withFile.getSnapshot().draft.text, 'with file');
+  assert.deepEqual(withFile.getSnapshot().draft.attachments, [attachment]);
+  const afterRestore = store.read(address);
+  assert.equal(afterRestore.ok, true);
+  assert.equal(afterRestore.snapshot.pending.length, 0);
+  assert.equal(afterRestore.snapshot.draft.text, 'with file');
+  assert.deepEqual(afterRestore.snapshot.draft.attachments, [attachment]);
 });

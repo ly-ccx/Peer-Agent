@@ -49,8 +49,34 @@ export interface ProjectInputRecoveryPort {
   write(request: ProjectInputDraftWriteRequest): Promise<ProjectInputDraftWriteResult>;
   submit(request: UnconfirmedProjectInput & ProjectInputDraftReadRequest): Promise<ProjectAgentSubmitInputResult>;
 }
+export type ProjectInputMutationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: string };
+export const DEFINITE_PROJECT_INPUT_REJECTION_CODES: ReadonlySet<string> = new Set([
+  'QUESTION_CLOSED',
+  'INVALID_INPUT',
+  'INVALID_INPUT_ID',
+  'INVALID_RESOURCE_FEEDBACK',
+  'RESOURCE_FEEDBACK_RECIPIENT_CHANGED',
+  'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT',
+  'INTERACTIVE_FEEDBACK_UNAVAILABLE',
+  'NOT_FOUND',
+  'WORKSPACE_NOT_FOUND',
+]);
 export function emptyInputDraft(): InputDraftValue { return { text: '', quote: null, attachments: [] }; }
 /** A handoff failure may follow a durable receipt. Generic ok alone proves nothing. */
 export function projectInputWasReceived(result: ProjectAgentSubmitInputResult | null | undefined, workspaceId: string, inputId: string): boolean {
   return result?.input?.workspaceId === workspaceId && result.input.inputId === inputId;
+}
+export function isDefiniteProjectInputRejectionCode(code: string | null | undefined): boolean {
+  return typeof code === 'string' && DEFINITE_PROJECT_INPUT_REJECTION_CODES.has(code);
+}
+/** True only when the host rejected the input before enqueuing it (no durable receipt). */
+export function isDefiniteProjectInputRejection(
+  result: ProjectAgentSubmitInputResult | null | undefined,
+  workspaceId: string,
+  inputId: string,
+): boolean {
+  if (!result || result.ok || projectInputWasReceived(result, workspaceId, inputId)) return false;
+  return isDefiniteProjectInputRejectionCode(result.code);
 }

@@ -393,3 +393,10 @@ test('failed or unconfirmed sends keep their retry input and only wait after rec
     assert.equal(mark.retryInputId, state === 'failed' || state === 'unknown' ? 'retry-id' : undefined);
   }
 });
+
+test('rejected pending inputs never fabricate an active or restored reply row', () => {
+  const rejected = { ...user, id: 'input-rej', inputId: 'rej', content: 'bad', pending: 'rejected' as const, rejectionCode: 'INVALID_INPUT' };
+  const pending = [{ inputId: 'rej', text: 'bad', quoteRefs: [], createdAt: rejected.createdAt, state: 'rejected' as const, rejectionCode: 'INVALID_INPUT' }];
+  const result = continuousReplyRows([row(rejected)], [rejected], [{ inputId: 'rej' }], pending);
+  assert.equal(replies(result).length, 0);
+});

@@ -83,7 +83,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   };
   const local = new Map(awaiting.map(input => [`input-${input.inputId}`, input]));
   for (const input of pending) {
-    if (input.state === 'failed' || input.state === 'unknown') local.delete(`input-${input.inputId}`);
+    if (input.state === 'failed' || input.state === 'unknown' || input.state === 'rejected') local.delete(`input-${input.inputId}`);
     else if (input.state === 'received' && !local.has(`input-${input.inputId}`)) local.set(`input-${input.inputId}`, input);
   }
   const settled = (message: BotChatMessage) => message.dispositions.some(mark =>

@@ -31,6 +31,9 @@ test('收到回答后收起对应选择；发送失败保留选择，重发绑�
   assert.equal(hideAcknowledgedQuestions(unknown)[0]?.cards[0]?.resolvedState, 'open');
   assert.equal(unknown[1]?.inputId, input.inputId);
   assert.equal(unknown[1]?.answerTo, input.answerTo);
+  const rejected = applyOptimistic([question()], [{ ...input, state: 'rejected', rejectionCode: 'INVALID_INPUT' }]);
+  assert.equal(hideAcknowledgedQuestions(rejected)[0]?.cards[0]?.resolvedState, 'open');
+  assert.equal(questionForInput(rejected, []), 'card:question:reply:r');
   assert.equal(failed[1]?.answerTo, input.answerTo);
 });
 

@@ -582,6 +582,19 @@ export type TranslationKey =
   | 'projectAgent.chat.draftConflict'
   | 'projectAgent.chat.inputUnconfirmed'
   | 'projectAgent.chat.retrySameInput'
+  | 'projectAgent.chat.restoreToDraft'
+  | 'projectAgent.chat.removePending'
+  | 'projectAgent.chat.deletePending'
+  | 'projectAgent.chat.confirmDiscardPending'
+  | 'projectAgent.chat.cancelDiscardPending'
+  | 'projectAgent.chat.discardUnconfirmedHint'
+  | 'projectAgent.chat.restoreDraftOccupied'
+  | 'projectAgent.chat.restoredUnconfirmedNotice'
+  | 'projectAgent.chat.restoredClosedQuestionNotice'
+  | 'projectAgent.chat.inputRejected'
+  | 'projectAgent.chat.inputRejectedQuestionClosed'
+  | 'projectAgent.chat.inputRejectedResourceFeedback'
+  | 'projectAgent.chat.inputRejectedTargetUnavailable'
   | 'projectAgent.chat.inputDeliveryIssue'
   | 'projectAgent.chat.planDecisionRecord'
   | 'projectAgent.chat.decisionUpdating'
@@ -2429,6 +2442,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.draftConflict': '另一个窗口更新了这份草稿。当前内容仍在此窗口，请复制保留后重新打开，避免覆盖另一份编辑。',
     'projectAgent.chat.inputUnconfirmed': '发送结果尚未确认，原消息已保留。',
     'projectAgent.chat.retrySameInput': '重试同一消息',
+    'projectAgent.chat.restoreToDraft': '放回输入框',
+    'projectAgent.chat.removePending': '移除',
+    'projectAgent.chat.deletePending': '删除',
+    'projectAgent.chat.confirmDiscardPending': '确认移除',
+    'projectAgent.chat.cancelDiscardPending': '取消',
+    'projectAgent.chat.discardUnconfirmedHint': '仅移除本地提示，若后台已收到仍会正常处理。',
+    'projectAgent.chat.restoreDraftOccupied': '输入框已有草稿，请先清空或发送后再放回。',
+    'projectAgent.chat.restoredUnconfirmedNotice': '已放回输入框；若原消息已送达后台，不会被撤回。',
+    'projectAgent.chat.restoredClosedQuestionNotice': '原问题已关闭，内容已放回输入框，可直接作为新消息发送。',
+    'projectAgent.chat.inputRejected': '消息未被接收，请修改后重发。',
+    'projectAgent.chat.inputRejectedQuestionClosed': '原问题已关闭，未发送。',
+    'projectAgent.chat.inputRejectedResourceFeedback': '引用的资源已失效，未发送。',
+    'projectAgent.chat.inputRejectedTargetUnavailable': '目标会话不可用，未发送。',
     'projectAgent.chat.inputDeliveryIssue': '输入已收到，后续交接未完成。请回原任务处理。',
     'projectAgent.chat.planDecisionRecord': '计划决定记录',
     'projectAgent.chat.decisionUpdating': '决定已提交，正在读取当前状态…',
@@ -4014,6 +4040,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.draftConflict': 'Another window changed this draft. Copy the contents in this window before reopening to preserve both edits.',
     'projectAgent.chat.inputUnconfirmed': 'Delivery is unconfirmed. The original message is retained.',
     'projectAgent.chat.retrySameInput': 'Retry same message',
+    'projectAgent.chat.restoreToDraft': 'Move to input',
+    'projectAgent.chat.removePending': 'Remove',
+    'projectAgent.chat.deletePending': 'Delete',
+    'projectAgent.chat.confirmDiscardPending': 'Confirm remove',
+    'projectAgent.chat.cancelDiscardPending': 'Cancel',
+    'projectAgent.chat.discardUnconfirmedHint': 'Removes only the local notice. If already received, processing will continue.',
+    'projectAgent.chat.restoreDraftOccupied': 'Input already has a draft. Clear or send it before moving this back.',
+    'projectAgent.chat.restoredUnconfirmedNotice': 'Moved back to input. If the original message already arrived, it will not be recalled.',
+    'projectAgent.chat.restoredClosedQuestionNotice': 'The original question is closed. Your content was moved back to input so you can send it as a new message.',
+    'projectAgent.chat.inputRejected': 'Message was rejected. Edit and send again.',
+    'projectAgent.chat.inputRejectedQuestionClosed': 'The original question is closed; message was not sent.',
+    'projectAgent.chat.inputRejectedResourceFeedback': 'Referenced resources are no longer valid; message was not sent.',
+    'projectAgent.chat.inputRejectedTargetUnavailable': 'Target conversation is unavailable; message was not sent.',
     'projectAgent.chat.inputDeliveryIssue': 'Input received; the subsequent handoff needs attention in the original task.',
     'projectAgent.chat.planDecisionRecord': 'Plan decision record',
     'projectAgent.chat.decisionUpdating': 'Decision submitted. Reading the current state…',
