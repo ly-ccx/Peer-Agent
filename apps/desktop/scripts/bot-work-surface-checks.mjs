@@ -82,7 +82,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await openReplyDetails(page, reply);
   change([{ ...initial.sessions[0], status: 'verifying', report: { summary: '已完成' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'verifying');
-  assert.match(await work.locator(':scope > summary').innerText(), /核验中/);
+  assert.equal(await work.locator('.bot-work-status.is-running').innerText(), '正在核对结果');
   assert.equal(await work.locator('.bot-work-detail > p').first().innerText(), '正在核对执行结果，结束后会在对话中告诉你。');
   assert.doesNotMatch(await work.innerText(), /已完成/);
   assert.equal(await taskReference.locator('.bot-inline-worker-status').innerText(), '核验中');
@@ -192,6 +192,13 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   assert.match(await work.locator(':scope > summary').innerText(), /结果待确认/);
   assert.doesNotMatch(await work.innerText(), /查看并处理/);
   assert.match(await work.locator('.bot-work-hint').innerText(), /主对话/);
+  change([{ ...initial.sessions[0], status: 'result_ready', verificationActive: false,
+    followUp: { owner: 'bot', reason: 'awaiting_acceptance_technical', inCurrentList: true } }]);
+  const workStatus = work.locator('.bot-work-status');
+  await until(() => workStatus.innerText(), value => value === '等待主 Bot 汇报结果');
+  assert.equal(await workStatus.evaluate(node => node.classList.contains('is-running')), false);
+  assert.equal(await taskReference.locator('.bot-inline-worker-status').innerText(), '等待主 Bot 汇报结果');
+  report.verificationPresentation.awaitingBotReport = true;
   change([{ ...initial.sessions[0], status: 'accepted' }]);
   await until(() => work.getAttribute('data-status'), value => value === 'accepted');
   assert.match(await work.locator(':scope > summary').textContent(), /已签收/);
@@ -205,7 +212,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await until(() => work.getAttribute('data-status'), value => value === 'running');
   change(initial.sessions, true);
   await until(() => work.getAttribute('data-status'), value => value === 'unavailable');
-  assert.equal(await work.locator('.is-running').count(), 0);
+  assert.equal(await workStatus.innerText(), '状态暂不可用');
+  assert.equal(await work.locator('.is-running, .bot-task-cancel').count(), 0);
   await closeReplyDetails(page); await openWorkPanel(page);
   await until(() => page.locator('.bot-work-panel-feedback').innerText(), text => /暂时|不可用/.test(text));
   assert.equal(await page.locator('.bot-work-panel-feedback button').count(), 1);

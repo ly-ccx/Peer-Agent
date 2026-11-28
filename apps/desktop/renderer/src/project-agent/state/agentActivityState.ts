@@ -1,6 +1,7 @@
 import type { AgentActivity } from '@peer-agent/protocol';
 import type { PeerIconName } from '../../ui/icons';
 import type { BotWorkIndex } from './botWorkState';
+import { isActivelyVerifying } from './drawerState.ts';
 
 const states = new Set(['queued', 'started', 'update', 'question', 'answer', 'reported', 'verifying', 'verified', 'ended', 'cancelled', 'blocked']);
 export function readAgentActivity(value: unknown): AgentActivity | undefined {
@@ -32,15 +33,15 @@ export function agentActivityRunning(activity: AgentActivity, work: BotWorkIndex
   if (!work.available) return false;
   const session = work.byId.get(activity.sessionId);
   return !!session && session.coordination?.phase !== 'stopping'
-    && ['starting', 'running', 'verifying'].includes(session.status);
+    && (isActivelyVerifying(session) || session.status === 'starting' || session.status === 'running');
 }
 
 export function currentAgentActivity(activity: AgentActivity, work: BotWorkIndex): AgentActivity {
   const session = work.available ? work.byId.get(activity.sessionId) : undefined;
   if (!session) return activity;
-  const state: AgentActivity['state'] = session.status === 'queued' ? 'queued'
+  const state: AgentActivity['state'] = isActivelyVerifying(session) ? 'verifying'
+    : session.status === 'queued' ? 'queued'
     : ['starting','running'].includes(session.status) ? 'started'
-    : session.status === 'verifying' ? 'verifying'
     : session.status === 'result_ready' ? 'reported'
     : session.status === 'accepted' ? 'ended'
     : session.status === 'cancelled' ? 'cancelled' : 'blocked';

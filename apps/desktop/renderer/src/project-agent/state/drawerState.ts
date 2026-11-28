@@ -47,6 +47,7 @@ export interface DrawerSession {
   readonly sourceRevision?: string;
   readonly observationRevision?: string;
   readonly verification?: SessionVerificationDetail;
+  readonly verificationActive?: boolean;
   readonly verificationProgress?: VerificationProgress;
   readonly coordination?: CoordinationSessionFacts;
   readonly withdrawalUnknownCallIds?: readonly string[];
@@ -230,12 +231,32 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
   return groups;
 }
 
-export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
-  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') {
-    return i18n.t(session.followUp.reason === 'verification_failed'
-      ? 'projectAgent.chat.work.verificationFailed'
-      : 'projectAgent.chat.work.resultSettling');
-  }
+export type TaskStatusFacts = Pick<DrawerSession, 'followUp' | 'verificationActive'> & { readonly status: string | null };
+
+export function isVerificationFailed(session: TaskStatusFacts): boolean {
+  return session.status === 'result_ready' && session.followUp?.reason === 'verification_failed';
+}
+
+export function isActivelyVerifying(session: TaskStatusFacts): boolean {
+  // The desktop session and lightweight directory projections can omit the boolean.
+  // Their canonical lifecycle status already encodes active verification.
+  return !isVerificationFailed(session) && (session.verificationActive ?? session.status === 'verifying');
+}
+
+export function isAwaitingBotReport(session: TaskStatusFacts): boolean {
+  return session.status === 'result_ready' && session.followUp?.owner === 'bot'
+    && !isVerificationFailed(session) && !isActivelyVerifying(session);
+}
+
+export function isTaskStatusSpinning(session: TaskStatusFacts): boolean {
+  return isActivelyVerifying(session) || session.status === 'starting' || session.status === 'running' || session.status === 'queued';
+}
+
+export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>,
+  fallback = session.statusLabel || session.status): string {
+  if (isActivelyVerifying(session)) return i18n.t('projectAgent.chat.activity.verification');
+  if (isVerificationFailed(session)) return i18n.t('projectAgent.chat.work.verificationFailed');
+  if (isAwaitingBotReport(session)) return i18n.t('projectAgent.chat.work.awaitingReport');
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
   if (session.resourceBlocker?.kind === 'protection') return i18n.t(session.resourceBlocker.code === 'execution_outcome_unknown'
@@ -248,7 +269,7 @@ export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18
     ? i18n.t(session.queueReason === 'dependency_failed'
       ? 'projectAgent.drawer.dependencyFailed' : 'projectAgent.drawer.queuedBehind',
       { tasks: session.queuedBehind.map(item => item.title).join(', ') })
-    : session.statusLabel || session.status;
+    : fallback;
 }
 
 export function readDrawerSession(raw: unknown): DrawerSession | null {
@@ -281,6 +302,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     sourceRevision: readString(record.sourceRevision),
     observationRevision: readString(record.observationRevision),
     ...(verification ? { verification } : {}),
+    ...(typeof record.verificationActive === 'boolean' ? { verificationActive: record.verificationActive } : {}),
     ...(validProgress ? { verificationProgress: progress } : {}),
     ...(readFollowUpProjection(record.followUp) ? { followUp: readFollowUpProjection(record.followUp) } : {}),
     ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),

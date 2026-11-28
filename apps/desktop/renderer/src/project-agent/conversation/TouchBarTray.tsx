@@ -8,6 +8,8 @@ import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import {
   formatDrawerSessionStatus,
   formatDrawerStamp,
+  isActivelyVerifying,
+  isVerificationFailed,
   readDrawerSession,
   type DrawerSession,
 } from '../state/drawerState';
@@ -187,7 +189,9 @@ export function TouchBarTray({
               {isZh ? '当前没有进行中的任务。' : 'No active tasks right now.'}
             </div>
           ) : activeTasks.map((task) => {
-            const visual = workerStatus(task.status, task.followUp, i18n);
+            const visual = workerStatus(task, i18n);
+            const subtitle = visual.tone === 'waiting' || isActivelyVerifying(task) || isVerificationFailed(task)
+              ? visual.text : task.phaseLabel || visual.text;
             return (
               <div
                 key={task.sessionId}
@@ -208,11 +212,7 @@ export function TouchBarTray({
                 </span>
                 <div className="bot-tray-row-main">
                   <span className="bot-tray-row-title">{task.title}</span>
-                  <span className="bot-tray-row-sub">
-                    {task.followUp?.reason === 'verification_failed'
-                      ? i18n.t('projectAgent.chat.work.verificationFailed')
-                      : (task.phaseLabel || visual.text)}
-                  </span>
+                  <span className="bot-tray-row-sub">{subtitle}</span>
                 </div>
                 <div className="bot-tray-row-right">
                   <span className="bot-tray-row-time">{formatDrawerStamp(task.updatedAt)}</span>

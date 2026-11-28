@@ -310,3 +310,25 @@ test('task detail reading preserves the structured plan ID for scoped resource n
   assert.equal(session?.planId, 'confirmed-plan');
   assert.equal(readDrawerSession({ sessionId: 'legacy' })?.planId, undefined);
 });
+
+test('task status distinguishes live verification, pending reports, failures and terminal states', () => {
+  const i18n = createI18n('zh-CN');
+  const awaitingReport = { owner: 'bot', inCurrentList: true, reason: 'awaiting_acceptance_technical' };
+  const cases = [
+    [{ status: 'result_ready', verificationActive: false, followUp: awaitingReport }, '等待主 Bot 汇报结果'],
+    [{ status: 'running', statusLabel: '进行中' }, '进行中'],
+    [{ status: 'verifying', verificationActive: true }, '正在核对结果'],
+    [{ status: 'verifying' }, '正在核对结果'],
+    [{ status: 'result_ready', verificationActive: true, followUp: awaitingReport }, '正在核对结果'],
+    [{ status: 'result_ready', followUp: awaitingReport }, '等待主 Bot 汇报结果'],
+    [{ status: 'result_ready', followUp: { ...awaitingReport, reason: 'verification_failed' } }, '核验未通过'],
+    [{ status: 'waiting_user', statusLabel: '等待你', followUp: { ...awaitingReport, owner: 'user', reason: 'human_request' } }, '等待你'],
+    [{ status: 'accepted', statusLabel: '已完成' }, '已完成'],
+    [{ status: 'cancelled', statusLabel: '已取消' }, '已取消'],
+  ] as const;
+  for (const [facts, label] of cases) {
+    const session = readDrawerSession({ sessionId: 's', ...facts });
+    assert.ok(session);
+    assert.equal(formatDrawerSessionStatus(session, i18n), label);
+  }
+});

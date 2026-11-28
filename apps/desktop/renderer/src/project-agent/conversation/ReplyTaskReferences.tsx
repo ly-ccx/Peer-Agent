@@ -18,7 +18,7 @@ export function ReplyTaskReferences({ rows, i18n, onOpen }: {
         const title = row.session?.title && row.session.title !== row.id
           ? row.session.title
           : i18n.t('projectAgent.chat.work.related');
-        const status = workerStatus(row.session?.status ?? row.status, row.session?.followUp, i18n);
+        const status = workerStatus(row.session ?? { status: row.status }, i18n);
         const showDot = status.tone !== 'muted';
         return (
           <button

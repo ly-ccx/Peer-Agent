@@ -41,7 +41,7 @@ export const BotSidebarTasks = memo(function BotSidebarTasks({
       aria-label={isZh ? `${botName} 进行中的任务` : `${botName} active tasks`}
     >
       {visible.map((task) => {
-        const visual = workerStatus(task.status, task.followUp, i18n);
+        const visual = workerStatus(task, i18n);
         const selected = activeSessionId === task.sessionId;
         return (
           <button

@@ -6,7 +6,7 @@ import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
 import { BotAccessControl } from '../BotAccessControl';
-import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
+import { formatDrawerSessionStatus, formatDrawerStamp, isActivelyVerifying, isAwaitingBotReport, isTaskStatusSpinning, isVerificationFailed, type DrawerSession } from '../state/drawerState';
 import { mergeTaskDetail } from '../state/taskDetailState';
 import { useTaskReport } from '../state/useTaskReport';
 import { useTaskCancellation } from '../state/TaskCancellation';
@@ -269,7 +269,7 @@ export function TaskWorkspaceView({
 
   const isLiveSession = Boolean(
     session?.conversationId
-    && ['queued', 'starting', 'running', 'verifying', 'waiting_agent'].includes(session.status),
+    && (isTaskStatusSpinning(session) || session.status === 'waiting_agent'),
   );
 
   useEffect(() => {
@@ -439,11 +439,13 @@ export function TaskWorkspaceView({
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused'].includes(session.status);
   const tone = pendingApproval || followUp?.owner === 'user'
     ? 'warn'
-    : followUp?.reason === 'verification_failed' || session.status === 'failed'
+    : isVerificationFailed(session) || session.status === 'failed'
       ? 'danger'
       : ended
         ? (session.status === 'accepted' ? 'good' : 'muted')
         : 'azure';
+  const verifying = isActivelyVerifying(session);
+  const spinning = !ended && tone === 'azure' && isTaskStatusSpinning(session);
   const cancelState = cancellation?.states[`${workspaceId}:${sessionId}`];
 
   const taskRefPayload: InputDraftTaskRef = {
@@ -453,10 +455,10 @@ export function TaskWorkspaceView({
     anchorMessageId: originMessageId,
   };
 
-  const verificationNotice = session.verification?.outcome === 'failed'
+  const verificationNotice = !verifying && session.verification?.outcome === 'failed'
     ? (session.verification.summary || (isZh ? '独立核验未通过，可展开核验查看详情或基于此重跑。' : 'Independent verification failed.'))
     : '';
-  const verdict = session.verification ? verdictStrip(session.verification, isZh) : null;
+  const verdict = !verifying && session.verification ? verdictStrip(session.verification, isZh) : null;
 
   return (
     <div className="bot-task-workspace" ref={rootRef} data-status={session.status}>
@@ -466,9 +468,9 @@ export function TaskWorkspaceView({
           <div className="bot-task-strip-leading">
             <span className="bot-task-status-pill" data-tone={tone}>
               <PeerIcon
-                name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : tone === 'azure' ? 'loader' : 'circle'}
+                name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : spinning ? 'loader' : 'circle'}
                 size={12}
-                className={tone === 'azure' && !ended ? 'motion-spin' : undefined}
+                className={spinning ? 'motion-spin' : undefined}
               />
               <span>{statusLabel}</span>
             </span>
@@ -543,6 +545,12 @@ export function TaskWorkspaceView({
             <span className="bot-task-notice-text">{feedback.text}</span>
           </div>
         ) : null}
+        {cancelState?.failed ? (
+          <div className="bot-task-notice" data-tone="danger" role="alert">
+            <span className="bot-task-notice-text">{i18n.t(isAwaitingBotReport(session)
+              ? 'projectAgent.task.withdrawFailed' : 'projectAgent.task.cancelFailed')}</span>
+          </div>
+        ) : null}
 
         {/* Primary Stage: Direct Native Worker Conversation Stream (full height, zero card chrome) */}
         <div className="bot-task-conversation-stage">
@@ -565,9 +573,9 @@ export function TaskWorkspaceView({
           ) : (
             <div className="bot-task-empty-stage">
               <PeerIcon
-                name={tone === 'azure' ? 'loader' : tone === 'danger' ? 'warning' : 'circle'}
+                name={spinning ? 'loader' : tone === 'danger' ? 'warning' : 'circle'}
                 size={22}
-                className={tone === 'azure' && !ended ? 'motion-spin' : undefined}
+                className={spinning ? 'motion-spin' : undefined}
               />
               <p className="bot-task-empty-copy">
                 {session.workerOutput
@@ -576,7 +584,8 @@ export function TaskWorkspaceView({
                     ? (isZh ? '子任务已排队，等待启动执行会话…' : 'Task queued, waiting to start execution session…')
                     : session.status === 'failed'
                       ? (isZh ? '任务在创建执行会话前已中止，可点击下方「基于此重跑」。' : 'Stopped before the execution session started. Use Re-run below.')
-                      : (isZh ? '正在启动执行会话…' : 'Starting execution session…')}
+                      : session.status === 'starting' ? (isZh ? '正在启动执行会话…' : 'Starting execution session…')
+                        : statusLabel}
               </p>
               {session.summary ? (
                 <button type="button" className="bot-task-btn" onClick={() => openInspectorTab('brief')}>
@@ -606,7 +615,7 @@ export function TaskWorkspaceView({
               onVerify={() => void handleReverify()}
               onCancel={cancellation ? event => {
                 const finishFocus = taskCancellationFocus(event.currentTarget);
-                void cancellation.cancel(sessionId).then(finishFocus, () => finishFocus(false));
+                void cancellation.cancel({ ...session, title }, i18n).then(finishFocus, () => finishFocus(false));
               } : undefined}
               onCiteToBot={() => onCiteToBot(taskRefPayload)}
               onRerunDraft={() => onCiteToBot(

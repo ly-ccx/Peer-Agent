@@ -76,6 +76,18 @@
 }
 
 .bot-touchbar-summary .bot-tb-status,
+.bot-tb-status.is-static {
+  height: auto;
+  min-height: 26px;
+  text-align: start;
+}
+
+.bot-touchbar-summary .bot-tb-status-text,
+.bot-tb-status.is-static .bot-tb-status-text {
+  white-space: normal;
+  text-wrap: pretty;
+}
+
 .bot-touchbar-summary .bot-tb-chip {
   height: 26px;
 }

@@ -2,7 +2,7 @@ import { WORK_SESSION_STATUSES, type WorkSessionStatus } from '@peer-agent/proto
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
 import type { BotConversationViewRow } from './botReplyContinuity';
-import { formatDrawerSessionStatus, type DrawerSession } from './drawerState.ts';
+import { formatDrawerSessionStatus, isActivelyVerifying, isAwaitingBotReport, isVerificationFailed, type DrawerSession } from './drawerState.ts';
 
 export interface BotWorkIndex {
   readonly byId: ReadonlyMap<string, DrawerSession>;
@@ -112,7 +112,8 @@ export function workProgress(row: BotWorkRow, i18n: Pick<I18nRuntime, 't'>): str
   if (!row.status || !row.session) return i18n.t('projectAgent.chat.work.unavailableHint');
   if (row.status === 'cancelled') return i18n.t('projectAgent.chat.sessionState.cancelled');
   if (['stopping','awaiting_outcome'].includes(row.status) || row.session.coordination?.phase === 'stopping') return formatDrawerSessionStatus(row.session,i18n);
-  if (row.status === 'verifying') return i18n.t('projectAgent.chat.work.verifyingHint');
+  if (isActivelyVerifying(row.session)) return i18n.t('projectAgent.chat.work.verifyingHint');
+  if (isAwaitingBotReport(row.session) || isVerificationFailed(row.session)) return formatDrawerSessionStatus(row.session, i18n);
   return row.session.summary || (formatDrawerSessionStatus(row.session, i18n) !== row.status
     ? formatDrawerSessionStatus(row.session, i18n) : i18n.t(`projectAgent.chat.sessionState.${row.status}`));
 }

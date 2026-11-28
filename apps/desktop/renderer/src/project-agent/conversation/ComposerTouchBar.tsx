@@ -3,10 +3,9 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import type { DrawerSession } from '../state/drawerState';
-import { formatDrawerSessionStatus } from '../state/drawerState';
+import { formatDrawerSessionStatus, isAwaitingBotReport, isTaskStatusSpinning, isVerificationFailed } from '../state/drawerState';
 import { canCancelTask } from '../state/botWorkState';
 import { summarizeActiveSessions, type SidebarTaskEntry } from '../state/botNavigationState';
-import { workerStatus } from '../state/workerStatus';
 import type { TouchBarTrayMode } from './TouchBarTray';
 
 export interface BotChatTouchBarProps {
@@ -45,13 +44,10 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
   const isZh = props.i18n.locale.startsWith('zh');
 
   if (props.kind === 'bot') {
-    const summary = summarizeActiveSessions(props.activeTasks, isZh);
+    const summary = summarizeActiveSessions(props.activeTasks, props.i18n);
     const isIdle = summary.total === 0;
-    const running = props.activeTasks.filter(task => workerStatus(task.status, task.followUp, props.i18n).tone === 'active').length;
-    const summaryText = isIdle
-      ? (isZh ? '无进行中任务' : 'No active tasks')
-      : isZh ? `${summary.total} 个任务 · ${running} 个运行中`
-        : `${summary.total} ${summary.total === 1 ? 'worker' : 'workers'} · ${running} running`;
+    const summaryText = isIdle ? (isZh ? '无进行中任务' : 'No active tasks')
+      : [isZh ? `${summary.total} 个任务` : `${summary.total} ${summary.total === 1 ? 'task' : 'tasks'}`, ...summary.segments].join(' · ');
 
     return (
       <div className="bot-touchbar-strip bot-touchbar-summary" role="toolbar" aria-label={isZh ? 'Bot 快捷栏' : 'Bot Touch Bar'}>
@@ -60,7 +56,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
             ref={props.activeTriggerRef}
             type="button"
             className={`bot-tb-status${isIdle ? ' is-idle' : ''}${props.trayMode === 'active' ? ' is-open' : ''}`}
-            title={!isIdle ? summary.segments.join(' · ') : undefined}
+            title={!isIdle ? summaryText : undefined}
             disabled={isIdle}
             aria-expanded={props.trayMode === 'active'}
             onClick={() => !isIdle && props.onToggleTray('active')}
@@ -97,7 +93,8 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
   const { session, inspectorOpen, hasPendingApproval, i18n } = props;
   const followUp = session.followUp;
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused', 'failed'].includes(session.status);
-  const verifyFailed = session.status === 'result_ready' && followUp?.reason === 'verification_failed';
+  const verifyFailed = isVerificationFailed(session);
+  const awaitingReport = isAwaitingBotReport(session);
   const cancelable = !ended && (canCancelTask(session.status, session.cancelable) || session.status === 'stopping');
   const statusText = formatDrawerSessionStatus(session, i18n);
   const verifyAttempts = session.verification?.reviewAttempts.length ?? 0;
@@ -111,12 +108,16 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
       : ended
         ? (session.status === 'accepted' ? 'good' : 'muted')
         : 'azure';
-  const spinning = !ended && !hasPendingApproval && !verifyFailed && ['starting', 'running', 'verifying', 'result_ready'].includes(session.status);
+  const spinning = !ended && tone === 'azure' && isTaskStatusSpinning(session);
+  const cancelLabel = awaitingReport
+    ? i18n.t(props.cancelBusy ? 'projectAgent.task.withdrawing' : 'projectAgent.task.withdraw')
+    : i18n.t(props.cancelBusy ? 'projectAgent.task.stopping' : 'chat.thread.stop');
+  const withdrawTitle = awaitingReport ? i18n.t('projectAgent.task.withdrawTitle') : undefined;
 
   return (
     <div className="bot-touchbar-strip" role="toolbar" aria-label={isZh ? '任务快捷栏' : 'Task Touch Bar'}>
       <div className="bot-tb-left">
-        <div className="bot-tb-status is-static">
+        <div className="bot-tb-status is-static" title={statusText}>
           <span className="bot-tb-glyph" data-tone={tone} aria-hidden="true">
             <PeerIcon
               name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : spinning ? 'loader' : 'circle'}
@@ -195,9 +196,10 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
         ) : (
           <>
             {cancelable && props.onCancel ? (
-              <button key="cancel-task" type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
-                <PeerIcon name="stop" size={12} />
-                <span>{props.cancelBusy ? (isZh ? '正在停止…' : 'Stopping…') : (isZh ? '停止' : 'Stop')}</span>
+              <button key="cancel-task" type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}
+                title={withdrawTitle} aria-label={withdrawTitle}>
+                <PeerIcon name={awaitingReport ? 'close' : 'stop'} size={12} />
+                <span>{cancelLabel}</span>
               </button>
             ) : null}
           </>

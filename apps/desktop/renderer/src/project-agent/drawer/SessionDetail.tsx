@@ -5,7 +5,7 @@ import type { I18nRuntime } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { useId, useState } from 'react';
 import { TaskConversationButton } from './TaskConversationButton';
-import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
+import { formatDrawerSessionStatus, formatDrawerStamp, isActivelyVerifying, isAwaitingBotReport, isTaskStatusSpinning, isVerificationFailed, type DrawerSession } from '../state/drawerState';
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import { taskProgressPreview, type TaskReportState } from '../state/taskDetailState';
@@ -52,18 +52,18 @@ export function SessionDetail({
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
   const followUp = session.followUp;
   const needsYou = followUp ? followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
-  const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session, i18n)
-    : session.status === 'result_ready' && !needsYou
-      ? i18n.t(followUp?.reason === 'verification_failed'
-        ? 'projectAgent.chat.work.verificationFailed'
-        : 'projectAgent.chat.work.resultSettling')
-    : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
-    : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
-    : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
+  const label = formatDrawerSessionStatus(session, i18n,
+    status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
+      : status === 'result_ready' && needsYou ? i18n.t('projectAgent.chat.work.resultReady')
+        : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable'));
+  const verifying = isActivelyVerifying(session);
+  const verifyFailed = isVerificationFailed(session);
+  const spinning = session.coordination?.phase !== 'stopping' && !needsYou && isTaskStatusSpinning(session);
+  const statusIcon = spinning ? 'loader' : verifyFailed ? 'warning' : isAwaitingBotReport(session) ? 'circle' : null;
   const progress = taskProgressPreview(session, context, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
   const hint = needsYou ? 'confirm'
-    : session.status === 'failed' || session.status === 'unavailable' || followUp?.reason === 'verification_failed' ? 'failed'
+    : session.status === 'failed' || session.status === 'unavailable' || verifyFailed ? 'failed'
     : session.status === 'accepted' || session.status === 'cancelled' ? 'ended' : 'working';
   const question = needsYou ? context?.question : null;
   const ended = followUp ? followUp.owner === 'none' : session.status === 'accepted' || session.status === 'cancelled';
@@ -77,7 +77,10 @@ export function SessionDetail({
       <button type="button" className="bot-task-back" onClick={onBack}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button>
       <header className="bot-task-detail-head">
         <h2>{title}</h2>
-        <div className="bot-task-detail-meta"><span className="bot-task-status">{label}</span></div>
+        <div className="bot-task-detail-meta"><span className="bot-task-status">
+          {statusIcon && <PeerIcon name={statusIcon} size={12} className={spinning ? 'motion-spin' : undefined} />}
+          {label}
+        </span></div>
       </header>
       <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
@@ -95,8 +98,8 @@ export function SessionDetail({
         <div className="bot-task-full-content">
           {stamp && <time className="bot-task-created" dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
           <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
-          <TaskCancelButton sessionId={session.sessionId} status={session.status} cancelable={session.cancelable} title={title} i18n={i18n} />
-          {reportState === 'ready' && !['queued', 'starting', 'running', 'verifying', 'awaiting_approval'].includes(session.status) && session.verification
+          <TaskCancelButton task={{ ...session, title }} i18n={i18n} />
+          {reportState === 'ready' && !verifying && !['queued', 'starting', 'running', 'awaiting_approval'].includes(session.status) && session.verification
             && <TaskVerification detail={session.verification} i18n={i18n} />}
           <section className="bot-task-next">
             <h3>{i18n.t(question ? 'projectAgent.drawer.task.question' : ended ? 'projectAgent.drawer.task.followUpEnded' : 'projectAgent.drawer.task.followUp', { name: botName })}</h3>
