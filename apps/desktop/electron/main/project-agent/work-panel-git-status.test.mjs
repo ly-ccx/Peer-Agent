@@ -1,26 +1,55 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import childProcess, { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
+import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createWorkPanelGitRead } from '@peer-agent/runtime-node/git-read';
 import { createWorkPanelGitStatus } from './work-panel-git-status.mjs';
 
-// In particular, a developer's global LFS filters must not change clean-state expectations.
 const home = mkdtempSync(join(tmpdir(), 'peer-work-panel-git-home-'));
-process.env.HOME = home;
-process.env.USERPROFILE = home;
-process.env.XDG_CONFIG_HOME = home;
+const gitConfigEnv = {
+  HOME: home,
+  USERPROFILE: home,
+  XDG_CONFIG_HOME: home,
+  GIT_CONFIG_GLOBAL: devNull,
+  GIT_CONFIG_NOSYSTEM: '1',
+};
+const fixtureGitEnv = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^GIT_/i.test(name))),
+  ...gitConfigEnv,
+};
+
+// The reader intentionally strips inherited GIT_* variables. Isolate the config
+// at the spawn boundary so system LFS filters cannot affect fixture observations.
+const spawn = childProcess.spawn;
+test.before(t => {
+  const stub = t.mock.method(childProcess, 'spawn', (binary, args, options) =>
+    spawn(binary, args, { ...options, env: { ...options.env, ...gitConfigEnv } }));
+  syncBuiltinESMExports();
+  t.after(() => {
+    stub.mock.restore();
+    syncBuiltinESMExports();
+  });
+});
 test.after(() => rmSync(home, { recursive: true, force: true }));
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'peer-work-panel-git-')));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' }).trim();
+  const git = (...args) => execFileSync('git', args, {
+    cwd: root, env: fixtureGitEnv, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8',
+  }).trim();
   const put = (name, value = 'first\n') => writeFileSync(join(root, name), value);
-  const init = () => git('init', '-b', 'main');
-  const commit = () => git('-c', 'user.name=Peer', '-c', 'user.email=peer@example.invalid', '-c', 'commit.gpgSign=false', '-c', 'core.hooksPath=.', 'commit', '-qm', 'fixture');
+  const init = () => {
+    git('init', '-b', 'main');
+    git('config', '--local', 'user.name', 'Peer');
+    git('config', '--local', 'user.email', 'peer@example.invalid');
+    git('config', '--local', 'commit.gpgSign', 'false');
+    git('config', '--local', 'core.hooksPath', home);
+  };
+  const commit = () => git('commit', '-qm', 'fixture');
   const status = createWorkPanelGitStatus({ resolveWorkspacePath: id => id === 'child' ? join(root, 'nested') : root });
   return { root, git, put, init, commit, status };
 }
@@ -130,7 +159,7 @@ test('unmerged paths retain both status codes without counting them as staged', 
   const f = fixture(t); f.init(); f.put('report.txt'); f.git('add', '.'); f.commit();
   f.git('checkout', '-b', 'other'); f.put('report.txt', 'other\n'); f.git('add', '.'); f.commit();
   f.git('checkout', 'main'); f.put('report.txt', 'main\n'); f.git('add', '.'); f.commit();
-  assert.throws(() => f.git('merge', 'other'));
+  assert.throws(() => f.git('merge', 'other'), { status: 1 });
   const status = await f.status(request);
   assert.deepEqual([status.changedCount, status.stagedCount, status.unstagedCount], [1, 0, 0]);
   assert.deepEqual(status.entries[0], { path: 'report.txt', index: 'U', worktree: 'U', conflicted: true, openPath: 'report.txt' });
