@@ -697,6 +697,149 @@ async fn live_submit_input_emits_push_events_and_commits_agent_reply() {
 }
 
 #[tokio::test]
+async fn yielded_response_resumes_automatically_and_original_turn_id_stops_it() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let (resumed_tx, resumed_rx) = tokio::sync::oneshot::channel();
+    let (disconnected_tx, disconnected_rx) = tokio::sync::oneshot::channel();
+    let req_count = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&req_count);
+    let mock = tokio::spawn(async move {
+        let mut resumed = Some((resumed_tx, disconnected_tx));
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let raw = read_http_request(&mut socket).await;
+            let request: Value =
+                serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let idx = count.fetch_add(1, Ordering::SeqCst);
+            if idx < 14 {
+                write_sse_reply(
+                    &mut socket,
+                    &sse_tool_call_response(
+                        &format!("rpc-yield-{idx}"),
+                        "list_files",
+                        r#"{"path":"."}"#,
+                    ),
+                )
+                .await;
+            } else if let Some((resumed, disconnected)) = resumed.take() {
+                resumed.send(request).unwrap();
+                // Do not send a result: stopResponse must abort the live request,
+                // not wait for the model to finish before settling the activity.
+                let _ = socket.read(&mut [0_u8; 1]).await;
+                disconnected.send(()).unwrap();
+            } else {
+                write_sse_reply(&mut socket, &sse_text_response("Unexpected extra reply")).await;
+            }
+        }
+    });
+
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-yield");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+    let (mut client, handle) = spawn_live_server(&home, Some(make_test_loader(endpoint))).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({"enabled": true, "heartbeatIntervalMs": 60}),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({
+                "path": ws_dir, "name": "Yield Bot", "startFamiliarize": false,
+            }),
+        )
+        .await;
+    let ws_id = created["profile"]["workspaceId"].as_str().unwrap();
+    let submitted = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id, "inputId": "rpc-yield", "text": "Inspect this project",
+            }),
+        )
+        .await;
+    assert_eq!(submitted["ok"], true);
+    let first = client
+        .wait_for_notification(Duration::from_secs(5), "first slice activity", |n| {
+            n["method"] == "project.bot.activity"
+                && n["params"]["workspaceId"] == ws_id
+                && n["params"]["activity"]["turnId"].is_string()
+        })
+        .await;
+    let first_id = first["params"]["activity"]["turnId"].as_str().unwrap();
+    // The first slice performs fourteen actual tool round trips before yielding.
+    let request = tokio::time::timeout(Duration::from_secs(20), resumed_rx)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "next slice must send a request without a second client action; observed {} requests",
+                req_count.load(Ordering::SeqCst)
+            )
+        })
+        .unwrap();
+    assert!(
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| { m["role"] == "tool" && m["tool_call_id"] == "rpc-yield-13" })
+    );
+    let resumed = client
+        .call("project.bot.hostStatus", json!({"workspaceId": ws_id}))
+        .await;
+    let activity = &resumed["activities"][ws_id];
+    let resumed_id = activity["turnId"].as_str().unwrap();
+    assert_ne!(resumed_id, first_id);
+    assert!(activity["finishedAt"].is_null());
+    let stop = client
+        .call(
+            "project.bot.stopResponse",
+            json!({
+                "workspaceId": ws_id, "turnId": first_id,
+            }),
+        )
+        .await;
+    assert_eq!(stop["ok"], true, "{stop}");
+    tokio::time::timeout(Duration::from_secs(5), disconnected_rx)
+        .await
+        .expect("stop must disconnect the outstanding model request")
+        .unwrap();
+    client
+        .wait_for_notification(Duration::from_secs(5), "resumed slice stops", |n| {
+            n["method"] == "project.bot.activity"
+                && n["params"]["workspaceId"] == ws_id
+                && n["params"]["activity"]["turnId"] == resumed_id
+                && n["params"]["activity"]["phase"] == "stopped"
+                && n["params"]["activity"]["finishedAt"].is_string()
+        })
+        .await;
+    let conv = client
+        .call(
+            "project.bot.readConversation",
+            json!({"workspaceId": ws_id}),
+        )
+        .await;
+    assert!(
+        !conv["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["kind"] == "agent_reply")
+    );
+    client.shutdown(handle).await;
+    assert_eq!(req_count.load(Ordering::SeqCst), 15);
+    mock.abort();
+}
+
+#[tokio::test]
 async fn stop_response_aborts_slow_turn_and_retry_completes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2549,7 +2692,11 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     };
 
-    // Let >= 6 heartbeat intervals pass; heartbeat must NOT spam retries or duplicate cards.
+    let wake = client
+        .call("project.bot.wake", json!({ "workspaceId": ws_id }))
+        .await;
+    assert_eq!(wake["woken"], true);
+    // Give both the ordinary wake and the heartbeat a chance to run.
     tokio::time::sleep(Duration::from_millis(320)).await;
     assert_eq!(
         req_count.load(Ordering::SeqCst),

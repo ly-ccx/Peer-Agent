@@ -637,7 +637,16 @@ impl NativeProjectHost {
             return Ok(Some((conv_id, ws_path, report, true)));
         }
         for (idx, input) in consumed.pending_execution.iter().enumerate() {
-            if cancel.is_cancelled() {
+            if cancel.is_cancelled()
+                && !self
+                    .runner
+                    .activity_for(workspace_id)
+                    .is_some_and(|activity| {
+                        activity.finished_at.is_none()
+                            && activity.conversation_id == conv_id
+                            && activity.reply_to == [format!("input-{}", input.input_id)]
+                    })
+            {
                 break;
             }
             let is_newly_consumed = consumed
@@ -673,19 +682,24 @@ impl NativeProjectHost {
             report.bot_turns_run += 1;
             let should_mark_executed = !matches!(
                 outcome.end,
-                crate::runner::TurnEndKind::Failed { .. } | crate::runner::TurnEndKind::CircuitOpen
+                crate::runner::TurnEndKind::Failed { .. }
+                    | crate::runner::TurnEndKind::CircuitOpen
+                    | crate::runner::TurnEndKind::Yielded
             );
             let stop_tick = matches!(
                 outcome.end,
                 crate::runner::TurnEndKind::Failed { .. }
                     | crate::runner::TurnEndKind::CircuitOpen
                     | crate::runner::TurnEndKind::UserStopped
+                    | crate::runner::TurnEndKind::Yielded
             );
             if should_mark_executed {
-                let completed_id = vec![input.input_id.clone()];
-                let _ = self
-                    .inputs
-                    .mark_executed(workspace_id, &completed_id, &[], true);
+                self.inputs.mark_executed(
+                    workspace_id,
+                    std::slice::from_ref(&input.input_id),
+                    &[],
+                    true,
+                )?;
             }
             report.last_turn = Some(outcome);
             if stop_tick {

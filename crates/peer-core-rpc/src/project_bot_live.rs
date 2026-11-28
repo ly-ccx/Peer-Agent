@@ -1639,7 +1639,7 @@ pub async fn handle_retry(ctx: &ServerContext, params: Value) -> Result<Value, R
         Ok(res) => {
             if res["ok"] == true {
                 if ctx.project_host.is_enabled() {
-                    ctx.project_host.wake_workspace(workspace_id);
+                    ctx.project_host.resume_workspace(workspace_id);
                 }
                 ctx.project_host.emit_changed(vec![workspace_id.to_owned()]);
                 ctx.project_host

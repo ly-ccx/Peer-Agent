@@ -5578,8 +5578,199 @@ async fn fallback_reply_store_failure_reports_failed_and_preserves_pending_input
     host.close();
 }
 
+const YIELD_OPENING: &str = "I will inspect the project before answering.";
+const YIELD_PRIVATE: &str = "PRIVATE_YIELD_REASONING";
+
+fn yield_tool_rounds() -> Vec<ScriptHandler> {
+    (0..14)
+        .map(|idx| {
+            Box::new(move |_: &Value| {
+                let id = format!("yield-checkpoint-call-{idx}");
+                let args = json!({"path": "."});
+                if idx == 0 {
+                    let private = json!({"choices":[{"index":0,"delta":{
+                        "reasoning_content": YIELD_PRIVATE
+                    },"finish_reason":null}]});
+                    format!("data: {private}\n\n")
+                        + &sse_streamed_text_then_tool_call(
+                            &[YIELD_OPENING],
+                            &id,
+                            "list_files",
+                            &args,
+                        )
+                } else {
+                    sse_tool_call(&id, "list_files", &args)
+                }
+            }) as ScriptHandler
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_leak() {
+async fn yielded_slice_restores_checkpoint_and_replaces_public_opening_without_leaking_reasoning() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("YieldBot")).unwrap();
+    let ws_id = &entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let input_id = "yield-continuation";
+    let cancel = CancellationToken::new();
+    let store = peer_store::ConversationStore::new(home.path());
+    let mut handlers = yield_tool_rounds();
+    let answer = "Here is the final project answer.";
+    handlers.push(Box::new(move |_| sse_text(answer)));
+    handlers.push(Box::new(|_| sse_text("Independent reply.")));
+    let server = start_mock_server(handlers);
+    let model = mock_model(&server.endpoint);
+    host.submit_user_input(ws_id, input_id, "Inspect this project", None)
+        .unwrap();
+
+    let first = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.inputs_consumed, 1);
+    let first = first.last_turn.unwrap();
+    assert_eq!(first.end, TurnEndKind::Yielded);
+    assert!(host.inputs().has_pending(ws_id));
+    assert!(
+        host.find_reply_for_input(ws_id, input_id)
+            .unwrap()
+            .is_none()
+    );
+    let mut trace = store
+        .read_committed(&conv_id, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages
+        .into_iter()
+        .find(|m| m["id"] == first.turn_id)
+        .unwrap();
+    hydrate_agent_turn_record(home.path(), ws_id, &mut trace);
+    let opening = trace["publicUpdates"].to_string();
+    assert_eq!(opening.matches(YIELD_OPENING).count(), 1, "{opening}");
+    assert!(!opening.contains(YIELD_PRIVATE));
+    let live = host.runner().activity_for(ws_id).unwrap();
+    assert!(live.finished_at.is_none());
+    let live = serde_json::to_string(&live).unwrap();
+    assert!(!live.contains(YIELD_OPENING));
+    assert!(!live.contains(YIELD_PRIVATE));
+
+    // The next scheduler tick uses the original queued input (no retry or resubmit).
+    let next = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(next.inputs_consumed, 0);
+    let next = next.last_turn.unwrap();
+    assert!(matches!(next.end, TurnEndKind::ReplyCommitted { .. }));
+    assert!(!host.inputs().has_pending(ws_id));
+    assert_eq!(
+        host.find_reply_for_input(ws_id, input_id).unwrap().unwrap()["content"],
+        answer
+    );
+    let snapshot = store.read_committed(&conv_id, None, 1024 * 1024).unwrap();
+    let mut resumed = snapshot
+        .history
+        .messages
+        .into_iter()
+        .find(|m| m["id"] == next.turn_id)
+        .unwrap();
+    assert_eq!(
+        resumed["meta"]["providerCheckpointResumedFrom"],
+        first.turn_id
+    );
+    hydrate_agent_turn_record(home.path(), ws_id, &mut resumed);
+    assert!(!resumed["publicUpdates"].to_string().contains(YIELD_OPENING));
+    assert!(!resumed["publicUpdates"].to_string().contains(YIELD_PRIVATE));
+
+    host.submit_user_input(ws_id, "yield-independent", "A brand-new question", None)
+        .unwrap();
+    let fresh = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    let fresh = fresh.last_turn.unwrap();
+    assert!(matches!(fresh.end, TurnEndKind::ReplyCommitted { .. }));
+    let snapshot = store.read_committed(&conv_id, None, 1024 * 1024).unwrap();
+    let fresh_trace = snapshot
+        .history
+        .messages
+        .iter()
+        .find(|m| m["id"] == fresh.turn_id)
+        .unwrap();
+    assert!(fresh_trace["meta"]["providerCheckpointResumedFrom"].is_null());
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 16);
+    assert!(
+        requests[14]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| { m["role"] == "tool" && m["tool_call_id"] == "yield-checkpoint-call-13" }),
+        "the next slice must receive the last executed tool result"
+    );
+    assert!(
+        !requests[15]["messages"]
+            .to_string()
+            .contains("yield-checkpoint-call-")
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn cancelled_yield_handoff_settles_original_input_without_dispatch() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("YieldStopBot"))
+        .unwrap();
+    let ws_id = &entry.workspace_id;
+    let cancel = CancellationToken::new();
+    let server = start_mock_server(yield_tool_rounds());
+    let model = mock_model(&server.endpoint);
+    host.submit_user_input(ws_id, "yield-stop", "Inspect this project", None)
+        .unwrap();
+    let first = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.last_turn.unwrap().end, TurnEndKind::Yielded);
+    assert!(
+        host.runner()
+            .activity_for(ws_id)
+            .unwrap()
+            .finished_at
+            .is_none()
+    );
+    cancel.cancel();
+    let stopped = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(stopped.last_turn.unwrap().end, TurnEndKind::UserStopped);
+    let activity = host.runner().activity_for(ws_id).unwrap();
+    assert_eq!(activity.phase, "stopped");
+    assert!(activity.finished_at.is_some());
+    assert!(!host.inputs().has_pending(ws_id));
+    assert!(
+        host.find_reply_for_input(ws_id, "yield-stop")
+            .unwrap()
+            .is_none()
+    );
+    let later = host
+        .tick_foreground(ws_id, &model, json!({}), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(later.bot_turns_run, 0);
+    assert_eq!(server.requests.lock().unwrap().len(), 14);
+    host.close();
+}
+
+#[tokio::test]
+async fn cooperative_yield_cap_synthesizes_without_tools_and_recovers_from_dsml_leak() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
     fs::write(ws.path().join("README.md"), "# Test repo\n").unwrap();
@@ -5597,10 +5788,10 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
     host.submit_user_input(&ws_id, input_id, "Inspect repository", None)
         .unwrap();
 
-    let mut handlers: Vec<ScriptHandler> = (0..14)
+    let mut handlers: Vec<ScriptHandler> = (0..42)
         .map(|idx| {
             Box::new(move |req: &Value| {
-                if idx == 13 {
+                if idx % 14 == 13 {
                     let sys_text = req["messages"]
                         .as_array()
                         .into_iter()
@@ -5622,7 +5813,7 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
             }) as ScriptHandler
         })
         .collect();
-    // Request 15: Synthesis attempt 1 sees disabled tools + explicit synthesis prompt, simulates DeepSeek DSML leak.
+    // After three slices: Synthesis attempt 1 sees disabled tools + explicit synthesis prompt, simulates DeepSeek DSML leak.
     handlers.push(Box::new(|req| {
         assert!(
             req.get("tools")
@@ -5688,12 +5879,20 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
 
     let server = start_mock_server(handlers);
     let model = mock_model(&server.endpoint);
+    for _ in 0..2 {
+        let slice = host
+            .tick_foreground(&ws_id, &model, json!({}), &cancel)
+            .await
+            .unwrap();
+        assert_eq!(slice.last_turn.unwrap().end, TurnEndKind::Yielded);
+        assert!(host.inputs().has_pending(&ws_id));
+    }
     let report = host
         .tick_foreground(&ws_id, &model, json!({}), &cancel)
         .await
         .unwrap();
     assert_eq!(report.bot_turns_run, 1);
-    assert_eq!(server.requests.lock().unwrap().len(), 16);
+    assert_eq!(server.requests.lock().unwrap().len(), 44);
     assert!(matches!(
         report.last_turn.as_ref().map(|t| &t.end),
         Some(TurnEndKind::ReplyCommitted { .. })

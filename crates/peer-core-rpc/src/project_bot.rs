@@ -455,7 +455,7 @@ pub fn handle_profile_update(ctx: &ServerContext, params_val: Value) -> Result<V
         let host = ctx.project_host.host();
         host.clear_failure_hold(ws);
         host.runner().reset_circuit_breaker_for(ws);
-        ctx.project_host.wake_workspace(ws);
+        ctx.project_host.resume_workspace(ws);
     }
     match store.read(ws) {
         Some(profile) => Ok(json!({ "ok": true, "profile": profile })),

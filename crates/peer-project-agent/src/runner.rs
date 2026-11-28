@@ -67,6 +67,8 @@ use std::{
 
 const USER_MAX_BOT_ROUNDS: usize = 14;
 const USER_MAX_BOT_TOOL_CALLS: usize = 28;
+// Keep exhaustion bounded across scheduling slices, not just within one slice.
+const MAX_USER_YIELD_RESUMES: u64 = 2;
 const WAKE_MAX_BOT_ROUNDS: usize = 8;
 const WAKE_MAX_BOT_TOOL_CALLS: usize = 16;
 const MAX_BOT_HISTORY_MESSAGES: usize = 40;
@@ -850,6 +852,40 @@ pub fn hydrate_agent_turn_record(data_home: &Path, workspace_id: &str, msg: &mut
 
 /// Reconstruct factual continuity from the latest stopped/failed `agent_turn` for
 /// `current_input_anchors` (before any answering `agent_reply`).
+/// Only the latest record for these exact input anchors can authorize a continuation.
+/// In particular, a later stop, failure, or delivered reply retires any old yield.
+fn yielded_user_slice<'a>(messages: &'a [Value], anchors: &[String]) -> Option<(&'a str, u64)> {
+    if anchors.is_empty() {
+        return None;
+    }
+    let anchors_json = json!(anchors);
+    for message in messages.iter().rev() {
+        if message["kind"] == "agent_reply"
+            && message["replyTo"].as_array().is_some_and(|ids| {
+                ids.iter().any(|id| {
+                    id.as_str()
+                        .is_some_and(|id| anchors.iter().any(|anchor| anchor == id))
+                })
+            })
+        {
+            return None;
+        }
+        if message["kind"] == "agent_turn"
+            && message["turnKind"] == "user"
+            && message["userInputs"] == anchors_json
+        {
+            if message["meta"]["diagnosticTiming"]["outcome"] != "yielded" {
+                return None;
+            }
+            return Some((
+                message["turnId"].as_str()?,
+                message["meta"]["yieldCount"].as_u64()?,
+            ));
+        }
+    }
+    None
+}
+
 pub fn read_retry_continuity(
     messages: &[Value],
     current_input_anchors: &[String],
@@ -1974,81 +2010,79 @@ impl ProjectAgentRunner {
         let provider_scope = format!("provider:{}", model.provider());
         let manual_trial = opts.manual_trial;
 
-        let mut trial_guard = match self.breaker_store.admit(
-            opts.workspace_id,
-            manual_trial,
-            Some(&provider_scope),
-            now_ms,
-        ) {
-            Ok(CircuitAdmit::Blocked { open_until }) => {
-                if opts.kind == "user" && manual_trial {
-                    let conv_store = ConversationStore::new(&self.data_home);
-                    let anchors: Vec<String> = opts
-                        .user_inputs
-                        .iter()
-                        .map(|i| format!("input-{}", i.input_id))
-                        .collect();
-                    let content =
-                        "代理熔断保护生效中，暂时无法处理这条消息。请稍后再试，或点击重试。";
-                    let at = now_iso();
-                    let _ = conv_store.append_message_idempotent(
-                        opts.conversation_id,
-                        &json!({
-                            "id": format!("{turn_id}-card"),
-                            "role": "assistant",
-                            "kind": "system_card",
-                            "card": "agent_unavailable",
-                            "turnId": turn_id,
-                            "replyTo": anchors,
-                            "content": content,
-                            "actions": ["retry"],
-                            "meta": {
-                                "errorCode": "model_circuit_open",
-                                "circuitOpenUntil": open_until,
-                            },
-                            "cards": [{
-                                "cardId": format!("card:agent_unavailable:{turn_id}"),
-                                "kind": "agent_unavailable",
-                                "content": content,
-                                "actions": [{
-                                    "id": "retry",
-                                    "channel": "project-agent:retry",
-                                    "payload": {
-                                        "workspaceId": opts.workspace_id,
-                                        "turnId": turn_id,
-                                    }
-                                }]
-                            }],
-                            "createdAt": at,
-                        }),
-                        &at,
-                        None,
-                    );
-                    self.set_error_status(opts.workspace_id);
-                }
-                return Ok(AgentTurnOutcome {
-                    turn_id,
-                    end: TurnEndKind::CircuitOpen,
-                    spawned_session_ids: vec![],
-                    tool_calls: 0,
-                    failure_hold: Some(FailureHoldSignal::CircuitOpen {
-                        open_until_ms: open_until.as_deref().and_then(parse_iso_ms),
-                    }),
-                });
-            }
-            Ok(CircuitAdmit::Admitted { trial }) => TrialGuard {
-                store: &self.breaker_store,
-                workspace_id: opts.workspace_id,
-                scope_key: &provider_scope,
-                active: trial,
-            },
-            Err(_) => TrialGuard {
-                store: &self.breaker_store,
-                workspace_id: opts.workspace_id,
-                scope_key: &provider_scope,
-                active: false,
-            },
+        let mut trial_guard = TrialGuard {
+            store: &self.breaker_store,
+            workspace_id: opts.workspace_id,
+            scope_key: &provider_scope,
+            active: false,
         };
+        if !cancel.is_cancelled() {
+            trial_guard.active = match self.breaker_store.admit(
+                opts.workspace_id,
+                manual_trial,
+                Some(&provider_scope),
+                now_ms,
+            ) {
+                Ok(CircuitAdmit::Blocked { open_until }) => {
+                    if opts.kind == "user" && manual_trial {
+                        let conv_store = ConversationStore::new(&self.data_home);
+                        let anchors: Vec<String> = opts
+                            .user_inputs
+                            .iter()
+                            .map(|i| format!("input-{}", i.input_id))
+                            .collect();
+                        let content =
+                            "代理熔断保护生效中，暂时无法处理这条消息。请稍后再试，或点击重试。";
+                        let at = now_iso();
+                        let _ = conv_store.append_message_idempotent(
+                            opts.conversation_id,
+                            &json!({
+                                "id": format!("{turn_id}-card"),
+                                "role": "assistant",
+                                "kind": "system_card",
+                                "card": "agent_unavailable",
+                                "turnId": turn_id,
+                                "replyTo": anchors,
+                                "content": content,
+                                "actions": ["retry"],
+                                "meta": {
+                                    "errorCode": "model_circuit_open",
+                                    "circuitOpenUntil": open_until,
+                                },
+                                "cards": [{
+                                    "cardId": format!("card:agent_unavailable:{turn_id}"),
+                                    "kind": "agent_unavailable",
+                                    "content": content,
+                                    "actions": [{
+                                        "id": "retry",
+                                        "channel": "project-agent:retry",
+                                        "payload": {
+                                            "workspaceId": opts.workspace_id,
+                                            "turnId": turn_id,
+                                        }
+                                    }]
+                                }],
+                                "createdAt": at,
+                            }),
+                            &at,
+                            None,
+                        );
+                        self.set_error_status(opts.workspace_id);
+                    }
+                    return Ok(AgentTurnOutcome {
+                        turn_id,
+                        end: TurnEndKind::CircuitOpen,
+                        spawned_session_ids: vec![],
+                        tool_calls: 0,
+                        failure_hold: Some(FailureHoldSignal::CircuitOpen {
+                            open_until_ms: open_until.as_deref().and_then(parse_iso_ms),
+                        }),
+                    });
+                }
+                Ok(CircuitAdmit::Admitted { trial }) => trial,
+                Err(_) => false,
+            };
+        }
 
         let mut activity_preview_budget = PreviewBudget::default();
         let (max_rounds, max_tool_calls) = if opts.kind == "user" {
@@ -2320,19 +2354,29 @@ impl ProjectAgentRunner {
         } else {
             Vec::new()
         };
+        // An explicit retry and a cooperative continuation have different durable
+        // predecessors. A retry marker can still be on the queue when that retry yields.
+        let yielded = if opts.kind == "user" {
+            yielded_user_slice(&history_messages, &current_input_anchors)
+        } else {
+            None
+        };
+        let has_yielded_slice = yielded.is_some();
+        let yield_count = yielded.map_or(0, |(_, count)| count);
         let resumed = (|| {
-            let target = explicit_retry_turn?;
-            let previous = if opts.kind == "user" {
+            let previous = if let Some((previous, _)) = yielded {
+                previous
+            } else if opts.kind == "user" {
+                let target = explicit_retry_turn?;
                 let previous = retry_continuity.as_ref()?["previousTurnId"].as_str()?;
                 if !target.is_empty() && target != previous {
                     return None;
                 }
                 previous
-            } else if !wake_event_ids.is_empty() && !target.is_empty() {
-                // The host resolved this target against the durable inbox batch.
-                target
             } else {
-                return None;
+                // The host resolved this target against the durable inbox batch.
+                explicit_retry_turn
+                    .filter(|target| !wake_event_ids.is_empty() && !target.is_empty())?
             };
             let checkpoint =
                 read_provider_checkpoint(&self.data_home, opts.workspace_id, previous)?;
@@ -2342,9 +2386,14 @@ impl ProjectAgentRunner {
                 return None;
             }
             let messages = checkpoint.canonical_messages()?;
-            Some((previous, checkpoint, messages))
+            Some((previous.to_owned(), checkpoint, messages))
         })();
-        let resumed_from = resumed.as_ref().map(|(previous, _, _)| *previous);
+        let (resumed_from, resumed) = match resumed {
+            Some((previous, checkpoint, messages)) => {
+                (Some(previous), Some((checkpoint, messages)))
+            }
+            None => (None, None),
+        };
 
         if coord_active {
             let _ = self.coordination.ensure_work(
@@ -2770,6 +2819,8 @@ impl ProjectAgentRunner {
         let mut rounds_record: Vec<Value> = Vec::new();
         let mut public_updates: Vec<Value> = Vec::new();
         let mut public_update_chars = 0usize;
+        let mut opening = None;
+        let mut budget_exhausted = false;
 
         // Pre-flight proactive compaction if conversation history is already >= 85% of context window.
         if let Some(window) = model.context_window()
@@ -2803,7 +2854,7 @@ impl ProjectAgentRunner {
 
         // Restore after proactive compaction: saved pairs are not historical summaries.
         let (mut provider_checkpoint, replay_reads) = match resumed {
-            Some((_, checkpoint, messages)) => {
+            Some((checkpoint, messages)) => {
                 let reads = provider_checkpoint::completed_reads(&messages);
                 committed_message_ids.extend(std::iter::repeat_n(None, messages.len()));
                 live_messages.extend(messages);
@@ -2838,8 +2889,14 @@ impl ProjectAgentRunner {
         let mut protocol_repair_attempts = 0usize;
         let mut round = 0usize;
         let mut wake_budget_nudged = false;
-        let mut budget_exhausted = false;
-        while round < max_rounds {
+        // Never restart a yielded turn from scratch if its native history is
+        // missing or no longer matches the selected route.
+        if has_yielded_slice && resumed_from.is_none() {
+            trial_guard.active = false;
+            final_end =
+                self.record_turn_failure(&failure_ctx, "yield_checkpoint_unavailable", cancel);
+        }
+        while round < max_rounds && matches!(final_end, TurnEndKind::Yielded) {
             round += 1;
             if cancel.is_cancelled() {
                 final_end = if is_preempted() {
@@ -3087,6 +3144,14 @@ impl ProjectAgentRunner {
             }
 
             let mut model_turn = model_turn.expect("nonempty tool calls require a model turn");
+            // Only the provider's public text channel can supply an opening.
+            // ModelDelta::Thinking and structured reply drafts are never narration.
+            if opts.kind == "user" && yield_count == 0 && round == 1 && !leaked_protocol {
+                let text = tool_preview::reply_draft(&model_turn.content);
+                if !text.trim().is_empty() {
+                    opening = Some(text);
+                }
+            }
             let mut assistant_tool_calls = Vec::new();
             let mut native_calls = Vec::new();
             let mut native_results = Vec::new();
@@ -3356,7 +3421,22 @@ impl ProjectAgentRunner {
             && turn_state.lock().is_ok_and(|state| {
                 has_undelivered_wake_result(&self.supervisor, &state, opts.wake_events)
             });
+        let cooperative_yield = opts.kind == "user"
+            && !cancel.is_cancelled()
+            && matches!(final_end, TurnEndKind::Yielded)
+            && (budget_exhausted || round >= max_rounds)
+            && yield_count < MAX_USER_YIELD_RESUMES
+            && !current_input_anchors.is_empty()
+            && provider_checkpoint.as_ref().is_some_and(|checkpoint| {
+                checkpoint.canonical_messages().is_some()
+                    && serde_json::to_vec(checkpoint)
+                        .is_ok_and(|bytes| bytes.len() as u64 <= provider_checkpoint::MAX_BYTES)
+            })
+            && turn_state
+                .lock()
+                .is_ok_and(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty());
         let needs_synthesis = (opts.kind == "user" || wake_synthesis)
+            && !cooperative_yield
             && !cancel.is_cancelled()
             && !matches!(
                 final_end,
@@ -3581,20 +3661,44 @@ impl ProjectAgentRunner {
                 session_ids: waiting_ids,
             };
         } else {
-            let phase = match final_end {
-                TurnEndKind::UserStopped => "stopped",
-                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
-                _ => "done",
-            };
-            if visible_activity {
-                if matches!(
-                    final_end,
-                    TurnEndKind::QuietSettled { .. } | TurnEndKind::Preempted
-                ) || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
-                {
-                    self.dispose_activity(opts.workspace_id);
+            if cancel.is_cancelled() && matches!(final_end, TurnEndKind::Yielded) {
+                final_end = if is_preempted() {
+                    TurnEndKind::Preempted
                 } else {
-                    self.set_activity_phase(opts.workspace_id, phase, None, true);
+                    TurnEndKind::UserStopped
+                };
+            } else if opts.kind == "user"
+                && matches!(final_end, TurnEndKind::Yielded)
+                && !cooperative_yield
+            {
+                // Synthesis may return neither a reply nor a terminal state.
+                // Do not let that look like another schedulable yield.
+                final_end =
+                    self.record_turn_failure(&failure_ctx, "user_turn_budget_exhausted", cancel);
+            }
+            if cooperative_yield && matches!(final_end, TurnEndKind::Yielded) {
+                if let Some(text) = opening {
+                    push_public_update(&mut public_updates, &mut public_update_chars, &text);
+                }
+                // Keep the live turn stoppable through the handoff. The opening
+                // is rendered from the durable publicUpdates, not a second live draft.
+                self.set_activity_phase(opts.workspace_id, "thinking", Some(""), false);
+            } else {
+                let phase = match final_end {
+                    TurnEndKind::UserStopped => "stopped",
+                    TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
+                    _ => "done",
+                };
+                if visible_activity {
+                    if matches!(
+                        final_end,
+                        TurnEndKind::QuietSettled { .. } | TurnEndKind::Preempted
+                    ) || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
+                    {
+                        self.dispose_activity(opts.workspace_id);
+                    } else {
+                        self.set_activity_phase(opts.workspace_id, phase, None, true);
+                    }
                 }
             }
         }
@@ -3715,9 +3819,10 @@ impl ProjectAgentRunner {
             TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
             TurnEndKind::Preempted => "preempted",
             TurnEndKind::UserStopped => "stopped",
+            TurnEndKind::Yielded if cooperative_yield => "yielded",
             _ => "done",
         };
-        let diagnostic_timing = json!({
+        let mut diagnostic_timing = json!({
             "startedAt": now_str,
             "finishedAt": finished_at,
             "durationMs": duration_ms,
@@ -3736,8 +3841,28 @@ impl ProjectAgentRunner {
             &diagnostic_timing,
             provider_checkpoint
                 .as_ref()
-                .filter(|_| matches!(outcome_label, "stopped" | "error")),
+                .filter(|_| matches!(outcome_label, "stopped" | "error" | "yielded")),
         );
+        if outcome_label == "yielded" && !trace_offloaded {
+            final_end =
+                self.record_turn_failure(&failure_ctx, "yield_checkpoint_write_failed", cancel);
+            diagnostic_timing["outcome"] =
+                json!(if matches!(final_end, TurnEndKind::UserStopped) {
+                    "stopped"
+                } else {
+                    "error"
+                });
+            self.set_activity_phase(
+                opts.workspace_id,
+                if cancel.is_cancelled() {
+                    "stopped"
+                } else {
+                    "error"
+                },
+                Some(""),
+                true,
+            );
+        }
         let mut completed_tools_summary = Vec::new();
         if trace_offloaded && matches!(outcome_label, "stopped" | "error") {
             for round in &rounds_record {
@@ -3767,6 +3892,9 @@ impl ProjectAgentRunner {
             "workId": work_id,
             "diagnosticTiming": diagnostic_timing,
         });
+        if matches!(final_end, TurnEndKind::Yielded) && cooperative_yield {
+            meta["yieldCount"] = json!(yield_count + 1);
+        }
         if let Some(previous) = resumed_from {
             meta["providerCheckpointResumedFrom"] = json!(previous);
         }
@@ -3791,12 +3919,25 @@ impl ProjectAgentRunner {
             agent_turn_msg["rounds"] = json!(rounds_record);
             agent_turn_msg["publicUpdates"] = json!(public_updates);
         }
-        let _ = conv_store.append_message_idempotent(
+        let stored = conv_store.append_message_idempotent(
             opts.conversation_id,
             &agent_turn_msg,
             &finished_at,
             None,
         );
+        if matches!(final_end, TurnEndKind::Yielded) && cooperative_yield && stored.is_err() {
+            final_end = self.record_turn_failure(&failure_ctx, "yield_record_write_failed", cancel);
+            self.set_activity_phase(
+                opts.workspace_id,
+                if cancel.is_cancelled() {
+                    "stopped"
+                } else {
+                    "error"
+                },
+                Some(""),
+                true,
+            );
+        }
 
         if coord_active {
             let end_state =
