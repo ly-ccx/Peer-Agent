@@ -723,6 +723,50 @@ fn derive_session_status(plan: &Value) -> String {
     )
 }
 
+// Record transitions at the durable write boundary, not when a renderer polls.
+fn session_execution_times(plan: &Value, previous: &Value, at: &str) -> Value {
+    let origin = &plan["delegationOrigin"];
+    let previous_origin = &previous["delegationOrigin"];
+    let mut times = json!({});
+    for key in ["startedAt", "endedAt"] {
+        if let Some(value) = previous["sessionExecution"][key]
+            .as_str()
+            .or_else(|| plan["sessionExecution"][key].as_str())
+        {
+            times[key] = json!(value);
+        }
+    }
+    if times["startedAt"].is_null()
+        && previous_origin.is_object()
+        && origin["phase"] == "running"
+        && previous_origin["phase"] != "running"
+    {
+        times["startedAt"] = json!(at);
+    }
+    // Imported terminal plans have no observed transition to timestamp.
+    if times["endedAt"].is_null()
+        && previous_origin.is_object()
+        && session_execution_ended(plan)
+        && !session_execution_ended(previous)
+    {
+        times["endedAt"] = json!(at);
+    }
+    times
+}
+
+fn session_execution_ended(plan: &Value) -> bool {
+    let origin = &plan["delegationOrigin"];
+    if !origin.is_object() {
+        return false;
+    }
+    let verifying = origin["phase"] == "verifying";
+    let lifecycle = crate::session_projection::decide_lifecycle(plan, false, verifying, None, None);
+    matches!(
+        lifecycle.status.as_str(),
+        "accepted" | "result_ready" | "failed" | "cancelled" | "superseded"
+    ) || lifecycle.follow_up.reason == "verification_failed"
+}
+
 fn is_manual_criterion_approved(plan: &Value, criterion_id: &str) -> bool {
     let confirmations = plan["manualConfirmations"]
         .as_array()
@@ -1243,6 +1287,8 @@ impl SessionSupervisor {
         let mut queue_reason = None;
         let mut follow_up = None;
         let mut phase_label = None;
+        let mut started_at = None;
+        let mut ended_at = None;
         let mut resolved_status = summary.status.clone();
         let anchor_message_id = summary.anchor_message_ids.first().cloned();
         let plan_id = (!summary.plan_id.is_empty()).then(|| summary.plan_id.clone());
@@ -1258,6 +1304,12 @@ impl SessionSupervisor {
             .as_ref();
 
         if let Ok(plan) = self.read_plan(&summary.plan_id) {
+            started_at = plan["sessionExecution"]["startedAt"]
+                .as_str()
+                .map(str::to_owned);
+            ended_at = plan["sessionExecution"]["endedAt"]
+                .as_str()
+                .map(str::to_owned);
             let (lc, human_gate) = crate::session_projection::compute_bot_list_session_lifecycle(
                 self,
                 &plan,
@@ -1287,6 +1339,8 @@ impl SessionSupervisor {
             title: summary.title,
             status: resolved_status,
             updated_at: Some(summary.updated_at),
+            started_at,
+            ended_at,
             result_confirmation_required,
             completion_review_required,
             conversation_id: (!summary.conversation_id.is_empty())
@@ -1481,6 +1535,20 @@ impl SessionSupervisor {
             .map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
         let index_path = self.index_file();
         let _lock = DirectoryLock::acquire(&index_path, LOCK_TIMEOUT, None)?;
+        let mut timed_plan;
+        let plan = if plan["delegationOrigin"].is_object() {
+            let previous = self.read_plan(plan_id).unwrap_or(Value::Null);
+            let times = session_execution_times(plan, &previous, &now_iso());
+            if times.as_object().is_some_and(|fields| !fields.is_empty()) {
+                timed_plan = plan.clone();
+                timed_plan["sessionExecution"] = times;
+                &timed_plan
+            } else {
+                plan
+            }
+        } else {
+            plan
+        };
         let body = serde_json::to_string_pretty(plan)
             .map_err(|e| ProjectError::new("SERIALIZE_ERROR", e.to_string()))?;
         atomic_write(&self.plan_file(plan_id), format!("{body}\n").as_bytes())?;
@@ -4192,17 +4260,77 @@ mod tests {
         assert_eq!(spawned.status, "waiting_user");
         let aid = spawned.approval_id.clone().unwrap();
 
-        // Approve the plan -> moves to queued -> promote moves to running.
+        // Approval and queueing must not start execution timing.
         let approved = sup.decide_plan_approval("ws-1", &aid, true, true).unwrap();
         assert_eq!(approved.phase, "queued");
+        let project = || {
+            crate::session_projection::get_session_projected(dir.path(), &spawned.session_id, None)
+                .unwrap()
+        };
+        let queued = project();
+        assert!(queued["spawnedAt"].is_string());
+        assert!(queued.get("startedAt").is_none());
+        assert!(queued.get("endedAt").is_none());
         let promoted = sup.promote_queued("ws-1", true).unwrap();
         assert_eq!(promoted.start, vec![spawned.session_id.clone()]);
 
-        // Cancel cleanly records cancellation.
+        let running = project();
+        let started_at = running["startedAt"].as_str().unwrap();
+        assert!(running.get("endedAt").is_none());
+        let mut saved = sup.read_plan(&spawned.plan_id).unwrap();
+        assert_eq!(saved["sessionExecution"]["startedAt"], started_at);
+        saved["updatedAt"] = json!("2099-01-01T00:00:00.000Z");
+        sup.save_plan_json(&saved).unwrap();
+        assert_eq!(project()["startedAt"], started_at);
+        let active = sup.to_bot_list_session(
+            sup.all_delegated_summaries().into_iter().next().unwrap(),
+            &[],
+            &mut HashMap::new(),
+            &mut HashMap::new(),
+        );
+        assert_eq!(active.started_at.as_deref(), Some(started_at));
+
         let cancelled = sup
             .control_session("ws-1", &spawned.session_id, "cancel", "user_stop", true)
             .unwrap();
         assert_eq!(cancelled.status, "cancelled");
+        let ended = project();
+        assert_eq!(ended["startedAt"], started_at);
+        let ended_at = ended["endedAt"].as_str().unwrap();
+        assert!(ended_at >= started_at);
+        let mut saved = sup.read_plan(&spawned.plan_id).unwrap();
+        assert_eq!(saved["sessionExecution"]["endedAt"], ended_at);
+        saved["updatedAt"] = json!("2099-01-02T00:00:00.000Z");
+        sup.save_plan_json(&saved).unwrap();
+        assert_eq!(project()["endedAt"], ended_at);
+    }
+
+    #[test]
+    fn session_execution_times_freeze_at_result_ready_and_ignore_legacy_snapshots() {
+        let running = json!({"status": "executing", "delegationOrigin": {"phase": "running"}});
+        let completed = json!({"status": "completed", "delegationOrigin": {"phase": "completed"}});
+        for legacy in [&running, &completed] {
+            assert_eq!(
+                session_execution_times(legacy, &Value::Null, "unknown"),
+                json!({})
+            );
+            assert_eq!(
+                session_execution_times(legacy, legacy, "unknown"),
+                json!({})
+            );
+        }
+        let mut completed = completed;
+        completed["sessionExecution"] = session_execution_times(&completed, &running, "first-end");
+        assert_eq!(
+            completed["sessionExecution"],
+            json!({"endedAt": "first-end"})
+        );
+        let mut accepted = completed.clone();
+        accepted["resultAcceptance"] = json!({"acceptedAt": "later"});
+        assert_eq!(
+            session_execution_times(&accepted, &completed, "later"),
+            completed["sessionExecution"]
+        );
     }
 
     #[test]

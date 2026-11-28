@@ -7,6 +7,8 @@ import { PeerIcon } from '../../ui/icons';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
 import { BotAccessControl } from '../BotAccessControl';
 import { formatDrawerSessionStatus, formatDrawerStamp, isActivelyVerifying, isAwaitingBotReport, isTaskStatusSpinning, isVerificationFailed, type DrawerSession } from '../state/drawerState';
+import { TaskExecutionDuration } from '../TaskExecutionDuration';
+import { taskExecutionTitle } from '../state/taskExecutionDuration';
 import { mergeTaskDetail } from '../state/taskDetailState';
 import { useTaskReport } from '../state/useTaskReport';
 import { useTaskCancellation } from '../state/TaskCancellation';
@@ -437,6 +439,7 @@ export function TaskWorkspaceView({
     : i18n.t('projectAgent.chat.work.related');
   const statusLabel = formatDrawerSessionStatus(session, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
+  const executionTitle = taskExecutionTitle(session, i18n);
   const followUp = session.followUp;
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused'].includes(session.status);
   const tone = pendingApproval || followUp?.owner === 'user'
@@ -470,7 +473,7 @@ export function TaskWorkspaceView({
         {/* Compact Single-Line Status Strip (keeps full height for the worker conversation) */}
         <header className="bot-task-strip">
           <div className="bot-task-strip-leading">
-            <span className="bot-task-status-pill" data-tone={tone}>
+            <span className="bot-task-status-pill" data-tone={tone} title={executionTitle}>
               <PeerIcon
                 name={tone === 'good' ? 'check' : tone === 'warn' || tone === 'danger' ? 'warning' : spinning ? 'loader' : 'circle'}
                 size={12}
@@ -478,6 +481,7 @@ export function TaskWorkspaceView({
               />
               <span>{statusLabel}</span>
             </span>
+            <TaskExecutionDuration surface="header" timing={session} i18n={i18n} />
             <h1 ref={titleRef} tabIndex={-1} className="bot-task-strip-title" title={title}>{title}</h1>
             {stamp ? (
               <span className="bot-task-meta-text">{stamp}</span>

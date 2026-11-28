@@ -44,6 +44,14 @@
   flex: 1;
 }
 
+.bot-task-strip-duration {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--graphite-soft);
+}
+
 .bot-task-strip-title {
   margin: 0;
   min-width: 0;

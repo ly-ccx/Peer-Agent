@@ -101,6 +101,42 @@ test('outward evidence projection never changes internal source revisions, repor
   } finally { await env.cleanup(); }
 });
 
+test('delegated execution timing survives disk reload and projects through list and detail', async () => {
+  let approval;
+  const env = await harness({
+    readPlanApproval: () => 'always',
+    approvalStore: { append(row) { approval = row; return row; }, list() { return approval ? [approval] : []; } },
+    goalRunner: { start: async () => {} },
+  });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const { sessionId } = opened;
+    const planId = approval.planId;
+    const detail = () => env.supervisor.get({ sessionId });
+    assert.ok(detail().spawnedAt);
+    assert.equal(Object.hasOwn(detail(), 'startedAt'), false);
+    assert.equal(Object.hasOwn(detail(), 'endedAt'), false);
+
+    approval = { ...approval, state: 'approved', decidedBy: 'local_ui', decidedAt: new Date().toISOString() };
+    assert.equal((await env.supervisor.resumeFromApproval(approval)).ok, true);
+    const reloaded = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() });
+    const { startedAt } = reloaded.getPlan(planId).sessionExecution;
+    assert.ok(Number.isFinite(Date.parse(startedAt)));
+    assert.equal(detail().startedAt, startedAt);
+    assert.equal(env.supervisor.list({ workspaceId: 'ws-1' })[0].startedAt, startedAt);
+    assert.equal(Object.hasOwn(detail(), 'endedAt'), false);
+
+    const { delegationOrigin } = reloaded.getPlan(planId);
+    reloaded.revisePlan(planId, { status: 'cancelled', delegationOrigin: { ...delegationOrigin, phase: 'cancelled' } });
+    const { endedAt } = reloaded.getPlan(planId).sessionExecution;
+    assert.ok(Date.parse(endedAt) >= Date.parse(startedAt));
+    assert.equal(detail().endedAt, endedAt);
+    assert.equal(env.supervisor.list({ workspaceId: 'ws-1' })[0].endedAt, endedAt);
+    reloaded.revisePlan(planId, { title: 'Later edit' });
+    assert.deepEqual(reloaded.getPlan(planId).sessionExecution, { startedAt, endedAt });
+  } finally { await env.cleanup(); }
+});
+
 test('local plan approval is frozen before execution and survives store reload', async () => {
   let latest;
   const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
