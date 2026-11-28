@@ -3,7 +3,7 @@ import test from 'node:test';
 import { projectWorkSession, type DelegationOrigin, type GoalRunnerStatus } from '@peer-agent/protocol';
 import { groupDrawerSessions, readDrawerSession, taskGroup } from './drawerState.ts';
 import { indexBotWork } from './botWorkState.ts';
-import { workPanelSessions } from './botWorkPanelState.ts';
+import { workPanelGroups } from './botWorkPanelState.ts';
 
 function listed(id: string, origin: Record<string, unknown>, runnerStatus: GoalRunnerStatus = 'running') {
   const session = readDrawerSession(projectWorkSession({
@@ -56,9 +56,9 @@ test('task list and collaboration agents follow the same stop settlement', () =>
   assert.equal(taskGroup(cancelled.status, cancelled.followUp), 'done');
   const indexed = readDrawerSession({ ...legacy, sessionId: 'indexed', followUp: { owner: 'none', inCurrentList: false, reason: 'obligation_indexed' }, status: 'awaiting_outcome', statusLabel: '执行结果待核实' });
   assert.ok(indexed);
-  const panel = workPanelSessions(indexBotWork([stopping, awaiting, legacy, cancelled, child, indexed], true));
-  assert.deepEqual(panel.tasks.map(session => session.sessionId).sort(), ['awaiting', 'legacy', 'stopping']);
-  assert.deepEqual(panel.agents.map(session => session.sessionId).sort(), ['awaiting', 'child', 'legacy', 'stopping']);
-  assert.equal([...panel.tasks, ...panel.agents].some(session => session.sessionId === 'indexed'), false);
+  const panel = workPanelGroups(indexBotWork([stopping, awaiting, legacy, cancelled, child, indexed], true));
+  assert.deepEqual(panel.map(group => [group.lane, group.count]), [['doing', 4]]);
+  assert.deepEqual(panel[0].roots.map(node => node.id).sort(), ['session:awaiting', 'session:legacy', 'session:stopping']);
+  assert.deepEqual(panel[0].roots.flatMap(node => node.children.map(child => child.id)), ['session:child']);
   assert.deepEqual(Object.values(groupDrawerSessions([indexed!])).flat(), []);
 });

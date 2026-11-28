@@ -3,12 +3,13 @@
 //! DirectoryLock ordering, and `.changes.json` notifications with TS stores.
 
 use crate::{
-    ConversationStore, DirectoryLock, StoreError, context_model_key, conversation_execution,
+    ConversationStore, StoreError, context_model_key, conversation_execution,
     conversation_preview::preview, durable_jsonl as log, files, valid_id,
 };
 use peer_protocol::{JsonLimits, decode_json_bounded, javascript_json_string};
 use serde_json::{Map, Value, json};
 use std::{
+    collections::HashSet,
     fs,
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::Path,
@@ -871,6 +872,38 @@ impl ConversationStore {
         Ok(meta)
     }
 
+    fn read_full_window_messages(&self, id: &str) -> Result<Vec<Value>, StoreError> {
+        let mut messages = decode_jsonl_messages(&self.directory.join(format!("{id}.jsonl")))?;
+        merge_stream_patch(
+            &self.directory.join(format!("{id}.stream.json")),
+            &mut messages,
+        );
+        Ok(messages)
+    }
+
+    /// Share one validated index across a read-only list projection. Read each
+    /// requested body on demand so callers need not hold all histories in memory.
+    pub fn indexed_full_message_reader(
+        &self,
+    ) -> impl Fn(&str) -> Result<Option<Vec<Value>>, StoreError> + '_ {
+        let known = self.read_index_rows().map(|rows| {
+            rows.into_iter()
+                .filter_map(|row| row["id"].as_str().map(str::to_owned))
+                .collect::<HashSet<_>>()
+        });
+        move |id: &str| {
+            if !valid_id(id, false) {
+                return Err(StoreError::InvalidInput);
+            }
+            known
+                .as_ref()
+                .map_err(|error| *error)?
+                .contains(id)
+                .then(|| self.read_full_window_messages(id))
+                .transpose()
+        }
+    }
+
     pub fn read_conversation_window(
         &self,
         id: &str,
@@ -890,8 +923,7 @@ impl ConversationStore {
         let stream_path = self.directory.join(format!("{id}.stream.json"));
 
         if full {
-            let mut messages = decode_jsonl_messages(&body_path)?;
-            merge_stream_patch(&stream_path, &mut messages);
+            let messages = self.read_full_window_messages(id)?;
             return Ok(Some(json!({
                 "meta": meta,
                 "window": messages,
@@ -1340,11 +1372,7 @@ impl ConversationStore {
 
     pub fn reorder_pinned(&self, ids: &[String]) -> Result<Value, StoreError> {
         let directory = self.write_directory()?;
-        let _held = [DirectoryLock::acquire(
-            &directory.join("index.jsonl"),
-            std::time::Duration::from_millis(100),
-            None,
-        )?];
+        let _held = crate::conversation_write::locks(&directory, None, None)?;
         let file = directory.join("index.jsonl");
         let mut index = log::read(&file, None)?;
 
@@ -1407,11 +1435,7 @@ impl ConversationStore {
             .filter(|s| !s.is_empty())
             .collect();
         let directory = self.write_directory()?;
-        let _held = [DirectoryLock::acquire(
-            &directory.join("index.jsonl"),
-            std::time::Duration::from_millis(100),
-            None,
-        )?];
+        let _held = crate::conversation_write::locks(&directory, None, None)?;
         let file = directory.join("index.jsonl");
         if files::identity(&file)?.is_none() {
             return Ok(json!({ "archivedIds": [], "archivedCount": 0 }));

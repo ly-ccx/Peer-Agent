@@ -1,4 +1,5 @@
 import './dropdown.css';
+import { PeerIcon } from '../../ui/icons';
 import { MotionSurface } from './MotionSurface';
 import { selectionNavigation } from './selectionNavigation';
 import { useInteractionLayer } from '../hooks/useInteractionLayer';
@@ -60,6 +61,7 @@ interface MenuCoords {
 // 展开时不会把容器撑高、冒出滚动条；同时按视口可用空间自适应向上/向下展开。
 export function Dropdown({
   value,
+  selectedValues,
   options,
   onChange,
   disabled = false,
@@ -79,6 +81,8 @@ export function Dropdown({
   tabsAriaLabel,
 }: {
   readonly value: string;
+  /** In multi-select mode onChange toggles the activated option and keeps the list open. */
+  readonly selectedValues?: readonly string[];
   readonly options: readonly DropdownOption[];
   readonly onChange: (value: string) => void;
   readonly disabled?: boolean;
@@ -109,7 +113,8 @@ export function Dropdown({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
-  useInteractionLayer(open, { roots: [menuRef], trigger: triggerRef, outside: true, closeOnTriggerRemoval: true, dismissOnTab: true,
+  const multiSelect = selectedValues !== undefined;
+  useInteractionLayer(open, { roots: [menuRef], trigger: triggerRef, outside: true, closeOnTriggerRemoval: true, dismissOnTab: true, restoreFocusOnOutside: multiSelect,
     onClose: () => setOpen(false), onEnter: () => (searchRef.current ?? menuRef.current?.querySelector<HTMLElement>('[role=listbox]'))?.focus({ preventScroll: true }) });
 
   const selected = options.find((o) => o.value === value);
@@ -160,12 +165,14 @@ export function Dropdown({
     if (!open) {
       setQuery('');
       setActiveTab('');
+      if (multiSelect) setActiveIndex(-1);
       return;
     }
     const idx = visibleOptions.findIndex((o) => o.value === value && !o.disabled);
     const firstEnabled = visibleOptions.findIndex((o) => !o.disabled);
-    setActiveIndex(idx >= 0 ? idx : firstEnabled);
-  }, [open, value, visibleOptions]);
+    setActiveIndex((current) => multiSelect && visibleOptions[current] && !visibleOptions[current].disabled
+      ? current : idx >= 0 ? idx : firstEnabled);
+  }, [open, value, visibleOptions, multiSelect]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -202,9 +209,9 @@ export function Dropdown({
       const opt = visibleOptions[index];
       if (!opt || opt.disabled) return;
       onChange(opt.value);
-      setOpen(false);
+      if (!multiSelect) setOpen(false);
     },
-    [visibleOptions, onChange],
+    [visibleOptions, onChange, multiSelect],
   );
 
   const runFooter = useCallback(() => {
@@ -285,6 +292,7 @@ export function Dropdown({
 
   let lastGroup: string | undefined;
   const optionNodes = visibleOptions.map((opt, index) => {
+    const checked = selectedValues ? selectedValues.includes(opt.value) : opt.value === value;
     const showGroup = Boolean(opt.group) && opt.group !== lastGroup;
     lastGroup = opt.group;
     return (
@@ -295,12 +303,12 @@ export function Dropdown({
           id={`${listId}-option-${index}`}
           role="option"
           tabIndex={-1}
-          aria-selected={opt.value === value}
+          aria-selected={checked}
           aria-label={opt.description ? opt.label : undefined}
           aria-describedby={opt.description ? `${listId}-description-${index}` : undefined}
           aria-disabled={opt.disabled || undefined}
           disabled={opt.disabled === true}
-          className={`pa-dropdown-item ${index === activeIndex && !opt.disabled ? 'active' : ''} ${opt.value === value ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''} ${opt.disabled ? 'is-disabled' : ''}`}
+          className={`pa-dropdown-item ${index === activeIndex && !opt.disabled ? 'active' : ''} ${checked ? 'selected' : ''} ${opt.tone === 'danger' ? 'danger' : ''} ${opt.disabled ? 'is-disabled' : ''}`}
           onMouseEnter={() => {
             if (!opt.disabled) setActiveIndex(index);
           }}
@@ -308,9 +316,7 @@ export function Dropdown({
           onClick={() => commit(index)}
         >
           <span className="pa-dropdown-check" aria-hidden>
-            {opt.value === value ? <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg> : null}
+            {checked ? <PeerIcon name="check" size={14} /> : null}
           </span>
           {opt.icon ? <span className="pa-dropdown-item-icon" aria-hidden>{opt.icon}</span> : null}
           <span className="pa-dropdown-item-label">{opt.label}</span>
@@ -373,6 +379,7 @@ export function Dropdown({
             </div>
           ) : null}
           <div className="pa-dropdown-list" role="listbox" id={listId} tabIndex={-1} aria-label={ariaLabel}
+            aria-multiselectable={multiSelect || undefined}
             aria-activedescendant={activeIndex >= 0 ? `${listId}-option-${activeIndex}` : undefined}>
             {optionNodes}
             {visibleOptions.length === 0 ? (

@@ -4,20 +4,140 @@ use crate::verifier::{VerifierOutcome, run_independent_verifier_with_interactive
 const MAX_VERIFIER_RUNS: usize = 3;
 const VERIFIER_TIMEOUT: Duration = Duration::from_secs(300);
 
-struct VerificationGuard<'a> {
-    active: &'a Mutex<HashSet<String>>,
-    session_id: &'a str,
+pub(super) struct ActiveVerification {
+    workspace_id: String,
+    run_id: String,
+    cancel: CancellationToken,
 }
 
-impl Drop for VerificationGuard<'_> {
+pub(super) struct VerificationGuard<'a, F: Fn() -> bool> {
+    supervisor: &'a SessionSupervisor,
+    session_id: &'a str,
+    plan_id: &'a str,
+    run_id: String,
+    cancel: CancellationToken,
+    holds_lease: &'a F,
+}
+
+impl<F: Fn() -> bool> VerificationGuard<'_, F> {
+    pub(super) fn token(&self) -> &CancellationToken {
+        &self.cancel
+    }
+}
+
+impl<F: Fn() -> bool> Drop for VerificationGuard<'_, F> {
     fn drop(&mut self) {
-        if let Ok(mut active) = self.active.lock() {
+        self.cancel.cancel();
+        if let Ok(mut active) = self.supervisor.verifying_sessions.lock()
+            && active
+                .get(self.session_id)
+                .is_some_and(|entry| entry.run_id == self.run_id)
+        {
             active.remove(self.session_id);
+        }
+        // Dropping can happen during unwinding or while another transition has the lock.
+        // Maintenance retries any cleanup that could not acquire the lock or persist here.
+        let _transition = match self.supervisor.transitions.try_lock() {
+            Ok(lock) => lock,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        };
+        if (self.holds_lease)()
+            && let Ok(mut current) = self.supervisor.read_plan(self.plan_id)
+            && is_verifying_run(&current, &self.run_id)
+        {
+            let _ = self.supervisor.recover_verification(&mut current);
         }
     }
 }
 
+fn is_verifying_run(plan: &Value, run_id: &str) -> bool {
+    plan["delegationOrigin"]["phase"] == "verifying" && current_verifier_run(plan) == Some(run_id)
+}
+
+fn current_verifier_run(plan: &Value) -> Option<&str> {
+    plan["runner"]["verifierRuns"].as_array()?.last()?["verifierRunId"].as_str()
+}
+
 impl SessionSupervisor {
+    pub(super) fn register_verification<'a, F: Fn() -> bool>(
+        &'a self,
+        workspace_id: &str,
+        session_id: &'a str,
+        plan_id: &'a str,
+        run_id: String,
+        cancel: &CancellationToken,
+        holds_lease: &'a F,
+    ) -> Result<VerificationGuard<'a, F>, ProjectError> {
+        let mut active = self
+            .verifying_sessions
+            .lock()
+            .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
+        let cancel = cancel.child_token();
+        match active.entry(session_id.to_owned()) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                return Err(ProjectError::code("verifier_in_progress"));
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(ActiveVerification {
+                    workspace_id: workspace_id.to_owned(),
+                    run_id: run_id.clone(),
+                    cancel: cancel.clone(),
+                });
+            }
+        }
+        Ok(VerificationGuard {
+            supervisor: self,
+            session_id,
+            plan_id,
+            run_id,
+            cancel,
+            holds_lease,
+        })
+    }
+
+    pub fn cancel_live_verification(&self, session_id: &str) {
+        if let Ok(active) = self.verifying_sessions.lock()
+            && let Some(run) = active.get(session_id)
+        {
+            run.cancel.cancel();
+        }
+    }
+
+    pub(crate) fn cancel_workspace_verifications(&self, workspace_id: &str) {
+        if let Ok(active) = self.verifying_sessions.lock() {
+            for run in active
+                .values()
+                .filter(|run| run.workspace_id == workspace_id)
+            {
+                run.cancel.cancel();
+            }
+        }
+    }
+
+    /// Re-read under the transition lock, and only repair a run this host can prove is gone.
+    pub(crate) fn recover_orphan_verifications(
+        &self,
+        workspace_id: &str,
+        holds_lease: impl Fn() -> bool,
+    ) -> Result<usize, ProjectError> {
+        // A poisoned transition lock still serializes the narrow reread-and-repair path.
+        let _transition = self
+            .transitions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !holds_lease() {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
+        let mut count = 0;
+        for mut plan in self.list_workspace_plans(workspace_id) {
+            if self.recover_verification(&mut plan)? {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     pub(super) fn record_verifier_run(plan: &mut Value) -> String {
         let id = format!("vrun-{}", uuid::Uuid::new_v4());
         let mut runs = plan["runner"]["verifierRuns"]
@@ -53,6 +173,7 @@ impl SessionSupervisor {
         cancel: &CancellationToken,
     ) {
         let child = cancel.child_token();
+        let _cancel_on_drop = child.clone().drop_guard();
         let interactive_bridge = self.interactive_bridge();
         let interactive_enabled = self.is_interactive_publishing_available();
         let result = tokio::select! {
@@ -276,34 +397,6 @@ impl SessionSupervisor {
         }
     }
 
-    fn session_already_reported(&self, plan: &Value, session_id: &str) -> bool {
-        let Some(parent_cid) = plan["delegationOrigin"]["parentConversationId"]
-            .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        else {
-            return false;
-        };
-        let Ok(messages) = crate::read_full_conversation_messages(&self.conversations, parent_cid)
-        else {
-            return false;
-        };
-        messages.iter().any(|msg| {
-            if msg["role"].as_str() != Some("assistant")
-                || msg["kind"].as_str() != Some("agent_reply")
-            {
-                return false;
-            }
-            let direct = msg["sources"]
-                .as_array()
-                .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(session_id)));
-            let in_meta = msg["meta"]["sources"]
-                .as_array()
-                .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(session_id)));
-            direct || in_meta
-        })
-    }
-
     pub fn notify_reverified_result(&self, workspace_id: &str, session_id: &str, plan_id: &str) {
         self.emit_event(
             workspace_id,
@@ -334,19 +427,7 @@ impl SessionSupervisor {
         let plan_id = plan["planId"]
             .as_str()
             .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
-        let guard = {
-            let mut active = self
-                .verifying_sessions
-                .lock()
-                .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
-            if !active.insert(session_id.to_owned()) {
-                return Err(ProjectError::code("verifier_in_progress"));
-            }
-            VerificationGuard {
-                active: &self.verifying_sessions,
-                session_id,
-            }
-        };
+        let guard;
         let (started, run_id) = {
             let _transition = self.transition_lock()?;
             if !holds_lease() {
@@ -377,8 +458,15 @@ impl SessionSupervisor {
                 return Err(ProjectError::code("CANCELLED"));
             }
             let run_id = Self::record_verifier_run(&mut current);
+            guard = self.register_verification(
+                workspace_id,
+                session_id,
+                plan_id,
+                run_id.clone(),
+                cancel,
+                &holds_lease,
+            )?;
             current["delegationOrigin"]["phase"] = json!("verifying");
-            current["updatedAt"] = json!(now_iso());
             self.write_plan(&current)?;
             (current, run_id)
         };
@@ -387,8 +475,15 @@ impl SessionSupervisor {
         updated["delegationOrigin"]["verifierConversationId"] = Value::Null;
         self.evaluate_deterministic_criteria(&mut updated);
         let mut refs = self.indexed_evidence_refs_for_plan(&updated);
-        self.verify_plan(&mut updated, &mut refs, &run_id, focus, model, cancel)
-            .await;
+        self.verify_plan(
+            &mut updated,
+            &mut refs,
+            &run_id,
+            focus,
+            model,
+            guard.token(),
+        )
+        .await;
         let interrupted = updated["runner"]["verifierRuns"]
             .as_array()
             .and_then(|runs| runs.last())
@@ -400,30 +495,19 @@ impl SessionSupervisor {
             if !holds_lease() {
                 return Err(ProjectError::code("LEASE_REQUIRED"));
             }
-            let mut current = self.read_plan(plan_id)?;
+            let current = self.read_plan(plan_id)?;
             if current != started {
-                if current["delegationOrigin"]["phase"] == "verifying"
-                    && current["runner"]["verifierRuns"]
-                        .as_array()
-                        .and_then(|runs| runs.last())
-                        .is_some_and(|run| run["verifierRunId"] == run_id)
-                {
-                    Self::finish_verifier_run(
-                        &mut current,
-                        "interrupted",
-                        Some("session_state_changed"),
-                    );
-                    current["delegationOrigin"]["phase"] = json!("completed");
-                    self.write_plan(&current)?;
-                }
+                // The guard will repair an orphan of this run against the latest snapshot.
                 return Err(ProjectError::code("session_state_changed"));
+            }
+            if guard.token().is_cancelled() && interrupted.is_none() {
+                return Err(ProjectError::code("CANCELLED"));
             }
             if let Some(run) = interrupted.as_ref() {
                 let runs = updated["runner"]["verifierRuns"].clone();
                 updated = started;
                 updated["runner"]["verifierRuns"] = runs;
                 updated["delegationOrigin"]["phase"] = json!("completed");
-                updated["updatedAt"] = json!(now_iso());
                 self.write_plan(&updated)?;
                 let code = if run["error"] == "CANCELLED" {
                     "CANCELLED"
@@ -440,15 +524,10 @@ impl SessionSupervisor {
             self.write_plan(&updated)?;
         }
         drop(guard);
-        let already_reported = self.session_already_reported(&updated, session_id);
-        let decision = self.settle_session(
-            workspace_id,
-            session_id,
-            already_reported,
-            false,
-            None,
-            true,
-        )?;
+        // A new verifier verdict is a new report revision. A historical citation cannot
+        // settle this revision until it is delivered through the normal reply path.
+        let decision =
+            self.settle_session(workspace_id, session_id, false, false, None, holds_lease())?;
         Ok(json!({
             "ok": true,
             "sessionId": session_id,
@@ -465,12 +544,34 @@ impl SessionSupervisor {
             || plan["delegationOrigin"]["sessionId"]
                 .as_str()
                 .is_some_and(|sid| {
-                    self.verifying_sessions
-                        .lock()
-                        .map_or(true, |active| active.contains(sid))
+                    self.verifying_sessions.lock().map_or(true, |active| {
+                        active.get(sid).is_some_and(|entry| {
+                            current_verifier_run(plan) == Some(entry.run_id.as_str())
+                        })
+                    })
                 })
         {
             return Ok(false);
+        }
+        let protected_phase = if plan["status"] == "cancelled"
+            || plan["delegationOrigin"]["cancellation"]["disposition"] == "user_withdrawn"
+            || plan["delegationOrigin"]["cancellation"]["phase"] == "completed"
+        {
+            Some("cancelled")
+        } else if plan["status"] == "failed" {
+            Some("failed")
+        } else if plan["resultAcceptance"]["acceptedAt"].is_string() {
+            Some("accepted")
+        } else if plan["delegationOrigin"]["supersededBy"].is_string() {
+            Some("superseded")
+        } else {
+            None
+        };
+        if let Some(phase) = protected_phase {
+            Self::finish_verifier_run(plan, "interrupted", Some("verifier_host_interrupted"));
+            plan["delegationOrigin"]["phase"] = json!(phase);
+            self.write_plan(plan)?;
+            return Ok(true);
         }
         let initial = plan["status"] != "completed";
         Self::finish_verifier_run(plan, "interrupted", Some("verifier_host_interrupted"));
@@ -483,7 +584,6 @@ impl SessionSupervisor {
                 json!({"passed": false, "error": "verifier_host_interrupted"});
         }
         plan["delegationOrigin"]["phase"] = json!("completed");
-        plan["updatedAt"] = json!(now_iso());
         if initial {
             self.persist_terminal_transition(plan, "host_recovery")?;
         } else {
@@ -509,7 +609,13 @@ mod tests {
 
     #[tokio::test]
     async fn autonomy_verification_fences_late_results_after_cancel_timeout_or_lease_change() {
-        for error in ["CANCELLED", "verifier_timeout", "LEASE_REQUIRED"] {
+        for error in [
+            "CANCELLED",
+            "verifier_timeout",
+            "LEASE_REQUIRED",
+            "session_state_changed",
+            "user_withdrawn",
+        ] {
             check_interrupted_verification(error).await;
         }
     }
@@ -524,6 +630,7 @@ mod tests {
         let (entry, _profile) = host
             .bind_workspace(workspace.path(), Some("FenceBot"))
             .unwrap();
+        let workspace_id = entry.workspace_id.clone();
         let sup = host.supervisor();
         let plan = json!({
             "planId":"plan-reverify-fence", "conversationId":"reverify-fence",
@@ -601,7 +708,7 @@ mod tests {
             assert!(!refs.is_empty());
             match expected_error {
                 "CANCELLED" => {
-                    cancel.cancel();
+                    sup.cancel_live_verification("reverify-fence");
                     Some(verdict_tx)
                 }
                 "verifier_timeout" => {
@@ -609,8 +716,24 @@ mod tests {
                     tokio::time::advance(VERIFIER_TIMEOUT + Duration::from_secs(1)).await;
                     Some(verdict_tx)
                 }
-                "LEASE_REQUIRED" => {
-                    owns_lease.set(false);
+                "user_withdrawn" => {
+                    sup.control_session(
+                        &workspace_id,
+                        "reverify-fence",
+                        "cancel",
+                        "user_withdrawn",
+                        true,
+                    )
+                    .unwrap();
+                    Some(verdict_tx)
+                }
+                "LEASE_REQUIRED" | "session_state_changed" => {
+                    if expected_error == "LEASE_REQUIRED" {
+                        owns_lease.set(false);
+                    } else {
+                        sup.reprioritize_session(&workspace_id, "reverify-fence", "high", true)
+                            .unwrap();
+                    }
                     verdict_tx.send(json!({
                         "passed": true, "failedCriteria":[], "missingEvidence":[], "risks":[],
                         "evidenceRefs":refs, "summary":"Checked current file on disk"
@@ -626,20 +749,124 @@ mod tests {
         }
         drop(held_response);
         server.await.unwrap();
-        assert_eq!(rejected.unwrap_err().code, expected_error);
+        assert_eq!(
+            rejected.unwrap_err().code,
+            if expected_error == "user_withdrawn" {
+                "session_state_changed"
+            } else {
+                expected_error
+            }
+        );
         let mut active = sup.read_plan("plan-reverify-fence").unwrap();
         assert_eq!(active["verificationReport"], plan["verificationReport"]);
         if expected_error == "LEASE_REQUIRED" {
             assert!(sup.recover_verification(&mut active).unwrap());
         }
 
-        assert_eq!(active["delegationOrigin"]["phase"], "completed");
+        if expected_error == "user_withdrawn" {
+            assert_eq!(active["delegationOrigin"]["phase"], "cancelled");
+            assert_eq!(
+                active["delegationOrigin"]["cancellation"]["disposition"],
+                "user_withdrawn"
+            );
+        } else {
+            assert_eq!(active["delegationOrigin"]["phase"], "completed");
+        }
         assert_eq!(active["runner"]["verifierRuns"][1]["status"], "interrupted");
         assert_eq!(active["verificationReport"], plan["verificationReport"]);
     }
 
     #[tokio::test]
-    async fn reverify_session_settles_already_reported_session_and_persists_run_summary() {
+    async fn maintenance_repairs_only_orphan_verifiers_and_blocking_panic_releases_its_run() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let host = Arc::new(crate::NativeProjectHost::new(home.path(), "test", Some(1)).unwrap());
+        let (entry, profile) = host
+            .bind_workspace(workspace.path(), Some("Orphans"))
+            .unwrap();
+        let workspace_id = entry.workspace_id;
+        host.ensure_lease(&workspace_id).unwrap();
+        let supervisor = host.supervisor();
+        let parent = profile.agent_conversation_id.unwrap();
+        let seed = |id: &str, status: &str| {
+            json!({
+                "planId": id, "conversationId": id, "title": id, "status": status,
+                "updatedAt": "2026-11-25T01:01:00.000Z",
+                "delegationOrigin": {
+                    "workspaceId": workspace_id, "sessionId": id, "parentConversationId": parent,
+                    "phase": "verifying", "lastWorkerOutput": "durable worker output", "readOnly": true
+                }
+            })
+        };
+        let mut orphan = seed("plan-orphan", "executing");
+        SessionSupervisor::record_verifier_run(&mut orphan);
+        supervisor.save_plan_json(&orphan).unwrap();
+
+        let mut live = seed("plan-live", "completed");
+        let live_id = SessionSupervisor::record_verifier_run(&mut live);
+        let cancel = CancellationToken::new();
+        let guard = supervisor
+            .register_verification(
+                &workspace_id,
+                "plan-live",
+                "plan-live",
+                live_id,
+                &cancel,
+                &|| true,
+            )
+            .unwrap();
+        supervisor.save_plan_json(&live).unwrap();
+        let report = host
+            .run_background_maintenance(&workspace_id, "2026-11-25T08:00:00.000Z", None, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(report.recovered_verifications, 1);
+        assert_eq!(supervisor.read_plan("plan-live").unwrap(), live);
+        assert!(!guard.token().is_cancelled());
+
+        let recovered = supervisor.read_plan("plan-orphan").unwrap();
+        assert_eq!(recovered["status"], "completed");
+        assert_eq!(
+            recovered["delegationOrigin"]["lastWorkerOutput"],
+            "durable worker output"
+        );
+        assert_eq!(
+            recovered["runner"]["verifierRuns"][0]["error"],
+            "verifier_host_interrupted"
+        );
+        // A newer run is still fenced from cleanup by the older guard.
+        let replacement_id = SessionSupervisor::record_verifier_run(&mut live);
+        supervisor.save_plan_json(&live).unwrap();
+        drop(guard);
+        assert_eq!(supervisor.read_plan("plan-live").unwrap(), live);
+
+        let join_host = Arc::clone(&host);
+        let join = tokio::task::spawn_blocking(move || {
+            let _guard = join_host
+                .supervisor()
+                .register_verification(
+                    &workspace_id,
+                    "plan-live",
+                    "plan-live",
+                    replacement_id,
+                    &cancel,
+                    &|| true,
+                )
+                .unwrap();
+            panic!("synthetic blocking verifier panic");
+        })
+        .await;
+        assert!(join.unwrap_err().is_panic());
+        let failed_run = supervisor.read_plan("plan-live").unwrap();
+        assert_eq!(failed_run["delegationOrigin"]["phase"], "completed");
+        assert_eq!(
+            failed_run["runner"]["verifierRuns"][1]["error"],
+            "verifier_host_interrupted"
+        );
+    }
+
+    #[tokio::test]
+    async fn reverify_session_requires_delivery_of_the_new_revision_and_persists_run_summary() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         fs::write(workspace.path().join("README.md"), "verified content").unwrap();
@@ -790,10 +1017,10 @@ mod tests {
         server.await.unwrap();
 
         assert_eq!(out["ok"], true);
-        assert_eq!(out["decision"]["acceptedBy"], "policy");
+        assert!(out["decision"]["acceptedBy"].is_null());
         let final_plan = sup.read_plan("plan-reverify-settle").unwrap();
-        assert_eq!(final_plan["delegationOrigin"]["phase"], "accepted");
-        assert_eq!(final_plan["resultAcceptance"]["acceptedBy"], "policy");
+        assert_eq!(final_plan["delegationOrigin"]["phase"], "completed");
+        assert!(final_plan["resultAcceptance"].is_null());
         let last_run = final_plan["runner"]["verifierRuns"]
             .as_array()
             .and_then(|a| a.last())

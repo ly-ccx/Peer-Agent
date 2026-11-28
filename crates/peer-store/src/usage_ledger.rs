@@ -1,5 +1,8 @@
 //! ADR25/131 recoverable billing sink. A billing log is never context authority.
-use crate::{ConversationStore, DirectoryLock, StoreError, durable_jsonl as log, files, valid_id};
+use crate::{
+    ConversationStore, DirectoryLock, StoreError, conversation_write::lock_index,
+    durable_jsonl as log, files, valid_id,
+};
 use peer_protocol::{
     JsonDecodeError, JsonLimits, RuntimeTurnUsage, approval_args_digest as stable_json_digest,
     decode_json_bounded, javascript_json_string, javascript_trim,
@@ -431,7 +434,7 @@ impl UsageFiles {
         let index = directory.join("index.jsonl");
         let intent = directory.join(INTENT_FILE);
         let locks = [
-            DirectoryLock::acquire(&index, Duration::from_millis(100), cancel)?,
+            lock_index(&directory, cancel)?,
             DirectoryLock::acquire(&intent, Duration::from_millis(100), cancel)?,
             DirectoryLock::acquire(&ledger, Duration::from_millis(100), cancel)?,
         ];

@@ -9,9 +9,9 @@ function Fixture() {
   const i18n = createI18n('zh-CN');
   const obligations = useObligationGrants('workspace', 'parent', async () => {});
   return <BotWorkPanel workspaceId="workspace" workIndex={indexBotWork([], true)} rows={[]} messages={[]}
-    recovering={false} headerTarget={null} i18n={i18n} onOpenTask={() => {}} onRefreshWork={async () => {}}
-    obligationGrants={obligations.grants} obligationError={obligations.error} obligationWriter={obligations.writer} obligationSubmittingId={obligations.submittingId}
-    onObligationConfirm={obligations.confirm} onObligationReject={obligations.reject} onObligationRetry={obligations.retry}>
+    recovering={false} headerTarget={null} i18n={i18n} botName="Bot" avatar={null} onOpenTask={() => {}} onRefreshWork={async () => {}}
+    onOpenSettings={() => {}} onOpenHistory={() => {}} onOpenBlocker={() => {}} onOpenCard={() => {}} onOpenObjective={() => {}}
+    onOpenGrant={id => document.getElementById(`obligation-grant-${id}`)?.focus()} obligationGrants={obligations.grants}>
     <div className="bot-convo">
       <div className="bot-thread"><p className="bot-thread-row">刚才的对话还在这里。</p></div>
       <ObligationGrantList grants={obligations.grants} error={obligations.error} writer={obligations.writer} submittingId={obligations.submittingId}

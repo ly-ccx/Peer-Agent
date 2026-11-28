@@ -1,4 +1,5 @@
-import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { taskEntry } from './bot-work-panel-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -12,23 +13,6 @@ export async function setFixtureBotAccess(page, workspaceId, accessLevel) {
   }, { workspaceId, accessLevel });
   assert.equal(result.ok, true, JSON.stringify(result));
   return result.policy;
-}
-
-async function openTaskScene(page, scene) {
-  await openFullTask(page);
-  const information = page.locator('.bot-task-information');
-  if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
-  // Native details keeps descendant rectangles at their final positions while
-  // its clipped content is still expanding. Wait for that real transition
-  // before dispatching the single pointer action into the revealed content.
-  await information.evaluate(async node => {
-    await Promise.all(node.getAnimations({ subtree: true })
-      .filter(animation => Number.isFinite(animation.effect?.getComputedTiming().endTime))
-      .map(animation => animation.finished.catch(() => {})));
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  });
-  await page.locator('.bot-task-scene').click();
-  await scene.waitFor({ state: 'visible' });
 }
 
 /** Uses production local IPC/persistence and actual child conversation metadata. No model calls. */
@@ -68,14 +52,11 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bots[0].workspaceId),
     result => result.sessions?.some(session => session.sessionId === command.sessions[0].sessionId && session.conversationId === child.id));
-  await page.getByRole('button', { name: '机器人设置', exact: true }).click();
-  // Wait for the compact resource detail surface before opening a child.
-  await page.locator(BOT_DETAIL_SURFACE).locator('.bot-drawer-body').waitFor({ state: 'visible' });
-  await page.getByRole('tab', { name: '任务', exact: true }).click();
-  if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
-  await page.locator('.bot-task-row').filter({ has: page.getByText(command.sessions[0].title, { exact: true }) }).click();
-  const scene = page.locator('.resource-workspace.workbench-panel--open:not([inert]) .resource-conversation-view[data-active="true"] .bot-inline-scene');
-  await openTaskScene(page, scene);
+  const row = await taskEntry(page, command.sessions[0]);
+  await row.click();
+  const workspace = page.locator('.bot-task-workspace');
+  const scene = workspace.locator('.bot-task-conversation-stage .bot-inline-scene');
+  await scene.waitFor();
   // Process viewing deliberately has no composer or inherited access control.
   // Verify inheritance through its real host facts, and the view through its DOM.
   const assertReadOnlyScene = async () => {
@@ -91,9 +72,8 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     const previousScene = await scene.elementHandle();
     await page.setViewportSize({ width, height: 860 }); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
-    // One side workspace retains the exact scene while its width changes.
-    // It does not remount a second push/cover drawer at the breakpoint.
-    await page.locator('.resource-workspace.workbench-panel--open:not([inert])').waitFor({ state: 'visible' });
+    // Keep the same worker conversation as the task workspace adapts to the window.
+    await workspace.waitFor();
     await page.waitForFunction(() => !document.getAnimations().some(animation => animation.playState === 'running'
       && Number.isFinite(animation.effect?.getComputedTiming().endTime) && animation.effect?.target?.checkVisibility()));
     assert.equal(await scene.evaluate((node, previous) => node === previous && previous.isConnected, previousScene), true);
@@ -102,10 +82,9 @@ export async function checkBotAccessPolicy({ page, until, report, captureDirecto
     await assertReadOnlyScene();
     await page.screenshot({ path: path.join(captureDirectory, `bot-access-child-${width}-${appearance}.png`), animations: 'disabled' });
   }
-  await scene.locator('.bot-inline-scene-heading button').focus(); await page.keyboard.press('Enter');
+  await page.locator('.bot-crumb-parent').focus(); await page.keyboard.press('Enter');
   await scene.waitFor({ state: 'detached' });
-  await page.locator(BOT_DETAIL_CLOSE).focus(); await page.keyboard.press('Enter');
-  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
+  await workspace.waitFor({ state: 'hidden' });
   assert.ok((await picker.innerText()).includes('完全访问'));
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: command.seq + 1 })); renameSync(commandFile + '.next', commandFile);
   await setFixtureBotAccess(page, bots[0].workspaceId, 'ask_before_local');

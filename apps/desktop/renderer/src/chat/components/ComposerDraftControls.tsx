@@ -648,119 +648,121 @@ const ComposerDraftField = memo(function ComposerDraftField({
           ))}
         </div>
       ) : null}
-      <ComposerInputSuggestion prediction={prediction} text={draft} i18n={predictionI18n} />
-      <textarea
-        ref={textareaRef}
-        value={draft}
-        disabled={!hasProvider}
-        placeholder={prediction.isPresented ? '' : hasProvider
-          ? isBusy
-            ? (isZh ? '随心输入' : 'Type freely')
-            : variant === 'home'
-              ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
-              : (isZh ? '输入消息，@ 引用文件或会话' : 'Type a message, @ to mention a file or session')
-          : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
-        rows={1}
-        style={quotes.length && quoteFlow ? { textIndent: `${quoteFlow.indent}px` } : undefined}
-        onPaste={onPaste}
-        onChange={prediction.onChange}
-        onCompositionStart={event => composition.start(event.currentTarget)}
-        onCompositionEnd={event => composition.end(event.currentTarget)}
-        onKeyUp={event => composition.keyUp(event.nativeEvent)}
-        onBlur={() => composition.reset()}
-        onKeyDown={(event) => {
-          if (composition.keyDown(event.nativeEvent)) return;
-          // 引用是覆盖层，不在 textarea 文本里。光标在正文最开头时，退格应像删掉前面那个字一样删掉引用。
-          if (
-            event.key === 'Backspace'
-            && !event.nativeEvent.isComposing
-            && event.keyCode !== 229
-            && !event.metaKey
-            && !event.ctrlKey
-            && !event.altKey
-            && quotes.length > 0
-            && onRemoveQuote
-            && event.currentTarget.selectionStart === 0
-            && event.currentTarget.selectionEnd === 0
-          ) {
-            event.preventDefault();
-            onRemoveQuote(quotes[quotes.length - 1].id);
-            return;
-          }
-          if (showSlashCommands) {
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              setActiveSlashIndex((index) => (index + 1) % slashCommands.length);
-              return;
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault();
-              setActiveSlashIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length);
-              return;
-            }
-            if ((event.key === 'Tab' || event.key === 'Enter')
+      <div className="composer-input-field">
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          disabled={!hasProvider}
+          placeholder={prediction.isPresented ? '' : hasProvider
+            ? isBusy
+              ? (isZh ? '随心输入' : 'Type freely')
+              : variant === 'home'
+                ? (isZh ? '描述任务，或告诉 Peer Agent 你想完成什么…' : 'Describe a task, or tell Peer Agent what you want to accomplish…')
+                : (isZh ? '输入消息，@ 引用文件或会话' : 'Type a message, @ to mention a file or session')
+            : (isZh ? '请先在设置中连接 AI 服务' : 'Connect an AI service in Settings first')}
+          rows={1}
+          style={quotes.length && quoteFlow ? { textIndent: `${quoteFlow.indent}px` } : undefined}
+          onPaste={onPaste}
+          onChange={prediction.onChange}
+          onCompositionStart={event => composition.start(event.currentTarget)}
+          onCompositionEnd={event => composition.end(event.currentTarget)}
+          onKeyUp={event => composition.keyUp(event.nativeEvent)}
+          onBlur={() => composition.reset()}
+          onKeyDown={(event) => {
+            if (composition.keyDown(event.nativeEvent)) return;
+            // 引用是覆盖层，不在 textarea 文本里。光标在正文最开头时，退格应像删掉前面那个字一样删掉引用。
+            if (
+              event.key === 'Backspace'
               && !event.nativeEvent.isComposing
               && event.keyCode !== 229
-              && draft !== slashCommands[activeSlashIndex]?.value) {
+              && !event.metaKey
+              && !event.ctrlKey
+              && !event.altKey
+              && quotes.length > 0
+              && onRemoveQuote
+              && event.currentTarget.selectionStart === 0
+              && event.currentTarget.selectionEnd === 0
+            ) {
               event.preventDefault();
-              const command = slashCommands[activeSlashIndex] ?? slashCommands[0];
-              if (command) applySlashCommand(command);
+              onRemoveQuote(quotes[quotes.length - 1].id);
               return;
             }
-            if (event.key === 'Escape') {
+            if (showSlashCommands) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setActiveSlashIndex((index) => (index + 1) % slashCommands.length);
+                return;
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActiveSlashIndex((index) => (index - 1 + slashCommands.length) % slashCommands.length);
+                return;
+              }
+              if ((event.key === 'Tab' || event.key === 'Enter')
+                && !event.nativeEvent.isComposing
+                && event.keyCode !== 229
+                && draft !== slashCommands[activeSlashIndex]?.value) {
+                event.preventDefault();
+                const command = slashCommands[activeSlashIndex] ?? slashCommands[0];
+                if (command) applySlashCommand(command);
+                return;
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setDismissedCompletion(`${conversationId}:${draft}`);
+                return;
+              }
+            }
+            if (showContextMentions && atQuery) {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                if (mentionHits.length === 0) return;
+                setActiveMentionIndex((index) => (index + 1) % mentionHits.length);
+                return;
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (mentionHits.length === 0) return;
+                setActiveMentionIndex((index) => (index - 1 + mentionHits.length) % mentionHits.length);
+                return;
+              }
+              if ((event.key === 'Tab' || event.key === 'Enter')
+                && mentionHits.length > 0
+                && !event.nativeEvent.isComposing
+                && event.keyCode !== 229) {
+                event.preventDefault();
+                const hit = mentionHits[activeMentionIndex] ?? mentionHits[0];
+                if (hit) applyMentionHit(hit);
+                return;
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setDismissedCompletion(`${conversationId}:${draft}`);
+                return;
+              }
+            }
+            if (prediction.onKeyDown(event)) return;
+            if (event.key === 'Escape' && editingMessage) {
               event.preventDefault();
-              event.stopPropagation();
-              setDismissedCompletion(`${conversationId}:${draft}`);
+              onCancelEdit?.();
               return;
             }
-          }
-          if (showContextMentions && atQuery) {
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              if (mentionHits.length === 0) return;
-              setActiveMentionIndex((index) => (index + 1) % mentionHits.length);
-              return;
-            }
-            if (event.key === 'ArrowUp') {
-              event.preventDefault();
-              if (mentionHits.length === 0) return;
-              setActiveMentionIndex((index) => (index - 1 + mentionHits.length) % mentionHits.length);
-              return;
-            }
-            if ((event.key === 'Tab' || event.key === 'Enter')
-              && mentionHits.length > 0
+            // IME composition (Chinese/Japanese/etc.): Enter confirms candidate, must not send.
+            if (
+              event.key === 'Enter'
+              && !event.shiftKey
               && !event.nativeEvent.isComposing
-              && event.keyCode !== 229) {
+              && event.keyCode !== 229
+            ) {
               event.preventDefault();
-              const hit = mentionHits[activeMentionIndex] ?? mentionHits[0];
-              if (hit) applyMentionHit(hit);
-              return;
+              onPrimaryAction();
             }
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              event.stopPropagation();
-              setDismissedCompletion(`${conversationId}:${draft}`);
-              return;
-            }
-          }
-          if (prediction.onKeyDown(event)) return;
-          if (event.key === 'Escape' && editingMessage) {
-            event.preventDefault();
-            onCancelEdit?.();
-            return;
-          }
-          // IME composition (Chinese/Japanese/etc.): Enter confirms candidate, must not send.
-          if (
-            event.key === 'Enter'
-            && !event.shiftKey
-            && !event.nativeEvent.isComposing
-            && event.keyCode !== 229
-          ) {
-            event.preventDefault();
-            onPrimaryAction();
-          }
-        }}
-      />
+          }}
+        />
+        <ComposerInputSuggestion prediction={prediction} text={draft} i18n={predictionI18n} />
+      </div>
       <input
         ref={fileInputRef}
         type="file"

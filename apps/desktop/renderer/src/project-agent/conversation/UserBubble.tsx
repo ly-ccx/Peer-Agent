@@ -5,13 +5,15 @@ import { BotAttachments } from './BotAttachments';
 import { ReplyAnchorPreview } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { useState } from 'react';
-import { userReceipt } from '../state/userReceiptState';
+import { userReceipt, type UserReplyWait } from '../state/userReceiptState';
 
 import type { BotWorkIndex } from '../state/botWorkState';
 
 export function UserBubble({
   message,
+  workspaceId,
   replied,
+  replyWait,
   highlighted = false,
   workIndex,
   i18n,
@@ -21,7 +23,9 @@ export function UserBubble({
   onLocateSession,
 }: {
   readonly message: BotChatMessage;
+  readonly workspaceId: string;
   readonly replied: boolean;
+  readonly replyWait?: UserReplyWait;
   readonly highlighted?: boolean;
   readonly workIndex?: BotWorkIndex;
   readonly i18n: I18nRuntime;
@@ -32,7 +36,7 @@ export function UserBubble({
 }) {
   const [arriving, setArriving] = useState(message.pending === 'sending');
   const excerpt = message.quoteRefs.length > 1 ? message.quoteRefs[1] : '';
-  const receipt = userReceipt(message, replied);
+  const receipt = userReceipt(message, replied, replyWait);
   const markText = (item: BotChatMessage['dispositions'][number]) => (
     item.kind === 'out_of_scope'
       ? i18n.t(item.labelKey, { title: item.title || i18n.t('projectAgent.chat.taskFallback') })
@@ -65,7 +69,7 @@ export function UserBubble({
           <ReplyAnchorPreview id={message.quoteRefs[0]} anchor={anchors.get(message.quoteRefs[0])}
             excerpt={excerpt} className="bot-user-quote" i18n={i18n} onJump={onJump} />
         ) : null}
-        {message.attachments?.length ? <BotAttachments attachments={message.attachments} i18n={i18n} /> : message.images?.length ? (
+        {message.attachments?.length ? <BotAttachments attachments={message.attachments} workspaceId={workspaceId} i18n={i18n} /> : message.images?.length ? (
           <div className="bot-user-images">
             {message.images.map((image) => (
               <img key={image.id} src={image.dataUrl} alt={image.name} />

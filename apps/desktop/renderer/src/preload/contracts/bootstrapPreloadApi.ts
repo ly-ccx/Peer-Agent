@@ -1029,6 +1029,7 @@ export interface BootstrapPreloadApi {
   readonly stopShellTask: (taskId: string) => Promise<Record<string, unknown>>;
   readonly listShellPermissionRules: () => Promise<readonly Record<string, unknown>[]>;
   readonly addShellPermissionRule: (rule: Record<string, unknown>) => Promise<readonly Record<string, unknown>[]>;
+  readonly listSkillInstallTargets: () => Promise<readonly import('@peer-agent/protocol').SkillInstallTarget[]>;
   readonly listSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
   readonly getSkillDetail: (skillId: string, workspacePath?: string | null) => Promise<SkillDetail | null>;
   readonly refreshSkills: (workspacePaths?: readonly string[]) => Promise<readonly SkillSummary[]>;
@@ -1055,7 +1056,7 @@ export interface BootstrapPreloadApi {
   readonly getSkillHubSkillDetail: (identity: Omit<SkillHubInstallRequest, 'version'>) => Promise<Record<string, unknown>>;
   readonly getSkillHubSyncStatus: () => Promise<SkillHubSyncStatus>;
   readonly syncSkillHubSkills: (options?: { readonly maxPages?: number }) => Promise<SkillHubSyncStatus>;
-  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<SkillMarketplaceInstallResult>;
+  readonly installSkillHubSkill: (identity: SkillHubInstallRequest) => Promise<import('@peer-agent/protocol').SkillHubInstallResult>;
   readonly listSkillHubCategories: () => Promise<readonly import('@peer-agent/protocol').SkillHubCategory[]>;
   readonly queryQoderSkills: (query?: import('@peer-agent/protocol').QoderMarketplaceQuery) => Promise<import('@peer-agent/protocol').QoderMarketplacePage>;
   readonly getQoderSkillDetail: (identity: { readonly skillId: string }) => Promise<import('@peer-agent/protocol').QoderMarketplaceSkillDetail & { readonly skillMd: string | null }>;
@@ -1106,6 +1107,7 @@ export interface BootstrapPreloadApi {
     answerTo?: string;
   }) => Promise<import('@peer-agent/protocol').ProjectAgentSubmitInputResult>;
   readonly projectAgentReadConversation: (params: { workspaceId: string; limit?: number; before?: string | null; latest?: boolean; kinds?: readonly string[]; presentationOnly?: boolean; processFor?: string; view?: import('@peer-agent/protocol').BotConversationReadView }) => Promise<{ ok: boolean; code?: string; cards?: readonly Record<string, unknown>[]; recovery?: import('@peer-agent/protocol').BotRecoveryStatus | null; recoveryAttention?: boolean; messages?: readonly Record<string, unknown>[]; nextCursor?: string | null; activeReplyQuestionId?: import('@peer-agent/protocol').BotDecisionSnapshot['activeReplyQuestionId']; processMessageId?: string | null; activity?: ProjectAgentActivity | null; familiarizeOffer?: { kind?: string; text?: string; action?: string } | null }>;
+  readonly projectAgentReadInputImage: (params: { workspaceId: string; blobDigest: string; mimeType: string }) => Promise<{ ok: true; dataUrl: string } | { ok: false; code?: string }>;
   readonly projectAgentReadEvidence: (params: ProjectAgentEvidenceReadRequest) => Promise<ProjectAgentEvidenceReadResult>;
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; scope?: 'all' | 'active' | 'history'; category?: 'all' | 'settled' | 'canceled' | 'failed'; query?: string; cursor?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[]; totalCount?: number; nextCursor?: string | null }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
@@ -1156,6 +1158,7 @@ export interface BootstrapPreloadApi {
   readonly projectAgentDiagnostics: (params: import('@peer-agent/protocol').ProjectDiagnosticsRequest) => Promise<import('@peer-agent/protocol').ProjectDiagnosticsResult>;
   readonly projectAgentRetry: (params: { workspaceId: string; turnId: string }) => Promise<{ ok: boolean; code?: string }>;
   readonly projectAgentStopResponse: (params: ProjectAgentStopResponseRequest) => Promise<ProjectAgentStopResponseResult>;
+  readonly projectAgentReadGitStatus: (params: { workspaceId: string }) => Promise<import('../../project-agent/gitStatusTypes').WorkPanelGitStatus>;
   readonly projectObjectivesList: (params: ProjectObjectiveListRequest) => Promise<ProjectObjectiveListResult>;
   readonly projectObjectivesUpdate: (params: ProjectObjectiveUpdateRequest) => Promise<ProjectObjectiveItemResult>;
   readonly projectObjectivesPause: (params: ProjectObjectiveCommandRequest) => Promise<ProjectObjectiveItemResult>;

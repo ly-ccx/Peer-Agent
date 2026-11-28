@@ -36,7 +36,7 @@ test('verifies Ed25519, MD5 and content hash before entering the existing Skill 
   let installOptions;
   const installer = createSkillHubVerifiedInstaller({
     apiClient: value.apiClient,
-    installSkillFromZip: async (zip, options) => {
+    prepareSkillFromZip: (zip) => async (options) => {
       installed = zip;
       installOptions = options;
       return { id: 'demo' };
@@ -63,7 +63,7 @@ test('verifies Ed25519, MD5 and content hash before entering the existing Skill 
 
 test('accepts a public namespace that differs from the verified publisher owner', async () => {
   const value = fixture({ installIdentity: { namespace: 'tencent-adm', slug: 'demo', publisher: 'u_b0de8114' } });
-  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: async () => ({ id: 'demo' }) });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, prepareSkillFromZip: () => async () => ({ id: 'demo' }) });
   const result = await installer.install({ ...identity, namespace: 'tencent-adm' });
   assert.equal(result.ok, true);
 });
@@ -73,7 +73,7 @@ test('rejects a publisher mismatch when the public namespace is an alias', async
     installIdentity: { namespace: 'tencent-adm', slug: 'demo', publisher: 'u_b0de8114' },
     overridePayload: { publisher_user_name: 'another-publisher' },
   });
-  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: async () => ({ id: 'demo' }) });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, prepareSkillFromZip: () => async () => ({ id: 'demo' }) });
   await assert.rejects(
     () => installer.install({ ...identity, namespace: 'tencent-adm' }),
     /skillhub_signature_publisher_mismatch/,
@@ -85,7 +85,11 @@ test('forwards install scope to Skill Store and echoes it in the result', async 
   let installOptions;
   const installer = createSkillHubVerifiedInstaller({
     apiClient: value.apiClient,
-    installSkillFromZip: async (_zip, options) => {
+    targetDirectory: {
+      resolve: ([request]) => [{ receipt: { path: request.workspacePath } }],
+      recheck: (target) => target.path,
+    },
+    prepareSkillFromZip: () => async (options) => {
       installOptions = options;
       return { id: 'demo' };
     },
@@ -124,7 +128,7 @@ test('rejects an invalid signature, unknown key id, and untrusted key issuer bef
   };
   for (const value of [fixture({ tamperSignature: true }), fixture({ keyId: 'unknown' }), untrustedIssuer]) {
     let installs = 0;
-    const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: () => { installs += 1; } });
+    const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, prepareSkillFromZip: () => { installs += 1; } });
     await assert.rejects(() => installer.install(identity), /signature_(invalid|key_unknown|key_untrusted)/);
     assert.equal(installs, 0);
   }
@@ -146,7 +150,7 @@ test('rejects a tampered ZIP, wrong content hash, identity substitution, and unk
     [{ ...unknownVersion.apiClient, getVersionSignature: async () => ({ ...unknownSignature, hash_version: 2 }) }, /hash_version_unsupported/],
   ];
   for (const [apiClient, expected] of variants) {
-    const installer = createSkillHubVerifiedInstaller({ apiClient, installSkillFromZip: () => { throw new Error('must not install'); } });
+    const installer = createSkillHubVerifiedInstaller({ apiClient, prepareSkillFromZip: () => { throw new Error('must not install'); } });
     await assert.rejects(() => installer.install(identity), expected);
   }
 });
@@ -156,7 +160,7 @@ test('accepts standard directory entries while preserving archive safety checks'
   zip.addFile('demo/', Buffer.alloc(0));
   zip.addFile('demo/SKILL.md', Buffer.from('# Skill'));
   const value = fixture({ zipBuffer: zip.toBuffer() });
-  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: () => ({ id: 'demo' }) });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, prepareSkillFromZip: () => () => ({ id: 'demo' }) });
   const result = await installer.install(identity);
   assert.equal(result.skillId, 'demo');
 });
@@ -178,6 +182,6 @@ test('rejects unsafe archives and missing SKILL.md', async () => {
   const zip = new AdmZip();
   zip.addFile('README.md', Buffer.from('x'));
   const value = fixture({ zipBuffer: zip.toBuffer() });
-  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, installSkillFromZip: () => ({ id: 'x' }) });
+  const installer = createSkillHubVerifiedInstaller({ apiClient: value.apiClient, prepareSkillFromZip: () => () => ({ id: 'x' }) });
   await assert.rejects(() => installer.install(identity), /missing_skill/);
 });

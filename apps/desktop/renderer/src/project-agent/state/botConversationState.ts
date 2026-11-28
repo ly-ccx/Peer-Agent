@@ -4,7 +4,7 @@
  * agent_turn 的内部文本不进入列表，但它的工具调用用来推导用户消息上的处置标记。
  * 模型不能直接写处置。
  */
-import type { TranslationKey } from '@peer-agent/i18n';
+import type { I18nRuntime, TranslationKey } from '@peer-agent/i18n';
 import type { ChatAttachment } from '../../chat/state/types';
 import { normalizeResourceFeedbackList, projectResourceFeedbackTransport, type ResourceFeedback, type ProjectInputAttachment } from '@peer-agent/protocol';
 import {
@@ -144,7 +144,7 @@ export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: s
 }
 
 export type ConversationRow =
-  | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly label: string }
+  | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly digest?: boolean; readonly label: string }
   | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[]; readonly processUpdates?: readonly import('./botNarrationState').BotNarrationSegment[]; readonly narration?: readonly import('./botNarrationState').BotNarrationSegment[] };
 
 export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
@@ -211,6 +211,8 @@ function readAttachments(value: unknown): ChatAttachment[] {
       name: readString(item.name) || 'file', mimeType: readString(item.mimeType),
       size: typeof item.size === 'number' ? item.size : 0, kind: item.kind,
       ...(typeof item.dataUrl === 'string' && item.dataUrl.startsWith('data:image/') ? { dataUrl: item.dataUrl } : {}),
+      ...(item.kind === 'image' && typeof item.blobDigest === 'string' && /^[a-f0-9]{64}$/.test(item.blobDigest)
+        ? { blobDigest: item.blobDigest } : {}),
     }));
 }
 
@@ -614,18 +616,35 @@ export function showAgentThinking(
 
 function separatorFor(previous: BotChatMessage | null, message: BotChatMessage): ConversationRow | null {
   const proactive = message.proactive === true;
+  const digest = message.meta.surfacing === 'digest';
   const previousAt = previous ? Date.parse(previous.createdAt) : Number.NaN;
   const currentAt = Date.parse(message.createdAt);
   const gap = Number.isFinite(previousAt) && Number.isFinite(currentAt) ? currentAt - previousAt : 0;
   const wide = gap > CONVERSATION_GAP_MS;
-  if (!proactive && !wide) return null;
+  if (!digest && !message.separatorLabel && !wide) return null;
   return {
     type: 'separator',
     id: `sep-${message.id}`,
     at: message.createdAt,
     proactive,
+    ...(digest ? { digest: true } : {}),
     label: message.separatorLabel,
   };
+}
+
+export function formatConversationSeparator(
+  row: Extract<ConversationRow, { type: 'separator' }>,
+  i18n: I18nRuntime,
+): string {
+  if (row.label) return row.label;
+  const stamp = formatConversationStamp(row.at);
+  const when = stamp
+    ? (stamp.sameDay
+      ? i18n.t('projectAgent.chat.today', { time: stamp.clock })
+      : i18n.t('projectAgent.chat.earlierDay', { date: stamp.date, time: stamp.clock }))
+    : '';
+  if (row.digest && when) return `${when} · ${i18n.t('projectAgent.chat.digest')}`;
+  return when;
 }
 
 function readMeta(value: unknown): BotChatMeta {

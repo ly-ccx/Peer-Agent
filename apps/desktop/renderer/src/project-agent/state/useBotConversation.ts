@@ -212,7 +212,7 @@ export function useBotConversation(workspaceId: string) {
     const input = result.input;
     if (generationRef.current === ticket && input && projectInputWasReceived(result, workspaceId, input.inputId)) {
       setAwaitingInputs(current => [...current.filter(item => item.inputId !== input.inputId), {
-        inputId: input.inputId, createdAt: input.createdAt, ...(!result.ok ? { deliveryIssue: true } : {}),
+        inputId: input.inputId, ...(!result.ok ? { deliveryIssue: true } : {}),
       }]);
     }
     return result;

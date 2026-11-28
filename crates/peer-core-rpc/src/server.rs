@@ -32,7 +32,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{Notify, mpsc, oneshot},
+    sync::{Notify, Semaphore, mpsc, oneshot},
     task::JoinSet,
 };
 
@@ -559,20 +559,25 @@ impl Drop for BackgroundCounterGuard {
 #[derive(Clone)]
 pub(crate) struct LocalBackgroundSpawner {
     local_tx: mpsc::UnboundedSender<LocalJob>,
+    io_handle: Option<tokio::runtime::Handle>,
     active_background: Arc<AtomicUsize>,
     background_done: Arc<Notify>,
 }
 
 impl LocalBackgroundSpawner {
+    fn bg_guard(&self) -> BackgroundCounterGuard {
+        self.active_background.fetch_add(1, Ordering::SeqCst);
+        BackgroundCounterGuard {
+            counter: Arc::clone(&self.active_background),
+            notify: Arc::clone(&self.background_done),
+        }
+    }
+
     pub(crate) fn spawn<F>(&self, spawn_fn: F) -> Result<(), RpcError>
     where
         F: FnOnce(BackgroundCounterGuard) + Send + 'static,
     {
-        let guard = BackgroundCounterGuard {
-            counter: Arc::clone(&self.active_background),
-            notify: Arc::clone(&self.background_done),
-        };
-        self.active_background.fetch_add(1, Ordering::SeqCst);
+        let guard = self.bg_guard();
         let res = self.local_tx.send(Box::new(move || {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || spawn_fn(guard)));
         }));
@@ -580,6 +585,52 @@ impl LocalBackgroundSpawner {
             return Err(RpcError::shutting_down());
         }
         Ok(())
+    }
+
+    /// Spawn a `Send` task on the multi-threaded Tokio I/O pool (when available) so notifications
+    /// and live activity streaming never block behind `peer-core-local-rt`.
+    pub(crate) fn spawn_send<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        if let Some(handle) = &self.io_handle {
+            handle.spawn(fut);
+            return;
+        }
+        let _ = self.spawn(move |_guard| {
+            tokio::task::spawn_local(fut);
+        });
+    }
+
+    /// Run a `!Send` task (such as a delegated worker episode or background maintenance pass) on
+    /// its own isolated `current_thread` runtime + `LocalSet` off `peer-core-local-rt` so workers
+    /// and sync `git`/FS operations can never starve Main Bot cognition or activity forwarding.
+    pub(crate) fn spawn_isolated_local<F, Fut>(&self, thread_name: &str, make_fut: F) -> bool
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + 'static,
+    {
+        let guard = self.bg_guard();
+        let runner = move || {
+            let _guard = guard;
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    let local = tokio::task::LocalSet::new();
+                    rt.block_on(local.run_until(make_fut()));
+                }
+            }));
+        };
+        if let Some(handle) = &self.io_handle {
+            handle.spawn_blocking(runner);
+            return true;
+        }
+        std::thread::Builder::new()
+            .name(thread_name.to_owned())
+            .spawn(runner)
+            .is_ok()
     }
 }
 
@@ -595,6 +646,7 @@ pub struct CoreEngine {
     pub streams: ClassicStreamRegistry,
     pub goals: ClassicGoalRegistry,
     pub project_host: Arc<ProjectHostRuntime>,
+    bot_projection_slot: Arc<Semaphore>,
     local_tx: mpsc::UnboundedSender<LocalJob>,
     local_stop: CancellationToken,
     active_background: Arc<AtomicUsize>,
@@ -650,6 +702,7 @@ impl CoreEngine {
         let background_done = Arc::new(Notify::new());
         let spawner = LocalBackgroundSpawner {
             local_tx: local_tx.clone(),
+            io_handle: tokio::runtime::Handle::try_current().ok(),
             active_background: Arc::clone(&active_background),
             background_done: Arc::clone(&background_done),
         };
@@ -676,6 +729,7 @@ impl CoreEngine {
             streams: ClassicStreamRegistry::new(),
             goals: ClassicGoalRegistry::new(),
             project_host,
+            bot_projection_slot: Arc::new(Semaphore::new(1)),
             local_tx,
             local_stop,
             active_background,
@@ -705,6 +759,7 @@ impl CoreEngine {
             streams: self.streams.clone(),
             goals: self.goals.clone(),
             project_host: Arc::clone(&self.project_host),
+            bot_search: Mutex::new(project_bot::BotSearchIndex::default()),
             local_tx: self.local_tx.clone(),
             active_background: Arc::clone(&self.active_background),
             background_done: Arc::clone(&self.background_done),
@@ -752,6 +807,7 @@ pub struct ServerContext {
     pub streams: ClassicStreamRegistry,
     pub goals: ClassicGoalRegistry,
     pub project_host: Arc<ProjectHostRuntime>,
+    pub(crate) bot_search: Mutex<project_bot::BotSearchIndex>,
     local_tx: mpsc::UnboundedSender<LocalJob>,
     active_background: Arc<AtomicUsize>,
     background_done: Arc<Notify>,
@@ -779,6 +835,7 @@ impl ServerContext {
     {
         LocalBackgroundSpawner {
             local_tx: self.local_tx.clone(),
+            io_handle: tokio::runtime::Handle::try_current().ok(),
             active_background: Arc::clone(&self.active_background),
             background_done: Arc::clone(&self.background_done),
         }
@@ -899,6 +956,27 @@ impl ServerContext {
             owned_workspaces,
         })
         .map_err(|err| RpcError::internal_error(err.to_string()))
+    }
+
+    async fn run_bot_projection(
+        self: &Arc<Self>,
+        params: Value,
+        project: fn(&Self, Value) -> Result<Value, RpcError>,
+    ) -> Result<Value, RpcError> {
+        // History and host-status projections can scan many files. Keep them
+        // serial (including cursor updates) so they don't block input RPCs and
+        // transport delivery on the stdio runtime's only async thread.
+        let permit = Arc::clone(&self.engine.bot_projection_slot)
+            .acquire_owned()
+            .await
+            .map_err(|_| RpcError::shutting_down())?;
+        let context = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            project(&context, params)
+        })
+        .await
+        .map_err(|err| RpcError::internal_error(err.to_string()))?
     }
 
     async fn handle_request(
@@ -1065,16 +1143,23 @@ impl ServerContext {
             "project.bot.listAttention" => {
                 project_bot_read::handle_bot_list_attention(self, params)
             }
-            "project.bot.get" => project_bot_read::handle_bot_get(self, params),
+            "project.bot.get" => {
+                self.run_bot_projection(params, project_bot_read::handle_bot_get)
+                    .await
+            }
             "project.bot.listObligationGrants" => {
                 project_bot_read::handle_bot_list_obligation_grants(self, params)
             }
             "project.bot.readConversation" => {
-                project_bot_read::handle_bot_read_conversation(self, params)
+                self.run_bot_projection(params, project_bot_read::handle_bot_read_conversation)
+                    .await
             }
             "project.bot.listSessions" => project_bot_read::handle_bot_list_sessions(self, params),
             "project.bot.getSession" => project_bot_read::handle_bot_get_session(self, params),
-            "project.bot.markRead" => project_bot::handle_bot_mark_read(self, params),
+            "project.bot.markRead" => {
+                self.run_bot_projection(params, project_bot::handle_bot_mark_read)
+                    .await
+            }
             "project.bot.listApprovals" => project_bot::handle_bot_list_approvals(self, params),
             "project.bot.listHistory" => project_bot::handle_bot_list_history(self, params),
             "project.bot.search" => project_bot::handle_bot_search(self, params),
@@ -1092,7 +1177,10 @@ impl ServerContext {
             "project.bot.hostConfigure" => {
                 project_bot_live::handle_host_configure(self, params).await
             }
-            "project.bot.hostStatus" => project_bot_live::handle_host_status(self, params),
+            "project.bot.hostStatus" => {
+                self.run_bot_projection(params, project_bot_live::handle_host_status)
+                    .await
+            }
             "project.bot.create" => project_bot_live::handle_create(self, params).await,
             "project.bot.delete" => project_bot_live::handle_delete(self, params).await,
             "project.bot.rebindFolder" => {

@@ -346,6 +346,15 @@ impl OwnedChild {
         self.0.take().unwrap().wait_with_output().unwrap()
     }
 }
+// Thinking and text messages may also have segments, but carry no tool evidence.
+fn has_tool_call(message: &Value) -> bool {
+    message["segments"].as_array().is_some_and(|segments| {
+        segments
+            .iter()
+            .any(|segment| segment["type"] == "tool-call")
+    })
+}
+
 impl Fixture {
     fn new(server: &Server) -> Self {
         let root = tempfile::tempdir().unwrap();
@@ -718,10 +727,7 @@ fn four_native_wires_execute_real_tools_and_preserve_only_live_provider_continua
             reply["contextSnapshot"]["provider"], channel,
             "{wire} snapshot must use the actual provider fact"
         );
-        let calls: Vec<_> = history
-            .iter()
-            .filter(|m| m["segments"].is_array())
-            .collect();
+        let calls: Vec<_> = history.iter().filter(|m| has_tool_call(m)).collect();
         assert_eq!(calls.len(), 2);
         for m in &calls {
             assert_eq!(m["segments"][0]["result"]["status"], "success");
@@ -836,10 +842,7 @@ fn configured_api_key_channels_run_native_tools_and_record_real_evidence() {
         assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-private-header"));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-private-header"));
         let history = f.history();
-        let calls: Vec<_> = history
-            .iter()
-            .filter(|m| m["segments"].is_array())
-            .collect();
+        let calls: Vec<_> = history.iter().filter(|m| has_tool_call(m)).collect();
         assert_eq!(calls.len(), 1, "{}", case["name"]);
         assert_eq!(calls[0]["segments"][0]["result"]["status"], "success");
         assert!(calls[0]["segments"][0]["result"]["evidence"].is_object());
@@ -1077,14 +1080,22 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
         "write_file",
         json!({"path":"partial.txt","content":"never"}),
     );
-    let truncated = full.split("data: [DONE]").next().unwrap().to_owned();
-    let server = Server::new(vec![truncated, reply_text("new task")]);
+    let incomplete = full.split("data: [DONE]").next().unwrap();
+    let truncated = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nRetry-After: 0\r\nConnection: close\r\n\r\n{incomplete}",
+        incomplete.len()
+    );
+    // Exhaust the replay policy before serving the next task's response.
+    let mut replies = vec![truncated; 4];
+    replies.push(reply_text("new task"));
+    let server = Server::new(replies);
     let f = Fixture::new(&server);
     let r = f.run();
     assert_eq!(r.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&r.stderr).contains("model_stream_incomplete"));
     assert!(!f.root.path().join("workspace/partial.txt").exists());
-    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    assert_eq!(server.requests.lock().unwrap().len(), 4);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 64);
     assert_eq!(
         get(f.root.path().join("goal-plans/p.json"))["status"],
         "paused"
@@ -1106,6 +1117,7 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
         "provider_request"
     );
     assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 5);
 }
 #[test]
 fn foreground_timeout_reaps_the_claimed_shell_and_allows_recovery_bash_calls() {

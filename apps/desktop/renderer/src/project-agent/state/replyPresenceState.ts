@@ -35,11 +35,6 @@ export function replyPresenceState(
     // Delivery handoff keeps the same cue, with static dots after execution ends.
     return { label: i18n.t('projectAgent.chat.generating'), busy: false, refresh: false, replying: true };
   }
-  else if (reply.pending?.deliveryIssue) key = 'projectAgent.chat.reply.deliveryIssue';
-  else if (reply.pending?.restored) key = 'projectAgent.chat.reply.unconfirmed';
-  else if (reply.pending?.sending) { key = 'projectAgent.chat.sending'; busy = true; }
-  // The user's message owns its receipt. It is neither a running reply nor footer copy.
   return { label: key ? i18n.t(key) : null, busy,
-    refresh: !running && !reply.stopping && Boolean(activity || reply.pending && !reply.pending.sending
-      && (reply.pending.restored || reply.pending.deliveryIssue)) };
+    refresh: !running && !reply.stopping && Boolean(activity) };
 }

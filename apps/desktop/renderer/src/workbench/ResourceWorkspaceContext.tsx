@@ -35,7 +35,7 @@ interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>
   readonly revealPrimary: () => void;
   readonly searchIntent: { readonly query: string; readonly candidates: readonly string[]; readonly id: number } | null;
   readonly locate: (query: string, candidates?: readonly string[]) => void;
-  readonly openReference: (reference: BotDocumentReference) => void;
+  readonly openReference: (reference: BotDocumentReference, options?: { literalPath?: boolean }) => void;
   readonly openDraft: (draft: Pick<ResourceEditDraftInfo, 'id' | 'target'>) => void;
   readonly openDelivery: (delivery: EvidenceDelivery) => void;
   readonly openComparison: (reference: BotDocumentReference, comparison: DocumentComparison) => void;
@@ -197,7 +197,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       }
       focusAfterIntent.current = true; setFocusRequest(value => value + 1); setFocusArea('primary'); workbench.setOpen(false);
     },
-    openReference: reference => {
+    openReference: (reference, options) => {
       if (ready && reference.workspaceId === owner?.workspaceId) {
         details.rememberDetailSource();
         if (reference.kind === 'directory') {
@@ -205,7 +205,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
           workbench.openDirectoryTab({ kind: 'directory', workspaceId: reference.workspaceId, path: reference.path,
             ...(reference.task ? { task: reference.task } : {}), ...(reference.relativeTo ? { relativeTo: reference.relativeTo } : {}) });
         } else {
-          const location = documentReferenceLocation(reference.path);
+          const location = options?.literalPath ? null : documentReferenceLocation(reference.path);
           workbench.openDocumentReference({ ...reference, path: location?.path ?? reference.path }, location?.line);
         }
         reveal();

@@ -5,7 +5,7 @@ use super::*;
 use crate::cognition::ContextPipeline;
 use crate::model::{ModelContinuation, ModelToolCall, ModelTurn};
 use crate::session_host::cognition_host::GoalRequestFrame;
-use crate::turn_loop::{ToolStep, TurnHost};
+use crate::turn_loop::{ToolStep, TurnError, TurnHost};
 use crate::{hook_policy::HookDecision, hook_process::decision_name};
 use peer_store::HookPhase;
 use peer_store::{EvidenceIndexStore, HostFileMaterialization, HostToolEvidence};
@@ -95,7 +95,7 @@ impl GoalTurnHost<'_, '_> {
 }
 
 impl TurnHost for GoalTurnHost<'_, '_> {
-    async fn request(&mut self) -> Result<ModelTurn, HostError> {
+    async fn request(&mut self) -> Result<ModelTurn, TurnError> {
         let f = self.frame;
         if self.host.has_work_background_shells() {
             let resource = self.host.current(f.plan, &now())?.resource;
@@ -105,7 +105,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         let policy = peer_store::PolicyStore::new(&self.host.home)
             .read_existing(&fresh.resource.workspace_id)?;
         if policy.conversation_id != self.origin["parentConversationId"] {
-            return Err(HostError("out_of_scope"));
+            return Err(HostError("out_of_scope").into());
         }
         if fresh.goal.source_revision != f.goal_revision
             || !crate::coordination::execution_binding_current(
@@ -115,7 +115,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                 self.binding,
             )
         {
-            return Err(HostError("execution_revision_stale"));
+            return Err(HostError("execution_revision_stale").into());
         }
         let home = self.host.home.clone();
         let request = crate::cognition::CognitionRequest {

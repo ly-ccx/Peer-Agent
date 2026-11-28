@@ -8,7 +8,7 @@ use crate::{
     QueuedInputMeta, atomic_write, cards, is_valid_workspace_id, now_iso, parse_iso_ms,
 };
 use peer_runtime::tool_markup::strip_literal_tool_call_blocks;
-use peer_store::{ApprovalStore, ConversationStore};
+use peer_store::{ApprovalStore, ConversationStore, StoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -915,6 +915,14 @@ impl BotDirectory {
     }
 
     fn summary_messages_for_profile(&self, profile: &BotProfile) -> Vec<Value> {
+        self.summary_messages(profile, self.conversations.indexed_full_message_reader())
+    }
+
+    fn summary_messages(
+        &self,
+        profile: &BotProfile,
+        read: impl FnOnce(&str) -> Result<Option<Vec<Value>>, StoreError>,
+    ) -> Vec<Value> {
         let Some(conv_id) = profile
             .agent_conversation_id
             .as_deref()
@@ -922,11 +930,8 @@ impl BotDirectory {
         else {
             return Vec::new();
         };
-        if let Ok(Some(page)) = self
-            .conversations
-            .read_conversation_window(conv_id, None, None, true)
-        {
-            page["window"].as_array().cloned().unwrap_or_default()
+        if let Ok(Some(messages)) = read(conv_id) {
+            messages
         } else {
             self.conversations
                 .read_committed(conv_id, None, 8 * 1024 * 1024)
@@ -947,11 +952,11 @@ impl BotDirectory {
     fn project_row(
         &self,
         profile: BotProfile,
+        messages: &[Value],
         sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
         now_ms: i64,
     ) -> BotRowProjection {
         let workspace_id = profile.workspace_id.clone();
-        let messages = self.summary_messages_for_profile(&profile);
         let last_msg = messages
             .iter()
             .rev()
@@ -971,7 +976,7 @@ impl BotDirectory {
             .iter()
             .filter(|s| s.status == "waiting_user")
             .collect();
-        let has_open_reply_question = project_reply_questions(&messages, now_ms)
+        let has_open_reply_question = project_reply_questions(messages, now_ms)
             .values()
             .any(|st| st.state == QuestionState::Open);
         let queued = if has_open_reply_question || !waiting_sessions.is_empty() {
@@ -984,14 +989,14 @@ impl BotDirectory {
         let task_question_cards = cards::project_waiting_user_question_cards_with_queued(
             &self.data_home,
             &workspace_id,
-            &messages,
+            messages,
             &queued,
             &waiting_sessions,
             &resolutions,
         );
         let attention = project_bot_attention_with_cards_and_queued(
             &profile,
-            &messages,
+            messages,
             &queued,
             sessions,
             &approvals,
@@ -1136,9 +1141,9 @@ impl BotDirectory {
                 }
                 Err(e) => return Err(e.into()),
             };
-        let visible: Vec<Value> = all_messages
-            .into_iter()
-            .filter(is_visible_bot_message)
+        let visible: Vec<_> = all_messages
+            .iter()
+            .filter(|message| is_visible_bot_message(message))
             .collect();
         let end = match before_message_id {
             Some(cursor_id) => visible
@@ -1149,9 +1154,55 @@ impl BotDirectory {
         };
         let cap = limit.clamp(1, 200);
         let start = end.saturating_sub(cap);
-        let page = visible[start..end].to_vec();
+        let selected = &visible[start..end];
+        let turn_ids: HashSet<_> = selected
+            .iter()
+            .filter_map(|row| row["turnId"].as_str())
+            .collect();
+        let turns = all_messages
+            .iter()
+            .filter_map(|row| {
+                let id = row["id"].as_str()?;
+                (message_kind(row) == "agent_turn" && turn_ids.contains(id)).then_some((id, row))
+            })
+            .collect::<HashMap<_, _>>();
+        let mut page = Vec::with_capacity(selected.len() + turns.len());
+        let mut included = HashSet::new();
+        for message in selected {
+            page.push((*message).clone());
+            let Some(turn_id) = message["turnId"].as_str().filter(|id| included.insert(*id)) else {
+                continue;
+            };
+            let Some(turn) = turns.get(turn_id) else {
+                continue;
+            };
+            let mut turn = (*turn).clone();
+            crate::runner::hydrate_agent_turn_record(&self.data_home, workspace_id, &mut turn);
+            if !turn["publicUpdates"]
+                .as_array()
+                .is_some_and(|updates| !updates.is_empty())
+            {
+                continue;
+            }
+            // Keep the linked public narration in the interaction page while
+            // tool diagnostics remain available through processFor only.
+            page.push(json!({
+                "id": turn_id,
+                "role": "assistant",
+                "kind": "agent_turn",
+                "content": "",
+                "turnId": turn_id,
+                "turnKind": turn["turnKind"],
+                "createdAt": turn["createdAt"],
+                "replyTo": turn["replyTo"],
+                "displayContract": turn["displayContract"],
+                "publicUpdates": turn["publicUpdates"],
+                "meta": { "workId": turn["meta"]["workId"] },
+            }));
+        }
         let next_cursor = if start > 0 {
-            page.first()
+            selected
+                .first()
                 .and_then(|m| m["id"].as_str())
                 .map(str::to_owned)
         } else {
@@ -1613,7 +1664,17 @@ impl BotDirectory {
         &self,
         sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
     ) -> Vec<BotRowProjection> {
+        self.project_rows_with_history(sessions_by_workspace, |_, _| {})
+    }
+
+    /// Let search reuse the same authorized history that was read for each row.
+    pub fn project_rows_with_history(
+        &self,
+        sessions_by_workspace: &HashMap<String, Vec<BotListSession>>,
+        mut observe: impl FnMut(&str, Vec<Value>),
+    ) -> Vec<BotRowProjection> {
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let reader = self.conversations.indexed_full_message_reader();
         let mut out = Vec::new();
         for workspace_id in self.profiles.list_workspace_ids() {
             let Some(profile) = self.profiles.read(&workspace_id) else {
@@ -1622,7 +1683,9 @@ impl BotDirectory {
             if !profile.is_active() {
                 continue;
             }
-            out.push(self.project_row(profile, sessions_by_workspace, now_ms));
+            let messages = self.summary_messages(&profile, &reader);
+            out.push(self.project_row(profile, &messages, sessions_by_workspace, now_ms));
+            observe(&workspace_id, messages);
         }
         out
     }
@@ -1687,7 +1750,8 @@ impl BotDirectory {
             return Err(ProjectError::code("ARCHIVED"));
         }
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
-        let row = self.project_row(profile.clone(), sessions_by_workspace, now_ms);
+        let messages = self.summary_messages_for_profile(&profile);
+        let row = self.project_row(profile.clone(), &messages, sessions_by_workspace, now_ms);
         Ok(BotDetail {
             item: row.item,
             path: self.workspace_path(workspace_id),
@@ -1708,8 +1772,9 @@ impl BotDirectory {
             let Some(profile) = self.profiles.read(ws).filter(BotProfile::is_active) else {
                 return Err(ProjectError::code("NOT_FOUND"));
             };
+            let messages = self.summary_messages_for_profile(&profile);
             return Ok(self
-                .project_row(profile, sessions_by_workspace, now_ms)
+                .project_row(profile, &messages, sessions_by_workspace, now_ms)
                 .attention);
         }
         Ok(self
@@ -1812,6 +1877,17 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].state.unread, 1);
         assert_eq!(listed[0].state.needs_you, 1);
+        let mut histories = Vec::new();
+        let rows = directory.project_rows_with_history(&HashMap::new(), |id, messages| {
+            histories.push((id.to_owned(), messages));
+        });
+        assert_eq!(
+            rows[0].item,
+            directory.get_bot("ws-alpha", &HashMap::new()).unwrap().item
+        );
+        assert_eq!(rows[0].attention.len(), 1);
+        assert_eq!(histories[0].0, "ws-alpha");
+        assert_eq!(histories[0].1[0]["id"], "reply-1");
 
         directory
             .mark_read("ws-alpha", Some("2026-11-19T01:06:00.000Z"))
@@ -1819,6 +1895,44 @@ mod tests {
         let listed2 = directory.list(&HashMap::new());
         assert_eq!(listed2[0].state.unread, 0);
         assert_eq!(listed2[0].state.needs_you, 1);
+    }
+
+    #[test]
+    fn interaction_page_retains_linked_public_progress_without_tool_diagnostics() {
+        let home = tempdir().unwrap();
+        let project = tempdir().unwrap();
+        let host = crate::NativeProjectHost::new(home.path(), "test", None).unwrap();
+        let (workspace, profile) = host.bind_workspace(project.path(), None).unwrap();
+        let conversation = profile.agent_conversation_id.unwrap();
+        let at = "2026-11-19T01:00:00.000Z";
+        for row in [
+            json!({ "id": "input-1", "role": "user", "kind": "user_input", "content": "Check the result", "createdAt": at }),
+            json!({ "id": "turn-1", "role": "assistant", "kind": "agent_turn", "content": "", "createdAt": at,
+                "publicUpdates": [{ "id": "progress", "text": "Checking the repository" }],
+                "rounds": [{ "text": "internal tool diagnostic" }] }),
+            json!({ "id": "failed-1", "role": "assistant", "kind": "system_card", "turnId": "turn-1", "content": "Disconnected", "createdAt": at }),
+        ] {
+            host.conversations()
+                .append_message_idempotent(&conversation, &row, at, None)
+                .unwrap();
+        }
+        let page = host
+            .directory()
+            .read_interactions(&workspace.workspace_id, 1, None)
+            .unwrap();
+        assert_eq!(page.next_cursor.as_deref(), Some("failed-1"));
+        assert_eq!(page.messages.len(), 2);
+        assert_eq!(
+            page.messages[1]["publicUpdates"][0]["text"],
+            "Checking the repository"
+        );
+        assert!(page.messages[1].get("rounds").is_none());
+        let older = host
+            .directory()
+            .read_interactions(&workspace.workspace_id, 1, page.next_cursor.as_deref())
+            .unwrap();
+        assert_eq!(older.messages.len(), 1);
+        assert_eq!(older.messages[0]["id"], "input-1");
     }
 
     #[test]

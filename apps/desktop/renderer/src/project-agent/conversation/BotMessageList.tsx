@@ -3,7 +3,7 @@ import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
-  formatConversationStamp,
+  formatConversationSeparator,
   repliedUserIds,
   type BotChatMessage,
   type ConversationRow,
@@ -171,9 +171,8 @@ export function BotMessageList({
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
       {scroll.visibleRows.map((row) => (
         <ConversationRowView key={conversationRowKey(row)} rowKey={conversationRowKey(row)}
-          entering={!previousRows.current.keys.has(conversationRowKey(row)) && (row.type === 'reply'
-            ? Boolean(row.pending && !row.pending.restored && !row.pending.deliveryIssue)
-            : row.type === 'message' && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput))}
+          entering={!previousRows.current.keys.has(conversationRowKey(row)) && row.type === 'message'
+            && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput)}
           className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
         {conversationRowShowsAuthor(row) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
@@ -187,7 +186,9 @@ export function BotMessageList({
           <UserBubble
             key={conversationRowKey(row)}
             message={row.message}
-            replied={replied.has(row.message.id)}
+            workspaceId={workspaceId}
+            replied={replied.has(row.message.id) || Boolean(row.message.inputId && (replied.has(row.message.inputId) || replied.has(`input-${row.message.inputId}`)))}
+            replyWait={row.replyWait}
             workIndex={workIndex}
             anchors={anchors}
             onJump={onJump}
@@ -308,17 +309,9 @@ function SystemCard({
   );
 }
 
-function separatorText(
+export function separatorText(
   row: Extract<ConversationRow, { type: 'separator' }>,
   i18n: I18nRuntime,
 ): string {
-  if (row.label) return row.label;
-  const stamp = formatConversationStamp(row.at);
-  const when = stamp
-    ? (stamp.sameDay
-      ? i18n.t('projectAgent.chat.today', { time: stamp.clock })
-      : i18n.t('projectAgent.chat.earlierDay', { date: stamp.date, time: stamp.clock }))
-    : '';
-  if (row.proactive && when) return `${when} · ${i18n.t('projectAgent.chat.digest')}`;
-  return when;
+  return formatConversationSeparator(row, i18n);
 }

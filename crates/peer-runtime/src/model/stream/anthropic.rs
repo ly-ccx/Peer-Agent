@@ -36,7 +36,7 @@ impl Anthropic {
 
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         if v["type"] == "error" || v.get("error").is_some() {
-            return Err(ModelError::provider_event(v));
+            return Err(ModelError::provider_event("error", v));
         }
         match v["type"].as_str() {
             Some("ping") => {}
@@ -168,13 +168,22 @@ impl Anthropic {
                         Some("end_turn" | "tool_use" | "stop_sequence")
                     )
                 {
-                    return Err(ModelError::new("model_stream_incomplete"));
+                    return Err(ModelError::terminal_stop(
+                        "message_stop",
+                        self.reason.as_deref(),
+                    ));
                 }
                 self.done = true;
             }
             _ => return Err(ModelError::new("model_event_unsupported")),
         }
         Ok(self.done)
+    }
+    pub(super) fn terminal_stop_error(&self) -> Option<ModelError> {
+        self.reason
+            .as_deref()
+            .filter(|reason| !matches!(*reason, "end_turn" | "tool_use" | "stop_sequence"))
+            .map(|reason| ModelError::terminal_stop("message_delta", Some(reason)))
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {

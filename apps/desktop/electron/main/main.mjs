@@ -243,7 +243,7 @@ import { registerDesktopProjectAgent } from './project-agent/project-agent-host.
 import { createSettingsIpcRegistrations } from './ipc/register-settings-ipc.mjs';
 import { createSkillsIpcRegistrations } from './ipc/register-skills-ipc.mjs';
 import { createSkillMarketplaceService } from './skill-marketplace-service.mjs';
-import { validateSkillInstallTarget } from './skill-install-target.mjs';
+import { createSkillInstallTargetDirectory } from './skill-install-target.mjs';
 import { registerIpcOwners } from './ipc/register-all.mjs';
 import { createRemoteAccessIpcRegistrations } from './ipc/register-remote-access-ipc.mjs';
 import { createTrustedWindowRegistry } from './ipc/trusted-window-registry.mjs';
@@ -667,6 +667,12 @@ const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
 let taskNotificationBroker = null;
 let projectAgentNotifier = null;
 let viewingBotWorkspaceId = null;
+let lastViewedBotWorkspaceId = null;
+const skillInstallTargets = createSkillInstallTargetDirectory({
+  dataHome,
+  getSettings: () => settingsStore.getAll(),
+  getViewingBotId: () => settingsStore.getAll().projectAgent?.shell === 'classic' ? null : lastViewedBotWorkspaceId,
+});
 let projectAgentDirectory = {
   listItems: () => [],
   botName: () => '',
@@ -2543,6 +2549,7 @@ function registerDesktopIpcHost() {
     }),
     ...createSkillsIpcRegistrations({
       skills: {
+        listInstallTargets: skillInstallTargets.list,
         list: (workspacePaths) => {
           if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
             return classicCoreBridge.listSkills(workspacePaths, {
@@ -2651,8 +2658,7 @@ function registerDesktopIpcHost() {
         },
         skillHubInstall: (identity) => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
-          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
-          return skillHubMarketplaceService.install(validated);
+          return skillHubMarketplaceService.install(identity);
         },
         skillHubListCategories: () => {
           if (!skillHubMarketplaceService) throw new Error('skillhub_marketplace_not_available');
@@ -2668,8 +2674,7 @@ function registerDesktopIpcHost() {
         },
         qoderInstall: (identity) => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
-          const validated = validateSkillInstallTarget(identity, settingsStore.getAll().workspaces);
-          return qoderMarketplaceService.install(validated);
+          return qoderMarketplaceService.install(identity);
         },
         qoderListTaxonomies: () => {
           if (!qoderMarketplaceService) throw new Error('qoder_marketplace_not_available');
@@ -2769,6 +2774,8 @@ function registerDesktopIpcHost() {
       onReady: (api) => { projectAgentDirectory = api; },
       onViewing: (workspaceId) => {
         viewingBotWorkspaceId = typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
+        // Opening Settings ends read tracking but preserves the Bot that led to the skill picker.
+        if (viewingBotWorkspaceId) lastViewedBotWorkspaceId = viewingBotWorkspaceId;
       },
       onAppendedMessage: (payload) => {
         try {
@@ -3906,7 +3913,8 @@ function startLocalRuntime() {
   const skillHubApiClient = createSkillHubApiClient();
   const skillHubInstaller = createSkillHubVerifiedInstaller({
     apiClient: skillHubApiClient,
-    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+    prepareSkillFromZip: (zipBuffer, options) => skillStore.prepareSkillFromZip(zipBuffer, options),
+    targetDirectory: skillInstallTargets,
   });
   // SkillHub 与 Qoder 一样走远程列表查询：搜索、分类、分页、排序都打官方接口。
   skillHubMarketplaceService = createSkillHubMarketplaceService({
@@ -3916,7 +3924,8 @@ function startLocalRuntime() {
   // Qoder 市场：qoder.com apphub 支持服务端搜索 + 分页，无需本地索引同步。
   qoderMarketplaceService = createQoderMarketplaceService({
     apiClient: createQoderApiClient(),
-    installSkillFromZip: (zipBuffer, options) => skillStore.installSkillFromZip(zipBuffer, options),
+    prepareSkillFromZip: (zipBuffer, options) => skillStore.prepareSkillFromZip(zipBuffer, options),
+    targetDirectory: skillInstallTargets,
   });
 
   const shellProvider = createLocalShellProvider({

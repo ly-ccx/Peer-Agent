@@ -47,6 +47,40 @@ export interface SkillMarketplaceInstallResult {
   readonly error?: string;
 }
 
+export interface SkillInstallTarget {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly path: string;
+  readonly kind: 'bot' | 'workspace';
+  readonly available: boolean;
+  readonly unavailableReason?: string;
+  readonly isActive: boolean;
+}
+
+export interface SkillInstallTargetRequest {
+  readonly workspaceId?: string;
+  readonly workspacePath?: string;
+}
+
+export type SkillInstallTargetResult = {
+  readonly workspaceId: string | null;
+  readonly name: string;
+  readonly path: string | null;
+} & (
+  | { readonly ok: true; readonly skillId: string }
+  | { readonly ok: false; readonly error: string; readonly code?: string }
+);
+
+export interface SkillInstallBatchReceipt {
+  readonly partial: boolean;
+  readonly succeededCount: number;
+  readonly failedCount: number;
+  readonly results: readonly SkillInstallTargetResult[];
+}
+
+export type SkillHubInstallResult = SkillMarketplaceInstallResult & Partial<SkillInstallBatchReceipt>;
+
 /**
  * SkillHub 官方列表排序（GET /api/skills?sortBy=）：
  * - score: 全部 / 综合评分
@@ -121,9 +155,10 @@ export interface SkillHubInstallRequest {
   readonly namespace: string;
   readonly slug: string;
   readonly version: string;
-  /** 默认 global；workspace 必须同时指定一个由 Desktop 主进程校验的登记工作区。 */
+  /** 默认 global。工作区安装使用 targets，旧调用方可传 workspacePath。 */
   readonly scope?: SkillHubInstallScope;
   readonly workspacePath?: string;
+  readonly targets?: readonly SkillInstallTargetRequest[];
   /** 市场图标 URL；安装时写入本地 _meta.json，供已安装列表展示。 */
   readonly iconUrl?: string | null;
 }
@@ -245,13 +280,14 @@ export interface QoderInstallIdentity {
   readonly skillId: string;
   readonly scope?: QoderInstallScope;
   readonly workspacePath?: string;
+  readonly targets?: readonly SkillInstallTargetRequest[];
   readonly iconUrl?: string | null;
 }
 
-export interface QoderInstallResult {
+export interface QoderInstallResult extends Partial<SkillInstallBatchReceipt> {
   readonly ok: boolean;
   readonly skillId: string;
-  readonly installedSkillId: string;
-  readonly version: string;
+  readonly installedSkillId?: string;
+  readonly version?: string;
   readonly scope: QoderInstallScope;
 }

@@ -53,8 +53,15 @@ fn public_exec_distinguishes_model_access_rejection_from_other_http_errors() {
         ),
     ] {
         let fixture = Ordinary::new();
+        // Keep this fixture focused on terminal error mapping. A transient
+        // 503 without a long Retry-After would recover inside the same turn.
+        let retry_after = if status == 503 {
+            "Retry-After: 600\r\n"
+        } else {
+            ""
+        };
         let rejected = format!(
-            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n{body}",
             body.len()
         );
         let server = Server::new(vec![

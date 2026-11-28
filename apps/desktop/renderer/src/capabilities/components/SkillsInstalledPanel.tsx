@@ -5,6 +5,8 @@ import { isImeKey } from '../../chat/state/compositionGuard';
 import type { AvailableSkillSummary, SkillSummary } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { skillWorkspacePathKey } from './marketplace-workspace-target';
+import { readInstalledSkills } from './read-installed-skills';
 import { Switch } from '../../ui/boolean-controls';
 import { SkillDetailDialog } from './SkillDetailDialog';
 
@@ -39,6 +41,7 @@ function sourceBadgeLabel(source?: string | null): string | null {
 function SkillSection({
   title,
   description,
+  emptyLabel,
   skills,
   onSelect,
   onToggle,
@@ -46,6 +49,7 @@ function SkillSection({
 }: {
   readonly title: string;
   readonly description: string;
+  readonly emptyLabel: string;
   readonly skills: readonly SkillSummary[];
   readonly onSelect: (skill: SkillSummary) => void;
   readonly onToggle: (skill: SkillSummary) => void;
@@ -61,7 +65,7 @@ function SkillSection({
         <span>{skills.length}</span>
       </header>
       {skills.length === 0 ? (
-        <div className="skill-scope-empty">当前机器人没有项目级 Skill</div>
+        <div className="skill-scope-empty">{emptyLabel}</div>
       ) : (
       <div className="skill-grid">
         {skills.map((skill) => (
@@ -107,11 +111,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
 }) {
   const actions = useResourceActions('installed-skills');
   const i18n = useMemo(() => createI18n('zh-CN'), []);
-  const reader = useResourceRead('installed-skills', async () => {
-    const workspace = await clientApi.workspaceList();
-    const list = await clientApi.listSkills(workspace.workspaces.map(row => row.path));
-    return { list, workspaces: workspace.workspaces };
-  });
+  const reader = useResourceRead('installed-skills', readInstalledSkills);
   const availableReader = useResourceRead('available-skills', () => clientApi.listAvailableSkills());
   const [searchQuery, setSearchQuery] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -141,7 +141,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
 
   const workspaceGroups = useMemo(() => workspaces.map((workspace) => ({
     ...workspace,
-    skills: filteredSkills.filter((skill) => skill.scope === 'workspace' && skill.workspacePath === workspace.path),
+    skills: filteredSkills.filter((skill) => skill.scope === 'workspace' && skillWorkspacePathKey(skill.workspacePath) === skillWorkspacePathKey(workspace.path)),
   })), [filteredSkills, workspaces]);
   const globalSkills = useMemo(
     () => filteredSkills.filter((skill) => skill.scope !== 'workspace'),
@@ -217,6 +217,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
               key={workspace.path}
               title={`机器人 · ${workspace.name || workspace.path.split('/').filter(Boolean).at(-1) || workspace.path}`}
               description={workspace.path}
+              emptyLabel="该机器人没有项目级 Skill"
               skills={workspace.skills}
               onSelect={setSelectedSkill}
               pending={skill => actions.get(JSON.stringify([skill.skillId, skill.workspacePath ?? null])).pending}
@@ -226,6 +227,7 @@ export function SkillsInstalledPanel({ onSkillsCountChange }: {
           <SkillSection
             title="全局"
             description="安装在用户目录中，可挂载到任意机器人"
+            emptyLabel="没有已安装的全局 Skill"
             skills={globalSkills}
             onSelect={setSelectedSkill}
             pending={skill => actions.get(JSON.stringify([skill.skillId, skill.workspacePath ?? null])).pending}

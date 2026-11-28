@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 
 export async function openWorkPanel(page) {
   // A closing resource pane changes the work panel's wide/compact preference.
@@ -13,6 +12,29 @@ export async function openWorkPanel(page) {
     const state = await page.locator('.bot-work-layout').evaluate(node => { const panel=node.querySelector('.bot-work-panel'), style=getComputedStyle(panel); return { layout: {...node.dataset}, panel: panel.outerHTML.slice(0,450), trigger: document.querySelector('.bot-work-panel-toggle')?.outerHTML.slice(0,400), visibility: style.visibility, display: style.display, width: panel.getBoundingClientRect().width, parent: node.parentElement.className }; });
     throw new Error(error.message + JSON.stringify(state));
   });
+}
+
+export async function taskEntry(page, session, { source = 'board' } = {}) {
+  if (source !== 'board') {
+    const panel = page.locator('.bot-work-layout[data-work-panel-wide="false"][data-work-panel-open="true"]');
+    if (await panel.count()) await page.locator('.bot-work-panel-toggle').click();
+    const trigger = source === 'history'
+      ? page.getByRole('button', { name: /^历史任务(?:\s*\d+)?$/ })
+      : page.locator('.bot-touchbar-summary .bot-tb-status');
+    if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
+    return page.locator('.bot-touchbar-tray .bot-tray-row').filter({ has: page.getByText(session.title, { exact: true }) });
+  }
+  await openWorkPanel(page);
+  return page.locator('.bot-work-panel .bot-work-panel-session.is-task')
+    .filter({ has: page.getByText(session.title, { exact: true }) });
+}
+
+export async function openTaskInspector(page) {
+  const toggle = page.getByRole('button', { name: '任务详情', exact: true });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  const inspector = page.getByRole('complementary', { name: '任务详情', exact: true });
+  await inspector.waitFor();
+  return inspector;
 }
 
 /** Opening, closing and responsive reflow retain the actual composer node and draft. */
@@ -53,7 +75,7 @@ export async function checkWorkPanelLayout({ page, report, captureDirectory }) {
         }
       }
     }
-    await page.locator('.bot-work-panel-head button').focus(); await page.keyboard.press('Escape');
+    await page.locator('.bot-work-panel-actions button').last().focus(); await page.keyboard.press('Escape');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
     assert.equal(await toggle.evaluate(node => node === document.activeElement), true);
   } finally {
@@ -69,6 +91,9 @@ export async function checkParallelPanelTasks({ page, until, report, captureDire
   const parallel = { ...initial.sessions[0], sessionId: 'rc-independent-work', title: '三处界面改动一起提交到当前分支',
     origin: { ...initial.sessions[0].origin, anchorMessageId: 'rc-message-9498' } };
   const viewport = page.viewportSize(), theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  const workspace = page.locator('.bot-task-workspace');
+  const parent = page.locator('.bot-crumb-parent');
+  const inspector = workspace.getByRole('complementary', { name: '任务详情', exact: true });
   const cases = [];
   try {
     change([initial.sessions[0], parallel]);
@@ -86,15 +111,19 @@ export async function checkParallelPanelTasks({ page, until, report, captureDire
       await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `parallel-work-${width}-${appearance}.png`) });
       for (const session of [initial.sessions[0], parallel]) {
         await rows.filter({ has: page.getByText(session.title, { exact: true }) }).click();
-        await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').waitFor();
-        assert.match(await page.locator('.bot-task-detail').innerText(), new RegExp(session.title));
-        await page.locator(BOT_DETAIL_CLOSE).click(); await openWorkPanel(page);
+        await workspace.getByRole('heading', { name: session.title, exact: true }).waitFor();
+        await openTaskInspector(page);
+        await inspector.getByRole('tab', { name: '边界与信息', exact: true }).click();
+        await inspector.getByText(session.sessionId, { exact: true }).waitFor();
+        await parent.click();
+        await workspace.waitFor({ state: 'hidden' });
+        await openWorkPanel(page);
       }
       cases.push({ width, appearance, sameLevel: true, uniqueRows: true, independentNavigation: true });
     }
     report.parallelWork = { neutralGroup: true, cases };
   } finally {
-    if (await page.locator(BOT_DETAIL_CLOSE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
+    if (await parent.isVisible()) await parent.click();
     await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     change(initial.sessions); await until(() => rows.count(), count => count === 1);
   }

@@ -5,8 +5,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
+import { openWorkPanel } from '../../../scripts/bot-work-panel-checks.mjs';
 
-test('the authorization card is in the bot chat and survives a closed or materials work panel', { timeout: 90_000 }, async (t) => {
+test('the authorization card stays in the Bot chat when the matter board is closed or showing outputs', { timeout: 90_000 }, async (t) => {
   const home = mkdtempSync(path.join(os.tmpdir(), 'peer-obligation-card-'));
   mkdirSync(home, { recursive: true });
   const shots = mkdtempSync(path.join(os.tmpdir(), 'peer-obligation-card-shots-'));
@@ -50,12 +51,23 @@ test('the authorization card is in the bot chat and survives a closed or materia
   await page.getByRole('button', { name: '收起工作现场' }).first().click();
   await four.getByRole('button', { name: '确认', exact: true }).waitFor();
   assert.equal(await page.locator('.bot-work-panel').getAttribute('aria-hidden'), 'true');
-  await page.getByRole('button', { name: '展开工作现场' }).click();
-  await page.getByRole('button', { name: '查看全部资料' }).click();
-  await page.locator('.bot-work-panel .obligation-grant-entry').first().click();
+  await openWorkPanel(page);
+  const panel = page.locator('.bot-work-panel');
+  const needsYou = panel.locator('[data-lane="needsYou"]');
+  assert.equal(await panel.locator('[data-lane]').count(), 1);
+  assert.equal(await needsYou.getByRole('listitem').count(), 4);
+  assert.equal(await needsYou.getByRole('heading').innerText(), '需要你 4');
+  const outputs = panel.locator('details').filter({ has: page.getByText(/^产物与变更/) });
+  const references = panel.locator('details').filter({ has: page.getByText(/^过程参考/) });
+  assert.equal(await outputs.evaluate(node => node.open), false);
+  assert.equal(await references.evaluate(node => node.open), false);
+  await outputs.locator('summary').click();
+  assert.equal(await outputs.evaluate(node => node.open), true);
+  assert.equal(await references.evaluate(node => node.open), false);
+  await needsYou.getByRole('button').first().click();
   await page.waitForFunction(() => document.activeElement?.classList.contains('obligation-grant-card'));
-  assert.equal(await page.locator('.bot-work-panel .obligation-grant-card').count(), 0);
-  assert.equal(await page.locator('.bot-work-panel-scroll').filter({ hasText: '返回工作现场' }).getAttribute('hidden'), null);
+  assert.equal(await panel.locator('.obligation-grant-card').count(), 0);
+  assert.equal(await outputs.evaluate(node => node.open), true);
 
   await chat.filter({ hasText: '单独拒绝' }).getByRole('button', { name: '拒绝', exact: true }).click();
   await four.getByRole('button', { name: '确认', exact: true }).click();

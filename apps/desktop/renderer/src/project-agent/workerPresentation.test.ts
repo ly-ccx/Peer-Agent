@@ -79,7 +79,66 @@ test('Peer executor defaults to 14px, uses unique transparent eye masks and can 
   assert.match(markup, /aria-hidden="true"/);
   assert.match(markup, /aria-label="Peer 小猫 CLI"/);
   assert.equal(executors.executorDisplayName('opencode', false), 'OpenCode');
-  assert.doesNotMatch(renderToStaticMarkup(createElement(ExecutorIcon, {kind: 'opencode'})), /<mask/);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(ExecutorIcon, { kind: 'opencode', flowing: true })),
+    /<mask|<linearGradient|motion-iridescent-flow/);
+});
+
+test('sidebar uses the cat as the only leading icon and confines flow to active worker states', () => {
+  const cases = [
+    { status: 'running', tone: 'active', label: '执行中' },
+    { status: 'starting', tone: 'active', label: '执行中' },
+    { status: 'verifying', tone: 'active', label: '核验中' },
+    { status: 'waiting_user', tone: 'warn', label: '待你确认' },
+    { status: 'needs_user', tone: 'warn', label: '待你确认' },
+    { status: 'result_ready', owner: 'user', reason: 'awaiting_human_gate', tone: 'warn', label: '待你确认' },
+    { status: 'failed', tone: 'danger', label: '执行失败' },
+    { status: 'result_ready', owner: 'bot', reason: 'verification_failed', tone: 'danger', label: '核验未通过' },
+    { status: 'result_ready', owner: 'bot', reason: 'awaiting_acceptance_technical', tone: 'muted', label: '正在核对结果' },
+    { status: 'queued', tone: 'queued' },
+    { status: 'paused', tone: 'muted' },
+    { status: 'accepted', tone: 'good', label: '已完成' },
+    { status: 'cancelled', tone: 'muted', label: '已停止' },
+  ] as const;
+  const tasks = cases.map((item, index) => ({
+    sessionId: String(index), title: `任务 ${index}`, status: item.status, updatedAt: '',
+    followUp: 'owner' in item ? { owner: item.owner, reason: item.reason, inCurrentList: true } : undefined,
+  }));
+  const markup = renderToStaticMarkup(createElement(BotSidebarTasks, {
+    workspaceId: 'ws', botName: 'Bot', tasks, total: tasks.length, activeSessionId: null,
+    i18n, expandedMore: true, onOpenTask() {}, onToggleMore() {},
+  }));
+  assert.doesNotMatch(markup, /bot-sidebar-task-state|motion-spin/);
+
+  const rows = [...markup.matchAll(/<button\b[^>]*data-session-id[^>]*>.*?<\/button>/g)].map(match => match[0]);
+  assert.equal(rows.length, cases.length);
+  const definitionIds = new Set<string>();
+  for (const [index, item] of cases.entries()) {
+    const row = rows[index]!;
+    assert.ok(row.includes(`data-task-tone="${item.tone}"`));
+    if ('label' in item) {
+      assert.ok(row.includes(`title="任务 ${index} · ${item.label}"`));
+      assert.ok(row.includes(`aria-label="任务 ${index} · ${item.label} · Peer 小猫 CLI"`));
+    }
+    assert.match(row, /"><svg[^>]*data-executor-kind="peer"[^>]*>.*<\/svg><span class="bot-sidebar-task-title">/);
+    assert.equal((row.match(/<svg\b/g) ?? []).length, 1);
+
+    const mask = row.match(/<mask id="([^"]+)"/)?.[1];
+    assert.ok(mask);
+    assert.equal(definitionIds.has(mask), false);
+    definitionIds.add(mask);
+    assert.ok(row.includes(`mask="url(#${mask})"`));
+    if (item.tone === 'active') {
+      const gradient = row.match(/<linearGradient id="([^"]+)"/)?.[1];
+      assert.ok(gradient);
+      assert.equal(definitionIds.has(gradient), false);
+      definitionIds.add(gradient);
+      assert.match(row, /class="motion-iridescent-flow"/);
+      assert.ok(row.includes(`fill="url(#${gradient}) currentColor"`));
+    } else {
+      assert.doesNotMatch(row, /<linearGradient|motion-iridescent-flow/);
+      assert.ok(row.includes('fill="currentColor"'));
+    }
+  }
 });
 
 test('sidebar presents four current host tasks plus overflow and retains the selected identity', () => {
@@ -154,6 +213,7 @@ test('work panel rows and agent activity rows unify on Peer ExecutorIcon matchin
   })!;
   const taskMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
     session: taskSession,
+    lane: 'doing',
     variant: 'task',
     i18n,
     onOpen() {},
@@ -163,6 +223,7 @@ test('work panel rows and agent activity rows unify on Peer ExecutorIcon matchin
 
   const subagentMarkup = renderToStaticMarkup(createElement(BotWorkSessionRow, {
     session: taskSession,
+    lane: 'doing',
     variant: 'agent',
     i18n,
     onOpen() {},

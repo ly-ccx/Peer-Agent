@@ -20,10 +20,17 @@ export function replyAnchorsForMessages(messages: readonly BotChatMessage[], lab
 /** Routing anchors remain intact; only context that adds information is shown. */
 export function replyReferencesForRows<Row extends ConversationDisplayRow | BotReplyRow>(rows: readonly Row[]): ReadonlyMap<Row, readonly string[]> {
   const references = new Map<Row, readonly string[]>();
+  const loadedInputs = new Map<string, string>();
+  for (const row of rows) {
+    if (row.type !== 'message' || row.message.kind !== 'user_input' || !row.message.inputId) continue;
+    loadedInputs.set(row.message.inputId, row.message.id);
+    loadedInputs.set(`input-${row.message.inputId}`, row.message.id);
+  }
   let preceding: ConversationDisplayRow | BotReplyRow | undefined;
   for (const row of rows) {
     if (row.type === 'separator') continue;
-    const ids = row.type === 'reply' ? row.replyTo : row.type === 'activity' ? row.activity.replyTo : row.message.replyTo;
+    const anchors = row.type === 'reply' ? row.replyTo : row.type === 'activity' ? row.activity.replyTo : row.message.replyTo;
+    const ids = [...new Set(anchors.map(id => loadedInputs.get(id) ?? id))];
     const message = row.type === 'reply' ? row.message : row.type === 'message' ? row.message : undefined;
     const explicit = message && (message.proactive || message.quoteRefs.length > 0);
     const continuation = !explicit && ids.length === 1 && preceding?.type === 'message'

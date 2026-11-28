@@ -1,3 +1,4 @@
+import { installMarketplacePackage } from './skill-install-target.mjs';
 const DEFAULT_BASE_URL = 'https://qoder.com';
 const DEFAULT_TIMEOUT_MS = 20000;
 const MAX_PAGE_SIZE = 50;
@@ -205,9 +206,9 @@ export function createQoderApiClient({
   });
 }
 
-export function createQoderMarketplaceService({ apiClient, installSkillFromZip }) {
+export function createQoderMarketplaceService({ apiClient, prepareSkillFromZip, targetDirectory }) {
   if (!apiClient) throw new TypeError('apiClient is required');
-  if (typeof installSkillFromZip !== 'function') throw new TypeError('installSkillFromZip must be a function');
+  if (typeof prepareSkillFromZip !== 'function') throw new TypeError('prepareSkillFromZip must be a function');
 
   return Object.freeze({
     query: (query) => apiClient.listSkills(query ?? {}),
@@ -225,34 +226,31 @@ export function createQoderMarketplaceService({ apiClient, installSkillFromZip }
       return { ...detail, skillMd };
     },
 
-    async install({ skillId, scope = 'global', workspacePath = null, iconUrl = null }) {
-      const id = requiredString(skillId, 'skill_id');
-      const installScope = scope === 'workspace' ? 'workspace' : 'global';
-      const detail = await apiClient.getSkillDetail({ skillId: id });
-      const zipBuffer = await apiClient.downloadZip(detail.downloadUrl);
-      const installed = await installSkillFromZip(zipBuffer, {
-        scope: installScope,
-        workspacePath: installScope === 'workspace' ? workspacePath : null,
-        source: 'qoder-marketplace',
-        iconUrl,
-        meta: {
-          marketplace: 'qoder',
-          skillId: id,
-          version: detail.version,
-          author: detail.authorName || detail.author,
-          category: detail.category,
-          installCount: detail.installCount,
-          downloadUrl: detail.downloadUrl,
-        },
-      });
-      if (!installed?.id && !installed?.skillId) throw new Error('qoder_install_failed');
-      return {
-        ok: true,
-        skillId: id,
-        installedSkillId: installed.skillId ?? installed.id,
-        version: detail.version,
-        scope: installScope,
-      };
+    async install(identity) {
+      const id = requiredString(identity?.skillId, 'skill_id');
+      const result = await installMarketplacePackage(identity, targetDirectory, async () => {
+        const detail = await apiClient.getSkillDetail({ skillId: id });
+        const zipBuffer = await apiClient.downloadZip(detail.downloadUrl);
+        const install = prepareSkillFromZip(zipBuffer);
+        return {
+          install: (destination) => install({
+            ...destination,
+            source: 'qoder-marketplace',
+            iconUrl: identity.iconUrl ?? null,
+            meta: {
+              marketplace: 'qoder',
+              skillId: id,
+              version: detail.version,
+              author: detail.authorName || detail.author,
+              category: detail.category,
+              installCount: detail.installCount,
+              downloadUrl: detail.downloadUrl,
+            },
+          }),
+          metadata: { version: detail.version },
+        };
+      }, 'qoder_install_failed');
+      return { ...result, skillId: id };
     },
   });
 }

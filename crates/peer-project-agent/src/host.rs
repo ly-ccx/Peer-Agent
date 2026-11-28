@@ -4,6 +4,8 @@
 //! `InputDraftStore`, `ProjectInbox`, `ApprovalStore`, `MemoryStore`, `ObjectiveStore`,
 //! `WatchHost`, `SessionSupervisor`, `ProjectAgentRunner`, and `BotDirectory`.
 
+mod delivery;
+
 use crate::{
     AcceptanceDecision, AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore,
     ConversationSearchHit, ConversationSearchIndex, CoordinationHub, CreateBotProfile, DigestQueue,
@@ -36,7 +38,10 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 pub const FAMILIARIZE_READ_CAPABILITIES: [&str; 5] = [
@@ -116,6 +121,8 @@ pub struct MaintenanceReport {
     pub memory_maintained_ids: Vec<String>,
     pub curator_learned_ids: Vec<String>,
     pub flushed_digest: bool,
+    pub recovered_verifications: usize,
+    pub settled_deliveries: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -133,6 +140,24 @@ struct WakeAdmission<'a> {
 }
 
 impl Drop for WakeAdmission<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(self.workspace_id);
+        }
+    }
+}
+
+struct ActiveWakeEntry {
+    cancel: CancellationToken,
+    preempted: Arc<AtomicBool>,
+}
+
+struct ActiveWakeGuard<'a> {
+    active: &'a Mutex<HashMap<String, ActiveWakeEntry>>,
+    workspace_id: &'a str,
+}
+
+impl Drop for ActiveWakeGuard<'_> {
     fn drop(&mut self) {
         if let Ok(mut active) = self.active.lock() {
             active.remove(self.workspace_id);
@@ -165,6 +190,7 @@ pub struct NativeProjectHost {
     runner: ProjectAgentRunner,
     failure_holds: Mutex<HashMap<String, FailureHold>>,
     active_wake_trials: Mutex<HashSet<String>>,
+    active_wakes: Mutex<HashMap<String, ActiveWakeEntry>>,
     directory: BotDirectory,
     conversations: ConversationStore,
     digests: DigestQueue,
@@ -235,6 +261,7 @@ impl NativeProjectHost {
             runner,
             failure_holds: Mutex::new(HashMap::new()),
             active_wake_trials: Mutex::new(HashSet::new()),
+            active_wakes: Mutex::new(HashMap::new()),
             host_identity,
             data_home: home,
         })
@@ -412,6 +439,10 @@ impl NativeProjectHost {
         self.coordination.holds(workspace_id)
     }
 
+    pub fn holds_lease_generation(&self, workspace_id: &str, epoch: &str) -> bool {
+        self.coordination.holds_generation(workspace_id, epoch)
+    }
+
     pub fn has_pending_work(&self, workspace_id: &str) -> bool {
         self.inputs.has_pending(workspace_id)
             || self
@@ -420,6 +451,7 @@ impl NativeProjectHost {
                 .iter()
                 .any(|s| s.status == "queued")
             || self.inbox.has_pending(workspace_id)
+            || self.has_due_delivery(workspace_id, parse_iso_ms(&now_iso()).unwrap_or(0))
     }
 
     /// Read-only inspection of an existing active lease holder (never creates files or steals lease).
@@ -434,6 +466,7 @@ impl NativeProjectHost {
     }
 
     pub fn release_lease(&self, workspace_id: &str) -> Result<(), ProjectError> {
+        self.supervisor.cancel_workspace_verifications(workspace_id);
         self.recovery.drop_workspace(workspace_id);
         self.watch_publisher.forget(workspace_id);
         self.coordination.release(workspace_id)
@@ -665,6 +698,127 @@ impl NativeProjectHost {
         Ok(Some((conv_id, ws_path, report, false)))
     }
 
+    /// Preempt any in-flight background `wake` turn for `workspace_id` so fresh user input
+    /// takes priority immediately without emitting a user-stopped card or advancing inbox cursor.
+    pub fn preempt_active_wake(&self, workspace_id: &str) -> bool {
+        let Ok(guard) = self.active_wakes.lock() else {
+            return false;
+        };
+        let Some(entry) = guard.get(workspace_id) else {
+            return false;
+        };
+        entry.preempted.store(true, Ordering::SeqCst);
+        entry.cancel.cancel();
+        true
+    }
+
+    /// Persist a visible `agent_unavailable` card when host-level setup (e.g. model loading or
+    /// foreground tick error) fails while pending user inputs are waiting for a reply.
+    pub fn record_host_input_failure(
+        &self,
+        workspace_id: &str,
+        code: &'static str,
+    ) -> Result<bool, ProjectError> {
+        if !self.holds_lease(workspace_id) || !self.inputs.has_pending(workspace_id) {
+            return Ok(false);
+        }
+        let Some(profile) = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+        else {
+            return Ok(false);
+        };
+        let Some(conv_id) = profile.agent_conversation_id else {
+            return Ok(false);
+        };
+        let consumed = self
+            .inputs
+            .consume(workspace_id, &conv_id, &self.conversations, true)?;
+        if consumed.pending_execution.is_empty() {
+            return Ok(false);
+        }
+        let anchors: Vec<String> = consumed
+            .pending_execution
+            .iter()
+            .map(|inp| format!("input-{}", inp.input_id))
+            .collect();
+        let turn_id = format!("turn-{}", uuid::Uuid::new_v4());
+        // Host and loader details may contain provider response bodies or private endpoints.
+        let content = if code == "MODEL_UNAVAILABLE" {
+            "代理暂时无法加载模型，请检查模型配置后重试。"
+        } else {
+            "代理暂时无法处理这条消息，请重试。"
+        };
+        let at = now_iso();
+        let meta = json!({
+            "errorCode": code,
+        });
+        self.conversations.append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": format!("{turn_id}-card"),
+                "role": "assistant",
+                "kind": "system_card",
+                "card": "agent_unavailable",
+                "turnId": turn_id,
+                "replyTo": anchors,
+                "content": content,
+                "actions": ["retry"],
+                "meta": meta,
+                "cards": [{
+                    "cardId": format!("card:agent_unavailable:{turn_id}"),
+                    "kind": "agent_unavailable",
+                    "content": content,
+                    "actions": [{
+                        "id": "retry",
+                        "channel": "project-agent:retry",
+                        "payload": {
+                            "workspaceId": workspace_id,
+                            "turnId": turn_id,
+                        }
+                    }]
+                }],
+                "createdAt": at,
+            }),
+            &at,
+            None,
+        )?;
+        if let Err(err) = self.conversations.append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": turn_id,
+                "role": "assistant",
+                "kind": "agent_turn",
+                "turnId": turn_id,
+                "turnKind": "user",
+                "userInputs": anchors,
+                "replyTo": anchors,
+                "content": "",
+                "createdAt": at,
+                "meta": {
+                    "diagnosticTiming": {
+                        "startedAt": at,
+                        "finishedAt": at,
+                        "durationMs": 0,
+                        "outcome": "error",
+                    }
+                },
+            }),
+            &at,
+            None,
+        ) {
+            // The card already carries the input anchors and retry action.
+            let err = ProjectError::from(err);
+            eprintln!(
+                "project-host failed to record failure timing for {turn_id}: {}",
+                err.code
+            );
+        }
+        self.runner.set_error_status(workspace_id);
+        Ok(true)
+    }
+
     pub fn failure_hold(&self, workspace_id: &str) -> Option<FailureHold> {
         self.failure_holds.lock().ok()?.get(workspace_id).cloned()
     }
@@ -684,7 +838,10 @@ impl NativeProjectHost {
         let Some(signal) = &outcome.failure_hold else {
             if !matches!(
                 outcome.end,
-                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+                TurnEndKind::Failed { .. }
+                    | TurnEndKind::CircuitOpen
+                    | TurnEndKind::UserStopped
+                    | TurnEndKind::Preempted
             ) {
                 self.clear_failure_hold(workspace_id);
             }
@@ -746,6 +903,12 @@ impl NativeProjectHost {
         {
             return Ok(None);
         }
+        let Some(epoch) = self.lease_epoch(workspace_id) else {
+            return Ok(None);
+        };
+        if !self.holds_lease_generation(workspace_id, &epoch) {
+            return Ok(None);
+        }
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
         if self.is_wake_held(workspace_id, now_ms)
             || !self
@@ -760,35 +923,82 @@ impl NativeProjectHost {
             workspace_id,
         };
         let batch = self.inbox.take_batch(workspace_id, now_ms, true);
-        if batch.events.is_empty() {
+        if batch.events.is_empty() && !self.has_due_delivery(workspace_id, now_ms) {
             return Ok(None);
         }
         let sessions = self.supervisor.list_sessions(workspace_id);
-        let events: Vec<_> = batch
-            .events
-            .into_iter()
-            .filter(|event| {
-                if event["kind"] == "session_verified" && event["payload"]["acceptedBy"] == "policy"
-                {
-                    return false;
-                }
-                let current_epoch = crate::wake_envelope::wake_event_session_id(event)
-                    .and_then(|id| sessions.iter().find(|session| session.session_id == id))
-                    .and_then(|session| session.follow_up_epoch)
-                    .unwrap_or(0);
-                event["payload"]["followUpEpoch"]
-                    .as_u64()
-                    .is_none_or(|epoch| epoch >= current_epoch)
-            })
-            .collect();
+        let ready = self
+            .reconcile_deliveries(workspace_id, conv_id, now_ms, false, &batch.events)?
+            .due;
+        let mut unrelated_events = Vec::new();
+        for event in &batch.events {
+            if event["kind"] == "session_verified" && event["payload"]["acceptedBy"] == "policy" {
+                continue;
+            }
+            let session = crate::wake_envelope::wake_event_session_id(event)
+                .and_then(|id| sessions.iter().find(|session| session.session_id == id));
+            let current_epoch = session
+                .and_then(|session| session.follow_up_epoch)
+                .unwrap_or(0);
+            if event["payload"]["followUpEpoch"]
+                .as_u64()
+                .is_some_and(|epoch| epoch < current_epoch)
+            {
+                continue;
+            }
+            if session.is_some_and(|s| {
+                matches!(
+                    s.status.as_str(),
+                    "result_ready" | "accepted" | "cancelled" | "superseded"
+                )
+            }) && (crate::wake_envelope::is_result_delivery_event(event)
+                || matches!(
+                    event["kind"].as_str(),
+                    Some(
+                        "session_started"
+                            | "session_spawned"
+                            | "session_running"
+                            | "progress"
+                            | "stalled"
+                            | "session_progress"
+                    )
+                ))
+            {
+                continue;
+            }
+            unrelated_events.push(event.clone());
+        }
+        let mut events = unrelated_events.clone();
+        events.extend(
+            ready
+                .iter()
+                .map(|session| delivery::delivery_event(session, &batch.events)),
+        );
         if events.is_empty() || is_routine_host_wake_wait(&events, &sessions) {
-            let _ = self
-                .inbox
-                .commit_batch(workspace_id, batch.through_seq, true);
+            self.inbox
+                .commit_batch(workspace_id, batch.through_seq, true)?;
             return Ok(None);
         }
         let (model, verifier_model) = models;
-        let outcome = Box::pin(self.runner.run_turn_with_verifier(
+        let wake_cancel = cancel.child_token();
+        let preempted = Arc::new(AtomicBool::new(false));
+        if let Ok(mut active) = self.active_wakes.lock() {
+            active.insert(
+                workspace_id.to_owned(),
+                ActiveWakeEntry {
+                    cancel: wake_cancel.clone(),
+                    preempted: Arc::clone(&preempted),
+                },
+            );
+        }
+        let _wake_guard = ActiveWakeGuard {
+            active: &self.active_wakes,
+            workspace_id,
+        };
+        if self.inputs.has_pending(workspace_id) || cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let outcome = Box::pin(self.runner.run_turn_with_preempt(
             &RunTurnOptions {
                 workspace_id,
                 workspace_path: ws_path,
@@ -802,19 +1012,37 @@ impl NativeProjectHost {
             },
             model,
             verifier_model,
-            cancel,
+            &wake_cancel,
+            Some(&preempted),
         ))
         .await?;
+        if !self.holds_lease_generation(workspace_id, &epoch) {
+            return Err(ProjectError::code("LEASE_REQUIRED"));
+        }
         self.record_failure_hold(
             workspace_id,
             &outcome,
             parse_iso_ms(&now_iso()).unwrap_or(now_ms),
         );
-        let ok = !matches!(
-            outcome.end,
-            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
-        );
-        let _ = self.inbox.commit_batch(workspace_id, batch.through_seq, ok);
+        if matches!(outcome.end, TurnEndKind::Preempted) {
+            return Ok(Some(outcome));
+        }
+        let finished_ms = parse_iso_ms(&now_iso()).unwrap_or(now_ms);
+        self.reconcile_deliveries(workspace_id, conv_id, finished_ms, false, &[])?;
+        let can_advance = outcome.failure_hold.is_none()
+            && !matches!(
+                outcome.end,
+                TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+            )
+            && (!matches!(outcome.end, TurnEndKind::Failed { .. })
+                || (!ready.is_empty() && unrelated_events.is_empty()));
+        self.finish_delivery_attempt(
+            workspace_id,
+            &ready,
+            finished_ms,
+            &outcome,
+            can_advance.then_some(batch.through_seq),
+        )?;
         Ok(Some(outcome))
     }
 
@@ -925,7 +1153,8 @@ impl NativeProjectHost {
         if is_legacy {
             self.release_lease(workspace_id)?;
         }
-        let run_res = Box::pin(self.supervisor.run_session_episode_with_verifier(
+        let lease_epoch = self.lease_epoch(workspace_id);
+        let run_res = Box::pin(self.supervisor.run_session_episode_with_verifier_owned(
             workspace_id,
             session_id,
             worker_model,
@@ -933,7 +1162,12 @@ impl NativeProjectHost {
             worker_permission,
             max_turns,
             cancel,
-            true,
+            || {
+                is_legacy
+                    || lease_epoch
+                        .as_deref()
+                        .is_some_and(|epoch| self.holds_lease_generation(workspace_id, epoch))
+            },
         ))
         .await;
         if is_legacy {
@@ -1325,6 +1559,13 @@ impl NativeProjectHost {
         }
         self.conversations
             .append_message_idempotent(&conv_id, &msg, &created_at, None)?;
+        self.reconcile_deliveries(
+            workspace_id,
+            &conv_id,
+            parse_iso_ms(&created_at).unwrap_or(0),
+            true,
+            &[],
+        )?;
         self.digests.acknowledge(workspace_id, &due.date)?;
         Ok(Some(msg))
     }
@@ -1493,6 +1734,13 @@ impl NativeProjectHost {
                                 let _ =
                                     self.obligation_service().suspend_live(workspace_id, &plans);
                                 if let Some(ref conv_id) = conv_id_opt {
+                                    self.reconcile_deliveries(
+                                        workspace_id,
+                                        conv_id,
+                                        parse_iso_ms(&now_iso()).unwrap_or(0),
+                                        true,
+                                        &[],
+                                    )?;
                                     let owner = InteractiveOwner {
                                         workspace_id: workspace_id.to_owned(),
                                         conversation_id: conv_id.clone(),
@@ -1748,6 +1996,27 @@ impl NativeProjectHost {
             .unwrap_or(true);
 
         let mut report = MaintenanceReport::default();
+
+        let epoch = self
+            .lease_epoch(workspace_id)
+            .ok_or_else(|| ProjectError::code("LEASE_REQUIRED"))?;
+        report.recovered_verifications = self
+            .supervisor
+            .recover_orphan_verifications(workspace_id, || {
+                self.holds_lease_generation(workspace_id, &epoch)
+            })?;
+
+        if let Some(conversation_id) = &profile.agent_conversation_id {
+            report.settled_deliveries = self
+                .reconcile_deliveries(
+                    workspace_id,
+                    conversation_id,
+                    parse_iso_ms(at_iso).unwrap_or(0),
+                    true,
+                    &[],
+                )?
+                .settled;
+        }
 
         // 1. Watchdog & delegation facts -> inbox (deduped against supervisor terminal events)
         let plans = self.supervisor.list_workspace_plans(workspace_id);

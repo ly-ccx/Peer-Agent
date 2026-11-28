@@ -98,7 +98,8 @@ test('current production inventory has one registration for every renderer-to-ma
   });
 
   assert.equal(inventory.registrationCount, inventory.handleCount + inventory.onCount);
-  assert.equal(inventory.onCount, 4);
+  assert.equal(inventory.onCount, Object.values(DESKTOP_IPC_CATALOG)
+    .filter(({ transport }) => transport === 'send' || transport === 'send-sync').length);
   assert.equal(inventory.directCount, 0);
   assert.equal(inventory.ownerCount, inventory.registrationCount);
 });
