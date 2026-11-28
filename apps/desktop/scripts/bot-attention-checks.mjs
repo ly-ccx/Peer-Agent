@@ -16,6 +16,17 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   });
   const read = workspaceId => page.evaluate(workspaceId => window.peerAgent.projectAgentListAttention(workspaceId ? { workspaceId } : {}), workspaceId);
   const count = async workspaceId => (await read(workspaceId)).items.length;
+  // Attention closes on durable enqueue. The input appears in history after the host consumes it.
+  async function waitForCommittedAnswer(bot, questionId) {
+    const answerTo = `card:question:reply:${questionId}`;
+    const answers = await until(
+      () => store.getPersistedConversationHistory(bot.conversationId).messages
+        .filter(message => message.kind === 'user_input' && message.answerTo === answerTo),
+      messages => messages.length > 0,
+    );
+    assert.equal(answers.length, 1, `Expected one committed answer for ${questionId}`);
+    return answers[0];
+  }
   appendQuestion(first, 'attention-old-1', '旧问题：是否再次核验报告？');
   appendQuestion(first, 'attention-old-2', '重复问题：是否再次核验报告？');
   appendQuestion(first, 'attention-current', '选择这次交付的处理方式；前面的旧问题已经收尾。');
@@ -64,8 +75,7 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await firstItem.getByRole('button', { name: '保留当前方案', exact: true }).click();
   await until(async () => (await read(first.workspaceId)).items.some(item => item.messageId === 'attention-current'), exists => !exists);
   assert.equal(await count(other.workspaceId), 1);
-  const history = store.getPersistedConversationHistory(first.conversationId).messages;
-  assert.equal(history.filter(m => m.kind === 'user_input' && m.answerTo === 'card:question:reply:attention-current').length, 1);
+  await waitForCommittedAnswer(first, 'attention-current');
   const late = await page.evaluate(workspaceId => window.peerAgent.projectAgentSubmitInput({ workspaceId, inputId: 'attention-late',
     text: '过期旧选项', answerTo: 'card:question:reply:attention-old-1' }), first.workspaceId);
   assert.equal(late.code, 'QUESTION_CLOSED');
@@ -85,7 +95,7 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await until(() => count(other.workspaceId), n => n === 0);
   await panel.getByText('暂时没有需要你处理的事项', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(captureDirectory, 'attention-empty-light.png'), animations: 'disabled' });
-  const answeredId = store.getPersistedConversationHistory(other.conversationId).messages.findLast(m => m.kind === 'user_input' && m.answerTo === 'card:question:reply:attention-newer')?.id;
+  const { id: answeredId } = await waitForCommittedAnswer(other, 'attention-newer');
   await until(() => store.getPersistedConversationHistory(other.conversationId).messages.some(m => m.kind === 'agent_reply'
     && (m.replyTo || m.meta?.replyTo || []).includes(answeredId)), Boolean);
   store.appendMessage(other.conversationId, { id: 'attention-deadline', kind: 'agent_reply', role: 'assistant',
