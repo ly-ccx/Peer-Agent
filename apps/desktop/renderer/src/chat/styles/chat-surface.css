@@ -4938,12 +4938,16 @@ button.chat-header-cap-item:focus-visible {
   order: -1;
 }
 
-.chat-composer--home > textarea,
-.chat-composer--compact > textarea {
+.chat-composer > .composer-input-field {
   grid-area: home-text;
+  align-self: stretch;
+}
+
+.chat-composer--home > .composer-input-field > textarea,
+.chat-composer--compact > .composer-input-field > textarea {
+  flex: none;
   width: 100%;
   box-sizing: border-box;
-  align-self: stretch;
   /* 外框 .chat-composer--home/--compact 已有 padding:10px。
      textarea 再加内边距会和引用覆盖层一起被顶出第二圈空白。 */
   padding: 0;
@@ -4953,13 +4957,13 @@ button.chat-header-cap-item:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.chat-composer--home > textarea {
+.chat-composer--home > .composer-input-field > textarea {
   min-height: 96px;
   font-size: var(--ui-font-body, 0.875rem);
   line-height: 1.5;
 }
 
-.chat-composer--compact > textarea {
+.chat-composer--compact > .composer-input-field > textarea {
   min-height: 28px;
 }
 

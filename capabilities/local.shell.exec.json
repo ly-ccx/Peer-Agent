@@ -22,12 +22,15 @@
         "description": "Shell command to execute."
       },
       "cwd": {
-        "type": "string",
-        "description": "Working directory. Defaults to the workspace root."
+        "type": ["string", "null"],
+        "description": "Working directory. Omit or use null for the current session directory, or the workspace root if unset."
       },
       "timeoutMs": {
-        "type": "number",
-        "description": "Execution timeout in milliseconds."
+        "type": ["integer", "null"],
+        "minimum": 1,
+        "maximum": 600000,
+        "default": 120000,
+        "description": "Execution timeout in milliseconds. Omit or use null for the default."
       },
       "description": {
         "type": "string",

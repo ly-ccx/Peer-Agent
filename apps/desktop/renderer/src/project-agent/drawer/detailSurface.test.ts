@@ -20,7 +20,13 @@ function find(node: any, type: string): any {
 test('explicit embedded task scene keeps the child conversation and has no nested modal or visible Workbench', async () => {
   const effects: (() => any)[] = [], calls: string[] = [];
   const scene = moduleFrom('./ConversationScene.tsx', {
-    react: { useState: (value: any) => [value, () => {}], useEffect: (effect: () => any) => effects.push(effect) },
+    react: {
+      memo: (component: unknown) => component,
+      useCallback: (callback: unknown) => callback,
+      useMemo: (factory: () => unknown) => factory(),
+      useState: (value: any) => [value, () => {}],
+      useEffect: (effect: () => any) => effects.push(effect),
+    },
     'react/jsx-runtime': jsx, '../../app/components/Drawer': { Drawer: 'drawer' },
     '../../app/components/deferredPanels': { ChatSurface: 'chat', WorkbenchPanel: 'workbench' }, '../../clientApi': { clientApi: {
       llmListProviders: async () => { calls.push('read-providers'); return []; }, getSettings: async () => { calls.push('read-settings'); return {}; },

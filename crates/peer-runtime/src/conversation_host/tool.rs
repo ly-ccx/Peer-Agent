@@ -49,11 +49,23 @@ impl Host<'_> {
         let effect = match self.providers.prepare(
             projection,
             &call.name,
-            call.arguments,
+            call.arguments.clone(),
             &self.workspace,
             &self.home,
         ) {
             Ok(effect) => effect,
+            Err(HostError(crate::providers::INVALID_TIMEOUT)) => {
+                return self
+                    .deny_unprepared_tool(
+                        &call.name,
+                        "local.shell.exec",
+                        call.arguments,
+                        crate::providers::INVALID_TIMEOUT,
+                        None,
+                        Some(crate::providers::TIMEOUT_DETAIL),
+                    )
+                    .await;
+            }
             Err(HostError(risk_error @ ("privileged_command" | "destructive_command")))
                 if raw_args_for_automation.is_some()
                     && self.projection.capability(&call.name) == Some("local.shell.exec") =>

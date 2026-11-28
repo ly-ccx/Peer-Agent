@@ -1,9 +1,9 @@
 import { useEditableResource } from '../../../ui/forms/useEditableResource';
 import { useUnsavedChanges } from '../../../ui/forms/UnsavedChanges';
-import { FormFeedback } from '../../../ui/forms/FormFeedback';
+import { ModelRoutingFeedback } from './ModelRoutingFeedback';
 import { readRoutingDraft, editRoutingDraft, routingDraftPatch, type RoutingDraft } from './routingDraft';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { isModelReasoningEffort, routingParameters, type ModelTierBinding, type RoleSetting } from '@peer-agent/protocol';
+import { isModelReasoningEffort, routingParameters, type RoleSetting } from '@peer-agent/protocol';
 import { effortLabel } from '../../../chat/state/preferences';
 import { useEffect, useId, useState } from 'react';
 import { clientApi } from '../../../clientApi';
@@ -24,6 +24,8 @@ import { RoutingParameterFields } from './RoutingParameterFields';
 import {
   MODEL_ROLES,
   MODEL_TIERS,
+  changeTierCandidates,
+  compatibleRoleRoute,
   isEssentialRole,
   isRoutingReadOnly,
   moveListItem,
@@ -58,12 +60,6 @@ function asOptions(providers: readonly ModelRoutingProviderOption[]): RoutingMod
   }));
 }
 
-function tierPatch(tier: ModelTierName, primary: string, fallbacks: readonly string[], previous: ModelTierBinding): ModelRoutingPatch {
-  const tiers: NonNullable<ModelRoutingPatch['tiers']> = {};
-  tiers[tier] = { ...previous, primary, fallbacks };
-  return { tiers };
-}
-
 function rolePatch(role: ModelRoleName, setting: NonNullable<ModelRoutingPatch['roles']>[ModelRoleName]): ModelRoutingPatch {
   const roles: NonNullable<ModelRoutingPatch['roles']> = {};
   if (setting) roles[role] = setting;
@@ -80,24 +76,29 @@ const TIER_META: Record<ModelTierName, { readonly icon: PeerIconName; readonly z
 
 export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   const [preview, setPreview] = useState<ModelRoutingPreview | null>(null);
-  const [error, setError] = useState(''), [previewError, setPreviewError] = useState(false);
+  const [saveErrorKey, setSaveErrorKey] = useState<'modelRouting.fastUnsupported' | 'modelRouting.reasoningInvalid'>();
+  const [selectionError, setSelectionError] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const preferLabelId = useId();
   const form = useEditableResource<RoutingDraft | null>('settings.model-routing', null, {
     read: async () => readRoutingDraft(await clientApi.modelRoutingGet()),
     write: async (draft, saved) => {
+      setSaveErrorKey(undefined);
+      setSelectionError(false);
       if (!draft || !saved) throw Error('NOT_LOADED');
       try {
         return readRoutingDraft(await clientApi.modelRoutingUpdate(routingDraftPatch(draft, saved)));
       } catch (failure) {
         const message = String(failure);
-        if (message.includes('INVALID_FAST_MODE')) setError(i18n.t('modelRouting.fastUnsupported'));
-        else if (message.includes('INVALID_REASONING_EFFORT')) setError(i18n.t('modelRouting.reasoningInvalid'));
+        if (message.includes('INVALID_FAST_MODE')) setSaveErrorKey('modelRouting.fastUnsupported');
+        else if (message.includes('INVALID_REASONING_EFFORT')) setSaveErrorKey('modelRouting.reasoningInvalid');
         throw failure;
       }
     },
   });
-  useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard: form.reset });
+  const discard = () => { setSelectionError(false); setSaveErrorKey(undefined); form.reset(); };
+  useUnsavedChanges({ dirty: form.dirty, busy: form.saving, save: form.save, discard });
   useEffect(() => {
     let live = true;
     setPreview(null);
@@ -107,27 +108,23 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
   }, [form.saved, previewVersion]);
   const view = form.draft ? { ...form.draft.view, providers: form.saved?.view.providers ?? form.draft.view.providers } : null;
   async function save(partial: ModelRoutingPatch) {
-    if (!form.draft || form.saving || isRoutingReadOnly(form.draft.view.providers.length)) return;
-    setError(''); form.edit(editRoutingDraft(form.draft, partial)); await form.save();
+    if (!form.draft || form.saving || !view || isRoutingReadOnly(view.providers.length)) return;
+    setSelectionError(false); form.edit(editRoutingDraft(form.draft, partial)); await form.save();
   }
-  if (!form.readError && !view) {
-    return (
-      <div className="settings-panel model-routing-panel">
-        <p className="settings-status">{i18n.t('settings.usage.loading')}</p>
-      </div>
-    );
-  }
-  if (!view) {
-    return (
-      <div className="settings-panel model-routing-panel">
-        <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
-      </div>
-    );
-  }
+  const feedback = <ModelRoutingFeedback i18n={i18n}
+    form={view ? form : { ...form, loading: !form.readError }}
+    saveDetail={saveErrorKey ? i18n.t(saveErrorKey) : undefined}
+    selectionError={selectionError ? i18n.t('modelRouting.poolInvalid') : undefined}
+    previewError={Boolean(view) && previewError}
+    onReload={form.reload} onRetry={form.save} onDiscard={discard}
+    onRetryPreview={() => setPreviewVersion(value => value + 1)} />;
+  if (!view) return <div className="settings-panel model-routing-panel">{feedback}</div>;
 
   const options = asOptions(view.providers);
-  const readOnly = form.saving || isRoutingReadOnly(options.length);
+  const readOnly = form.loading || form.saving || isRoutingReadOnly(options.length);
   const resolutionFor = (role: string) => preview?.resolutions.find((row) => row.role === role);
+  const saveRoleRoute = (role: ModelRoleName, setting: RoleSetting) =>
+    save(rolePatch(role, compatibleRoleRoute(setting, view.routing.tiers, options, role)));
 
   return (
     <div className="settings-panel model-routing-panel">
@@ -137,10 +134,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
       </header>
       {options.length === 1 ? <p className="model-routing-banner">{i18n.t('modelRouting.singleModel')}</p> : null}
       {options.length === 0 ? <p className="model-routing-banner">{i18n.t('modelRouting.noModel')}</p> : null}
-      <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
-      {form.dirty ? <p className="ui-form-feedback">{i18n.t('forms.pendingSelection')}<button type="button" className="ui-button is-compact" disabled={form.saving} onClick={() => { void form.save(); }}>{i18n.t('forms.retry')}</button><button type="button" className="ui-button is-compact" disabled={form.saving} onClick={form.reset}>{i18n.t('forms.discard')}</button></p> : null}
-      {previewError ? <p className="ui-form-feedback" role="status">{i18n.t('forms.previewFailed')}<button type="button" className="ui-button" onClick={() => setPreviewVersion(value => value + 1)}>{i18n.t('forms.retry')}</button></p> : null}
-      {error ? <p className="settings-warning" role="alert">{error}</p> : null}
+      {feedback}
 
       <SettingsGroup className="model-routing-card" title={i18n.t('modelRouting.tiers')}>
         <div className="model-routing-tier-grid">
@@ -152,6 +146,10 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             const isZh = i18n.locale.startsWith('zh');
             const missingPrimary = Boolean(binding.primary) && !options.some((option) => option.id === binding.primary);
             const addable = options.filter((option) => option.id !== binding.primary && !fallbacks.includes(option.id));
+            const saveCandidates = (primary: string, nextFallbacks: readonly string[]) =>
+              save({ tiers: { [tier]: changeTierCandidates(tier, binding, primary, nextFallbacks, options) } });
+            const moveFallback = (id: string, direction: -1 | 1) =>
+              save({ tiers: { [tier]: { ...binding, fallbacks: moveListItem(fallbacks, id, direction) } } });
             return (
               <section className={`model-routing-tier-card${missingPrimary ? ' is-warning' : ''}`} key={tier} aria-label={tierLabel}>
                 <header className="model-routing-tier-head">
@@ -185,7 +183,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                       disabled={readOnly}
                       ariaLabel={tierLabel}
                       i18n={i18n}
-                      onChange={(id) => save(tierPatch(tier, id, withoutId(fallbacks, id), binding))}
+                      onChange={(id) => { if (id !== binding.primary) void saveCandidates(id, withoutId(fallbacks, id)); }}
                     />
                   </div>
 
@@ -213,7 +211,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                                 type="button"
                                 disabled={readOnly || index === 0}
                                 aria-label={i18n.t('modelRouting.moveUp')}
-                                onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, -1), binding))}
+                                onClick={() => moveFallback(id, -1)}
                               >
                                 <PeerIcon name="chevronUp" size={12} />
                               </button>
@@ -221,7 +219,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                                 type="button"
                                 disabled={readOnly || index === fallbacks.length - 1}
                                 aria-label={i18n.t('modelRouting.moveDown')}
-                                onClick={() => save(tierPatch(tier, binding.primary, moveListItem(fallbacks, id, 1), binding))}
+                                onClick={() => moveFallback(id, 1)}
                               >
                                 <PeerIcon name="chevronDown" size={12} />
                               </button>
@@ -229,7 +227,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                                 type="button"
                                 disabled={readOnly}
                                 aria-label={i18n.t('modelRouting.remove')}
-                                onClick={() => save(tierPatch(tier, binding.primary, withoutId(fallbacks, id), binding))}
+                                onClick={() => saveCandidates(binding.primary, withoutId(fallbacks, id))}
                               >
                                 <PeerIcon name="close" size={12} />
                               </button>
@@ -246,7 +244,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                         placeholder={`+ ${i18n.t('modelRouting.addFallback')}`}
                         ariaLabel={i18n.t('modelRouting.addFallback')}
                         i18n={i18n}
-                        onChange={(id) => save(tierPatch(tier, binding.primary, [...fallbacks, id], binding))}
+                        onChange={(id) => saveCandidates(binding.primary, [...fallbacks, id])}
                       />
                     </div>
                   </div>
@@ -312,23 +310,23 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                       ]}
                       onChange={(mode) => {
                         if (mode === 'tier') {
-                          void save(rolePatch(role, { mode: 'tier', tier: setting.mode === 'tier' ? setting.tier : 'economy', ...parameters }));
+                          if (setting.mode !== 'tier') void saveRoleRoute(role, { mode: 'tier', tier: 'economy', ...parameters });
                         } else if (mode === 'fixed') {
+                          if (setting.mode === 'fixed') return;
                           const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
                           if (!capable) {
-                            setError(i18n.t('modelRouting.poolInvalid'));
+                            setSelectionError(true);
                             return;
                           }
-                          void save(rolePatch(role, { mode: 'fixed', modelProviderId: capable.id, ...parameters }));
+                          void saveRoleRoute(role, { mode: 'fixed', modelProviderId: capable.id, ...parameters });
                         } else {
-                          const capable = options.filter((option) => !optionRejectReason(option, { kind: 'role', role }));
-                          const pool = capable.slice(0, 1).map((option) => option.id);
-                          const check = validateAutoPool(pool, options, role);
-                          if (!check.ok) {
-                            setError(i18n.t('modelRouting.poolInvalid'));
+                          if (setting.mode === 'auto') return;
+                          const capable = options.find((option) => !optionRejectReason(option, { kind: 'role', role }));
+                          if (!capable) {
+                            setSelectionError(true);
                             return;
                           }
-                          void save(rolePatch(role, { mode: 'auto', pool, ...parameters }));
+                          void saveRoleRoute(role, { mode: 'auto', pool: [capable.id], ...parameters });
                         }
                       }}
                     />
@@ -344,7 +342,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                           value: tierName,
                           label: i18n.t(tierTranslationKey(tierName)),
                         }))}
-                        onChange={(tierName) => save(rolePatch(role, { ...setting, tier: tierName as ModelTierName }))}
+                        onChange={(tierName) => { if (tierName !== setting.tier) void saveRoleRoute(role, { ...setting, tier: tierName as ModelTierName }); }}
                       />
                     ) : null}
                     {setting.mode === 'fixed' ? (
@@ -355,7 +353,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                         disabled={readOnly}
                         ariaLabel={roleLabel}
                         i18n={i18n}
-                        onChange={(id) => save(rolePatch(role, { ...setting, modelProviderId: id }))}
+                        onChange={(id) => { if (id !== setting.modelProviderId) void saveRoleRoute(role, { ...setting, modelProviderId: id }); }}
                       />
                     ) : null}
                     {setting.mode === 'auto' ? (
@@ -369,8 +367,8 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                         onSelectModel={id => {
                           const pool = (setting.pool || []).includes(id) ? withoutId(setting.pool || [], id) : [...(setting.pool || []), id];
                           const check = validateAutoPool(pool, options, role);
-                          if (!check.ok) { setError(i18n.t('modelRouting.poolInvalid')); return; }
-                          return save(rolePatch(role, { ...setting, pool }));
+                          if (!check.ok) { setSelectionError(true); return; }
+                          return saveRoleRoute(role, { ...setting, pool });
                         }} />
                     ) : null}
                   </div>
@@ -397,7 +395,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                         disabled={readOnly}
                         aria-label={i18n.t('modelRouting.spendCap')}
                         value={form.draft?.caps[role] ?? ''}
-                        aria-invalid={form.saveError || Boolean(error) || undefined}
+                        aria-invalid={form.saveError || undefined}
                         onChange={event => { if (form.draft) form.edit({ ...form.draft, caps: { ...form.draft.caps, [role]: event.target.value } }); }}
                         onBlur={() => { if (form.dirty && !form.saving) void form.save(); }}
                       />

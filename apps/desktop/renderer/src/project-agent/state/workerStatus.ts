@@ -9,15 +9,18 @@ export function workerStatus(
   i18n: Pick<I18nRuntime, 'locale' | 't'>,
 ): { readonly text: string; readonly tone: WorkerTone } {
   const isZh = Boolean(i18n.locale?.startsWith('zh'));
-  if (followUp?.owner === 'user' || status === 'waiting_user') {
-    return { text: isZh ? '待你确认' : 'Needs decision', tone: 'warn' };
-  }
   if (status === 'result_ready' && followUp?.reason === 'verification_failed') {
     return { text: isZh ? '核验未通过' : 'Verification failed', tone: 'danger' };
   }
   if (status === 'failed') return { text: isZh ? '执行失败' : 'Execution failed', tone: 'danger' };
-  if (status === 'verifying' || (status === 'result_ready' && followUp?.owner === 'bot')) {
+  if (followUp?.owner === 'user' || status === 'waiting_user' || status === 'needs_user') {
+    return { text: isZh ? '待你确认' : 'Needs decision', tone: 'warn' };
+  }
+  if (status === 'verifying') {
     return { text: isZh ? '核验中' : 'Verifying', tone: 'active' };
+  }
+  if (status === 'result_ready' && followUp?.owner === 'bot') {
+    return { text: i18n.t('projectAgent.chat.work.resultSettling'), tone: 'muted' };
   }
   if (status === 'running' || status === 'starting') {
     return { text: isZh ? '执行中' : 'Running', tone: 'active' };

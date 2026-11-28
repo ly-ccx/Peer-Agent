@@ -155,6 +155,10 @@ fn merge_references(items: &[DigestItem]) -> (Vec<String>, Vec<String>, Vec<Valu
     meta.insert("memoryUsed".into(), json!(collect_meta("memoryUsed")));
     meta.insert("memoryLearned".into(), json!(collect_meta("memoryLearned")));
     meta.insert("evidenceRefs".into(), json!(collect_meta("evidenceRefs")));
+    meta.insert(
+        "reportFactKeys".into(),
+        json!(collect_meta("reportFactKeys")),
+    );
     if !digest_reply_ids.is_empty() {
         meta.insert("digestReplyIds".into(), Value::Array(digest_reply_ids));
     }
@@ -244,6 +248,16 @@ impl DigestQueue {
             .items
             .get(workspace_id.trim())
             .map_or(0, Vec::len)
+    }
+
+    pub(crate) fn pending_messages(&self, workspace_id: &str) -> Vec<Value> {
+        self.load_doc()
+            .items
+            .remove(workspace_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.message)
+            .collect()
     }
 
     pub fn consider(

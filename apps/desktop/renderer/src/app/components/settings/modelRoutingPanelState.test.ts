@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import {
+  changeTierCandidates,
+  compatibleRoleRoute,
   isRoutingReadOnly,
   moveListItem,
   optionRejectReason,
@@ -137,6 +139,64 @@ test('reasoning choices intersect the declared eligible candidates without pinni
   const changed = setRoutingReasoning(tier, 'high');
   assert.deepEqual(changed, { mode: 'tier', tier: 'strong', reasoningEffort: 'high' });
   assert.deepEqual(setRoutingReasoning(changed), tier);
+});
+
+const maxFast = { ...text, id: 'max-fast', authMethod: 'oauth_chatgpt', reasoningEffortLevels: ['high', 'max'] as const };
+const highNormal = { ...text, id: 'high-normal', authMethod: 'api_key', reasoningEffortLevels: ['high'] as const };
+const maxNormal = { ...maxFast, id: 'max-normal', authMethod: 'api_key' };
+const highFast = { ...highNormal, id: 'high-fast', authMethod: 'oauth_grok' };
+const alternatives = [maxFast, highNormal, maxNormal, highFast];
+const configuredTier = { primary: maxFast.id, reasoningEffort: 'max', fastMode: true } as const;
+
+test('tier primary switches reset only the unsupported parameters', () => {
+  assert.deepEqual(changeTierCandidates('strong', configuredTier, highNormal.id, [], alternatives),
+    { primary: highNormal.id, fallbacks: [] });
+  assert.deepEqual(changeTierCandidates('strong', configuredTier, highFast.id, [], alternatives),
+    { primary: highFast.id, fallbacks: [], fastMode: true });
+  assert.deepEqual(changeTierCandidates('strong', configuredTier, maxNormal.id, [], alternatives),
+    { primary: maxNormal.id, fallbacks: [], reasoningEffort: 'max' });
+});
+
+test('adding a tier fallback uses shared support; removing it preserves supported values without restoring cleared ones', () => {
+  const added = changeTierCandidates('strong', configuredTier, maxFast.id, [highNormal.id], alternatives);
+  assert.deepEqual(added, { primary: maxFast.id, fallbacks: [highNormal.id] });
+  assert.deepEqual(changeTierCandidates('strong', added, maxFast.id, [], alternatives),
+    { primary: maxFast.id, fallbacks: [] });
+  const historical = { ...configuredTier, fallbacks: [highNormal.id] };
+  assert.deepEqual(changeTierCandidates('strong', historical, maxFast.id, [], alternatives),
+    { ...configuredTier, fallbacks: [] });
+  assert.deepEqual(historical, { ...configuredTier, fallbacks: [highNormal.id] });
+  const supported = { ...configuredTier, reasoningEffort: 'high' } as const;
+  assert.deepEqual(changeTierCandidates('strong', supported, maxFast.id, [highFast.id], alternatives),
+    { ...supported, fallbacks: [highFast.id] });
+});
+
+test('a legacy vision fallback still participates in backend tier parameter validation', () => {
+  const visionMax = { ...maxFast, supportsVision: true };
+  assert.deepEqual(changeTierCandidates('vision', configuredTier, maxFast.id, [highNormal.id], [visionMax, highNormal]),
+    { primary: maxFast.id, fallbacks: [highNormal.id] });
+});
+
+test('switching a custom role model or editing its pool resets incompatible values and keeps supported ones', () => {
+  const fixed = { mode: 'fixed', modelProviderId: highNormal.id, reasoningEffort: 'max', fastMode: true } as const;
+  assert.deepEqual(compatibleRoleRoute(fixed, {}, alternatives, 'session_worker'),
+    { mode: 'fixed', modelProviderId: highNormal.id });
+  assert.deepEqual(compatibleRoleRoute({ ...fixed, modelProviderId: maxNormal.id }, {}, alternatives, 'session_worker'),
+    { mode: 'fixed', modelProviderId: maxNormal.id, reasoningEffort: 'max' });
+  assert.deepEqual(compatibleRoleRoute({ ...fixed, modelProviderId: maxFast.id }, {}, alternatives, 'session_worker'),
+    { ...fixed, modelProviderId: maxFast.id });
+  const auto = { mode: 'auto', pool: [maxFast.id, highFast.id], reasoningEffort: 'high', fastMode: true } as const;
+  assert.deepEqual(compatibleRoleRoute(auto, {}, alternatives, 'session_worker'), auto);
+  assert.deepEqual(compatibleRoleRoute({ ...auto, reasoningEffort: 'max' }, {}, alternatives, 'session_worker'),
+    { mode: 'auto', pool: auto.pool, fastMode: true });
+});
+
+test('switching a role to a tier explicitly bypasses an incompatible inherited value', () => {
+  const tiers = { strong: { ...configuredTier, fallbacks: [highNormal.id] } };
+  const role = { mode: 'tier', tier: 'strong' } as const;
+  assert.deepEqual(compatibleRoleRoute(role, tiers, alternatives, 'session_worker'),
+    { ...role, reasoningEffort: null, fastMode: false });
+  assert.deepEqual(compatibleRoleRoute(role, { strong: configuredTier }, alternatives, 'session_worker'), role);
 });
 
 test('model routing copy exists in both locales', () => {

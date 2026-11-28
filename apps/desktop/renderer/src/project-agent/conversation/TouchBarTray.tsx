@@ -12,6 +12,7 @@ import {
   type DrawerSession,
 } from '../state/drawerState';
 import { recencyBucketOf, type RecencyBucketKey, type SidebarTaskEntry } from '../state/botNavigationState';
+import { workerStatus } from '../state/workerStatus';
 
 export type TouchBarTrayMode = 'active' | 'history' | null;
 type HistoryCategory = 'all' | 'settled' | 'canceled' | 'failed';
@@ -31,13 +32,12 @@ export interface TouchBarTrayProps {
 
 const HISTORY_PAGE_SIZE = 20;
 
-function statusGlyph(status: string, reason?: string): { icon: 'check' | 'close' | 'warning' | 'loader' | 'circle'; tone: string; spin?: boolean } {
+function historyStatusGlyph(status: string, reason?: string): { icon: 'check' | 'close' | 'warning' | 'circle'; tone: string } {
   if (status === 'accepted' || reason === 'settled') return { icon: 'check', tone: 'good' };
   if (status === 'failed' || reason === 'verification_failed') return { icon: 'warning', tone: 'danger' };
   if (status === 'waiting_user') return { icon: 'warning', tone: 'warn' };
   if (status === 'cancelled' || status === 'superseded' || status === 'paused') return { icon: 'close', tone: 'muted' };
-  if (status === 'queued') return { icon: 'circle', tone: 'muted' };
-  return { icon: 'loader', tone: 'azure', spin: true };
+  return { icon: 'circle', tone: 'muted' };
 }
 
 export function TouchBarTray({
@@ -187,7 +187,7 @@ export function TouchBarTray({
               {isZh ? '当前没有进行中的任务。' : 'No active tasks right now.'}
             </div>
           ) : activeTasks.map((task) => {
-            const g = statusGlyph(task.status, task.followUp?.reason);
+            const visual = workerStatus(task.status, task.followUp, i18n);
             return (
               <div
                 key={task.sessionId}
@@ -203,18 +203,15 @@ export function TouchBarTray({
                   }
                 }}
               >
-                <span className="bot-tray-glyph" data-tone={g.tone} aria-hidden="true">
-                  <PeerIcon name={g.icon} size={14} className={g.spin ? 'motion-spin' : undefined} />
+                <span className="bot-tray-glyph" data-tone={visual.tone}>
+                  <ExecutorIcon title={executorDisplayName('peer', isZh)} flowing={visual.tone === 'active'} />
                 </span>
                 <div className="bot-tray-row-main">
-                  <div className="bot-tray-row-title-line">
-                    <ExecutorIcon title={executorDisplayName('peer', isZh)} />
-                    <span className="bot-tray-row-title">{task.title}</span>
-                  </div>
+                  <span className="bot-tray-row-title">{task.title}</span>
                   <span className="bot-tray-row-sub">
                     {task.followUp?.reason === 'verification_failed'
                       ? i18n.t('projectAgent.chat.work.verificationFailed')
-                      : (task.phaseLabel || task.status)}
+                      : (task.phaseLabel || visual.text)}
                   </span>
                 </div>
                 <div className="bot-tray-row-right">
@@ -303,7 +300,7 @@ export function TouchBarTray({
               <div key={group.key} className="bot-tray-group">
                 <div className="bot-tray-group-label">{group.label}</div>
                 {group.items.map((row) => {
-                  const g = statusGlyph(row.status, row.followUp?.reason);
+                  const g = historyStatusGlyph(row.status, row.followUp?.reason);
                   const subtitle = row.summary || formatDrawerSessionStatus(row, i18n);
                   const title = row.title && row.title !== row.sessionId
                     ? row.title

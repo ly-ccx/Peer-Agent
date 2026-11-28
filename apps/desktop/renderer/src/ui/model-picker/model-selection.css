@@ -247,6 +247,7 @@
 }
 
 .model-selection-trigger .model-selection-trigger-effort {
+  display: inline-grid;
   flex: none;
   margin-inline-start: 1px;
   color: color-mix(in srgb, var(--graphite-mute) 92%, transparent);
@@ -255,6 +256,9 @@
   letter-spacing: 0.02em;
   line-height: 1;
 }
+
+.model-selection-trigger-effort > span { grid-area: 1 / 1; }
+.model-selection-trigger-effort > [aria-hidden="true"] { visibility: hidden; }
 
 .model-selection-fast-mark {
   flex: none;

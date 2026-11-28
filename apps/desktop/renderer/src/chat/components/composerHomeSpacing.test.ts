@@ -102,6 +102,15 @@ test('workspace picker stays in the toolbar under the composer', () => {
   );
 });
 
+test('prediction follows the textarea in the shared input field', () => {
+  const chat = readFileSync(new URL('./ComposerDraftControls.tsx', import.meta.url), 'utf8');
+  const bot = readFileSync(new URL('../../project-agent/conversation/BotComposer.tsx', import.meta.url), 'utf8');
+  const fieldOrder = /className="composer-input-field">\s*<textarea\b[\s\S]*?\/\>\s*<ComposerInputSuggestion\b[^>]+>\s*<\/div>/;
+  assert.match(chat, fieldOrder);
+  assert.match(bot, fieldOrder);
+  assert.match(styles, /\.chat-composer > \.composer-input-field \{[^}]*grid-area:\s*home-text;/);
+});
+
 test('home composer textarea keeps a taller empty-state input area', () => {
   assert.match(
     styles,
@@ -109,7 +118,7 @@ test('home composer textarea keeps a taller empty-state input area', () => {
   );
   assert.match(
     styles,
-    /\.chat-composer--home > textarea \{[\s\S]*?min-height:\s*96px;/,
+    /\.chat-composer--home > \.composer-input-field > textarea \{[\s\S]*?min-height:\s*96px;/,
   );
   assert.match(
     styles,
@@ -118,15 +127,15 @@ test('home composer textarea keeps a taller empty-state input area', () => {
   // Home and compact share the 20-line cap so neither stays locked to one overflowing row.
   assert.match(
     styles,
-    /\.chat-composer--home > textarea,\s*\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
+    /\.chat-composer--home > \.composer-input-field > textarea,\s*\.chat-composer--compact > \.composer-input-field > textarea \{[\s\S]*?max-height:\s*20lh;[\s\S]*?overflow-wrap:\s*anywhere;/,
   );
   assert.match(
     styles,
-    /\.chat-composer--compact > textarea \{[\s\S]*?min-height:\s*28px;/,
+    /\.chat-composer--compact > \.composer-input-field > textarea \{[\s\S]*?min-height:\s*28px;/,
   );
   assert.doesNotMatch(
     styles,
-    /\.chat-composer--compact > textarea \{[\s\S]*?max-height:\s*160px;/,
+    /\.chat-composer--compact > \.composer-input-field > textarea \{[\s\S]*?max-height:\s*160px;/,
   );
 });
 
