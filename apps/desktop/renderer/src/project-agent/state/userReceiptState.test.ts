@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createI18n } from '@peer-agent/i18n';
 import { userReceipt } from './userReceiptState.ts';
 import type { BotDispositionMark } from './botConversationState.ts';
 
@@ -20,7 +21,7 @@ test('reply acknowledgement preserves distinct task actions and never implies ta
 test('pending delivery and failure take precedence over historical replies, and retry retains input identity', () => {
   const base = { inputId: 'u', dispositions: [answered(['old'])] };
   assert.equal(userReceipt({ ...base, pending: 'sending' }, true).labelKey, 'projectAgent.chat.sending');
-  assert.equal(userReceipt({ ...base, pending: 'received' }, true).labelKey, 'projectAgent.chat.received');
+  assert.equal(userReceipt({ ...base, pending: 'received' }, true).labelKey, 'projectAgent.chat.replied');
   assert.equal(userReceipt({ ...base, pending: 'failed' }, true).retryInputId, 'u');
   assert.equal(userReceipt({ ...base, pending: 'failed' }, true).labelKey, 'projectAgent.chat.failed');
   assert.equal(userReceipt({ inputId: 'u', dispositions: [] }, false).labelKey, 'projectAgent.chat.received');
@@ -32,4 +33,16 @@ test('unknown delivery is neither received nor a definitive failure and retains 
   const receipt = userReceipt({inputId:'same-id',pending:'unknown',dispositions:[]},false);
   assert.equal(receipt.labelKey,'projectAgent.chat.inputUnconfirmed');
   assert.equal(receipt.retryInputId,'same-id');
+});
+
+
+test('waiting receipt has localized copy without implying queued execution', () => {
+  const base = { inputId: 'u', dispositions: [] };
+  const receipt = userReceipt(base, false, 'waiting');
+  assert.ok(receipt.labelKey);
+  assert.equal(createI18n('zh-CN').t(receipt.labelKey), '已收到 · 等待处理');
+  assert.equal(createI18n('en-US').t(receipt.labelKey), 'Received · waiting');
+  assert.equal(receipt.retryInputId, undefined);
+  assert.equal(userReceipt(base, false, 'deliveryIssue').labelKey, 'projectAgent.chat.reply.deliveryIssue');
+  assert.equal(userReceipt({ ...base, pending: 'unknown' }, false, 'waiting').retryInputId, 'u');
 });
