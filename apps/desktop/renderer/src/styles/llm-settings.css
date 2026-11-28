@@ -1549,6 +1549,11 @@
   width: min(720px, calc(100vw - 32px));
 }
 
+.llm-model-settings-dialog > .llm-dialog-header,
+.llm-model-settings-dialog > .llm-dialog-footer {
+  flex-shrink: 0;
+}
+
 .llm-dialog-header {
   display: flex;
   align-items: flex-start;
@@ -1989,10 +1994,16 @@
 }
 
 .llm-model-settings-body {
-  display: grid;
-  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
   padding: var(--space-4) var(--space-5);
   overflow-y: auto;
+}
+
+.llm-model-settings-fields {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
 }
 
 .llm-settings-section {

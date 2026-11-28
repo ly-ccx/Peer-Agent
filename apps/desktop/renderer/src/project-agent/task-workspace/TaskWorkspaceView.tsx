@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotProfile, InputDraftTaskRef } from '@peer-agent/protocol';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { clientApi } from '../../clientApi';
 import { PeerIcon } from '../../ui/icons';
 import { useCompositionGuard } from '../../app/hooks/useCompositionGuard';
@@ -9,7 +10,8 @@ import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from
 import { mergeTaskDetail } from '../state/taskDetailState';
 import { useTaskReport } from '../state/useTaskReport';
 import { useTaskCancellation } from '../state/TaskCancellation';
-import type { TaskConversationContext } from '../state/taskConversationState';
+import { taskCancellationFocus } from '../state/taskCancellationFocus';
+import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
 import { ComposerTouchBar } from '../conversation/ComposerTouchBar';
 import { ConversationSceneDrawer } from '../drawer/ConversationScene';
 import { TaskEvidenceInspector, type InspectorTab } from './TaskEvidenceInspector';
@@ -41,6 +43,7 @@ export interface TaskWorkspaceViewProps {
   readonly onToggleInspector: () => void;
   readonly onCloseInspector: () => void;
   readonly onBackToBot: (focusMessageId?: string) => void;
+  readonly onTaskConversation: (request: Omit<TaskConversationRequest, 'id'>) => void;
   readonly onOpenTask: (sessionId: string) => void;
   readonly onCiteToBot: (ref: InputDraftTaskRef, prefillText?: string) => void;
   readonly onRefreshSessions: () => Promise<void>;
@@ -217,12 +220,14 @@ export function TaskWorkspaceView({
   onToggleInspector,
   onCloseInspector,
   onBackToBot,
+  onTaskConversation,
   onOpenTask,
   onCiteToBot,
   onRefreshSessions,
   onEvidenceCountChange,
 }: TaskWorkspaceViewProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const [overlayInspector, setOverlayInspector] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('brief');
   const [pendingApproval, setPendingApproval] = useState<PendingTaskApproval | null>(null);
@@ -240,10 +245,27 @@ export function TaskWorkspaceView({
     sessionsAvailable || !liveSession,
     `${liveSession?.sourceRevision || ''}:${liveSession?.observationRevision || ''}`,
   );
-  const session = useMemo(
-    () => mergeTaskDetail(liveSession, reportRead.detail),
-    [liveSession, reportRead.detail],
-  );
+  const session = useMemo(() => {
+    const merged = mergeTaskDetail(liveSession, reportRead.detail);
+    if (!merged) return null;
+    const verification = reportRead.state === 'ready' && !['queued', 'starting', 'running', 'verifying', 'awaiting_approval'].includes(merged.status)
+      ? merged.verification : undefined;
+    if (liveSession && !sessionsAvailable) return {
+      ...merged, status: 'unavailable', statusLabel: i18n.t('projectAgent.chat.work.unavailable'), cancelable: false, verification: undefined,
+    };
+    const status = WORK_SESSION_STATUSES.find(value => value === merged.status);
+    const statusLabel = merged.statusLabel || (status ? i18n.t(status === 'waiting_user' ? 'projectAgent.chat.work.waiting'
+      : status === 'result_ready' ? 'projectAgent.chat.work.resultReady' : `projectAgent.chat.sessionState.${status}`) : merged.status);
+    return { ...merged, statusLabel, verification };
+  }, [i18n, liveSession, reportRead.detail, reportRead.state, sessionsAvailable]);
+
+  const visibleSessionId = session?.sessionId;
+  useLayoutEffect(() => {
+    const title = titleRef.current;
+    if (!title) return;
+    const { activeElement, body } = title.ownerDocument;
+    if (activeElement === body || activeElement?.closest('[hidden], [inert]')) title.focus({ preventScroll: true });
+  }, [visibleSessionId]);
 
   const isLiveSession = Boolean(
     session?.conversationId
@@ -437,7 +459,7 @@ export function TaskWorkspaceView({
   const verdict = session.verification ? verdictStrip(session.verification, isZh) : null;
 
   return (
-    <div className="bot-task-workspace" ref={rootRef}>
+    <div className="bot-task-workspace" ref={rootRef} data-status={session.status}>
       <div className="bot-task-stage">
         {/* Compact Single-Line Status Strip (keeps full height for the worker conversation) */}
         <header className="bot-task-strip">
@@ -450,10 +472,7 @@ export function TaskWorkspaceView({
               />
               <span>{statusLabel}</span>
             </span>
-            <h1 className="bot-task-strip-title" title={title}>{title}</h1>
-            {session.modelLabel ? (
-              <span className="bot-task-meta-text">{session.modelLabel}</span>
-            ) : null}
+            <h1 ref={titleRef} tabIndex={-1} className="bot-task-strip-title" title={title}>{title}</h1>
             {stamp ? (
               <span className="bot-task-meta-text">{stamp}</span>
             ) : null}
@@ -585,7 +604,10 @@ export function TaskWorkspaceView({
               onApprove={pendingApproval ? () => void handleApprovalDecision('approve') : undefined}
               onReject={pendingApproval ? () => void handleApprovalDecision('reject') : undefined}
               onVerify={() => void handleReverify()}
-              onCancel={cancellation ? () => { void cancellation.cancel(sessionId); } : undefined}
+              onCancel={cancellation ? event => {
+                const finishFocus = taskCancellationFocus(event.currentTarget);
+                void cancellation.cancel(sessionId).then(finishFocus, () => finishFocus(false));
+              } : undefined}
               onCiteToBot={() => onCiteToBot(taskRefPayload)}
               onRerunDraft={() => onCiteToBot(
                 taskRefPayload,
@@ -611,10 +633,16 @@ export function TaskWorkspaceView({
         overlay={overlayInspector}
         workspaceId={workspaceId}
         session={session}
+        reportState={reportRead.state}
+        hasReadReport={Boolean(reportRead.detail)}
+        context={context}
+        botName={profile.displayName}
         initialTab={inspectorTab}
         i18n={i18n}
         triggerRef={inspectorTriggerRef}
         onClose={onCloseInspector}
+        onRetryReport={liveSession && !sessionsAvailable ? onRefreshSessions : reportRead.refresh}
+        onTaskConversation={onTaskConversation}
         onSelectSession={onOpenTask}
       />
     </div>

@@ -3,7 +3,7 @@ import { readFileSync, existsSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 
 /** Actual UI, preload, IPC and save adapter; the native destination is controlled in this isolated fixture. */
-export async function checkBotShellDiagnostics({ page, report, exportFile, fixture }) {
+export async function checkBotShellDiagnostics({ page, report, exportFile, fixture, artifactDirectory }) {
   const before = await page.evaluate(() => window.peerAgent.projectAgentDiagnostics({ action: 'read' }));
   assert.equal(before.ok, true); assert.equal(before.report.bots.length, fixture.bots.length);
   const invalid = await page.evaluate(() => window.peerAgent.projectAgentDiagnostics({ action: 'export', filePath: '/untrusted/destination' }));
@@ -23,8 +23,7 @@ export async function checkBotShellDiagnostics({ page, report, exportFile, fixtu
     assert.equal(body.includes(text), false, `private field escaped: ${text}`);
   }
   assert.equal(body.includes('unique-needle'), false);
-  const outputIndex = process.argv.indexOf('--output');
-  if (outputIndex >= 0) copyFileSync(exportFile, path.join(path.dirname(process.argv[outputIndex + 1]), 'bot-shell-diagnostics.json'));
+  if (artifactDirectory) copyFileSync(exportFile, path.join(artifactDirectory, 'bot-shell-diagnostics.json'));
   report.diagnostics = { bots: saved.bots.length, bytes: Buffer.byteLength(body), errors: 0,
     scope: 'Real source Electron UI/preload/IPC/atomic export; native save destination controlled in isolated fixture; OS dialog interaction is an owner check',
     checks: ['read actual stores', 'reject renderer destination', 'refresh real Developer panel', 'save redacted JSON', 'bounded events/turns', 'actual turn timing', 'no absolute paths, IDs or message text'] };

@@ -29,17 +29,16 @@ function locator(artifact) {
 export function createEvidenceDeliveryProjection({ getConversationId, getPlan, getSession }) {
   return (record, context) => {
     if (!context || !id(context.workspaceId) || context.task !== undefined && (!id(context.task?.sessionId) || !id(context.task?.planId))) return denied();
+    if (record.planId && !id(record.planId)) return denied();
     const workspaceId = context.workspaceId; let task, plan;
     const botConversationId = getConversationId(workspaceId);
     const directBotInteractive = typeof record.planId === 'string'
       && record.planId.startsWith(BOT_DIRECT_PLAN_PREFIX)
-      && id(record.planId)
       && !context.task
       && record.conversationId === botConversationId
       && record.capabilityId === INTERACTIVE_PUBLISH_CAPABILITY
       && record.toolName === INTERACTIVE_PUBLISH_TOOL;
     if (record.planId && !directBotInteractive) {
-      if (!id(record.planId)) return denied();
       plan = getPlan(record.planId); const origin = plan?.delegationOrigin;
       task = { sessionId: origin?.sessionId, planId: record.planId };
       if (!id(task.sessionId) || !id(task.planId) || context.task && (context.task.sessionId !== task.sessionId || context.task.planId !== task.planId)
