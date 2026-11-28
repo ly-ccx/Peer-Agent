@@ -495,7 +495,14 @@ async fn install_release_update(update: &UpdateInfo) -> Result<(), String> {
     fs::write(&archive_path, &archive_bytes).map_err(|e| format!("write archive failed: {e}"))?;
     fs::create_dir_all(&extracted).map_err(|e| format!("create extract dir failed: {e}"))?;
 
-    let status = Command::new(find_tar_executable())
+    let tar = find_tar_executable();
+    let mut extract = Command::new(tar);
+    // GNU tar launches gzip through PATH even when tar itself has an absolute path.
+    #[cfg(target_os = "linux")]
+    if Path::new(tar).is_absolute() {
+        extract.env("PATH", "/usr/bin:/bin");
+    }
+    let status = extract
         .args(["-xzf"])
         .arg(&archive_path)
         .arg("-C")

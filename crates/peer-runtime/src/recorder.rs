@@ -103,6 +103,8 @@ pub(crate) async fn stop_owned_group(
     let deadline = Instant::now() + budget;
     kill_process_tree(pid);
     let _ = child.start_kill();
+    #[cfg(target_os = "macos")]
+    mac::finish_group_signal(pid, deadline).await;
     if !timeout_at(deadline, child.wait())
         .await
         .is_ok_and(|result| result.is_ok())

@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 // Development verification uses TS as the conformance reference. The built
 // peer-native executable does not spawn this script, Node, or Bun.
-import { execFileSync } from 'node:child_process';
 import { copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runVerificationCommand } from './run-verification-command.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-')));
-const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root, stdio: 'inherit',env:extraEnv?{...process.env,...extraEnv}:process.env });
+const run = (command, args, extraEnv) => {
+  writeFileSync(1, `Running ${command} ${args.join(' ')}\n`);
+  const status = runVerificationCommand(command, args, {
+    cwd: root, env: { ...process.env, ...extraEnv }, logPath: join(output, 'verification-command.log'),
+  });
+  if (status !== 0) process.exit(status);
+};
 const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
+run('node', ['--test', 'scripts/native-cli/run-verification-command.test.mjs']);
 if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
 run('pnpm',['--filter','@peer-agent/credential-helper','build']);
 run('pnpm',['--filter','@peer-agent/runtime-node','build']);
@@ -122,12 +129,8 @@ run('node', ['scripts/native-cli/project-agent-conformance.mjs', 'target/debug/e
 run('node', ['--test', 'packages/runtime-node/src/goal-plan-transactions.test.mjs', 'packages/runtime-node/src/goal-plan-closure-mirror.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
-execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {
-  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
-});
-execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/release/peer-credential-helper')], {
-  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
-});
+run(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], { PATH: '/nonexistent' });
+run(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/release/peer-credential-helper')], { PATH: '/nonexistent' });
 run('python3', ['scripts/native-cli/pty_checks.py', '--binary', 'target/release/peer-native',
   '--fixture', 'target/release/examples/terminal-lifecycle', '--output', join(output, 'pty')]);
 run('python3', ['scripts/native-cli/resume_pty.py', '--binary', 'target/release/peer-native',

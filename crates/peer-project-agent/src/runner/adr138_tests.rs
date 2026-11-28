@@ -239,7 +239,7 @@ async fn user_turn_no_reply_after_spawn_synthesizes_natural_ack() {
 async fn natural_user_retry_auto_cites_unreported_result_ready_session_for_anchor() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
-    fs::write(ws.path().join("README.md"), "# Demo").unwrap();
+    fs::write(ws.path().join("readme.md"), "# Demo").unwrap();
     let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
     let (entry, profile) = host.bind_workspace(ws.path(), Some("AutoCite")).unwrap();
     let ws_id = entry.workspace_id;
