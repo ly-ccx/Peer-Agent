@@ -399,9 +399,9 @@
     }
   ],
   "help": {
-    "sessions": "peer 0.1.0-rc.45\n\npeer sessions — list, resume, or delete a stored session\n\nUsage:\n  peer sessions\n  peer sessions resume <id>\n  peer sessions delete <id> [--yes]\n\nlist writes updated time, id, and title to stdout.\nresume opens that session in the TUI and needs a TTY.\ndelete removes that session and its goal plans. A TTY asks first; otherwise pass --yes.",
-    "doctor": "peer 0.1.0-rc.45\n\npeer doctor — check the local install\n\nUsage:\n  peer doctor\n\nChecks the peer binary, credential helper, data root, and version.\nIt does not install, sign in, or change configuration.",
-    "export": "peer 0.1.0-rc.45\n\npeer export — write a stored session as Markdown\n\nUsage:\n  peer export <id>\n  peer export <id> --output <path> [--force]\n\nThe file is a reading copy, not Evidence. An existing output path is kept unless --force is set."
+    "sessions": "peer 0.1.0-rc.46\n\npeer sessions — list, resume, or delete a stored session\n\nUsage:\n  peer sessions\n  peer sessions resume <id>\n  peer sessions delete <id> [--yes]\n\nlist writes updated time, id, and title to stdout.\nresume opens that session in the TUI and needs a TTY.\ndelete removes that session and its goal plans. A TTY asks first; otherwise pass --yes.",
+    "doctor": "peer 0.1.0-rc.46\n\npeer doctor — check the local install\n\nUsage:\n  peer doctor\n\nChecks the peer binary, credential helper, data root, and version.\nIt does not install, sign in, or change configuration.",
+    "export": "peer 0.1.0-rc.46\n\npeer export — write a stored session as Markdown\n\nUsage:\n  peer export <id>\n  peer export <id> --output <path> [--force]\n\nThe file is a reading copy, not Evidence. An existing output path is kept unless --force is set."
   },
   "redaction": [
     {
