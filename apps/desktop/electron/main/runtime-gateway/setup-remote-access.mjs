@@ -259,10 +259,14 @@ export function setupRemoteAccess({
       lookupProject: value => projectLedger().lookupProject(value),
       rememberProject: (value,result,now) => projectLedger().rememberProject(value,result,now),
     },
-    resolveLocal(request) {
+    async resolveLocal(request) {
       const binding=bindingStore.load(),policy=currentPolicy(),ports=getProjectAccess();
       const project='workspaceId' in request?ports?.directory.get(request.workspaceId):null;
-      const session=request.operation==='project.session.read'?ports?.getSession(request.sessionId):null;
+      const session=request.operation==='project.session.read'
+        ? (typeof ports?.getSessionAsync === 'function'
+          ? await ports.getSessionAsync(request.sessionId)
+          : ports?.getSession(request.sessionId))
+        : null;
       const paths=request.operation==='project.list'?(ports?.directory.workspaceIds?.()??[]).map(id=>ports.directory.get(id)?.path):[project?.path];
       return {projectAccess:ports,sessionFacts:session,privatePaths:[userDataPath,...paths].filter(Boolean),admission:{
         now:Date.now(),ownerId:binding?.ownerId??'',deviceId:binding?.deviceId??'',bindingVersion:binding?.bindingVersion??0,

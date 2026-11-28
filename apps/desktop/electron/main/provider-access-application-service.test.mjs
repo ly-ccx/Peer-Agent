@@ -20,19 +20,13 @@ function createHarness(overrides = {}) {
       sessions.push(session);
       return session;
     },
-    startGoogleBrowserLogin() { throw new Error('unexpected_google_login'); },
     startGrokOAuthLogin() { throw new Error('unexpected_grok_login'); },
     ensureFreshTokens: async (tokens) => ({ tokens, refreshed: false }),
-    ensureFreshGoogleTokens: async (tokens) => ({ tokens, refreshed: false }),
     ensureFreshGrokTokens: async (tokens) => ({ tokens, refreshed: false }),
     listSubscriptionModels: async () => ({ models: [{ id: 'gpt-5' }], source: 'builtin' }),
     listModelCatalogForChannel: async () => ({ models: [{ id: 'remote' }], source: 'remote' }),
     listGrokBuildModels: async () => ({ models: [], source: 'remote' }),
-    listGeminiModels: async () => ({ models: [], source: 'builtin' }),
-    preferGeminiModel: () => null,
-    listQoderModels: async () => ({ models: [{ id: 'qoder' }], source: 'qoder' }),
     resolveChannel: (config) => ({ ...config, headers: { Authorization: 'Bearer secret' }, wire: 'openai' }),
-    resolveGeminiCodeAssistProjectId: async () => null,
   };
   const service = createProviderAccessApplicationService({
     fetchQuota: async (id, force) => ({ id, force }),
@@ -59,6 +53,12 @@ function createHarness(overrides = {}) {
       const provider = providers.find((entry) => entry.id === id);
       credentialById.set(id, { authMethod: provider?.authMethod, tokens });
       calls.push(['tokens', id]);
+    },
+    refreshOAuthTokens: async (id, tokens, refresh) => {
+      const result = await refresh(tokens);
+      if (result.refreshed) credentialById.set(id, { ...credentialById.get(id), tokens: result.tokens });
+      calls.push(['refresh', id]);
+      return result;
     },
     getApiKeyRequestConfig: (id) => ({ id, baseUrl: 'https://example.test', apiKey: 'secret' }),
     fetchWithRecovery: async () => ({ ok: true }),
@@ -89,25 +89,6 @@ test('provider access forwards quota and model discovery modes', async () => {
     success: true,
     models: [{ id: 'remote' }],
     source: 'remote',
-  });
-});
-
-test('provider access keeps qoder model discovery on the local source', async () => {
-  const { service } = createHarness({
-    ports: {
-      listProviders: () => [{ id: 'q1', authMethod: 'local_cli', channelId: 'qoder' }],
-    },
-  });
-  assert.deepEqual(await service.listModels('q1'), {
-    success: true,
-    models: [{ id: 'qoder' }],
-    source: 'qoder',
-    error: undefined,
-  });
-  assert.deepEqual(await service.fetchModels({ channelId: 'qoder' }), {
-    success: true,
-    models: [{ id: 'qoder' }],
-    source: 'qoder',
   });
 });
 

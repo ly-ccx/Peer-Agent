@@ -18,13 +18,13 @@
      * 在 React 首帧/bootstrap 失败时会呈现“整窗白屏/空屏”。
      * 内容区半透明玻璃仍由各组件 --glass-* 负责。
      */
-    background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
+    background: var(--chrome-canvas);
     font-weight: 400;
   }
 
   html,
   #root {
-    background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
+    background: var(--chrome-canvas);
   }
 
   /*
@@ -54,7 +54,7 @@
     html[data-vibrancy='true'],
     html[data-vibrancy='true'] body,
     html[data-vibrancy='true'] #root {
-      background: var(--za-app-bg, var(--chrome-canvas, #F4F6F9));
+      background: var(--chrome-canvas);
     }
   }
 
@@ -91,7 +91,7 @@
   button:focus-visible,
   select:focus-visible,
   summary:focus-visible {
-    outline: 1px solid var(--za-focus);
+    outline: 1px solid var(--ui-focus-glow);
     outline-offset: 1px;
   }
 
@@ -125,11 +125,11 @@
 
 :hover> ::-webkit-scrollbar-thumb,
 :hover::-webkit-scrollbar-thumb {
-  background-color: var(--za-scrollbar-thumb);
+  background-color: var(--chrome-scrollbar-thumb);
 }
 
 *::-webkit-scrollbar-thumb:active {
-  background-color: var(--za-scrollbar-thumb);
+  background-color: var(--chrome-scrollbar-thumb);
 }
 @layer base {
   summary { list-style: none; }

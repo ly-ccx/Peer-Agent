@@ -3,7 +3,7 @@ import { useComposerAttachmentIntake } from '../hooks/useComposerAttachmentIntak
 import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
 
 import { findCurrentTurnIdForScroll, planStickToBottomScroll, shouldProbeTurnForScroll, type StickScrollAnchor } from "../state/threadScrollAnchor.ts";
-import { formatQueueNoticeText, formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
+import { formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
 import { loadConversationMessages, nextId, shouldLoadOlderHistory } from "../state/conversationHydration.ts";
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
@@ -192,6 +192,8 @@ export function ChatSurface({
   onPendingSendConsumed,
   banner,
   showComposer = true,
+  showHeader = true,
+  externalStreaming = false,
 }: {
   readonly i18n: I18nRuntime;
   readonly providers: readonly LlmProviderConfigView[];
@@ -206,6 +208,10 @@ export function ChatSurface({
   readonly banner?: React.ReactNode;
   /** 流程查看保留状态与批准入口，不提供输入、编辑或排队发送。 */
   readonly showComposer?: boolean;
+  /** 是否显示内置顶部标题栏；无缝嵌入子任务页时由外层紧凑状态条替代。 */
+  readonly showHeader?: boolean;
+  /** 由外部宿主驱动的实时执行态（如后台委派子任务），使进行中消息按 0.18.0 实时时间线展开。 */
+  readonly externalStreaming?: boolean;
   readonly conversationRevision?: string | null;
   readonly conversationTitle?: string;
   readonly automationOrigin?: {
@@ -2370,30 +2376,32 @@ export function ChatSurface({
           </div>
         </div>
       ) : null}
-      <ChatHeader
-        title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
-        automationOrigin={automationOrigin}
-        onOpenAutomationRun={onOpenAutomationRun}
-        isZh={isZh}
-        i18n={i18n}
-        isStreaming={isStreaming}
-        hasScroll={threadScrolled}
-        localAccessLevel={localAccessLevel}
-        taskLine={gitChrome.taskLine}
-        editTriggerRef={headerEditTriggerRef}
-        onOpenTools={onOpenTools}
-        onRename={!isDraftConversation && onRenameConversation && conversationId
-          ? (newTitle) => onRenameConversation(conversationId, newTitle)
-          : undefined}
-        onArchive={!isDraftConversation && onArchiveConversation && conversationId
-          ? () => onArchiveConversation(conversationId)
-          : undefined}
-        onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
-        onFind={() => setFindOpen(true)}
-        onClose={onClose}
-        taskMonitorOpen={taskMonitorOpen}
-        onToggleTaskMonitor={toggleTaskMonitor}
-      />
+      {showHeader ? (
+        <ChatHeader
+          title={conversationTitle || (isDraftConversation ? (isZh ? '新对话' : 'New Chat') : '')}
+          automationOrigin={automationOrigin}
+          onOpenAutomationRun={onOpenAutomationRun}
+          isZh={isZh}
+          i18n={i18n}
+          isStreaming={isStreaming}
+          hasScroll={threadScrolled}
+          localAccessLevel={localAccessLevel}
+          taskLine={gitChrome.taskLine}
+          editTriggerRef={headerEditTriggerRef}
+          onOpenTools={onOpenTools}
+          onRename={!isDraftConversation && onRenameConversation && conversationId
+            ? (newTitle) => onRenameConversation(conversationId, newTitle)
+            : undefined}
+          onArchive={!isDraftConversation && onArchiveConversation && conversationId
+            ? () => onArchiveConversation(conversationId)
+            : undefined}
+          onBranch={!isDraftConversation && messages.length > 0 ? handleHeaderBranch : undefined}
+          onFind={() => setFindOpen(true)}
+          onClose={onClose}
+          taskMonitorOpen={taskMonitorOpen}
+          onToggleTaskMonitor={toggleTaskMonitor}
+        />
+      ) : null}
       <ChatFindBar
         open={findOpen}
         containerRef={threadRef}
@@ -2403,7 +2411,7 @@ export function ChatSurface({
         recomputeKey={messages.length}
       />
       {banner ? <div className="selection-child-banner">{banner}</div> : null}
-      {currentTurnContext ? (
+      {showHeader && currentTurnContext ? (
         <div className="current-turn-context" aria-label={isZh ? '当前问题' : 'Current question'}>
           <span className="current-turn-context-label">{isZh ? '当前问题' : 'Current'}</span>
           <span className="current-turn-context-text">{currentTurnContext}</span>
@@ -2447,7 +2455,7 @@ export function ChatSurface({
             turns={chatTurns}
             liveTurn={liveChatTurn}
             lastMessage={messages.at(-1)}
-            isStreaming={isStreaming}
+            isStreaming={isStreaming || externalStreaming}
             streamStartedAt={convState.turnStartedAt}
             isZh={isZh}
             i18n={i18n}
@@ -2469,11 +2477,9 @@ export function ChatSurface({
           />
         ) : null}
         {providerRecoveryNotice ? (
-          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}${providerRecoveryNotice.kind === 'queue' ? ' provider-recovery-notice--queue' : ''}`}>
+          <div className={`provider-recovery-notice${providerRecoveryNotice.kind === 'connection' ? ' provider-recovery-notice--connection' : ''}`}>
             <div className="provider-recovery-body">
-              {providerRecoveryNotice.kind === 'queue'
-                ? formatQueueNoticeText(providerRecoveryNotice, isZh)
-                : providerRecoveryNotice.kind === 'connection'
+              {providerRecoveryNotice.kind === 'connection'
                 ? providerRecoveryNotice.status === 'retrying'
                   ? isZh
                     ? `网络连接波动，正在重试连接（第 ${providerRecoveryNotice.attempt ?? 1}/${providerRecoveryNotice.maxRetries ?? 10} 次，${formatRetryCountdownLabel(connectionRetryRemainingSeconds ?? Math.ceil((providerRecoveryNotice.delayMs ?? 0) / 1000))}）`

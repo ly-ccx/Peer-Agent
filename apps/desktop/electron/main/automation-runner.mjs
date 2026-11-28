@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { createCallbackSink } from './agent-host/turn-sinks.mjs';
+
+function createSimpleCallbackSink(onEvent) {
+  const send = typeof onEvent === 'function'
+    ? (channel, payload) => { onEvent({ channel, payload }); }
+    : () => {};
+  return { send, isDestroyed: () => false };
+}
 
 function permissionPolicyFromGrant(grant) {
   return Object.freeze({
@@ -58,7 +64,8 @@ function resultComparison(summary, previousSummary) {
 export function createAutomationRunner({
   store,
   conversationStore,
-  llmChatService,
+  llmChatService = null,
+  classicCoreBridge = null,
   worktreeAdapter = null,
   ensureWorkspace = async (workspacePath) => {
     const info = await stat(workspacePath);
@@ -70,10 +77,20 @@ export function createAutomationRunner({
   onRunUpdated = null,
   logger = console,
 } = {}) {
-  if (!store || !conversationStore || !llmChatService) {
+  if (!store || !conversationStore || (!llmChatService && !classicCoreBridge)) {
     throw new Error('automation_runner_dependencies_required');
   }
   const activeRuns = new Map();
+  const activeStreams = new Map();
+
+  async function cancel(runId) {
+    const entry = activeStreams.get(runId);
+    if (!entry) return { aborted: false };
+    if (entry.engine === 'rust') {
+      return (await classicCoreBridge?.abort?.(entry.streamId)) ?? { aborted: false };
+    }
+    return (await llmChatService?.abort?.(entry.streamId)) ?? { aborted: false };
+  }
 
   async function run(runOrId) {
     const initial = typeof runOrId === 'string' ? store.getRun(runOrId) : runOrId;
@@ -88,7 +105,11 @@ export function createAutomationRunner({
         executionWorkspace = worktreeAdapter
           ? await worktreeAdapter.prepare(initial)
           : { kind: 'workspace', workspacePath: initial.snapshot.workspacePath, baseline: null };
-        const conversation = conversationStore.createConversation({
+        if (store.getRun(initial.runId)?.status === 'cancelled') {
+          return store.getRun(initial.runId);
+        }
+        const useRustCore = Boolean(classicCoreBridge?.isAvailable?.());
+        const conversationInput = {
           title: `Automation: ${initial.snapshot.name}`,
           workspacePath: executionWorkspace.workspacePath,
           mode: 'goal',
@@ -102,7 +123,10 @@ export function createAutomationRunner({
             originWorkspacePath: initial.snapshot.workspacePath,
             createdAt: startedAt,
           },
-        });
+        };
+        const conversation = useRustCore
+          ? await classicCoreBridge.createConversation(conversationInput)
+          : conversationStore.createConversation(conversationInput);
         const userMessage = {
           id: createId(),
           role: 'user',
@@ -115,30 +139,67 @@ export function createAutomationRunner({
           content: '',
           timestamp: Date.parse(startedAt),
         };
-        conversationStore.appendMessage(conversation.id, userMessage);
-        conversationStore.appendMessage(conversation.id, assistantMessage);
+        if (useRustCore) {
+          await classicCoreBridge.appendConversationMessage({
+            id: conversation.id,
+            message: userMessage,
+            returnMessages: false,
+          });
+          await classicCoreBridge.appendConversationMessage({
+            id: conversation.id,
+            message: assistantMessage,
+            returnMessages: false,
+          });
+        } else {
+          conversationStore.appendMessage(conversation.id, userMessage);
+          conversationStore.appendMessage(conversation.id, assistantMessage);
+        }
         store.updateRun(initial.runId, {
           status: 'running',
           startedAt,
           conversationId: conversation.id,
         });
 
-        const outcome = await llmChatService.sendMessage({
-          messages: [{ role: 'user', content: initial.snapshot.prompt }],
-          webContents: createCallbackSink(onBackgroundEvent),
-          streamId: `automation:${initial.runId}:${createId()}`,
-          effort: 'default',
-          mode: 'goal',
-          conversationId: conversation.id,
-          modelProviderId: initial.snapshot.modelProviderId ?? null,
-          workspacePath: executionWorkspace.workspacePath,
-          assistantMessageId: assistantMessage.id,
-          permissionPolicy: permissionPolicyFromGrant(initial.snapshot.grant),
-          runtimeReminders: [
-            `Automation run ${initial.runId}. Use only the saved Automation Grant. Do not request permanent access changes.`,
-          ],
+        const streamId = `automation:${initial.runId}:${createId()}`;
+        const runtimeReminders = [
+          `Automation run ${initial.runId}. Use only the saved Automation Grant. Do not request permanent access changes.`,
+        ];
+        const permissionPolicy = permissionPolicyFromGrant(initial.snapshot.grant);
+        const sink = createSimpleCallbackSink(onBackgroundEvent);
+        activeStreams.set(initial.runId, {
+          streamId,
+          engine: useRustCore ? 'rust' : 'ts',
         });
-        const status = terminalRunStatus(outcome);
+
+        const outcome = useRustCore
+          ? await classicCoreBridge.send({
+              streamId,
+              conversationId: conversation.id,
+              assistantMessageId: assistantMessage.id,
+              workspacePath: executionWorkspace.workspacePath,
+              mode: 'goal',
+              modelProviderId: initial.snapshot.modelProviderId ?? null,
+              effort: 'default',
+              persistModelSelection: true,
+              permissionPolicy,
+              runtimeReminders,
+            }, sink)
+          : await llmChatService.sendMessage({
+              messages: [{ role: 'user', content: initial.snapshot.prompt }],
+              webContents: sink,
+              streamId,
+              effort: 'default',
+              mode: 'goal',
+              conversationId: conversation.id,
+              modelProviderId: initial.snapshot.modelProviderId ?? null,
+              workspacePath: executionWorkspace.workspacePath,
+              assistantMessageId: assistantMessage.id,
+              permissionPolicy,
+              runtimeReminders,
+            });
+        const status = store.getRun(initial.runId)?.status === 'cancelled'
+          ? 'cancelled'
+          : terminalRunStatus(outcome);
         const finishedAt = now();
         let changes = null;
         if (worktreeAdapter && executionWorkspace?.kind === 'worktree' && status !== 'waiting_user') {
@@ -146,6 +207,7 @@ export function createAutomationRunner({
           changes = await worktreeAdapter.retainOrCleanup(initial, executionWorkspace, changes);
         }
         const summary = normalizeSummary(outcome?.summary)
+          ?? normalizeSummary(outcome?.text)
           ?? finalAssistantSummary(conversationStore, conversation.id, assistantMessage.id)
           ?? (status === 'succeeded' ? 'Run completed. Open the conversation for the full result.' : undefined);
         const comparison = resultComparison(summary, previousCompletedSummary(store, initial));
@@ -210,6 +272,7 @@ export function createAutomationRunner({
         onRunUpdated?.(failedRun);
         return failedRun;
       } finally {
+        activeStreams.delete(initial.runId);
         activeRuns.delete(initial.runId);
       }
     })();
@@ -219,6 +282,7 @@ export function createAutomationRunner({
 
   return Object.freeze({
     run,
+    cancel,
     isRunning: (runId) => activeRuns.has(runId),
   });
 }

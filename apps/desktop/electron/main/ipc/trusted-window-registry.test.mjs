@@ -49,7 +49,7 @@ test('Quick Chat may list bots and submit inputs, while administration and popov
         sender.mainFrame.url = 'https://app.local/index.html';
       } else assert.throws(() => registry.authorize({ entry, event: createEvent(sender) }), /not allowed for this window role/);
     }
-    for (const channel of ['settings:get', 'project-agent:update-profile', 'project-agent:delete', 'project-agent:decide-approval', 'project-agent:read-evidence', 'project-agent:diagnostics']) {
+    for (const channel of ['settings:get', 'project-agent:update-profile', 'project-agent:rebind-folder', 'project-agent:delete', 'project-agent:decide-approval', 'project-agent:read-evidence', 'project-agent:diagnostics']) {
       assert.throws(() => registry.authorize({ entry: getDesktopIpcPolicy(channel), event: createEvent(sender) }), /not allowed for this window role/);
     }
   }

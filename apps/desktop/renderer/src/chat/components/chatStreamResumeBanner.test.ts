@@ -24,8 +24,8 @@ test('composer wrap shows a stream-error Resume control above the input', async 
   assert.doesNotMatch(source, />\s*×\s*</);
   assert.match(source, /chat-stream-error-icon/);
   assert.match(source, /<PeerIcon name="close" size=\{14\} \/>/);
-  assert.match(streamErrorRule, /--za-control-fill/);
-  assert.doesNotMatch(streamErrorRule, /--za-danger-soft/);
+  assert.match(streamErrorRule, /--control-fill/);
+  assert.doesNotMatch(streamErrorRule, /--state-danger-soft|--za-danger-soft/);
   assert.doesNotMatch(streamErrorRule, /--azure-seal/);
   assert.match(source, /restoreStreamErrorFromInterrupted/);
   assert.match(source, /streamError 按会话桶隔离/);

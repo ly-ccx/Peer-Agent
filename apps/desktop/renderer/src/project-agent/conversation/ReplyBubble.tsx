@@ -1,7 +1,9 @@
 import { ReplyResourceContext } from './ReplyResourceContext';
+import { parseQuietReply } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
+import { stripHistoricalLocalRecordForDisplay } from '../../chat/state/historicalLocalRecord';
 import { BotSelectionQuote } from './BotSelectionQuote';
 import type { BotChatMessage } from '../state/botConversationState';
 import { ReplyContext } from './ReplyContext';
@@ -11,7 +13,8 @@ import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyTaskReferences } from './ReplyTaskReferences';
-import type { BotWorkIndex } from '../state/botWorkState';
+import { InlineInteractiveReplies } from './InlineInteractiveReplies';
+import type { BotWorkIndex, BotWorkRow } from '../state/botWorkState';
 
 export function ReplyBubble({
   workspaceId,
@@ -24,6 +27,7 @@ export function ReplyBubble({
   onQuote,
   onOpenDetails,
   workIndex,
+  taskRows,
   onOpenWork,
   narration = [],
 }: {
@@ -37,28 +41,40 @@ export function ReplyBubble({
   readonly onQuote: (excerpt: string) => void;
   readonly onOpenDetails?: () => void;
   readonly workIndex: BotWorkIndex;
+  readonly taskRows: readonly BotWorkRow[];
   readonly onOpenWork: (sessionId: string) => void;
   readonly narration?: readonly BotNarrationSegment[];
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const parsed = parseQuietReply(stripHistoricalLocalRecordForDisplay(message.content));
+  if (parsed.isPureQuiet) return null;
+  const cleanContent = parsed.leadingText;
+  const displayContent = !cleanContent && message.content.trim().length > 0
+    ? i18n.t('projectAgent.chat.protocolLeakFallback')
+    : cleanContent;
+  const cleanNarration = narration.flatMap((segment) => {
+    const text = stripHistoricalLocalRecordForDisplay(segment.text);
+    return text ? [{ ...segment, text }] : [];
+  });
   return (
     <article
       className={`bot-reply${highlighted ? ' is-anchored' : ''}`}
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      <ReplyResourceContext references={message.resourceReferences}><BotNarration segments={narration} /></ReplyResourceContext>
+      <ReplyResourceContext references={message.resourceReferences}><BotNarration segments={cleanNarration} /></ReplyResourceContext>
       <div className="bot-reply-body">
         <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
         <div ref={bodyRef} className="bot-reply-text">
-          <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={message.content} /></ReplyResourceContext>
+          <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={displayContent} /></ReplyResourceContext>
         </div>
       </div>
-      <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
-      <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
+      <InlineInteractiveReplies workspaceId={workspaceId} evidenceRefs={message.meta?.evidenceRefs ?? []} isZh={Boolean(i18n.locale?.startsWith('zh'))} />
+      <ReplyTaskReferences rows={taskRows} i18n={i18n} onOpen={onOpenWork} />
+      <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
       <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails}
-        onQuote={message.content.trim() ? () => onQuote(message.content) : undefined} />
+        onQuote={cleanContent.trim() ? () => onQuote(cleanContent) : undefined} />
     </article>
   );
 }

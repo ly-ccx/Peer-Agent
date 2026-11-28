@@ -24,6 +24,13 @@ const packageJsonFiles = [
 
 const cargoPackages = [
   ['peer-credential-helper', 'crates/peer-credential-helper/Cargo.toml'],
+  ['peer-protocol', 'crates/peer-protocol/Cargo.toml'],
+  ['peer-store', 'crates/peer-store/Cargo.toml'],
+  ['peer-runtime', 'crates/peer-runtime/Cargo.toml'],
+  ['peer-project-agent', 'crates/peer-project-agent/Cargo.toml'],
+  ['peer-core-rpc', 'crates/peer-core-rpc/Cargo.toml'],
+  ['peer-tui', 'crates/peer-tui/Cargo.toml'],
+  ['peer-cli', 'crates/peer-cli/Cargo.toml'],
 ];
 
 const errors = [];

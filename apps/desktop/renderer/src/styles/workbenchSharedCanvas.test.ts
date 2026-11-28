@@ -24,7 +24,7 @@ test('workbench and chat columns paint the same opaque canvas token', () => {
   const thread = ruleBody(shellCss, '.thread');
 
   // 真源：两列都用 --chrome-canvas，右列不再让 .app-layout 的玻璃底透出。
-  const sharedSurface = /background:\s*var\(--chrome-canvas,\s*var\(--za-app-bg\)\);/;
+  const sharedSurface = /background:\s*var\(--chrome-canvas\);/;
   assert.match(panel, sharedSurface);
   assert.match(thread, sharedSurface);
   assert.doesNotMatch(panel, /background:\s*transparent;/);

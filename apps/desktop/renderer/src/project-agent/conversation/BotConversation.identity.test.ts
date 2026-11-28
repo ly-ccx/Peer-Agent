@@ -47,7 +47,10 @@ test('conversation siblings keep distinct identities while loading, recovering a
       avatar: { kind: 'generated', color: 'lake' }, i18n: { t: (key: string) => key } });
     const panel = tree.props.children;
     assert.equal(panel.type, component('BotWorkPanel'), 'one stable panel layout owns the conversation');
-    const children = panel.props.children.props.children.filter((child: unknown) =>
+    const convo = panel.props.children;
+    assert.equal(convo.type, 'div', 'one stable conversation container owns the thread and composer');
+    assert.equal(convo.props.className, 'bot-convo');
+    const children = convo.props.children.filter((child: unknown) =>
       child !== null && typeof child === 'object') as ReactElement[];
     const keys = children.flatMap(child => child.key === null ? [] : [child.key]);
     assert.equal(new Set(keys).size, keys.length, 'React cannot reconcile siblings with duplicate keys');

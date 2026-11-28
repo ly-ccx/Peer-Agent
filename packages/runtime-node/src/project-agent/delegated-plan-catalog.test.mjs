@@ -138,3 +138,52 @@ test('query releases observations after errors and shares nested synchronous rea
   assert.throws(() => query.run(() => Promise.resolve()), /must_be_synchronous/);
   assert.equal(read(), 4, 'outside a query never retains a previous observation');
 });
+
+test('scoped catalog reads hydrate only matching workspace or session and skip warm readdirSync', t => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'peer-plan-scoped-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const writePlan = (id, origin) => writeFileSync(path.join(directory, `${id}.json`), JSON.stringify({
+    planId: id,
+    ...(origin ? { delegationOrigin: origin } : {}),
+  }));
+  writeFileSync(path.join(directory, '.changes.jsonl'), '');
+  writeFileSync(path.join(directory, 'index.jsonl'), '');
+  for (let i = 0; i < 40; i += 1) writePlan(`legacy-${i}`, null);
+  writePlan('del-a', { sessionId: 'sess-a', workspaceId: 'ws-a' });
+  writePlan('del-b', { sessionId: 'sess-b', workspaceId: 'ws-b' });
+
+  const hydrated = [];
+  const catalog = createDelegatedPlanCatalog({
+    directory: () => directory,
+    incremental: true,
+    readPlan: id => {
+      hydrated.push(id);
+      return JSON.parse(fs.readFileSync(path.join(directory, `${id}.json`), 'utf8'));
+    },
+  });
+
+  // Cold read scoped to ws-a must hydrate only del-a, never del-b or legacy plans.
+  assert.deepEqual(catalog.read({ workspaceId: 'ws-a' }).map(p => p.planId), ['del-a']);
+  assert.deepEqual(hydrated, ['del-a']);
+
+  // Warm read scoped to sess-b must hydrate only del-b and skip readdirSync on unchanged dir.
+  hydrated.length = 0;
+  let readdirs = 0;
+  const origReaddir = fs.readdirSync;
+  t.mock.method(fs, 'readdirSync', (...args) => {
+    if (args[0] === directory) readdirs += 1;
+    return origReaddir(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+
+  assert.deepEqual(catalog.read({ sessionId: 'sess-b' }).map(p => p.planId), ['del-b']);
+  assert.deepEqual(hydrated, ['del-b']);
+  assert.equal(readdirs, 0, 'warm lookup on unchanged directory should not re-scan all files');
+
+  // Adding a new delegated file updates directory stat and is discovered immediately.
+  writePlan('del-c', { sessionId: 'sess-c', workspaceId: 'ws-a' });
+  hydrated.length = 0;
+  assert.deepEqual(catalog.read({ workspaceId: 'ws-a' }).map(p => p.planId).sort(), ['del-a', 'del-c']);
+  assert.deepEqual(hydrated.sort(), ['del-a', 'del-c']);
+});

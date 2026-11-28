@@ -143,6 +143,7 @@ test('context snapshot is shared while revision and model still match', () => {
       conversationId: conv.id,
       contentRevision: 1,
       modelKey: 'provider-1::model-1',
+      projectorVersion: 3, compactionBoundaryId: null,
     }));
   } finally {
     cleanup();

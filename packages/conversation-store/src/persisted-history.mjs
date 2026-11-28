@@ -1,5 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import path from 'node:path';
+import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 
 const PORTABLE_HISTORY_BYTES = 8 * 1024 * 1024;
 const conversationIdAllowed = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
@@ -9,7 +10,7 @@ function fail(code, cause) {
   throw Object.assign(new Error(code, { cause }), { code });
 }
 
-function readText(file, missingAllowed, maxBytes, readBudget) {
+export function readPersistedText(file, missingAllowed, maxBytes, readBudget, preserveBom = false) {
   try {
     if (maxBytes === undefined) return readFileSync(file, 'utf8');
     const revision = lstatSync(file, { bigint: true });
@@ -30,7 +31,7 @@ function readText(file, missingAllowed, maxBytes, readBudget) {
         bytes += count;
       }
       if (bytes !== body.length - 1 || fileRevision(lstatSync(file, { bigint: true })) !== fileRevision(revision)) fail('BACKGROUND_VERSION_CHANGED');
-      return new TextDecoder('utf-8', { fatal: true }).decode(body.subarray(0, bytes));
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: preserveBom }).decode(body.subarray(0, bytes));
     } finally { closeSync(fd); }
   } catch (error) {
     if (error.code === 'ENOENT' && missingAllowed) return null;
@@ -42,7 +43,7 @@ function readText(file, missingAllowed, maxBytes, readBudget) {
 /** Strict snapshot input, separate from tolerant UI history recovery. */
 export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes, readBudget }) {
   // New conversations legitimately have no JSONL until their first message.
-  const text = readText(historyFile, contentRevision === 0, maxBytes, readBudget);
+  const text = readPersistedText(historyFile, contentRevision === 0, maxBytes, readBudget);
   let messages;
   try {
     messages = (text ?? '').split('\n').filter((line) => line.trim()).map((line) => {
@@ -52,7 +53,7 @@ export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversati
     });
     if (contentRevision > 0 && messages.length === 0) throw new Error('Empty history with nonzero revision');
   } catch (error) { fail('BACKGROUND_HISTORY_CORRUPT', error); }
-  const sidecarText = readText(sidecarFile, true, maxBytes, readBudget);
+  const sidecarText = readPersistedText(sidecarFile, true, maxBytes, readBudget);
   let activeMessageId = null;
   if (sidecarText !== null) {
     try {
@@ -77,6 +78,121 @@ export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversati
   };
 }
 
+const HEAD_SCAN_MAX_BYTES = 256 * 1024;
+
+function readJsonlHeadMessages(filePath, limit) {
+  if (!Number.isInteger(limit) || limit <= 0) return [];
+  let fd;
+  try {
+    fd = openSync(filePath, 'r');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= 0) return [];
+    const readSize = Math.min(size, HEAD_SCAN_MAX_BYTES);
+    const buf = Buffer.allocUnsafe(readSize);
+    let offset = 0;
+    while (offset < readSize) {
+      const count = readSync(fd, buf, offset, readSize - offset, offset);
+      if (count <= 0) break;
+      offset += count;
+    }
+    const slice = offset === readSize ? buf : buf.subarray(0, offset);
+    const messages = [];
+    let start = 0;
+    for (let i = 0; i < slice.length && messages.length < limit; i += 1) {
+      if (slice[i] !== 0x0a) continue;
+      const line = slice.subarray(start, i).toString('utf8').trim();
+      start = i + 1;
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) messages.push(parsed);
+      } catch {
+        // Ignore corrupt head line; strict tail window still governs recent turns.
+      }
+    }
+    if (messages.length < limit && offset === size && start < slice.length) {
+      const line = slice.subarray(start).toString('utf8').trim();
+      if (line) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) messages.push(parsed);
+        } catch {
+          // Ignore corrupt trailing line.
+        }
+      }
+    }
+    return messages;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Bounded head+tail persisted reader for projections (e.g. input prediction) that only
+ * need the opening turn and recent tail, avoiding synchronous multi-megabyte JSONL parses
+ * on the Electron main event loop. Falls back to the full strict reader if a streaming
+ * sidecar targets a message outside the tail window.
+ */
+export function readPersistedHistoryTailFiles({
+  historyFile,
+  sidecarFile,
+  conversationId,
+  contentRevision,
+  tailLimit = 64,
+  headLimit = 16,
+  maxBytes,
+  readBudget,
+}) {
+  const sidecarText = readPersistedText(sidecarFile, true, maxBytes, readBudget);
+  let activeMessageId = null;
+  if (sidecarText !== null) {
+    try {
+      const sidecar = JSON.parse(sidecarText);
+      if (sidecar?.version !== 1 || sidecar.conversationId !== conversationId
+        || typeof sidecar.messageId !== 'string' || !sidecar.messageId
+        || !sidecar.patch || typeof sidecar.patch !== 'object' || Array.isArray(sidecar.patch)) {
+        throw new Error('Invalid streaming marker');
+      }
+      activeMessageId = sidecar.messageId;
+    } catch (error) { fail('BACKGROUND_STREAM_STATE_INVALID', error); }
+  }
+  const page = readJsonlByteWindow(historyFile, { limit: tailLimit });
+  let tail = page.messages;
+  if (activeMessageId) {
+    const provisionalIndex = tail.findIndex((message) => message.id === activeMessageId);
+    if (provisionalIndex < 0) {
+      return readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes, readBudget });
+    }
+    tail = tail.slice(0, provisionalIndex);
+  }
+  if (contentRevision > 0 && !page.hasMore && tail.length === 0 && !activeMessageId) {
+    return readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes, readBudget });
+  }
+  if (!page.hasMore || headLimit <= 0) {
+    return {
+      conversationId,
+      contentRevision,
+      messages: tail,
+      excludedFromMessageId: activeMessageId,
+      requiresRuntimeCheck: true,
+    };
+  }
+  const tailIds = new Set(tail.map((message) => message?.id).filter(Boolean));
+  const head = readJsonlHeadMessages(historyFile, headLimit).filter((message) => !message?.id || !tailIds.has(message.id));
+  return {
+    conversationId,
+    contentRevision,
+    messages: [...head, ...tail],
+    excludedFromMessageId: activeMessageId,
+    requiresRuntimeCheck: true,
+  };
+}
+
 /** Read an already-imported work conversation without constructing a migrating store. */
 export function readStoredWorkHistory(storeDir, { workspaceId, parentConversationId, conversationId, sessionId }, readBudget) {
   if (![parentConversationId, conversationId].every(conversationIdAllowed) || parentConversationId === conversationId) return null;
@@ -88,7 +204,7 @@ export function readStoredWorkHistory(storeDir, { workspaceId, parentConversatio
   };
   const files = [indexFile, historyFile, sidecarFile];
   const before = files.map(revision);
-  const index = readText(indexFile, true, PORTABLE_HISTORY_BYTES, readBudget);
+  const index = readPersistedText(indexFile, true, PORTABLE_HISTORY_BYTES, readBudget);
   if (!index) return null;
   const rows = index.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
   const parent = rows.filter(row => row?.id === parentConversationId), work = rows.filter(row => row?.id === conversationId);

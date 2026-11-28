@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "scripts": {
+    "bash": "_peer() {\n  local cur\n  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n  local commands=\"acp bots completions doctor exec export help models result sessions update version --classic --help --version\"\n  if [[ ${COMP_CWORD} -eq 1 ]]; then\n    COMPREPLY=( $(compgen -W \"$commands\" -- \"$cur\") )\n    return\n  fi\n  case \"${COMP_WORDS[1]}\" in\n    sessions) COMPREPLY=( $(compgen -W \"list resume delete --help\" -- \"$cur\") ) ;;\n    completions) COMPREPLY=( $(compgen -W \"bash zsh fish\" -- \"$cur\") ) ;;\n    update) COMPREPLY=( $(compgen -W \"--check --help\" -- \"$cur\") ) ;;\n    export) COMPREPLY=( $(compgen -W \"--output --force --help\" -- \"$cur\") ) ;;\n  esac\n}\ncomplete -F _peer peer\n",
+    "zsh": "#compdef peer\n_peer() {\n  local -a commands\n  commands=(\n    'acp:Run the ACP agent on stdio'\n    'bots:Browse bots'\n    'completions:Print a shell completion script'\n    'doctor:Check the local peer install'\n    'exec:Run one task without the TUI'\n    'export:Export a stored session as Markdown'\n    'help:Show help'\n    'models:List configured models'\n    'result:Read an interactive result'\n    'sessions:List, resume, or delete sessions'\n    'update:Install the newest release on this channel'\n    'version:Print the version'\n  )\n  if (( CURRENT == 2 )); then\n    _describe command commands\n    _arguments '--classic[Open task mode]' '--help[Show help]' '--version[Print version]'\n    return\n  fi\n  case \"$words[2]\" in\n    sessions) _values action list resume delete ;;\n    completions) _values shell bash zsh fish ;;\n    update) _arguments '--check[Report without installing]' '--help[Show help]' ;;\n    export) _arguments '--output[Write to a file]:file:_files' '--force[Overwrite]' ;;\n  esac\n}\nif (( ${+functions[compdef]} )); then compdef _peer peer; fi\n",
+    "fish": "complete -c peer -n __fish_use_subcommand -a acp -d 'Run the ACP agent on stdio'\ncomplete -c peer -n __fish_use_subcommand -a bots -d 'Browse bots'\ncomplete -c peer -n __fish_use_subcommand -a completions -d 'Print a shell completion script'\ncomplete -c peer -n __fish_use_subcommand -a doctor -d 'Check the local peer install'\ncomplete -c peer -n __fish_use_subcommand -a exec -d 'Run one task without the TUI'\ncomplete -c peer -n __fish_use_subcommand -a export -d 'Export a stored session as Markdown'\ncomplete -c peer -n __fish_use_subcommand -a help -d 'Show help'\ncomplete -c peer -n __fish_use_subcommand -a models -d 'List configured models'\ncomplete -c peer -n __fish_use_subcommand -a result -d 'Read an interactive result'\ncomplete -c peer -n __fish_use_subcommand -a sessions -d 'List, resume, or delete sessions'\ncomplete -c peer -n __fish_use_subcommand -a update -d 'Install the newest release on this channel'\ncomplete -c peer -n __fish_use_subcommand -a version -d 'Print the version'\ncomplete -c peer -n __fish_use_subcommand -l classic -d 'Open task mode'\ncomplete -c peer -n __fish_use_subcommand -l help -d 'Show help'\ncomplete -c peer -n __fish_use_subcommand -l version -d 'Print version'\ncomplete -c peer -n \"__fish_seen_subcommand_from sessions\" -a \"list resume delete\" -d 'Session action'\ncomplete -c peer -n \"__fish_seen_subcommand_from completions\" -a \"bash zsh fish\"\ncomplete -c peer -n \"__fish_seen_subcommand_from update\" -l check -d 'Report without installing'\ncomplete -c peer -n \"__fish_seen_subcommand_from export\" -l output -d 'Write to a file'\ncomplete -c peer -n \"__fish_seen_subcommand_from export\" -l force -d 'Overwrite the output file'\n"
+  },
+  "help": "peer 0.1.0-rc.45\n\npeer completions — print a shell completion script\n\nUsage:\n  peer completions <bash|zsh|fish>\n\nThe script is written to stdout. This command does not edit your shell configuration.",
+  "cases": [
+    {
+      "argv": [
+        "completions",
+        "bash"
+      ],
+      "expected": {
+        "kind": "completions",
+        "shell": "bash"
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "zsh"
+      ],
+      "expected": {
+        "kind": "completions",
+        "shell": "zsh"
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "fish"
+      ],
+      "expected": {
+        "kind": "completions",
+        "shell": "fish"
+      }
+    },
+    {
+      "argv": [
+        "completions"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "Usage: peer completions <bash|zsh|fish>",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "powershell"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "Usage: peer completions <bash|zsh|fish>",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "bash",
+        "extra"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "Usage: peer completions <bash|zsh|fish>",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "completions"
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "bash",
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "completions"
+      }
+    },
+    {
+      "argv": [
+        "completions",
+        "--version"
+      ],
+      "expected": {
+        "kind": "version"
+      }
+    }
+  ]
+}

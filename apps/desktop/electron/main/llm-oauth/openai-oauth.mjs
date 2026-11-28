@@ -12,6 +12,8 @@ import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { createOAuthRefreshFetch } from '../provider-transports/oauth-refresh-fetch.mjs';
+const refreshFetch = createOAuthRefreshFetch(fetchWithConnectionRecovery);
 
 // 在系统浏览器打开授权页。electron 的 shell 仅在 main 运行时可用,
 // 故惰性加载,避免该模块在 node 测试环境(无 electron shell 导出)下崩溃。
@@ -85,7 +87,7 @@ async function exchangeCode({ code, verifier, fetchImpl = fetchWithConnectionRec
 }
 
 // 用 refresh_token 换新 access_token。
-export async function refreshAccessToken(tokens, { fetchImpl = fetchWithConnectionRecovery } = {}) {
+export async function refreshAccessToken(tokens, { fetchImpl = refreshFetch } = {}) {
   if (!tokens?.refresh) throw new Error('No refresh token available');
   const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
@@ -114,7 +116,7 @@ export async function refreshAccessToken(tokens, { fetchImpl = fetchWithConnecti
 // 临近过期(默认 60s 缓冲)即刷新。返回 { tokens, refreshed }。
 export async function ensureFreshTokens(
   tokens,
-  { skewMs = 60_000, fetchImpl = fetchWithConnectionRecovery } = {},
+  { skewMs = 60_000, fetchImpl = refreshFetch } = {},
 ) {
   if (!tokens?.access) throw new Error('Not logged in');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {
@@ -168,7 +170,7 @@ const CALLBACK_HTML = (ok) => {
 
 // 启动一次 browser 模式登录。返回 { promise, cancel }。
 // promise resolve 为 token 集合;cancel() 关闭 server 并 reject。
-export function startBrowserLogin() {
+export function startBrowserLogin({ openExternal = openInBrowser, fetchImpl = fetchWithConnectionRecovery } = {}) {
   const { verifier, challenge } = createPkce();
   const state = base64url(randomBytes(16));
 
@@ -223,7 +225,7 @@ export function startBrowserLogin() {
     }
 
     try {
-      const tokens = await exchangeCode({ code, verifier });
+      const tokens = await exchangeCode({ code, verifier, fetchImpl });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(CALLBACK_HTML(true));
       finish(resolveFn, tokens);
@@ -244,7 +246,7 @@ export function startBrowserLogin() {
     authorizeUrl.searchParams.set('code_challenge_method', 'S256');
     authorizeUrl.searchParams.set('state', state);
     authorizeUrl.searchParams.set('id_token_add_organizations', 'true');
-    openInBrowser(authorizeUrl.toString()).catch((err) => finish(rejectFn, err));
+    Promise.resolve(openExternal(authorizeUrl.toString())).catch((err) => finish(rejectFn, err));
   }
 
   // 端口 1455 是注册死的 OAuth 回调端口,不能换。占用多半来自上一次

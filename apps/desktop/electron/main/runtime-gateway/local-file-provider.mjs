@@ -1,5 +1,5 @@
 import { withFileMutationLock } from './file-mutation-lock.mjs';
-import { evaluateObjectiveProbeCall,objectiveProbeDenial } from '../chat-runtime/objective-probe-gate.mjs';
+import { evaluateObjectiveProbeCall, objectiveProbeDenial } from './objective-probe-gate.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import {

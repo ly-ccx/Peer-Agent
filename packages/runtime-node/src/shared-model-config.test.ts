@@ -71,6 +71,41 @@ test('selectDesktopDefaultProvider follows the configured Desktop default', () =
   assert.equal(selectDesktopDefaultProvider(providers)?.id, 'oauth-1');
 });
 
+test('shared model readers skip retired defaults without consulting their credential slots', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-retired-model-'));
+  try {
+    const config = getSharedModelConfigPath(userDataPath);
+    const local = { id: 'old-local', groupId: 'old-local', channelId: 'qoder', authMethod: 'qoder_local_auth' };
+    const subscription = { id: 'old-subscription', groupId: 'old-subscription', channelId: 'google-ai', authMethod: 'oauth_google' };
+    const active = { id: 'current', groupId: 'current', channelId: 'google-ai', authMethod: 'api_key', apiKeyConfigured: true };
+    const models = [
+      { id: 'retired-local', groupId: local.id, model: 'retired', isDefault: true },
+      { id: 'retired-subscription', groupId: subscription.id, model: 'retired', isDefault: true },
+      { id: 'active-gemini', groupId: active.id, model: 'gemini-2.5-flash' },
+    ];
+    const flat = [local, subscription, active].map((channel, i) => ({ ...channel, ...models[i] }));
+    for (const state of [flat, { version: 2, channels: [local, subscription, active], models }]) {
+      const contents = JSON.stringify(state);
+      writeFileSync(config, contents);
+      const credentials = createCredentialStore({ apiKeys: { current: 'synthetic-key' } });
+      const options = { userDataPath, credentialStore: credentials.store };
+      assert.deepEqual(loadSharedModelMetadataList(options).map(model => model.model), ['gemini-2.5-flash']);
+      for (const credentialId of [local.id, subscription.id]) {
+        assert.equal(loadSharedModelSelection({ ...options, credentialId }), null);
+      }
+      assert.deepEqual(credentials.reads, { apiKey: 0, oauth: 0 });
+      const selected = loadSharedModelSelection(options);
+      assert.equal(selected?.model, 'gemini-2.5-flash');
+      assert.equal(selected?.authMethod, 'api_key');
+      assert.equal(selected?.apiKey, 'synthetic-key');
+      assert.deepEqual(credentials.reads, { apiKey: 1, oauth: 0 });
+      assert.equal(readFileSync(config, 'utf8'), contents);
+    }
+  } finally {
+    rmSync(userDataPath, { force: true, recursive: true });
+  }
+});
+
 test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-model-'));
   try {
@@ -103,6 +138,41 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
     assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low', 'default', 'high']);
     assert.equal(metadata?.defaultReasoningEffort, 'high');
     assert.deepEqual(credentials.reads, { apiKey: 0, oauth: 0 });
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('shared metadata uses reasoningEffortMap keys when levels were not persisted', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-effort-map-'));
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify([{
+      id: 'provider-map',
+      model: 'deepseek-v4.1-flash',
+      apiKeyConfigured: true,
+      supportsReasoning: true,
+      reasoningEffortMap: { off: 'none', low: 'low', high: 'high', max: 'max' },
+    }]));
+    const metadata = loadSharedModelMetadata({ userDataPath });
+    assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low', 'high', 'max']);
+    assert.equal(metadata?.defaultReasoningEffort, 'high');
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('shared metadata keeps persisted reasoning levels ahead of the effort map', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-effort-levels-'));
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify([{
+      id: 'provider-levels',
+      model: 'deepseek-v4.1-flash',
+      apiKeyConfigured: true,
+      reasoningEffortLevels: ['off', 'low'],
+      reasoningEffortMap: { off: 'none', low: 'low', high: 'high', max: 'max' },
+    }]));
+    const metadata = loadSharedModelMetadata({ userDataPath });
+    assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low']);
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
   }
@@ -245,41 +315,19 @@ test('OAuth metadata write failure restores the previous credential', () => {
   }
 });
 
-test('loadSharedModelSelection returns null without a credential store, and resolves oauth_google with tokens', () => {
-  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-unsupported-'));
+test('explicit OAuth metadata updates preserve a legacy providers envelope and unknown root fields', () => {
+  const userDataPath=mkdtempSync(path.join(os.tmpdir(),'peer-shared-envelope-'));
   try {
-    const configFile = getSharedModelConfigPath(userDataPath);
-    writeFileSync(configFile, JSON.stringify([{
-      id: 'google-1',
-      groupId: 'google-group',
-      model: 'gemini',
-      enabled: true,
-      isDefault: true,
-      authMethod: 'oauth_google',
-      oauthConfigured: true,
-      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    }]));
-    assert.equal(loadSharedModelSelection({ userDataPath }), null);
-
-    const credentials = createCredentialStore({
-      oauthTokens: {
-        'google-group': {
-          access: 'google-access',
-          refresh: 'google-refresh',
-          expires: Date.now() + 60_000,
-        },
-      },
-    });
-    const selection = loadSharedModelSelection({
-      userDataPath,
-      credentialStore: credentials.store,
-    });
-    assert.equal(selection?.authMethod, 'oauth_google');
-    assert.equal(selection?.oauthTokens?.access, 'google-access');
-    assert.equal(selection?.model, 'gemini');
-  } finally {
-    rmSync(userDataPath, { recursive: true, force: true });
-  }
+    const configFile=getSharedModelConfigPath(userDataPath);
+    writeFileSync(configFile,JSON.stringify({future:{keep:['yes']},providers:[{id:'oauth',groupId:'account',provider:'openai',authMethod:'oauth_chatgpt',model:'gpt-5.5',enabled:true,isDefault:true,oauthConfigured:true,futureModel:'kept'}]}));
+    const credentials=createCredentialStore({oauthTokens:{account:{access:'old'}}});
+    const selection=loadSharedModelSelection({userDataPath,credentialStore:credentials.store});
+    assert.ok(selection);selection.persistOAuthTokens({access:'new',expires:456});
+    const saved=JSON.parse(readFileSync(configFile,'utf8'));
+    assert.deepEqual(saved.future,{keep:['yes']});assert.equal(saved.providers[0].futureModel,'kept');
+    assert.equal(saved.providers[0].oauthExpires,456);assert.equal(saved.providers[0].oauthTokens,undefined);
+    assert.equal(credentials.oauthTokens.get('account')?.access,'new');
+  } finally {rmSync(userDataPath,{recursive:true,force:true});}
 });
 
 test('legacy encrypted fields are not treated as usable TUI credentials', () => {
@@ -463,8 +511,10 @@ test('loadSharedModelSelection resolves API keys from Desktop v2 config', () => 
   }
 });
 
-test('persistOAuthTokens keeps Desktop v2 channels/models layout', () => {
+test('persistOAuthTokens keeps the Desktop v2 layout and preserves retired records', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-v2-'));
+  const retiredChannel = { id: 'old-cli', channelId: 'qoder', authMethod: 'qoder_local_auth' };
+  const retiredModel = { id: 'retired', groupId: 'channel-oauth', model: 'legacy', authMethod: 'oauth_google' };
   const credentials = createCredentialStore({
     oauthTokens: {
       'channel-oauth': {
@@ -486,14 +536,14 @@ test('persistOAuthTokens keeps Desktop v2 channels/models layout', () => {
         authMethod: 'oauth_chatgpt',
         oauthConfigured: true,
         oauthExpires: 1_700_000_000_000,
-      }],
+      }, retiredChannel],
       models: [{
         id: 'model-oauth-1',
         groupId: 'channel-oauth',
         model: 'gpt-5',
         enabled: true,
         isDefault: true,
-      }],
+      }, retiredModel],
     }, null, 2));
 
     const selection = loadSharedModelSelection({
@@ -514,13 +564,16 @@ test('persistOAuthTokens keeps Desktop v2 channels/models layout', () => {
       models: Array<{ id: string; model: string }>;
     };
     assert.equal(stored.version, 2);
-    assert.equal(stored.channels.length, 1);
-    assert.equal(stored.models.length, 1);
+    assert.equal(stored.channels.length, 2);
+    assert.equal(stored.models.length, 2);
     assert.equal(stored.channels[0]?.id, 'channel-oauth');
     assert.equal(stored.channels[0]?.oauthConfigured, true);
     assert.equal(stored.channels[0]?.oauthExpires, 1_800_000_000_000);
     assert.equal(stored.channels[0]?.oauthAccountId, 'account-1');
     assert.equal(stored.models[0]?.model, 'gpt-5');
+    assert.deepEqual(stored.channels[1], retiredChannel);
+    assert.deepEqual(stored.models[1], retiredModel);
+    assert.equal(loadSharedModelSelection({ userDataPath, credentialStore: credentials.store })?.authMethod, 'oauth_chatgpt');
     assert.equal(credentials.oauthTokens.get('channel-oauth')?.access, 'new-access');
     assert.equal(JSON.stringify(stored).includes('new-access'), false);
   } finally {
@@ -552,7 +605,7 @@ test('loadSharedModelMetadata projects Desktop reasoningEffortLevels', () => {
       channels: [{
         id: 'channel-1',
         groupId: 'channel-1',
-        name: 'Qoder CLI',
+        name: 'Fixture Model',
         provider: 'openai',
         baseUrl: 'https://example.test/v1',
         authMethod: 'api_key',

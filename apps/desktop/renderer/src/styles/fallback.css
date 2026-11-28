@@ -13,12 +13,12 @@
 
   .empty-task h2 {
     @apply m-0 text-lg font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .empty-task p {
     @apply m-0 max-w-[760px] text-[13px] leading-7;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .facts-grid {
@@ -32,19 +32,19 @@
 
   .fact-card span,
   .section-heading span {
-    color: var(--za-text-faint);
+    color: var(--graphite-mute);
     font-size: 12px;
   }
 
   .fact-card strong {
     @apply overflow-hidden text-ellipsis whitespace-nowrap text-[15px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .fact-card small,
   .inventory-row p {
     @apply overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-5;
-    color: var(--za-text-faint);
+    color: var(--graphite-mute);
   }
 
   .inventory-section,
@@ -55,23 +55,23 @@
   .inventory-row {
     @apply grid min-h-[60px] min-w-0 items-center gap-4 px-3.5 py-3;
     grid-template-columns: minmax(0, 1fr) auto;
-    background: var(--za-surface-0);
+    background: var(--paper-raised);
     box-shadow: none;
   }
 
   .inventory-row strong {
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     font-size: 12.5px;
   }
 
   .empty-inline {
     @apply m-0 text-[12px] leading-5;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .running-note {
     @apply m-0 px-2 py-1.5 text-[12px] leading-5;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-panel);
   }
 }

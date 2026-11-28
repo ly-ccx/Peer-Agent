@@ -24,8 +24,9 @@ import os from 'node:os';
 /** 内嵌 Browser 持久分区（与 renderer BrowserView 一致）。 */
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
 const execFileAsync = promisify(execFile);
-import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
-import { buildGoalRunnerMessage, createDesktopGoalRunnerHost } from './agent-host/goal-runner-host.mjs';
+import { resolveRoleRoute } from '@peer-agent/runtime-node/models';
+import { createUsageRequestLog } from './usage-request-log.mjs';
+import { startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { createCapabilityRegistry } from './capability-registry.mjs';
 import { loadLocalEnv } from './env-loader.mjs';
 import { createLocalDesktopPreviewProvider } from './runtime-gateway/local-desktop-preview-provider.mjs';
@@ -109,7 +110,11 @@ import { createProviderAccessApplicationService } from './provider-access-applic
 import { resolveDockIconPaths } from './dock-icon-paths.mjs';
 import { createTrayController, TRAY_RECENT_EXPANDED_LIMIT, TRAY_RECENT_LIMIT } from './tray-controller.mjs';
 import { clearPendingTask, peekPendingTask, readAndClearPendingTask, writePendingTask } from './pending-task-store.mjs';
-import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs';
+import {
+  buildAnthropicToolsFromModelProjection,
+  buildOpenAIToolsFromModelProjection,
+  createRuntimeToolProjection,
+} from './tools/index.mjs';
 import {
   createAutomationStore,
   createGoalPlanStore,
@@ -124,6 +129,7 @@ import {
   listBotWorkspaceIds
 } from "@peer-agent/runtime-node/storage";
 import {
+  buildGoalRunnerMessage,
   resolveWorkspaceHead,
   decideIntakeConvergence,
   isStalledAcceptedGoalRunner,
@@ -146,6 +152,7 @@ import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
+  microcompactMessagesForContext,
   projectConversationHistory,
   projectConversationHistoryYielding,
   reprojectContextAccountingWindow,
@@ -173,6 +180,7 @@ import { buildPlanEvidenceExport, serializeEvidenceExportDocument } from './goal
 import { resolveNewTaskWorkspacePath } from './chat-start-workspace.mjs';
 import { createGoalTaskBranchAdapter } from './goal-task-branch.mjs';
 import { createGoalDeliveryHandoff } from './goal-delivery-handoff.mjs';
+import { preparePlanExecutionWorkspace } from './goal-preferred-worktree.mjs';
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { fetchProviderAccountUsage as fetchProviderSubscriptionQuota } from './account-usage.mjs';
 import {
@@ -183,17 +191,26 @@ import {
 } from './goal-message-router.mjs';
 import { createLocalGoalProvider } from './runtime-gateway/local-goal-provider.mjs';
 import {
-  buildPersistedCompactedMessages,
-  persistCompactedConversation,
-} from './conversation-compaction-persistence.mjs';
-import { runCompactionCheck } from './chat-runtime/compaction-coordinator.mjs';
-import { applyMicrocompaction } from './chat-runtime/compaction-coordinator.mjs';
-import { getCompaction } from './chat-runtime/compaction-registry.mjs';
+  beginCompaction,
+  endCompaction,
+  failCompaction,
+  getCompaction,
+  updateCompactionProgress,
+} from './compaction-registry.mjs';
 import { resolveProviderCredential, refreshExpiredOAuthProviders } from './provider-credential-resolver.mjs';
 import {
   bindDesktopAppLifecycle,
   createDesktopCompositionRoot,
 } from './desktop-composition-root.mjs';
+import {
+  createPeerCoreClient,
+  isPeerCoreDaemonEnabled,
+  resolvePeerCoreBinaryPath,
+} from './peer-core-client.mjs';
+import {
+  collectDesktopExternalCapabilities,
+  createClassicCoreBridge,
+} from './classic-core-bridge.mjs';
 import { createCatalogIpcMain } from './ipc/catalog-ipc-main.mjs';
 import { createBrowserIpcRegistrations } from './ipc/register-browser-ipc.mjs';
 import { createChatIpcRegistrations } from './ipc/register-chat-ipc.mjs';
@@ -215,6 +232,7 @@ import { createResourceWindowIpcRegistrations } from './ipc/register-resource-wi
 import { createResourceWindowController } from './resource-window-controller.mjs';
 import { createDesktopInteractiveApplication } from './interactive-results/application-service.mjs';
 import { createInteractiveResultsIpcRegistrations } from './ipc/register-interactive-results-ipc.mjs';
+import { INTERACTIVE_CONTEXT } from '@peer-agent/interactive-content/context';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
@@ -238,7 +256,10 @@ import { createBrowserFdaDragApplicationService } from './browser-fda-drag-appli
 import { createBrowserSessionImportApplicationService } from './browser-session-import-application-service.mjs';
 import { createChatStreamApplicationService } from './chat-stream-application-service.mjs';
 import { createConversationApplicationService } from './conversation-application-service.mjs';
-import { createConversationReadProjection } from './conversation-read-projection.mjs';
+import {
+  createConversationReadProjection,
+  projectConversationWindowPage,
+} from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
 import { readBoundedDirectoryEntries } from './workspace-file-search.mjs';
@@ -338,8 +359,24 @@ const dataHome = getDataHome();
   if (!isManagedPreview) migrateFromLegacy(legacyUserData);
 }
 
-const settingsStore = createSettingsStore();
+let peerCoreStartupPending = true;
+let peerCoreDisposing = false;
+let lastProjectAgentShell = null;
+const settingsStore = createSettingsStore({
+  onChange: (partial, next) => {
+    if (!partial || typeof partial !== 'object') return;
+    const touchesBotPolicy = Object.hasOwn(partial, 'projectAgent') || Object.hasOwn(partial, 'memory');
+    if (!touchesBotPolicy) return;
+    const nextShell = next?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
+    const switchedFromClassic = lastProjectAgentShell === 'classic' && nextShell !== 'classic';
+    lastProjectAgentShell = nextShell;
+    if (classicCoreBridge.isAvailable()) {
+      void syncProjectBotHostConfig({ includeWorkspaces: switchedFromClassic });
+    }
+  },
+});
 const initialSettings = settingsStore.getAll();
+lastProjectAgentShell = initialSettings?.projectAgent?.shell === 'classic' ? 'classic' : 'bots';
 
 const capabilityRegistry = createCapabilityRegistry({ workspaceRoot: resourcesRoot });
 const sessionStore = createSessionStore({
@@ -369,8 +406,8 @@ const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
 const passwordVaultStore = createPasswordVaultStore();
 const baseMcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
-const mcpCredentialResolver = async (auth, server) => {
-  const injection = await baseMcpCredentialResolver(auth, server);
+const mcpCredentialResolver = async (auth, server, context) => {
+  const injection = await baseMcpCredentialResolver(auth, server, context);
   if (injection?.authProviderConfig) {
     injection.authProviderConfig.openAuthorizationUrl = (url) => shell.openExternal(String(url));
   }
@@ -414,6 +451,75 @@ const automationStore = createAutomationStore({
   },
 });
 let automationRuntimeOwner = null;
+let peerCoreClient = null;
+function buildProjectBotHostConfig({ includeWorkspaces = false } = {}) {
+  const policy = settingsStore.getRuntimePolicy();
+  const enabled = policy?.projectAgent?.shell !== 'classic';
+  const settings = includeWorkspaces && enabled ? settingsStore.getAll() : null;
+  return {
+    enabled,
+    ...(typeof policy?.projectAgent?.proactivity === 'string' ? { proactivity: policy.projectAgent.proactivity } : {}),
+    learnPreferences: policy?.memory?.learnPreferences !== false,
+    interactiveResults: policy?.projectAgent?.interactiveResults === true,
+    interactiveContext: INTERACTIVE_CONTEXT.content,
+    ...(Number.isInteger(policy?.projectAgent?.concurrency) && policy.projectAgent.concurrency > 0
+      ? { concurrency: policy.projectAgent.concurrency }
+      : {}),
+    ...(includeWorkspaces && enabled && Array.isArray(settings?.workspaces)
+      ? { workspaces: settings.workspaces }
+      : {}),
+  };
+}
+function syncProjectBotHostConfig({ includeWorkspaces = false } = {}) {
+  if (!classicCoreBridge.isAvailable()) return Promise.resolve(null);
+  const config = buildProjectBotHostConfig({ includeWorkspaces });
+  return classicCoreBridge.configureProjectBotHost(config).catch((error) => {
+    console.warn('[peer-core] project bot host configure failed:', error?.message || error);
+    return null;
+  });
+}
+function notifyProjectBotConversationChanged({ workspaceId, conversationId } = {}) {
+  const notifier = projectAgentNotifier;
+  if (!notifier) return;
+  const cid = (typeof conversationId === 'string' && conversationId)
+    || (typeof workspaceId === 'string' && workspaceId
+      ? projectAgentDirectory.projectAccess?.directory?.conversationId?.(workspaceId)
+      : '')
+    || '';
+  if (!cid) return;
+  const history = conversationStore.getPersistedConversationHistory(cid);
+  const messages = Array.isArray(history?.messages) ? history.messages : [];
+  for (const message of messages.slice(-3)) {
+    if (!message?.meta?.surfacingFacts && !message?.meta?.surfacing) continue;
+    try {
+      notifier.handleAppended({ conversationId: cid, message });
+    } catch (error) {
+      console.warn('[project-agent-notifier] rust push hook failed:', error);
+    }
+  }
+}
+const classicCoreBridge = createClassicCoreBridge({
+  getClient: () => peerCoreClient,
+  getLocalToolHost: () => localToolHost,
+  broadcast: broadcastToAllWindows,
+  onGoalPlanChanged: (payload) => handleGoalPlanChanged(payload),
+  onProjectBotConversationChanged: (payload) => notifyProjectBotConversationChanged(payload),
+  onProjectBotHostStateChanged: ({ active, reason }) => {
+    if (!active && reason === 'unexpected_exit' && !peerCoreDisposing) {
+      peerCoreStartupPending = false;
+      hostLeases.pulse();
+    }
+  },
+  prepareGoalWorkspace: (params) => prepareClassicGoalWorkspace(params),
+  runVisualVerification: (params) => runClassicVisualVerification(params),
+  compactionRegistry: {
+    beginCompaction,
+    updateCompactionProgress,
+    failCompaction,
+    endCompaction,
+  },
+  logger: console,
+});
 let automationRunner = null;
 const automationApplicationService = createAutomationApplicationService({
   store: automationStore,
@@ -469,60 +575,61 @@ const goalPlanStore = createGoalPlanStore({
   // 任何写路径（IPC 或 AI 工具 local-goal-provider）改动计划后，广播给所有窗口，
   // 让 GoalPlanPanel 实时重拉，无需切换会话/重挂载。详见方案 B。
   // broadcastToAllWindows 是后文的函数声明（已提升），onChange 仅在运行时触发，引用安全。
-  onChange: (payload) => {
-    broadcastToAllWindows('goalPlans:changed', payload);
-    // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
-    if (payload?.changeKind !== 'runner-progress') {
-      taskOverviewBroadcast.request({
-        reason: 'goalPlans:changed',
-        planId: payload?.planId ?? null,
-      });
-    }
-    try {
-      taskNotificationBroker?.handleGoalPlanChanged(payload);
-    } catch (err) {
-      console.warn('[task-notification] handleGoalPlanChanged failed:', err);
-    }
-    if (payload?.changeKind === 'runner-progress') {
-      return;
-    }
-    // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
-    queueMicrotask(() => {
-      try {
-        maybeSyncConversationTitleFromPlan(payload);
-      } catch (error) {
-        console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
-      }
-    });
-    // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
-    // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
-    queueMicrotask(() => {
-      try {
-        maybeAutoStartAcceptedGoalFromPlanChange(payload);
-      } catch (error) {
-        console.error('[main] plan-change auto-start failed:', error?.message || error);
-      }
-    });
-    const planId = typeof payload?.planId === 'string' ? payload.planId : null;
-    scheduleGoalDeliveryHandoff(planId);
-    if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
-      queueMicrotask(() => {
-        try {
-          const plan = goalPlanStore.getPlan(planId);
-          if (!plan) return;
-          if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
-          // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
-          if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
-          void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
-            console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
-          });
-        } catch (error) {
-          console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
-        }
-      });
-    }
-  },
+  onChange: (payload) => handleGoalPlanChanged(payload),
 });
+function handleGoalPlanChanged(payload) {
+  broadcastToAllWindows('goalPlans:changed', payload);
+  // runner-progress 只服务面板软刷新；不要因此重算整表 overview / 同步标题。
+  if (payload?.changeKind !== 'runner-progress') {
+    taskOverviewBroadcast.request({
+      reason: 'goalPlans:changed',
+      planId: payload?.planId ?? null,
+    });
+  }
+  try {
+    taskNotificationBroker?.handleGoalPlanChanged(payload);
+  } catch (err) {
+    console.warn('[task-notification] handleGoalPlanChanged failed:', err);
+  }
+  if (payload?.changeKind === 'runner-progress') {
+    return;
+  }
+  // 未手改会话标题时，把质量更好的 plan.title 同步到侧栏。
+  queueMicrotask(() => {
+    try {
+      maybeSyncConversationTitleFromPlan(payload);
+    } catch (error) {
+      console.warn('[main] plan title → conversation title sync failed:', error?.message || error);
+    }
+  });
+  // goal_create_plan 写盘后立刻 kick Runner，不依赖 intake agent loop 是否成功 sendDone。
+  // 旧路径只在 chat:send outcome resolve 后 auto-start；若 handoff 后流未收口，就会永久卡在 0/N。
+  queueMicrotask(() => {
+    try {
+      maybeAutoStartAcceptedGoalFromPlanChange(payload);
+    } catch (error) {
+      console.error('[main] plan-change auto-start failed:', error?.message || error);
+    }
+  });
+  const planId = typeof payload?.planId === 'string' ? payload.planId : null;
+  scheduleGoalDeliveryHandoff(planId);
+  if (planId && typeof goalWorktreeAdapter?.retainOrCleanupPlan === 'function') {
+    queueMicrotask(() => {
+      try {
+        const plan = goalPlanStore.getPlan(planId);
+        if (!plan) return;
+        if (plan.status !== 'completed' && plan.status !== 'cancelled' && plan.status !== 'failed') return;
+        // 隔离任务完成后会自动合回；合回未完成前先留着 worktree。
+        if (plan.status === 'completed' && plan.deliveryBinding?.executionIsolation === 'worktree' && plan.deliveryHandoff?.status !== 'delivered') return;
+        void goalWorktreeAdapter.retainOrCleanupPlan(plan).catch((error) => {
+          console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+        });
+      } catch (error) {
+        console.warn('[goal-worktree] retain/cleanup failed:', error?.message || error);
+      }
+    });
+  }
+}
 let goalRunner = null;
 let localToolHost = null;
 let remoteAccess = null;
@@ -537,8 +644,7 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
   listShellTasks: () => localToolHost?.listShellTasks?.() ?? [],
   // 把 modelProviderId（配置项 UUID）解析成可读提供商/模型名；勿直接展示 id。
   listProviders: () => llmConfigStore.listProviders(),
-  // llmChatService 在本聚合器之后才创建；list 时惰性读取，避免启动环依赖。
-  listActiveStreams: () => llmChatService?.listActiveStreams?.() ?? [],
+  listActiveStreams: () => chatStreamApplicationService?.listActive?.().streams ?? [],
   artifactRoots: {
     shell: path.join(dataHome, 'shell-artifacts'),
     browser: path.join(dataHome, 'browser-artifacts'),
@@ -611,43 +717,6 @@ function getActiveContextEpochId(conversationId = null) {
   } catch {
     return null;
   }
-}
-
-function persistCompactionToConversation({
-  conversationId,
-  compactResult,
-  preservePendingAssistant = false,
-  sourceMessages = null,
-}) {
-  const conv = conversationStore.getConversation(conversationId);
-  if (!conv) return null;
-  // 默认 0 而非 10：keptMessageCount 缺失时保守保留 0 条，与「真·全量压缩」语义一致，
-  // 避免凭空多保留 10 条旧消息。注意下游 buildPersistedCompactedMessages 对 keptCount<=0 已有安全守卫。
-  const keptCount = compactResult.notification?.keptMessageCount ?? 0;
-  const compactedMessages = buildPersistedCompactedMessages({
-    compactedMessages: compactResult.messages,
-    sourceMessages: sourceMessages ?? conv.messages,
-    keptCount,
-    preservePendingAssistant,
-  });
-  return persistCompactedConversation({
-    store: conversationStore,
-    conversationId,
-    messages: compactedMessages,
-  });
-}
-
-function continuityContextFromCompactionResult(result) {
-  const handoff = result?.messages?.find((message) => message?._compaction)?._compaction;
-  if (!handoff) return [];
-  return [{
-    id: `manual-compact:${Date.now()}`,
-    method: handoff.method || result.notification?.method || 'unknown',
-    originalMessageCount: handoff.originalMessageCount ?? result.notification?.oldMessageCount ?? 0,
-    beforeTokens: handoff.beforeTokens ?? result.notification?.beforeTokens ?? 0,
-    afterTokens: handoff.afterTokens ?? result.notification?.afterTokens ?? 0,
-    summary: handoff.summary || '',
-  }];
 }
 
 function desktopContinuityContextFromProjection(projection) {
@@ -938,34 +1007,11 @@ goalDeliveryHandoff = createGoalDeliveryHandoff({
     || null,
 });
 
-const llmChatService = createLlmChatService({
-  llmConfigStore,
-  conversationStore,
-  emitRuntimeEvent,
-  persistCompaction: persistCompactionToConversation,
-  promptSnapshotStore,
-  preferredAccessLevel: initialSettings.localAccessLevel,
-  mcpRegistry,
-  skillStore,
-  automationProposalService,
-  // 注入带 onChange 的同一 goalPlanStore 单例，使 AI 工具写计划经唯一写路径广播，
-  // 浮条无需切会话即可随流式更新。见 Goal 模式设计。
-  goalPlanStore,
-  goalWorktreeAdapter,
-  goalTaskBranchAdapter,
-  // Agent 工具路径创建 LocalToolHost 时需要同一套 Browser 工作现场 reveal 桥。
-  ensureBrowserReady: browserPanelRevealCoordinator.ensureBrowserReady,
-  broadcast: broadcastToAllWindows,
-  // 全局兜底多模态模型配置（settings.json → fallbackVision）。
-  getSettings: () => settingsStore.getAll(),
-});
-llmChatService.setWorkspacePath(settingsStore.getAll().activeWorkspace || null);
-
 const chatStreamApplicationService = createChatStreamApplicationService({
-  abortStream: (streamId) => llmChatService.abort(streamId),
-  reattachStream: (input) => llmChatService.reattach(input),
-  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
-  listActiveStreams: () => llmChatService.listActiveStreams(),
+  abortStream: (streamId) => classicCoreBridge.abort(streamId),
+  reattachStream: (input) => classicCoreBridge.reattach(input),
+  listActiveConversationIds: () => classicCoreBridge.listActiveSync().conversationIds ?? [],
+  listActiveStreams: () => classicCoreBridge.listActiveSync().streams ?? [],
 });
 
 desktopPreviewProvider = !isPackaged && !isManagedPreview
@@ -973,7 +1019,10 @@ desktopPreviewProvider = !isPackaged && !isManagedPreview
     workspaceRoot, userDataPath: dataHome, goalPlanStore, nativeImage,
     hostVisualReview: createDesktopHostVisualReview({
       runVerifier: (input) => runPlanVisualVerifier({
-        ...input, llmChatService, modelProviderId: resolveConversationModelProviderId({
+        ...input,
+        llmConfigStore,
+        resolveCredential: (provider) => resolveProviderCredential({ provider, llmConfigStore }),
+        modelProviderId: resolveConversationModelProviderId({
           conversationStore, conversationId: input.plan?.conversationId,
         }),
       }),
@@ -989,36 +1038,233 @@ const webUiCapture = createWebUiCapture({
   hostVisualReview: desktopPreviewProvider?.hostVisualReview,
   workspaceRoot,
 });
-const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });
 const hostLeases = createHostLease({
   surface: 'desktop', hostId: randomUUID(), pid: process.pid, appVersion: app.getVersion(),
-  projectAgentEnabled: () => settingsStore.getAll()?.projectAgent?.shell !== 'classic', botWorkspaceIds: listBotWorkspaceIds,
+  projectAgentEnabled: () => (
+    !peerCoreDisposing
+    && !peerCoreStartupPending
+    && !classicCoreBridge.isProjectBotHostOwnedOrPending()
+    && settingsStore.getAll()?.projectAgent?.shell !== 'classic'
+  ),
+  botWorkspaceIds: listBotWorkspaceIds,
 });
 const visualCompletionHandoff = createGoalVisualCompletionHandoff({
   goalPlanStore,
   authority: desktopPreviewProvider?.authority,
-  forceComplete: (conversationId) => llmChatService.forceCompleteConversationStreams(conversationId, {
+  forceComplete: (conversationId) => forceCompleteActiveConversationStreams(conversationId, {
     reason: 'goal-visual-completion-handoff',
   }),
   startRunner: (planId) => goalRunner.start(planId),
 });
-goalRunner = createDesktopGoalRunnerHost({
-  goalPlanStore,
-  conversationStore,
-  agentTurnExecutor,
-  broadcast: broadcastToAllWindows,
-  llmChatService,
-  goalWorktreeAdapter,
-  goalTaskBranchAdapter,
-  desktopPreviewProvider,
-  runPlanVisualVerifier,
-  resolveConversationModelProviderId,
-  toDesktopProviderMessages,
-  desktopContinuityContextFromProjection,
-  workspaceRoot,
-  getMainWindows: () => BrowserWindow.getAllWindows().filter((window) => window.__peerAgentMainWindow === true),
-  hostLeases,
-}).goalRunner;
+goalRunner = {
+  start(planId, options) {
+    return classicCoreBridge.startGoalRunner(planId, options);
+  },
+  resume(planId, options) {
+    return classicCoreBridge.resumeGoalRunner(planId, options);
+  },
+  pause(planId, reason) {
+    return classicCoreBridge.pauseGoalRunner(planId, reason);
+  },
+  clear(planId, reason) {
+    return classicCoreBridge.clearGoalRunner(planId, reason);
+  },
+  getState(planId) {
+    return classicCoreBridge.getGoalRunnerState(planId);
+  },
+  waitForIdle() {
+    return Promise.resolve();
+  },
+};
+
+async function prepareClassicGoalWorkspace({ planId, conversationId } = {}) {
+  if (!planId || typeof goalPlanStore?.getPlan !== 'function') {
+    return { workspacePath: null, planId: planId ?? null };
+  }
+  const plan = goalPlanStore.getPlan(planId);
+  if (!plan) return { workspacePath: null, planId };
+  const resolvedConvId = plan.conversationId || conversationId || null;
+  const conversation = resolvedConvId ? conversationStore.getConversation(resolvedConvId) : null;
+  if (plan.delegationOrigin) {
+    if (plan.delegationOrigin.readOnly === true) {
+      return {
+        workspacePath:
+          plan.targetWorkspacePath
+          || plan.originWorkspacePath
+          || conversation?.workspacePath
+          || workspaceRoot,
+        planId,
+      };
+    }
+    throw new Error('delegated_goal_out_of_scope');
+  }
+  try {
+    await preparePlanExecutionWorkspace({
+      plan,
+      conversation,
+      ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch,
+      prepareForPlan: goalWorktreeAdapter?.prepareForPlan,
+      isolatePlan: goalWorktreeAdapter?.isolatePlan,
+    });
+  } catch (error) {
+    console.warn('[peer-core] prepareGoalWorkspace failed; falling back to bound workspace:', error?.message || error);
+  }
+  const fresh = goalPlanStore.getPlan(planId) || plan;
+  const workspacePath =
+    (fresh?.deliveryBinding?.executionIsolation === 'worktree'
+      ? fresh.deliveryBinding.worktreePath
+      : null)
+    || fresh?.targetWorkspacePath
+    || fresh?.deliveryBinding?.targetWorkspacePath
+    || fresh?.originWorkspacePath
+    || conversation?.workspacePath
+    || workspaceRoot;
+  return { workspacePath, planId };
+}
+
+async function runClassicVisualVerification({
+  planId,
+  conversationId,
+  verifierRunId,
+  workspacePath,
+} = {}) {
+  const plan = planId && typeof goalPlanStore?.getPlan === 'function'
+    ? goalPlanStore.getPlan(planId)
+    : null;
+  let required = false;
+  try {
+    required = Boolean(plan && desktopPreviewProvider?.authority?.read(planId, plan)?.required === true);
+  } catch {
+    required = true;
+  }
+  if (!required) {
+    return { required: false, passed: true, report: null };
+  }
+  if (!plan) {
+    return {
+      required: true,
+      passed: false,
+      report: { passed: false, summary: 'Goal plan unavailable for visual verification', evidenceRefs: [] },
+    };
+  }
+  const workerModelProviderId = resolveConversationModelProviderId({
+    conversationStore,
+    conversationId: plan.conversationId || conversationId,
+  });
+  const spentUsd = sumRoleSpendUsd(createUsageRequestLog().readAll({ limit: 20_000 }), {
+    role: 'visual_verifier',
+    sinceMs: startOfLocalDayMs(),
+  });
+  const routed = resolveRoleRoute({
+    role: 'visual_verifier',
+    providers: llmConfigStore.listProviders(),
+    routing: settingsStore.getAll()?.modelRouting,
+    workerModelProviderId,
+    spentUsd,
+  });
+  if (!routed?.ok) {
+    return {
+      required: true,
+      passed: false,
+      report: {
+        passed: false,
+        summary: routed?.missing || '没有能看图的模型',
+        reason: routed?.reason || 'capability',
+        evidenceRefs: [],
+      },
+    };
+  }
+  const resolvedWorkspace =
+    (plan?.deliveryBinding?.executionIsolation === 'worktree' ? plan.deliveryBinding.worktreePath : null)
+    || workspacePath
+    || plan?.targetWorkspacePath
+    || plan?.originWorkspacePath
+    || workspaceRoot;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('visual-verifier-timeout')), 150_000);
+  try {
+    const report = await runPlanVisualVerifier({
+      plan,
+      verifierRunId,
+      signal: controller.signal,
+      goalPlanStore,
+      workspacePath: resolvedWorkspace,
+      llmConfigStore,
+      resolveCredential: (provider) => resolveProviderCredential({ provider, llmConfigStore }),
+      modelProviderId: routed.selection?.modelProviderId || workerModelProviderId,
+    });
+    return {
+      required: true,
+      passed: Boolean(report?.passed === true),
+      report: report ?? { passed: false, summary: 'Empty visual verification report', evidenceRefs: [] },
+    };
+  } catch (error) {
+    return {
+      required: true,
+      passed: false,
+      report: {
+        passed: false,
+        summary: error instanceof Error ? error.message : String(error || 'visual_verification_failed'),
+        evidenceRefs: [],
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function forceCompleteActiveConversationStreams(conversationId) {
+  return classicCoreBridge.forceCompleteConversationStreams(conversationId);
+}
+
+function finalizeClassicGoalTurnOutcome(outcomePromise, {
+  conversationId,
+  mode,
+  resumeInterruptedReply,
+  visualCompletionPlanId,
+  answeredRequestedUserInputPlanId,
+} = {}) {
+  if (!(!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId)) {
+    return outcomePromise;
+  }
+  return Promise.resolve(outcomePromise).then((outcome) => {
+    convergeIntakeAfterGoalTurn(conversationId, outcome);
+    void visualCompletionHandoff.handoff(conversationId, outcome, visualCompletionPlanId).catch((error) => {
+      console.error('[main] visual completion handoff failed:', error?.message || error);
+    });
+    const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
+    if (answeredRequestedUserInputPlanId) {
+      void serializeAcceptedGoalRunnerHandoff({
+        forceComplete: () => forceCompleteActiveConversationStreams(
+          conversationId,
+          { reason: 'goal_user_decision_handoff' },
+        ),
+        isStillAccepted: () => shouldResumeGoalRunnerAfterUserDecision(
+          goalPlanStore.getPlan?.(answeredRequestedUserInputPlanId),
+        ),
+        startRunner: () => goalRunner?.start(answeredRequestedUserInputPlanId),
+      }).catch((error) => {
+        console.error('[main] resume goal runner after user decision failed:', error?.message || error);
+      });
+    } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
+      void serializeAcceptedGoalRunnerHandoff({
+        forceComplete: () => forceCompleteActiveConversationStreams(
+          conversationId,
+          { reason: 'goal_handoff' },
+        ),
+        isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
+          goalPlanStore.getPlan?.(acceptedGoal.planId),
+        ),
+        startRunner: () => goalRunner?.start(acceptedGoal.planId),
+      }).catch((error) => {
+        console.error('[main] auto-start goal runner failed:', error?.message || error);
+      });
+    }
+    return outcome;
+  });
+}
+
+
 
 function buildRuntimeProjection() {
   const session = sessionStore.getSession();
@@ -1258,7 +1504,9 @@ const settingsApplicationService = createSettingsApplicationService({
   recordInstructionBaseline,
   resolveLocalAccessLevel,
   setSessionAccessLevel: (accessLevel) => sessionStore.setAccessLevel(accessLevel),
-  setRuntimeAccessLevel: (accessLevel) => llmChatService.setLocalAccessLevel(accessLevel),
+  setRuntimeAccessLevel: (accessLevel) => {
+    void classicCoreBridge.setLocalAccessLevel(accessLevel);
+  },
   chooseExportDirectory: async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: '选择导出目录',
@@ -1282,6 +1530,16 @@ const settingsApplicationService = createSettingsApplicationService({
     resourcesRoot,
     workspaceRoot,
     loadedEnvKeys,
+    classicCore: {
+      enabled: true,
+      daemonEnabled: isPeerCoreDaemonEnabled(),
+      active: classicCoreBridge.isAvailable(),
+      projectBotHostActive: classicCoreBridge.isProjectBotHostActive(),
+      engine: 'rust',
+      transport: peerCoreClient?.status?.()?.transport ?? null,
+      endpoint: peerCoreClient?.status?.()?.endpoint ?? null,
+      status: peerCoreClient?.status?.() ?? null,
+    },
   }),
   setSessionLocale: (locale) => sessionStore.setLocale(locale),
   rebuildAppMenu: () => rebuildAppMenu(),
@@ -1291,7 +1549,7 @@ const settingsApplicationService = createSettingsApplicationService({
 const permissionGrantService = createPermissionGrantService({
   createId: () => randomUUID(),
   now: () => new Date(),
-  resolveGrant: (toolCallId, grant) => llmChatService.resolvePermissionGrant(toolCallId, grant),
+  resolveGrant: (toolCallId, grant) => classicCoreBridge.resolvePermissionGrant(toolCallId, grant),
 });
 
 const hostRestarter = createHostRestarter({ workspaceRoot });
@@ -1336,7 +1594,11 @@ const providerConfigurationApplicationService = createProviderConfigurationAppli
   removeGroup: (groupId) => llmConfigStore.removeGroup(groupId),
   setDefault: (id) => llmConfigStore.setDefault(id),
   testConnection: (id) => llmConfigStore.testConnection(id),
-  completePrompt: (params) => llmConfigStore.completePrompt(params),
+  completePrompt: (params) => (
+    classicCoreBridge.isAvailable()
+      ? classicCoreBridge.completeLlmPrompt(params)
+      : llmConfigStore.completePrompt(params)
+  ),
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
   notifyOAuthRefreshed: ({ reason, refreshed }) => {
     console.info(`[llm] silent oauth refresh (${reason}): refreshed ${refreshed} credential(s)`);
@@ -1372,7 +1634,8 @@ const providerAccessApplicationService = createProviderAccessApplicationService(
   updateProvider: (id, patch) => llmConfigStore.updateProvider(id, patch),
   removeProvider: (id) => llmConfigStore.removeProvider(id),
   getCredential: (id) => llmConfigStore.getCredential(id),
-  setOAuthTokens: (id, tokens) => llmConfigStore.setOAuthTokens(id, tokens),
+  setOAuthTokens: (id, tokens, options) => llmConfigStore.setOAuthTokens(id, tokens, options),
+  refreshOAuthTokens: (id, tokens, refresh) => llmConfigStore.refreshOAuthTokens(id, tokens, refresh),
   getApiKeyRequestConfig: (id) => llmConfigStore.getApiKeyRequestConfig(id),
   fetchWithRecovery: (url, init, context) => fetchWithConnectionRecovery(url, init, context),
   openExternal: (url) => shell.openExternal(url),
@@ -1382,9 +1645,6 @@ const providerAccessApplicationService = createProviderAccessApplicationService(
     target?.send(channel, payload);
   },
   recordBaseline: (reason, provider) => recordProviderBaseline(reason, provider),
-  reportProjectResolutionError: (error) => {
-    console.warn('[oauth] resolve Gemini Code Assist project failed:', error?.message || error);
-  },
 });
 
 const mcpApplicationService = createMcpApplicationService({
@@ -1464,7 +1724,7 @@ const conversationApplicationService = createConversationApplicationService({
     return result;
   },
   addUsage: (id, usage) => conversationStore.addUsage(id, usage),
-  listActiveConversationIds: () => llmChatService.listActiveConversationIds(),
+  listActiveConversationIds: () => chatStreamApplicationService.listActive().conversationIds,
   deletePlanByConversation: (id) => goalPlanStore.deletePlanByConversation(id),
   removeConversationToolArtifacts: (params) => removeConversationToolArtifacts(params),
   reportCascadeFailure: (operation, error) => {
@@ -1659,7 +1919,7 @@ const workspaceApplicationService = createWorkspaceApplicationService({
     );
     return canceled ? null : (filePaths?.[0] ?? null);
   },
-  setChatWorkspacePath: (candidate) => llmChatService.setWorkspacePath(candidate),
+  setChatWorkspacePath: () => {},
   setSkillWorkspacePath: (candidate) => skillStore?.setWorkspacePath?.(candidate),
   readProjectIndex: (options) => readProjectIndex(options),
 });
@@ -1926,7 +2186,7 @@ function registerDesktopIpcHost() {
   const inputPrediction = createDesktopInputPrediction({ getSettings: () => settingsStore.getAll(),
     listModels: llmConfigStore.listProviders, llmConfigStore, conversationStore,
     getProjectAgent: () => projectAgentDirectory, trustedWindows: trustedWindowRegistry,
-    isBusy: id => llmChatService.listActiveConversationIds().includes(id), fetchImpl: (...args) => net.fetch(...args) });
+    isBusy: id => chatStreamApplicationService.listActive().conversationIds.includes(id), fetchImpl: (...args) => net.fetch(...args) });
   const productLinkService = createProductLinkService({
     openExternal: (url) => shell.openExternal(url),
   });
@@ -2068,11 +2328,144 @@ function registerDesktopIpcHost() {
     }),
     ...createSelectionIpcRegistrations({
       store: conversationStore,
-      resolveRuntimeState: (id) => llmChatService.getSelectionRuntimeState(id),
+      resolveRuntimeState: (id) => {
+        const history = conversationStore?.getPersistedConversationHistory?.(id);
+        if (!history) return { conversationId: id, contentRevision: null, status: 'unknown' };
+        const base = { conversationId: id, contentRevision: history.contentRevision };
+        const coreRecords = classicCoreBridge.getActiveStreamsForConversation(id);
+        if (coreRecords.length > 1) return { ...base, status: 'unknown' };
+        if (coreRecords.length === 1) {
+          const activeMessageId = coreRecords[0]?.assistantMessageId;
+          return typeof activeMessageId === 'string' && activeMessageId
+            ? { ...base, status: 'running', activeMessageId }
+            : { ...base, status: 'unknown' };
+        }
+        return { ...base, status: history.excludedFromMessageId ? 'unknown' : 'idle' };
+      },
       authorizeWindow: trustedWindowRegistry.authorize,
     }),
     ...createDataIpcRegistrations({
-      conversations: conversationApplicationService,
+      conversations: {
+        list: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listConversations(payload)
+            : conversationApplicationService.list(payload)
+        ),
+        search: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.searchConversations(payload)
+            : conversationApplicationService.search(payload)
+        ),
+        create: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.createConversation(payload)
+            : conversationApplicationService.create(payload)
+        ),
+        get: async (payload) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.get(payload);
+          }
+          const page = await classicCoreBridge.getConversation(payload);
+          return projectConversationWindowPage(page, { goalPlanStore, llmConfigStore });
+        },
+        updateTitle: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationTitle(payload)
+            : conversationApplicationService.updateTitle(payload)
+        ),
+        updateMode: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationMode(payload)
+            : conversationApplicationService.updateMode(payload)
+        ),
+        updateFastMode: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationFastMode(payload)
+            : conversationApplicationService.updateFastMode(payload)
+        ),
+        updatePreferredExecutionIsolation: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationPreferredExecutionIsolation(payload)
+            : conversationApplicationService.updatePreferredExecutionIsolation(payload)
+        ),
+        updateModelEffort: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationModelEffort(payload)
+            : conversationApplicationService.updateModelEffort(payload)
+        ),
+        appendMessage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.appendConversationMessage(payload)
+            : conversationApplicationService.appendMessage(payload)
+        ),
+        updateLastMessage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.updateConversationLastMessage(payload)
+            : conversationApplicationService.updateLastMessage(payload)
+        ),
+        replaceMessages: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.replaceConversationMessages(payload)
+            : conversationApplicationService.replaceMessages(payload)
+        ),
+        archive: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.archiveConversation(payload)
+            : conversationApplicationService.archive(payload)
+        ),
+        restore: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.restoreConversation(payload)
+            : conversationApplicationService.restore(payload)
+        ),
+        pin: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.pinConversation(payload)
+            : conversationApplicationService.pin(payload)
+        ),
+        unpin: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.unpinConversation(payload)
+            : conversationApplicationService.unpin(payload)
+        ),
+        reorderPinned: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.reorderPinnedConversations(payload)
+            : conversationApplicationService.reorderPinned(payload)
+        ),
+        autoArchive: (payload = {}) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.autoArchive(payload);
+          }
+          const excludeIds = [
+            ...new Set([
+              ...(Array.isArray(payload?.excludeIds) ? payload.excludeIds : []),
+              ...(classicCoreBridge.listActiveSync().conversationIds ?? []),
+            ]),
+          ];
+          return classicCoreBridge.autoArchiveConversations({
+            before: payload?.before,
+            excludeIds,
+          });
+        },
+        remove: async (payload = {}) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return conversationApplicationService.remove(payload);
+          }
+          const remaining = await classicCoreBridge.deleteConversation(payload);
+          if (payload?.id) {
+            void disposeApplicationShellConversation(dataHome, payload.id).catch((error) => {
+              console.warn('[main] conversation shell cleanup failed:', error);
+            });
+          }
+          return remaining;
+        },
+        addUsage: (payload) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.addConversationUsage(payload)
+            : conversationApplicationService.addUsage(payload)
+        ),
+      },
       promptSnapshots: {
         list: (params) => promptSnapshotStore.list(params),
         get: (id) => promptSnapshotStore.get(id),
@@ -2081,10 +2474,26 @@ function registerDesktopIpcHost() {
         getContextEpochChain: (params) => promptSnapshotStore.getContextEpochChain(params),
       },
       usage: {
-        stats: () => collectUsageStats({ conversationStore, llmConfigStore }),
-        daily: (params) => collectUsageDaily(params),
-        day: (params) => collectUsageDay({ ...params, llmConfigStore }),
-        cacheHitRate: () => collectCacheHitRateMetrics(),
+        stats: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageStats()
+            : collectUsageStats({ conversationStore, llmConfigStore })
+        ),
+        daily: (params) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageDaily(params)
+            : collectUsageDaily(params)
+        ),
+        day: (params) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageDay(params)
+            : collectUsageDay({ ...params, llmConfigStore })
+        ),
+        cacheHitRate: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.getUsageCacheHitRate()
+            : collectCacheHitRateMetrics()
+        ),
       },
     }),
     ...createAutomationIpcRegistrations({
@@ -2134,38 +2543,91 @@ function registerDesktopIpcHost() {
     }),
     ...createSkillsIpcRegistrations({
       skills: {
-        list: (workspacePaths) => skillStore?.listSkills(workspacePaths) ?? [],
+        list: (workspacePaths) => {
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listSkills(workspacePaths, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
+          return skillStore?.listSkills(workspacePaths) ?? [];
+        },
         getDetail: (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.getSkillDetail(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
           return skillStore.getSkillDetail(skillId, workspacePath);
         },
         refresh: (workspacePaths) => {
           skillStore?.refresh();
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listSkills(workspacePaths, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+          }
           return skillStore?.listSkills(workspacePaths) ?? [];
         },
         upload: (zipBase64) => {
           if (!skillStore) throw new Error('skill_store_not_available');
           return skillStore.installSkillFromZip(Buffer.from(zipBase64, 'base64'));
         },
-        enable: (skillId, workspacePath) => {
+        enable: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const updated = await classicCoreBridge.enableSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return updated;
+          }
           return skillStore.enableSkill(skillId, workspacePath);
         },
-        disable: (skillId, workspacePath) => {
+        disable: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const updated = await classicCoreBridge.disableSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return updated;
+          }
           return skillStore.disableSkill(skillId, workspacePath);
         },
-        listAvailable: () => skillStore?.listAvailableSkills() ?? [],
-        link: (skillId) => {
+        listAvailable: () => {
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            return classicCoreBridge.listAvailableSkills({ sourceRoots: skillSourceRoots });
+          }
+          return skillStore?.listAvailableSkills() ?? [];
+        },
+        link: async (skillId) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.linkSkill(skillId, { sourceRoots: skillSourceRoots });
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.linkSkill(skillId);
         },
-        unlink: (skillId) => {
+        unlink: async (skillId) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.unlinkSkill(skillId);
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.unlinkSkill(skillId);
         },
-        uninstall: (skillId, workspacePath) => {
+        uninstall: async (skillId, workspacePath) => {
           if (!skillStore) throw new Error('skill_store_not_available');
+          if (!disableLocalSkill && classicCoreBridge.isAvailable()) {
+            const result = await classicCoreBridge.uninstallSkill(skillId, workspacePath, {
+              activeWorkspace: settingsStore.getAll().activeWorkspace || null,
+            });
+            skillStore?.refresh?.();
+            return result;
+          }
           return skillStore.uninstallSkill(skillId, workspacePath);
         },
         marketplaceList: () => skillMarketplaceService?.list() ?? { schemaVersion: 1, catalogId: 'peer-agent', generatedAt: '', entries: [] },
@@ -2219,7 +2681,58 @@ function registerDesktopIpcHost() {
       pendingTask: pendingTaskApplicationService,
     }),
     ...createMcpIpcRegistrations({
-      mcp: mcpApplicationService,
+      mcp: {
+        ...mcpApplicationService,
+        listInstalled: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listInstalledMcp()
+            : mcpApplicationService.listInstalled()
+        ),
+        listCapabilities: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listMcpCapabilities()
+            : mcpApplicationService.listCapabilities()
+        ),
+        listCredentials: () => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.listMcpCredentials()
+            : mcpApplicationService.listCredentials()
+        ),
+        install: (item) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.installMcpServer(item)
+            : mcpApplicationService.install(item)
+        ),
+        upsertServer: (item) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.upsertMcpServer(item)
+            : mcpApplicationService.upsertServer(item)
+        ),
+        setEnabled: (serverId, enabled) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.setMcpEnabled(serverId, enabled)
+            : mcpApplicationService.setEnabled(serverId, enabled)
+        ),
+        setToolVisibility: (serverId, toolName, visible) => (
+          classicCoreBridge.isAvailable()
+            ? classicCoreBridge.setMcpToolVisibility(serverId, toolName, visible)
+            : mcpApplicationService.setToolVisibility(serverId, toolName, visible)
+        ),
+        uninstall: async (serverId) => {
+          if (!classicCoreBridge.isAvailable()) {
+            return mcpApplicationService.uninstall(serverId);
+          }
+          const result = await classicCoreBridge.uninstallMcpServer(serverId);
+          if (result?.boundCredentialRef) {
+            try {
+              mcpCredentialStore.deleteCredential(result.boundCredentialRef);
+            } catch (error) {
+              console.warn('[mcp] failed to remove bound credential:', error?.message ?? error);
+            }
+          }
+          return Array.isArray(result?.servers) ? result.servers : [];
+        },
+      },
     }),
     ...createPasswordVaultIpcRegistrations({
       passwordVault: {
@@ -2245,9 +2758,9 @@ function registerDesktopIpcHost() {
     ...createResourceFeedbackIpcRegistrations({ preparation: resourceFeedbackPreparation }),
     ...createBrowserWindowIpcRegistrations({ browserWindows: browserWindowController }),
     ...registerDesktopProjectAgent({
-      configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
       enabled: () => true,
-      dataHome, conversationStore, goalPlanStore, goalRunner, agentTurnExecutor,
+      classicCoreBridge,
+      dataHome, conversationStore, goalPlanStore, goalRunner,
       workspace: workspaceApplicationService, broadcast: broadcastToAllWindows,
       hostLeases, holdsLease: (workspaceId) => hostLeases.holds(workspaceId), acquireLease: (id) => hostLeases.acquire(id), releaseLease: (id) => hostLeases.release(id),
       getSettings: () => settingsStore.getAll(), readRuntimePolicy: () => settingsStore.getRuntimePolicy(), mergeSettings: (patch) => settingsStore.merge(patch),
@@ -2678,10 +3191,10 @@ function maybeAutoStartAcceptedGoalFromPlanChange(payload = {}) {
   // Both failed and interrupted re-arms use resume() to consume suspension.
   // Recheck after the foreground stream releases, rather than capture stale state.
   void serializeAcceptedGoalRunnerHandoff({
-    forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+    forceComplete: () => forceCompleteActiveConversationStreams(
       plan.conversationId,
       { reason: 'goal_handoff' },
-    ) ?? { released: Promise.resolve() },
+    ),
     isStillAccepted: () => (
       shouldAutoStartAcceptedGoalRunner(goalPlanStore.getPlan?.(plan.planId))
       || shouldRearmFailedGoalPlanFromChange(goalPlanStore.getPlan?.(plan.planId))
@@ -2778,37 +3291,70 @@ async function handleChatStartTask({
   if (!boundWorkspacePath) {
     throw new Error('workspace_required');
   }
-  const conversation = conversationStore.createConversation({
-    title: String(title ?? normalizedText).slice(0, 48) || '新任务',
-    workspacePath: boundWorkspacePath,
-    mode,
-    fastMode,
-    preferredExecutionIsolation,
-  });
-  if (effort !== undefined || modelProviderId !== undefined) {
-    conversationStore.updateModelEffort(conversation.id, {
-      effort,
-      modelProviderId,
+  let conversation;
+  if (classicCoreBridge.isAvailable()) {
+    conversation = await classicCoreBridge.createConversation({
+      title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+      workspacePath: boundWorkspacePath,
+      mode,
+      fastMode,
+      preferredExecutionIsolation,
     });
+    if (effort !== undefined || modelProviderId !== undefined) {
+      await classicCoreBridge.updateConversationModelEffort({
+        id: conversation.id,
+        effort,
+        modelProviderId,
+      });
+    }
+  } else {
+    conversation = conversationStore.createConversation({
+      title: String(title ?? normalizedText).slice(0, 48) || '新任务',
+      workspacePath: boundWorkspacePath,
+      mode,
+      fastMode,
+      preferredExecutionIsolation,
+    });
+    if (effort !== undefined || modelProviderId !== undefined) {
+      conversationStore.updateModelEffort(conversation.id, {
+        effort,
+        modelProviderId,
+      });
+    }
   }
   const now = new Date().toISOString();
   const userMessageId = randomUUID();
   const assistantMessageId = randomUUID();
   const streamId = randomUUID();
-  conversationStore.appendMessage(conversation.id, {
+  const userMessagePayload = {
     id: userMessageId,
     role: 'user',
     content: normalizedText,
     timestamp: now,
     ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
-  }, { returnMessages: false });
-  conversationStore.appendMessage(conversation.id, {
+  };
+  const assistantMessagePayload = {
     id: assistantMessageId,
     role: 'assistant',
     content: '',
     timestamp: now,
     segments: [],
-  }, { returnMessages: false });
+  };
+  if (classicCoreBridge.isAvailable()) {
+    await classicCoreBridge.appendConversationMessage({
+      id: conversation.id,
+      message: userMessagePayload,
+      returnMessages: false,
+    });
+    await classicCoreBridge.appendConversationMessage({
+      id: conversation.id,
+      message: assistantMessagePayload,
+      returnMessages: false,
+    });
+  } else {
+    conversationStore.appendMessage(conversation.id, userMessagePayload, { returnMessages: false });
+    conversationStore.appendMessage(conversation.id, assistantMessagePayload, { returnMessages: false });
+  }
   void Promise.resolve(handleChatSend({
     streamId,
     assistantMessageId,
@@ -2894,10 +3440,10 @@ function handleChatSend({
           });
           if (appliedRoute?.type === 'kick_stalled_runner' || isStalledAcceptedGoalRunner(activeGoal)) {
             void serializeAcceptedGoalRunnerHandoff({
-              forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
+              forceComplete: () => forceCompleteActiveConversationStreams(
                 conversationId,
                 { reason: 'goal_handoff' },
-              ) ?? { released: Promise.resolve() },
+              ),
               isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
                 goalPlanStore.getPlan?.(activeGoal.planId),
               ),
@@ -2980,79 +3526,75 @@ function handleChatSend({
         },
       ]
     : runtimeReminders;
-  // Bind the foreground contract before it can complete or be superseded.
-  const visualCompletionPlanId = goalPlanStore.getActivePlanByConversation(conversationId)?.planId;
-  const outcomePromise = llmChatService.sendMessage({
-    messages,
-    webContents: sender,
-    streamId,
-    effort,
-    fastMode,
-    mode,
-    conversationId,
-    modelProviderId: resolvedModelProviderId,
-    conversationLoad,
-    // B2 兜底：透传渲染端当前工作区，仅在会话未绑定 workspacePath 时由
-    // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
-    workspacePath,
-    assistantMessageId,
-    resumeInterruptedReply,
-    contextAttachments,
-    runtimeReminders: effectiveRuntimeReminders,
-    attachmentContext,
-    continuityContext: resolvedContinuityContext,
-    configInstructions,
-    contextExtensions,
-  });
-  // goal 模式首笔回合结束后补 intake 判别收敛（方案 C）：不改变返回给渲染端的 outcome，
-  // 仅在回合 resolve 后按 outcome 决定是否静默移除残留的 intake 契约。
-  if (!resumeInterruptedReply && (mode === 'goal' || mode === 'chat') && conversationId) {
-    return Promise.resolve(outcomePromise).then((outcome) => {
-      convergeIntakeAfterGoalTurn(conversationId, outcome);
-      // Keep the foreground outcome unchanged; this service waits for Runtime release
-      // and rechecks the same completed plan before invoking the existing UI gate.
-      void visualCompletionHandoff.handoff(conversationId, outcome, visualCompletionPlanId).catch((error) => {
-        console.error('[main] visual completion handoff failed:', error?.message || error);
+  const hasResourceFeedback = Boolean(
+    Array.isArray(persistedConversation?.messages)
+    && persistedConversation.messages.some((msg) => (
+      (Array.isArray(msg?.resourceFeedback) && msg.resourceFeedback.length > 0)
+      || (Array.isArray(msg?.attachments) && msg.attachments.some((att) => (
+        att?.kind === 'interactive-feedback' || Boolean(att?.resourceFeedback)
+      )))
+    )),
+  );
+  if (
+    !conversationId
+    || !assistantMessageId
+    || !classicCoreBridge.canHandleChatSend({ mode: mode || 'chat', hasResourceFeedback })
+  ) {
+    const errorCode = !classicCoreBridge.isAvailable()
+      ? 'peer_core_not_ready'
+      : hasResourceFeedback
+        ? 'history_resource_feedback_unsupported'
+        : 'classic_core_bridge_invalid_send_params';
+    if (sender && typeof sender.send === 'function' && !sender.isDestroyed?.()) {
+      sender.send('chat:stream:error', {
+        streamId,
+        conversationId,
+        error: errorCode,
+        streamFailure: { code: errorCode },
       });
-      const acceptedGoal = goalPlanStore.getActivePlanByConversation(conversationId);
-      if (answeredRequestedUserInputPlanId) {
-        // The user's answer ran in the foreground chat turn. Hand ownership back
-        // only after that turn has released the conversation runtime, and re-read
-        // persisted state before starting so a new block/completion wins the race.
-        void serializeAcceptedGoalRunnerHandoff({
-          forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
-            conversationId,
-            { reason: 'goal_user_decision_handoff' },
-          ) ?? { released: Promise.resolve() },
-          isStillAccepted: () => shouldResumeGoalRunnerAfterUserDecision(
-            goalPlanStore.getPlan?.(answeredRequestedUserInputPlanId),
-          ),
-          startRunner: () => goalRunner?.start(answeredRequestedUserInputPlanId),
-        }).catch((error) => {
-          console.error('[main] resume goal runner after user decision failed:', error?.message || error);
-        });
-      } else if (shouldAutoStartAcceptedGoalRunner(acceptedGoal)) {
-        // intake 路径下 createIntakeContract 初始 status 为 executing；goal_create_plan
-        // 原地升级后 activation.kind=accepted_goal，但 status 可能仍是 executing。
-        // 不能 queueMicrotask(start)：intake 回合可能还没释放 Runtime turn，
-        // start() 会先把磁盘写成 running，第一回合却撞上 active session。
-        void serializeAcceptedGoalRunnerHandoff({
-          forceComplete: () => llmChatService?.forceCompleteConversationStreams?.(
-            conversationId,
-            { reason: 'goal_handoff' },
-          ) ?? { released: Promise.resolve() },
-          isStillAccepted: () => shouldAutoStartAcceptedGoalRunner(
-            goalPlanStore.getPlan?.(acceptedGoal.planId),
-          ),
-          startRunner: () => goalRunner.start(acceptedGoal.planId),
-        }).catch((error) => {
-          console.error('[main] auto-start goal runner failed:', error?.message || error);
-        });
-      }
-      return outcome;
+    }
+    return Promise.resolve({
+      ok: false,
+      status: 'error',
+      terminalStatus: 'error',
+      streamId,
+      conversationId,
+      text: '',
+      error: errorCode,
+      streamFailure: { code: errorCode },
+      aborted: false,
     });
   }
-  return outcomePromise;
+  // Bind the foreground contract before it can complete or be superseded.
+  const visualCompletionPlanId = goalPlanStore.getActivePlanByConversation(conversationId)?.planId;
+  const classicOutcomePromise = classicCoreBridge.send({
+    streamId,
+    conversationId,
+    assistantMessageId,
+    workspacePath:
+      persistedConversation?.workspacePath
+      ?? workspacePath
+      ?? settingsStore.getAll().activeWorkspace
+      ?? workspaceRoot,
+    mode: mode || 'chat',
+    modelProviderId: resolvedModelProviderId,
+    effort,
+    fastMode,
+    persistModelSelection: Boolean(modelProviderId),
+    resumeInterruptedReply,
+    runtimeReminders: effectiveRuntimeReminders,
+    configInstructions,
+    contextAttachments,
+    attachmentContext,
+    contextExtensions,
+  }, sender);
+  return finalizeClassicGoalTurnOutcome(classicOutcomePromise, {
+    conversationId,
+    mode,
+    resumeInterruptedReply,
+    visualCompletionPlanId,
+    answeredRequestedUserInputPlanId,
+  });
 }
 
 // ── Stream reattach (ADR 22) ──
@@ -3061,243 +3603,47 @@ function handleChatSend({
 
 // 全局活跃流查询也由 chat-ipc owner 投影；服务保留既有 conversationIds 与 streams 形状。
 
-async function handleChatCompact({ conversationId, streamId }, sender) {
+async function handleChatCompact({ conversationId, streamId }) {
   const conv = conversationStore.getConversation(conversationId);
   if (!conv || !conv.messages?.length) return { compacted: false };
-
-  const filteredMessages = conv.messages.filter(
-    (m) => !(m.role === 'user' && typeof m.content === 'string' && m.content.trim() === '/compact'),
-  );
-  if (filteredMessages.length === 0) return { compacted: false };
-  const canonicalHistory = projectConversationHistory(filteredMessages);
-  const priorContinuityContext = desktopContinuityContextFromProjection(canonicalHistory);
-  const activeSourceMessages = filteredMessages.slice(canonicalHistory.compactionBoundaryIndex + 1);
-  if (canonicalHistory.messages.length === 0) return { compacted: false };
-
-  const workspacePath = settingsStore.getAll().activeWorkspace || null;
-
-  const compactProviders = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
-  const provider = compactProviders.find((p) => p.isDefault)
-    || compactProviders[0]
-    || null;
-  let credential = null;
-  if (provider) {
-    try {
-      credential = await resolveProviderCredential({ provider, llmConfigStore });
-    } catch (error) {
-      console.warn('[main] compact credential unavailable:', error?.code || error?.message || error);
-    }
-  }
-  const systemContext = buildSystemContext(workspacePath, {
+  const resolvedWorkspacePath = conv.workspacePath || settingsStore.getAll().activeWorkspace || workspaceRoot;
+  const result = await classicCoreBridge.compact({
     conversationId,
-    continuityContext: priorContinuityContext,
-    mode: 'compact',
-    provider: provider?.provider ?? null,
-    model: provider?.model ?? null,
+    streamId,
+    workspacePath: resolvedWorkspacePath,
+    modelProviderId: conv.modelProviderId || null,
+    effort: conv.effort || null,
   });
-  const systemPrompt = renderSystemContext(systemContext);
+  if (!result?.compacted) return { compacted: false };
   try {
-    promptSnapshotStore.record(systemContext, {
+    const refreshed = conversationStore.getConversation(conversationId);
+    const refreshedHistory = refreshed?.messages ? projectConversationHistory(refreshed.messages) : null;
+    const providers = llmConfigStore.listProviders().filter((p) => p.apiKeyConfigured);
+    const provider = (conv.modelProviderId && providers.find((p) => p.id === conv.modelProviderId))
+      || providers.find((p) => p.isDefault)
+      || providers[0]
+      || null;
+    const baselineContext = buildSystemContext(resolvedWorkspacePath, {
+      conversationId,
+      continuityContext: refreshedHistory ? desktopContinuityContextFromProjection(refreshedHistory) : [],
+      mode: 'chat',
+      provider: provider?.provider ?? null,
+      model: provider?.model ?? null,
+    });
+    promptSnapshotStore.recordBaseline(baselineContext, {
       streamId,
       conversationId,
       contextEpochId: getActiveContextEpochId(conversationId),
       provider: provider?.provider ?? null,
       providerId: provider?.id ?? null,
       model: provider?.model ?? null,
-      mode: 'compact',
+      mode: 'chat',
+      baselineReason: 'manual_compact',
     });
   } catch (error) {
-    console.warn('[main] failed to record compact prompt snapshot:', error?.message || error);
+    console.warn('[main] failed to record compact baseline:', error?.message || error);
   }
-
-  let providerConfig = null;
-  let resolvedChannel = null;
-  if (provider && credential?.apiKey) {
-    resolvedChannel = resolveChannel({
-      ...provider,
-      apiKey: credential.apiKey,
-      accountId: credential.accountId,
-      sessionId: conversationId || streamId || undefined,
-    });
-    providerConfig = {
-      provider: resolvedChannel.legacyProvider,
-      baseUrl: resolvedChannel.baseUrl,
-      apiKey: credential.apiKey,
-      model: provider.model,
-      authMethod: credential.authMethod,
-      accountId: credential.accountId,
-      wire: resolvedChannel.wire,
-      endpoint: resolvedChannel.endpoint,
-      headers: resolvedChannel.headers,
-      omitMaxOutputTokens: credential.authMethod === 'oauth_chatgpt',
-    };
-  }
-  const contextWindow = provider?.contextWindow || 0;
-  let tools = null;
-  try {
-    tools = buildRuntimeTools({
-      mcpRegistry,
-      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
-      mode: conv.mode || 'chat',
-    }).tools;
-  } catch (error) {
-    console.warn('[main] compact tool projection unavailable:', error?.message || error);
-  }
-
-  const apiMessages = [
-    { role: 'system', content: systemPrompt },
-    ...toDesktopProviderMessages(canonicalHistory.messages),
-  ];
-
-  // 登记表/横幅/进度/持久化/完成事件全部收敛到 runCompactionCheck 单入口（manual 语义）：
-  // 手动 /compact = force 全量压缩 + 强制横幅；不再在 handler 内复制平行实现。
-  // 见 knowledge/architecture/23-compaction-path-root-governance.md（单闸门不变式）。
-  try {
-    const exactAnthropic = resolvedChannel?.wire === 'anthropic-messages'
-      && Boolean(credential?.apiKey);
-    const exactGemini = resolvedChannel?.wire === 'gemini'
-      && credential?.authMethod === 'api_key'
-      && Boolean(credential?.apiKey);
-    let outcome = null;
-    const accountingPipeline = createContextAccountingCompactionPipeline({
-      identity: {
-        conversationId,
-        contentRevision: Number.isSafeInteger(conv.contentRevision)
-          ? conv.contentRevision + 1
-          : 1,
-        modelKey: contextAccountingModelKey(provider?.id, provider?.model),
-      },
-      contextWindow,
-      countCapability: exactAnthropic || exactGemini
-        ? { kind: 'provider_count_api' }
-        : { kind: 'observed_usage_only' },
-      initialSnapshot: reprojectContextAccountingWindow(
-        conv.contextSnapshot?.version === 1
-        && conv.contextSnapshot.modelKey === contextAccountingModelKey(provider?.id, provider?.model)
-          ? conv.contextSnapshot
-          : null,
-        provider?.contextWindow,
-      ),
-      buildRequest(state) {
-        if (exactAnthropic) {
-          const system = state.messages
-            .filter((message) => message.role === 'system')
-            .map((message) => message.content)
-            .join('\n\n');
-          return {
-            model: provider.model,
-            system,
-            messages: state.messages.filter((message) => message.role !== 'system'),
-            tools,
-            effort: conv.effort || 'default',
-            supportsReasoning: Boolean(provider.supportsReasoning),
-            promptCaching: provider.supportsPromptCaching !== false,
-            maxOutputTokens: provider.maxOutputTokens || 0,
-          };
-        }
-        return {
-          model: provider?.model || '',
-          messages: state.messages,
-          tools,
-          maxOutputTokens: provider?.maxOutputTokens || 0,
-        };
-      },
-      countRequest: exactAnthropic
-        ? (request) => countAnthropicCanonicalRequest({
-            baseUrl: provider.baseUrl,
-            apiKey: credential.apiKey,
-            headers: resolvedChannel?.headers,
-            ...request,
-          })
-        : exactGemini
-          ? (request) => countGeminiCanonicalRequest({
-              baseUrl: provider.baseUrl,
-              apiKey: credential.apiKey,
-              headers: resolvedChannel?.headers,
-              ...request,
-            })
-          : undefined,
-      async compact({ state }) {
-        outcome = await runCompactionCheck({
-          messages: state.messages,
-          systemPrompt,
-          contextWindow,
-          providerConfig,
-          // 手动路径的持久化需要用 Projector 分界后的 raw rows 作为源切片。
-          persistCompaction: (args) => persistCompactionToConversation({
-            ...args,
-            sourceMessages: activeSourceMessages,
-          }),
-          conversationId,
-          streamId,
-          webContents: sender,
-          force: true,
-          manual: true,
-          preserveLatestUserTurn: false,
-          continuityContext: priorContinuityContext,
-        });
-        return {
-          compacted: Boolean(outcome?.compacted),
-          state: {
-            messages: Array.isArray(outcome?.messages)
-              ? outcome.messages
-              : state.messages,
-          },
-        };
-      },
-      send: async () => {
-        throw new Error('manual_compact_must_not_send');
-      },
-      onSnapshot(snapshot) {
-        emitRuntimeEvent({
-          type: 'context.accounting',
-          sessionId: conversationId,
-          conversationId,
-          streamId,
-          snapshot,
-        });
-      },
-    });
-    const accountingResult = await accountingPipeline.execute({
-      state: { messages: apiMessages },
-      command: 'manual_compact',
-    });
-    if (accountingResult.snapshot.version === 1) {
-      conversationStore.updateContextSnapshot(
-        conversationId,
-        accountingResult.snapshot,
-      );
-    }
-    if (!outcome?.compacted) return { compacted: false };
-
-    const result = outcome.compactResult;
-    try {
-      const baselineContext = buildSystemContext(workspacePath, {
-        conversationId,
-        continuityContext: continuityContextFromCompactionResult(result),
-        mode: 'chat',
-        provider: provider?.provider ?? null,
-        model: provider?.model ?? null,
-      });
-      promptSnapshotStore.recordBaseline(baselineContext, {
-        streamId,
-        conversationId,
-        provider: provider?.provider ?? null,
-        providerId: provider?.id ?? null,
-        model: provider?.model ?? null,
-        mode: 'chat',
-        baselineReason: 'manual_compact',
-      });
-    } catch (error) {
-      console.warn('[main] failed to record compact baseline:', error?.message || error);
-    }
-
-    // done 事件已由 coordinator 统一发出（含 manual 标记与压缩后投影）；这里只回 IPC 结果。
-    return { compacted: true, notification: result.notification };
-  } catch (error) {
-    // 横幅收尾（idle）已由 coordinator 的 settleBannerIdle 处理，这里只上报错误。
-    throw error;
-  }
+  return result;
 }
 
 // ── 压缩态查询（按 conversationId）──
@@ -3368,19 +3714,21 @@ async function handleChatContextRestored(
   const systemPrompt = renderSystemContext(systemContext);
   let tools = null;
   try {
-    tools = buildRuntimeTools({
+    const { modelProjection } = createRuntimeToolProjection({
       mcpRegistry,
-      providerType: provider?.provider === 'anthropic' ? 'anthropic' : 'openai',
-      mode,
-    }).tools;
+      skillStore,
+      projectionOptions: { mode },
+    });
+    tools = provider?.provider === 'anthropic'
+      ? buildAnthropicToolsFromModelProjection(modelProjection)
+      : buildOpenAIToolsFromModelProjection(modelProjection);
   } catch (error) {
     // 工具投影失败时仍可给出 system+messages 投影,但降级为部分成分;记录以便排查。
     console.warn('[main] restored projection tools unavailable:', error?.message || error);
   }
 
-  const projectedMessages = applyMicrocompaction(
+  const projectedMessages = microcompactMessagesForContext(
     [{ role: 'system', content: systemPrompt }, ...activeMessages],
-    { log: () => {} },
   ).messages;
   const identity = {
     conversationId,
@@ -3525,19 +3873,13 @@ function flushPendingRuntimeEvents() {
 }
 
 async function startRecoveryAndAppearance() {
-  applyStartupApprovalRecovery({ approvalStore: createApprovalStore(), goalPlanStore, canRecover: row => !goalPlanStore.getPlan(row.planId)?.delegationOrigin || hostLeases.holds(row.workspaceId) });
-  try {
-    if (goalRunner && typeof goalRunner.recoverContextCheckpoints === 'function') {
-      const recovery = goalRunner.recoverContextCheckpoints({ includeDelegated: false });
-      if (recovery?.recovered?.length) {
-        console.info(
-          `[main] recovered ${recovery.recovered.length}/${recovery.scanned} goal checkpoint(s) after startup`,
-        );
-      }
-    }
-  } catch (error) {
-    console.error('[main] recoverContextCheckpoints failed:', error?.message || error);
-  }
+  // Session-bound approvals belong to the workspace host. A native plan may
+  // not decode through the desktop GoalPlan store while that host is starting.
+  applyStartupApprovalRecovery({
+    approvalStore: createApprovalStore(),
+    goalPlanStore,
+    canRecover: row => !row.sessionId && !goalPlanStore.getPlan(row.planId)?.delegationOrigin,
+  });
   setDockIcon();
   const onNativeThemeUpdated = () => {
     const appearance = settingsStore.getAll().appearance;
@@ -3823,7 +4165,7 @@ function startAutomationRuntime() {
   automationRunner = createAutomationRunner({
     store: automationStore,
     conversationStore,
-    llmChatService,
+    classicCoreBridge,
     worktreeAdapter,
     onBackgroundEvent: ({ channel, payload }) => broadcastToAllWindows(channel, payload),
     onRunUpdated: (run) => outcomeController.handleRunUpdated(run),
@@ -3851,6 +4193,58 @@ function startAutomationRuntime() {
   };
 }
 
+async function startPeerCoreBridge() {
+  const binaryPath = resolvePeerCoreBinaryPath({
+    resourcesPath: isPackaged ? process.resourcesPath : undefined,
+    executablePath: app.getPath('exe'),
+    repositoryRoot: isPackaged ? undefined : workspaceRoot,
+    buildProfile: isPackaged ? 'release' : 'debug',
+  });
+  const externalCapabilities = collectDesktopExternalCapabilities();
+  const client = createPeerCoreClient({
+    binaryPath,
+    dataHome,
+    transport: isPeerCoreDaemonEnabled() ? 'daemon' : 'stdio',
+    fallbackToStdio: true,
+    clientInfo: { name: 'peer-desktop', version: app.getVersion() },
+    externalCapabilities,
+    onNotification: classicCoreBridge.handleNotification,
+    hostHandlers: classicCoreBridge.createHostHandlers(),
+    onUnexpectedExit: classicCoreBridge.handleUnexpectedExit,
+    logger: console,
+  });
+  peerCoreClient = client;
+  try {
+    const initialized = await client.start();
+    const clientStatus = client.status();
+    const initialAccessLevel = resolveLocalAccessLevel(settingsStore.getAll());
+    await classicCoreBridge.setLocalAccessLevel(initialAccessLevel);
+    const botConfig = buildProjectBotHostConfig({ includeWorkspaces: true });
+    const botHostStatus = await classicCoreBridge.configureProjectBotHost(botConfig);
+    peerCoreStartupPending = false;
+    const botSummary = botHostStatus?.enabled === true
+      ? `active(owned=${botHostStatus.ownedWorkspaces?.length ?? 0})`
+      : 'dormant';
+    console.info(
+      `[peer-core] bridge ready (transport=${clientStatus.transport}, pid=${initialized.pid}, version=${initialized.server?.version ?? 'unknown'}, ext=${externalCapabilities.length}, access=${initialAccessLevel}, botHost=${botSummary})`,
+    );
+    return {
+      name: 'peer-core-bridge',
+      dispose: async () => {
+        peerCoreDisposing = true;
+        if (peerCoreClient === client) peerCoreClient = null;
+        await client.dispose();
+      },
+    };
+  } catch (error) {
+    peerCoreStartupPending = false;
+    if (peerCoreClient === client) peerCoreClient = null;
+    await client.dispose().catch(() => {});
+    if (!peerCoreDisposing) hostLeases.pulse();
+    throw error;
+  }
+}
+
 const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionRoot({
   logger: console,
   initialOwners: [
@@ -3871,6 +4265,14 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
   phases: [
     { name: 'recovery-and-appearance', start: startRecoveryAndAppearance },
     { name: 'local-runtime', start: startLocalRuntime },
+    {
+      name: 'peer-core-bridge',
+      fatal: false,
+      start: startPeerCoreBridge,
+      onError: (error) => {
+        console.warn('[peer-core] startup failed:', error?.message || error);
+      },
+    },
     { name: 'desktop-ipc', start: () => registerDesktopIpcHost() },
     {
       name: 'first-main-window',

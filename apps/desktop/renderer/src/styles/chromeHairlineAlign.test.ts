@@ -36,7 +36,7 @@ test('chat header and workbench tab rail share a locked 40px chrome hairline', (
   assert.match(openHeader, /border-bottom-color:\s*var\(--chrome-hairline\);/);
   assert.match(
     openHeader,
-    /background:\s*var\(--chrome-canvas,\s*var\(--za-app-bg\)\);/,
+    /background:\s*var\(--chrome-canvas\);/,
   );
   assert.match(openHeader, /-webkit-backdrop-filter:\s*none;/);
   assert.match(openHeader, /backdrop-filter:\s*none;/);

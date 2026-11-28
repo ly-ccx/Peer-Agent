@@ -26,6 +26,7 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
     if (!range) { setPosition(null); return; }
     const dismiss = () => {
       gate.invalidate();
+      selectedRange.current = null;
       setConfirmation(null);
       setRange(null);
       setPosition(null);
@@ -83,11 +84,15 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
     setRange(null);
     setError('');
     const inspect = () => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT') && !selectedRange.current) {
+        return;
+      }
       gate.invalidate();
       setConfirmation(null);
       setBusy(false);
       const selection = window.getSelection();
-      if (!selection || selection.isCollapsed || selection.rangeCount !== 1) { setRange(null); return; }
+      if (!selection || selection.isCollapsed || selection.rangeCount !== 1) { selectedRange.current = null; setRange(null); return; }
       const selected = selection.getRangeAt(0);
       const element = selected.startContainer.nodeType === Node.ELEMENT_NODE
         ? selected.startContainer as Element : selected.startContainer.parentElement;

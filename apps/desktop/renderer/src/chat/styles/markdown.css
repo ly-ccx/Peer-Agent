@@ -22,7 +22,7 @@
   .markdown-content h5,
   .markdown-content h6 {
     @apply m-0 leading-6;
-    color: var(--za-text);
+    color: var(--graphite-base);
     font-weight: 600;
   }
 
@@ -60,22 +60,22 @@
 
   .markdown-content li {
     @apply min-w-0 leading-6;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     /* 等价还原原 gap-1 的紧凑行距。 */
     margin: 2px 0;
   }
 
   .markdown-content li::marker {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .markdown-content strong {
-    color: var(--za-text);
+    color: var(--graphite-base);
     font-weight: 600;
   }
 
   .markdown-content em {
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     font-style: italic;
   }
 
@@ -84,26 +84,26 @@
   }
 
   .markdown-token-red {
-    color: var(--za-danger);
+    color: var(--state-danger);
   }
 
   .markdown-token-warning {
-    color: var(--za-warn);
+    color: var(--state-warn);
   }
 
   .markdown-token-success {
-    color: var(--za-good);
+    color: var(--state-success);
   }
 
   .markdown-token-info {
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .markdown-content code {
     @apply rounded-[var(--ui-radius-control-compact)] px-1.5 py-0.5 text-[12px];
     box-sizing: border-box;
-    color: var(--za-text-soft);
-    background: var(--za-surface-1);
+    color: var(--graphite-soft);
+    background: var(--control-fill);
     max-width: 100%;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -112,21 +112,21 @@
 
   /* 可点击的文件路径：在普通 inline code 基础上加链接化的提示，但不喧宾夺主。 */
   .markdown-content code.markdown-file-path {
-    color: var(--za-accent);
+    color: var(--azure-seal);
     cursor: pointer;
     text-decoration: underline;
-    text-decoration-color: color-mix(in srgb, var(--za-accent) 40%, transparent);
+    text-decoration-color: color-mix(in srgb, var(--azure-seal) 40%, transparent);
     text-underline-offset: 2px;
     transition: background 0.12s, text-decoration-color 0.12s;
   }
 
   .markdown-content code.markdown-file-path:hover {
-    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-1));
-    text-decoration-color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 14%, var(--control-fill));
+    text-decoration-color: var(--azure-seal);
   }
 
   .markdown-content code.markdown-file-path:focus-visible {
-    outline: 2px solid var(--za-accent);
+    outline: 2px solid var(--azure-seal);
     outline-offset: 1px;
   }
 
@@ -137,10 +137,10 @@
     min-width: 0;
     width: 100%;
     max-height: 260px;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control-compact);
-    color: var(--za-text-muted);
-    background: var(--za-bg-1);
+    color: var(--graphite-fade);
+    background: var(--chrome-canvas);
   }
 
   .markdown-content pre code {
@@ -163,9 +163,9 @@
     @apply absolute right-1.5 top-1.5 flex items-center justify-center rounded-[var(--ui-radius-control)] p-1;
     opacity: 0;
     transition: opacity 0.15s;
-    color: var(--za-text-muted);
-    background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
+    color: var(--graphite-fade);
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
     cursor: pointer;
     z-index: 1;
   }
@@ -173,18 +173,18 @@
     opacity: 1;
   }
   .markdown-content .code-copy-btn:hover {
-    color: var(--za-text);
-    background: var(--za-surface-2);
+    color: var(--graphite-base);
+    background: var(--control-fill-hover);
   }
   .markdown-content .code-copy-btn.copied {
     opacity: 1;
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .markdown-content blockquote {
     @apply my-0 border-l-2 py-0.5 pl-3;
-    border-color: var(--za-line-strong);
-    color: var(--za-text-muted);
+    border-color: var(--chrome-hairline-strong);
+    color: var(--graphite-fade);
   }
 
   /* 对齐 tool-call-card 普通命令卡：极简单行，无边框/背景/圆角，hover 才显底色。 */
@@ -221,7 +221,7 @@
 
   .historical-preview-chevron {
     flex: none;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     transition: transform var(--za-motion-fast) var(--za-ease-out);
   }
 
@@ -239,7 +239,7 @@
   .historical-preview-meta {
     flex: none;
     margin-left: auto;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .historical-preview-body pre {
@@ -251,9 +251,9 @@
     box-sizing: border-box;
     min-width: 0;
     width: 100%;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control);
-    background: var(--za-surface-0);
+    background: var(--paper-raised);
     scrollbar-gutter: stable;
   }
 
@@ -266,8 +266,8 @@
   .markdown-content td {
     @apply align-top leading-6;
     padding: 9px 11px;
-    border-bottom: 1px solid var(--za-line);
-    border-right: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--chrome-hairline);
+    border-right: 1px solid var(--chrome-hairline);
     overflow-wrap: anywhere;
   }
 
@@ -281,18 +281,18 @@
   }
 
   .markdown-content th {
-    color: var(--za-text);
+    color: var(--graphite-base);
     font-weight: 600;
-    background: var(--za-surface-1);
+    background: var(--control-fill);
   }
 
   .markdown-content td {
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .markdown-content hr {
     @apply my-1 border-0 border-t;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .markdown-content .markdown-local-image {
@@ -308,9 +308,9 @@
   .markdown-content .markdown-local-image-thumb {
     display: block;
     padding: 0;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-inset);
-    background: var(--za-bg-1);
+    background: var(--chrome-canvas);
     cursor: zoom-in;
     overflow: hidden;
     max-width: 100%;
@@ -338,9 +338,9 @@
     width: auto;
     height: auto;
     object-fit: contain;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control-compact);
-    background: var(--za-bg-1);
+    background: var(--chrome-canvas);
   }
 }
 
@@ -402,7 +402,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--graphite-soft, #9aa0a6);
+  color: var(--graphite-soft);
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--ui-radius-control);
 }
@@ -432,12 +432,12 @@
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: #edf1f6;
+  color: var(--preview-thumb-dark-ink);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .markdown-local-image-lightbox-bar {
-    background: #16181f;
+    background: var(--preview-thumb-dark-top);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
@@ -510,7 +510,7 @@
 
 .markdown-local-image-lightbox-actions button:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: rgb(255 255 255);
 }
 
 .markdown-local-image-lightbox-actions button:active {

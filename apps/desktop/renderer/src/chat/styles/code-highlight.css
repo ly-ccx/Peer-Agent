@@ -2,7 +2,7 @@
  * 代码块语法高亮配色。
  *
  * 设计约束：
- * - 颜色只通过 --za-code-* 变量表达，深浅色由 [data-theme] 切换，
+ * - 颜色只通过 --syntax-* 变量表达，深浅色由 [data-theme] 切换，
  *   与 tokens.css 的主题机制保持一致，组件层不需要感知当前主题。
  * - 选择器统一收敛在 .hljs 下，避免和已有 pre/code 样式互相覆盖。
  * - diff 使用行级背景 + 前景双通道着色，保证在两种主题下都能看清增删。
@@ -10,42 +10,42 @@
 
 /* 浅色（默认）：Peer Frost 基调，低饱和但可辨识。 */
 :root {
-  --za-code-keyword: #8250df;
-  --za-code-string: #0a7c42;
-  --za-code-number: #b3261e;
-  --za-code-comment: #6b7785;
-  --za-code-function: #1a63c4;
-  --za-code-type: #b45309;
-  --za-code-variable: #953800;
-  --za-code-attr: #0550ae;
-  --za-code-meta: #57606a;
-  --za-code-punct: #4b5563;
-  --za-code-addition-fg: #0a6b34;
-  --za-code-addition-bg: rgba(31, 136, 61, 0.14);
-  --za-code-deletion-fg: #b3261e;
-  --za-code-deletion-bg: rgba(207, 34, 46, 0.13);
-  --za-code-diff-meta-fg: #0550ae;
-  --za-code-diff-meta-bg: rgba(84, 121, 224, 0.13);
+  --syntax-keyword: #8250df;
+  --syntax-string: #0a7c42;
+  --syntax-number: #b3261e;
+  --syntax-comment: #6b7785;
+  --syntax-function: #1a63c4;
+  --syntax-type: #b45309;
+  --syntax-variable: #953800;
+  --syntax-attr: #0550ae;
+  --syntax-meta: #57606a;
+  --syntax-punct: #4b5563;
+  --syntax-addition-fg: #0a6b34;
+  --syntax-addition-bg: rgba(31, 136, 61, 0.14);
+  --syntax-deletion-fg: #b3261e;
+  --syntax-deletion-bg: rgba(207, 34, 46, 0.13);
+  --syntax-diff-meta-fg: #0550ae;
+  --syntax-diff-meta-bg: rgba(84, 121, 224, 0.13);
 }
 
 /* 深色：提高明度与饱和，保证在深底上的对比度。 */
 [data-theme="dark"] {
-  --za-code-keyword: #d2a8ff;
-  --za-code-string: #7ee787;
-  --za-code-number: #ffa657;
-  --za-code-comment: #8b949e;
-  --za-code-function: #79c0ff;
-  --za-code-type: #ffa657;
-  --za-code-variable: #ffa198;
-  --za-code-attr: #79c0ff;
-  --za-code-meta: #8b949e;
-  --za-code-punct: #c9d1d9;
-  --za-code-addition-fg: #7ee787;
-  --za-code-addition-bg: rgba(46, 160, 67, 0.18);
-  --za-code-deletion-fg: #ffa198;
-  --za-code-deletion-bg: rgba(248, 81, 73, 0.16);
-  --za-code-diff-meta-fg: #79c0ff;
-  --za-code-diff-meta-bg: rgba(56, 139, 253, 0.16);
+  --syntax-keyword: #d2a8ff;
+  --syntax-string: #7ee787;
+  --syntax-number: #ffa657;
+  --syntax-comment: #8b949e;
+  --syntax-function: #79c0ff;
+  --syntax-type: #ffa657;
+  --syntax-variable: #ffa198;
+  --syntax-attr: #79c0ff;
+  --syntax-meta: #8b949e;
+  --syntax-punct: #c9d1d9;
+  --syntax-addition-fg: #7ee787;
+  --syntax-addition-bg: rgba(46, 160, 67, 0.18);
+  --syntax-deletion-fg: #ffa198;
+  --syntax-deletion-bg: rgba(248, 81, 73, 0.16);
+  --syntax-diff-meta-fg: #79c0ff;
+  --syntax-diff-meta-bg: rgba(56, 139, 253, 0.16);
 }
 
 @layer components {
@@ -64,7 +64,7 @@
   .hljs-doctag,
   .hljs-name,
   .hljs-strong {
-    color: var(--za-code-keyword);
+    color: var(--syntax-keyword);
   }
 
   .hljs-string,
@@ -72,7 +72,7 @@
   .hljs-attribute,
   .hljs-meta .hljs-string,
   .hljs-quote {
-    color: var(--za-code-string);
+    color: var(--syntax-string);
   }
 
   .hljs-number,
@@ -82,13 +82,13 @@
   .hljs-selector-attr,
   .hljs-selector-pseudo,
   .hljs-template-variable {
-    color: var(--za-code-number);
+    color: var(--syntax-number);
   }
 
   .hljs-comment,
   .hljs-code,
   .hljs-formula {
-    color: var(--za-code-comment);
+    color: var(--syntax-comment);
     font-style: italic;
   }
 
@@ -97,14 +97,14 @@
   .hljs-title.function_,
   .hljs-built_in,
   .hljs-selector-id {
-    color: var(--za-code-function);
+    color: var(--syntax-function);
   }
 
   .hljs-type,
   .hljs-class .hljs-title,
   .hljs-params,
   .hljs-selector-class {
-    color: var(--za-code-type);
+    color: var(--syntax-type);
   }
 
   .hljs-variable,
@@ -112,23 +112,23 @@
   .hljs-variable.constant_,
   .hljs-property,
   .hljs-operator {
-    color: var(--za-code-variable);
+    color: var(--syntax-variable);
   }
 
   .hljs-attr,
   .hljs-tag .hljs-attr {
-    color: var(--za-code-attr);
+    color: var(--syntax-attr);
   }
 
   .hljs-meta,
   .hljs-meta .hljs-keyword,
   .hljs-comment.hljs-meta {
-    color: var(--za-code-meta);
+    color: var(--syntax-meta);
   }
 
   .hljs-punctuation,
   .hljs-tag {
-    color: var(--za-code-punct);
+    color: var(--syntax-punct);
   }
 
   .hljs-emphasis {
@@ -141,8 +141,8 @@
   .markdown-content code.hljs .hljs-addition,
   .cloud-chat-message code.hljs .hljs-addition {
     display: block;
-    color: var(--za-code-addition-fg);
-    background: var(--za-code-addition-bg);
+    color: var(--syntax-addition-fg);
+    background: var(--syntax-addition-bg);
     margin: 0 -0.5rem;
     padding: 0 0.5rem;
   }
@@ -150,8 +150,8 @@
   .markdown-content code.hljs .hljs-deletion,
   .cloud-chat-message code.hljs .hljs-deletion {
     display: block;
-    color: var(--za-code-deletion-fg);
-    background: var(--za-code-deletion-bg);
+    color: var(--syntax-deletion-fg);
+    background: var(--syntax-deletion-bg);
     margin: 0 -0.5rem;
     padding: 0 0.5rem;
   }
@@ -162,8 +162,8 @@
   .cloud-chat-message code.language-diff .hljs-meta,
   .cloud-chat-message code.language-diff .hljs-comment {
     display: block;
-    color: var(--za-code-diff-meta-fg);
-    background: var(--za-code-diff-meta-bg);
+    color: var(--syntax-diff-meta-fg);
+    background: var(--syntax-diff-meta-bg);
     margin: 0 -0.5rem;
     padding: 0 0.5rem;
     font-style: normal;

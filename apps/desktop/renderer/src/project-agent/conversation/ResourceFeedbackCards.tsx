@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import type { ResourceFeedback } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
-export function ResourceFeedbackCards({ rows, botName, conversationId, isZh, onRemove, sent = false }: {
+export const ResourceFeedbackCards = memo(function ResourceFeedbackCards({ rows, botName, conversationId, isZh, onRemove, sent = false }: {
   readonly rows: readonly ResourceFeedback[]; readonly botName: string; readonly conversationId?: string; readonly isZh: boolean; readonly onRemove?: (id: string) => void; readonly sent?: boolean;
 }) {
   const workspace = useResourceWorkspace();
@@ -31,4 +32,4 @@ export function ResourceFeedbackCards({ rows, botName, conversationId, isZh, onR
       {stale ? <p role="alert">{isZh ? '原收件会话已变化；请移除此引用后重新选择。' : 'The original recipient conversation changed. Remove this reference and select it again.'}</p> : null}
     </section>;
   })}</div>;
-}
+});

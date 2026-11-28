@@ -16,3 +16,5 @@ export function createInputRecoveryProjection<Key extends keyof InputRecoveryVie
 
 export const conversationInputKeys = ['ready', 'pending', 'received', 'sending'] as const;
 export const composerInputKeys = ['ready', 'error', 'draft', 'pending', 'sending'] as const;
+export const composerStatusKeys = ['ready', 'error', 'pending', 'sending'] as const;
+export const composerDraftKeys = ['draft'] as const;

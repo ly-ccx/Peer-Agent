@@ -1,0 +1,1762 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Actual TS canonical projector and wire encoders; native admission errors are explicit safety deltas.",
+  "requestBytes": 536870912,
+  "factualJsonBytes": 8388608,
+  "permissionJsonBytes": 1048576,
+  "largeFact": {
+    "scalars": 300000,
+    "bytes": 1200034,
+    "sha256": "49356c7a7bd5a23688fc1f4f7b81722898557bb5a1908f4d5efda77e6ed32566",
+    "arrayBytes": 1200036,
+    "arraySha256": "048c5aa162e6e0e87e09620efd54eaf930e15825b58e5f712591c61603cdfa5b"
+  },
+  "cases": [
+    {
+      "wire": "openai-chat",
+      "name": "base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f631307d"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "openai-responses",
+      "name": "base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f631307d"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f631307d"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "gemini",
+      "name": "base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f631307d"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "inlineData": {
+                  "mimeType": "image/png",
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="
+                }
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "openai-chat",
+      "name": "remote",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "https://images.invalid/a.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://images.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-6662e68e"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://images.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "openai-responses",
+      "name": "remote",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "https://images.invalid/a.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://images.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-6662e68e"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "https://images.invalid/a.png"
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "remote",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "https://images.invalid/a.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://images.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-6662e68e"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "gemini",
+      "name": "remote",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "https://images.invalid/a.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://images.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-6662e68e"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "openai-chat",
+      "name": "percent",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-13f71b7a"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "openai-responses",
+      "name": "percent",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-13f71b7a"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "percent",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-13f71b7a"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/svg+xml",
+                  "data": "PHN2Zz48L3N2Zz4="
+                }
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "gemini",
+      "name": "percent",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-13f71b7a"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "openai-chat",
+      "name": "bad-base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,%%%"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-03b2cc5d"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": "model_image_invalid"
+    },
+    {
+      "wire": "openai-responses",
+      "name": "bad-base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,%%%"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-03b2cc5d"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "data:image/png;base64,%%%"
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": "model_image_invalid"
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "bad-base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,%%%"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-03b2cc5d"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image",
+                "source": {
+                  "type": "base64",
+                  "media_type": "image/png",
+                  "data": "%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": "model_image_invalid"
+    },
+    {
+      "wire": "gemini",
+      "name": "bad-base64",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,%%%"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-03b2cc5d"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "inlineData": {
+                  "mimeType": "image/png",
+                  "data": "%%%"
+                }
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": "model_image_invalid"
+    },
+    {
+      "wire": "openai-chat",
+      "name": "file",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "file:///private/image.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "file:///private/image.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9861ac10"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "file:///private/image.png"
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "openai-responses",
+      "name": "file",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "file:///private/image.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "file:///private/image.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9861ac10"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "file:///private/image.png"
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "file",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "file:///private/image.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "file:///private/image.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9861ac10"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "gemini",
+      "name": "file",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "file:///private/image.png"
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "file:///private/image.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9861ac10"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "openai-chat",
+      "name": "uppercase",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "DATA:image/png;base64,AA=="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "DATA:image/png;base64,AA=="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-fc0210de"
+      },
+      "expected": {
+        "model": "model",
+        "messages": [
+          {
+            "role": "system",
+            "content": "system"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "DATA:image/png;base64,AA=="
+                }
+              }
+            ]
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "openai-responses",
+      "name": "uppercase",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "DATA:image/png;base64,AA=="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "DATA:image/png;base64,AA=="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-fc0210de"
+      },
+      "expected": {
+        "model": "model",
+        "instructions": "system",
+        "input": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "input_image",
+                "image_url": "DATA:image/png;base64,AA=="
+              }
+            ]
+          }
+        ],
+        "tools": [],
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "stream": true,
+        "store": false
+      },
+      "nativeError": null
+    },
+    {
+      "wire": "anthropic-messages",
+      "name": "uppercase",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "DATA:image/png;base64,AA=="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "DATA:image/png;base64,AA=="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-fc0210de"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "max_tokens": 16384,
+        "stream": true,
+        "tools": []
+      },
+      "nativeError": "model_image_transport_unsupported"
+    },
+    {
+      "wire": "gemini",
+      "name": "uppercase",
+      "raw": [
+        {
+          "id": "input",
+          "role": "user",
+          "content": "Inspect saved material",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "facts.txt",
+              "mimeType": "text/plain",
+              "size": 4,
+              "text": "user data"
+            },
+            {
+              "kind": "image",
+              "dataUrl": "DATA:image/png;base64,AA=="
+            }
+          ]
+        }
+      ],
+      "projected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "DATA:image/png;base64,AA=="
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-fc0210de"
+      },
+      "expected": {
+        "contents": [
+          {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Inspect saved material\n\nAttached file: facts.txt\nMIME: text/plain\nSize: 4 B\nContent:\n```\nuser data\n```"
+              }
+            ]
+          }
+        ],
+        "systemInstruction": {
+          "parts": [
+            {
+              "text": "system"
+            }
+          ]
+        }
+      },
+      "nativeError": "model_image_transport_unsupported"
+    }
+  ]
+}

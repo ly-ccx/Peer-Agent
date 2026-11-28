@@ -5,8 +5,22 @@ let value = normalizeInputPredictionSettings(null), loaded = false;
 let request: Promise<void> | null = null;
 let workspaces: readonly { id: string; path: string }[] = [];
 const listeners = new Set<() => void>();
+
+function samePreferences(a: InputPredictionSettings, b: InputPredictionSettings): boolean {
+  return a.enabled === b.enabled
+    && a.continuationEnabled === b.continuationEnabled
+    && a.dailyRequestLimit === b.dailyRequestLimit
+    && a.dailyTokenLimit === b.dailyTokenLimit
+    && a.disabledWorkspaceIds.length === b.disabledWorkspaceIds.length
+    && a.disabledWorkspaceIds.every((id, index) => id === b.disabledWorkspaceIds[index]);
+}
+
 export function publishInputPredictionPreferences(next: unknown) {
-  value = normalizeInputPredictionSettings(next); loaded = true;
+  const normalized = normalizeInputPredictionSettings(next);
+  const unchanged = loaded && samePreferences(value, normalized);
+  loaded = true;
+  if (unchanged) return;
+  value = normalized;
   for (const listener of listeners) listener();
 }
 export const inputPredictionPreferences = {

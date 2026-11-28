@@ -72,7 +72,7 @@
   width: fit-content;
   max-width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--za-line);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   /* 毛玻璃三件套：材质 + 模糊 + 浮起阴影。
      1) --glass-popover 是 hsla(...,0.88) 的近白，压在被 blur(24px) 糊成灰雾的正文上
@@ -89,7 +89,7 @@
   box-shadow: var(--shadow-popover, 0 2px 12px rgba(26, 29, 33, 0.06)), var(--glass-edge-highlight);
   /* 入场动画挂卡片自身而非 .goal-investigation-cards 祖先，见该容器处的说明。 */
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) backwards;
-  color: var(--za-text);
+  color: var(--graphite-base);
   font-size: 12px;
 }
 
@@ -103,23 +103,23 @@
 .goal-investigation-more {
   flex-shrink: 0;
   font-size: 10px;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   white-space: nowrap;
 }
 
-.goal-investigation-signal { color: var(--za-accent); flex-shrink: 0; }
+.goal-investigation-signal { color: var(--azure-seal); flex-shrink: 0; }
 .goal-investigation-card[data-status='running'] .goal-investigation-signal {
   --motion-pulse-floor: 0.4;
   animation: motion-pulse-soft calc(var(--za-motion-slow) * 8) ease-in-out infinite;
 }
-.goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
-.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
+.goal-investigation-card[data-status='failed'] { border-color: var(--state-warn); }
+.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--state-success); }
 
 /* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色并停用模糊。
    阴影/顶边高光沿用基础规则，不透底时它们仍然是卡片浮起的唯一交代。 */
 @media (prefers-reduced-transparency: reduce) {
   .goal-investigation-card {
-    background: var(--ui-surface-raised, var(--za-surface-1));
+    background: var(--ui-surface-raised);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }

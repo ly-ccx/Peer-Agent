@@ -1,6 +1,6 @@
 {
   "name": "peer-agent",
-  "version": "0.1.0-rc.40",
+  "version": "0.1.0-rc.45",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
@@ -53,7 +53,6 @@
       "esbuild"
     ],
     "ignoredBuiltDependencies": [
-      "@qoder-ai/qoder-agent-sdk",
       "electron-winstaller",
       "@openuidev/lang-core"
     ],

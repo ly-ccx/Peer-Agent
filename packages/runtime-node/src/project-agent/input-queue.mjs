@@ -468,7 +468,7 @@ export function normalizeInputAttachments(value) {
   if (value == null) return [];
   if (!Array.isArray(value)) throw new TypeError('attachments must be an array');
   if (!value.some(item => item?.sourceKind === 'user_upload')) return boundedImageAttachments(value);
-  if (value.length > INPUT_ATTACHMENT_LIMIT) throw new TypeError('at most 8 attachments are allowed');
+  if (value.length > INPUT_ATTACHMENT_LIMIT) throw new TypeError(`at most ${INPUT_ATTACHMENT_LIMIT} attachments are allowed`);
   return value.flatMap(item => item?.sourceKind === 'user_upload'
     ? [normalizeUserUpload(item)] : boundedImageAttachments([item]));
 }

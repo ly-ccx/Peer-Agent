@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, normalizeInteractiveUserArtifact } from '@peer-agent/protocol';
 const id = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value) && !value.includes('..');
+const BOT_DIRECT_PLAN_PREFIX = 'bot-reply:';
 const denied = () => ({ deliveryStatus: 'scope_denied', deliveries: [] });
 /** Existing Watch evidence has its own immutable, workspace-bound registry; it produces no UserArtifact here. */
 export function createScopedExternalEvidenceReader({ findWatch, readWatchBody }) {
@@ -28,27 +29,36 @@ function locator(artifact) {
 export function createEvidenceDeliveryProjection({ getConversationId, getPlan, getSession }) {
   return (record, context) => {
     if (!context || !id(context.workspaceId) || context.task !== undefined && (!id(context.task?.sessionId) || !id(context.task?.planId))) return denied();
+    if (record.planId && !id(record.planId)) return denied();
     const workspaceId = context.workspaceId; let task, plan;
-    if (record.planId) {
-      if (!id(record.planId)) return denied();
+    const botConversationId = getConversationId(workspaceId);
+    const directBotInteractive = typeof record.planId === 'string'
+      && record.planId.startsWith(BOT_DIRECT_PLAN_PREFIX)
+      && !context.task
+      && record.conversationId === botConversationId
+      && record.capabilityId === INTERACTIVE_PUBLISH_CAPABILITY
+      && record.toolName === INTERACTIVE_PUBLISH_TOOL;
+    if (record.planId && !directBotInteractive) {
       plan = getPlan(record.planId); const origin = plan?.delegationOrigin;
       task = { sessionId: origin?.sessionId, planId: record.planId };
       if (!id(task.sessionId) || !id(task.planId) || context.task && (context.task.sessionId !== task.sessionId || context.task.planId !== task.planId)
         || !taskMatches(plan, getSession(task.sessionId), workspaceId, task)) return denied();
-    } else if (context.task || !record.conversationId || record.conversationId !== getConversationId(workspaceId)) return denied();
+    } else if (!directBotInteractive && (context.task || !record.conversationId || record.conversationId !== botConversationId)) return denied();
     const deliveries = [], seen = new Set(); let previewBudget = 512 * 1024;
     for (const artifact of Array.isArray(record.userArtifacts) ? record.userArtifacts : []) {
       if (deliveries.length >= 8) break;
       if (artifact?.kind === 'interactive') {
         const value = normalizeInteractiveUserArtifact(artifact);
-        if (!value || seen.has(value.ref) || !task || record.capabilityId !== INTERACTIVE_PUBLISH_CAPABILITY || record.toolName !== INTERACTIVE_PUBLISH_TOOL
-          || record.evidenceRef !== value.ref || !id(record.toolCallId) || record.conversationId !== plan?.conversationId
-          || value.reference.owner.workspaceId !== workspaceId || value.reference.owner.conversationId !== getConversationId(workspaceId)) continue;
+        const expectedConversationId = directBotInteractive ? botConversationId : plan?.conversationId;
+        if (!value || seen.has(value.ref) || (!task && !directBotInteractive) || record.capabilityId !== INTERACTIVE_PUBLISH_CAPABILITY || record.toolName !== INTERACTIVE_PUBLISH_TOOL
+          || record.evidenceRef !== value.ref || !id(record.toolCallId) || record.conversationId !== expectedConversationId
+          || value.reference.owner.workspaceId !== workspaceId || value.reference.owner.conversationId !== botConversationId) continue;
         seen.add(value.ref);
         deliveries.push({ evidenceRef: record.evidenceRef, artifactRef: value.ref, kind: 'interactive', label: value.label,
           interactiveReference: value.reference, specHash: value.specHash });
         continue;
       }
+      if (directBotInteractive) continue;
       if (!['file', 'code-change', 'image'].includes(artifact?.kind) || typeof artifact.ref !== 'string' || !artifact.ref.trim()
         || artifact.ref.length > 8192 || /[\u0000-\u001f]/.test(artifact.ref) || seen.has(artifact.ref)) continue;
       seen.add(artifact.ref); const target = locator(artifact);

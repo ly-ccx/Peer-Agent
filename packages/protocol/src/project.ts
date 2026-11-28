@@ -5,6 +5,7 @@
 
 import type { ProjectModelPolicy } from './model-routing.ts';
 import type { PendingApprovalState, WorkSessionStatus } from './delegation.ts';
+import type { FollowUpProjection } from './task-overview.ts';
 
 export interface DiagnosticText { readonly length: number; readonly sha256: string }
 export interface ProjectAgentDiagnosticTiming {
@@ -53,13 +54,68 @@ export type ProjectHostTakeoverResult =
   | { readonly ok: true; readonly requested: boolean; readonly alreadyHost?: boolean }
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_UNAVAILABLE' | 'INVALID_INPUT' };
 
+export const BOT_AVATAR_HEADS = [
+  'none',
+  'beret',
+  'glasses',
+  'beanie',
+  'vermeer',
+  'straw',
+  'headphones',
+  'crown',
+] as const;
+
+export type BotAvatarHead = (typeof BOT_AVATAR_HEADS)[number];
+
+export const BOT_AVATAR_NECKS = [
+  'bowtie',
+  'scarf',
+  'sweater',
+  'moon',
+  'sailor',
+  'cape',
+] as const;
+
+export type BotAvatarNeck = (typeof BOT_AVATAR_NECKS)[number];
+
+export interface BotAvatarPartsPatch {
+  readonly shape?: string;
+  readonly color?: string;
+  readonly head?: BotAvatarHead;
+  readonly neck?: BotAvatarNeck;
+  readonly backdrop?: boolean;
+}
+
 export type BotAvatar =
-  | { readonly kind: 'generated'; readonly shape: string; readonly color: string; readonly variant?: number }
+  | {
+      readonly kind: 'generated';
+      readonly shape: string;
+      readonly color: string;
+      readonly variant?: number;
+      readonly head?: BotAvatarHead;
+      readonly neck?: BotAvatarNeck;
+      readonly backdrop?: boolean;
+    }
   | { readonly kind: 'image'; readonly ref: string };
 
 export type BotAvatarReadResult =
   | { readonly ok: true; readonly dataUrl: string }
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'INVALID_IMAGE' };
+
+export type BotCommunicationStyle = 'natural' | 'concise' | 'detailed' | 'technical';
+export type BotProfileCommunicationStyle = 'inherit' | BotCommunicationStyle;
+
+/** Per-bot capability mounting overrides (inherits global enabled state when absent). */
+export interface BotCapabilityPolicy {
+  /** Skill IDs explicitly mounted on this bot (overrides global disable). */
+  readonly enabledSkillIds?: readonly string[];
+  /** Skill IDs explicitly unmounted on this bot (overrides global/workspace enable). */
+  readonly disabledSkillIds?: readonly string[];
+  /** MCP server IDs explicitly mounted on this bot (overrides global disable). */
+  readonly enabledMcpIds?: readonly string[];
+  /** MCP server IDs explicitly unmounted on this bot (overrides global enable). */
+  readonly disabledMcpIds?: readonly string[];
+}
 
 export interface BotProfile {
   readonly workspaceId: string;
@@ -68,6 +124,7 @@ export interface BotProfile {
   readonly managed?: boolean;
   readonly agentConversationId?: string;
   readonly proactivity?: 'inherit' | 'quiet' | 'low' | 'standard' | 'high' | 'muted';
+  readonly communicationStyle?: BotProfileCommunicationStyle;
   /** Absent means this bot uses memory. */
   readonly memoryEnabled?: boolean;
   readonly planApproval?: 'never' | 'writes' | 'always';
@@ -79,6 +136,8 @@ export interface BotProfile {
   /** Archived deletion intent, retained until each cleanup step is persisted. */
   readonly deletionCleanup?: { readonly folder: string; readonly trashPending: boolean; readonly removePending: boolean } | null;
   readonly modelPolicy?: ProjectModelPolicy | null;
+  /** Bot-mounted Skills & MCP overrides inherited by all derived child tasks. */
+  readonly capabilityPolicy?: BotCapabilityPolicy | null;
   readonly updatedAt?: string;
 }
 
@@ -97,6 +156,9 @@ export interface BotListItem {
   readonly preview: string;
   readonly lastActiveAt: string;
   readonly state: BotRowState;
+  readonly activeSessions?: readonly BotListSession[];
+  readonly activeSessionTotal?: number;
+  readonly historySessionTotal?: number;
 }
 
 export interface BotListFilter {
@@ -178,8 +240,18 @@ export type ProjectAgentStopResponseResult =
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_OFFLINE' | 'STALE_TURN' | 'INVALID_INPUT' };
 
 export interface BotListSession {
+  readonly sessionId?: string;
+  readonly title?: string;
   readonly status: WorkSessionStatus;
   readonly updatedAt?: string;
+  readonly followUp?: FollowUpProjection;
+  readonly phaseLabel?: string;
+  readonly anchorMessageId?: string;
+  readonly planId?: string;
+  readonly conversationId?: string;
+  readonly queueReason?: string;
+  readonly resultConfirmationRequired?: boolean;
+  readonly completionReviewRequired?: boolean;
 }
 
 export interface BotListApproval {
@@ -302,5 +374,113 @@ export function filterBotList(items: readonly BotListItem[], filter: BotListFilt
     if (!query) return true;
     const haystack = `${item.profile.displayName}\n${item.preview}`.toLowerCase();
     return haystack.includes(query);
+  });
+}
+
+function dedupCapabilityIds(ids: readonly string[] | undefined): string[] {
+  if (!Array.isArray(ids)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export function normalizeBotCapabilityPolicy(
+  policy: BotCapabilityPolicy | null | undefined,
+): BotCapabilityPolicy | null {
+  if (!policy || typeof policy !== 'object') return null;
+  const disabledSkillIds = dedupCapabilityIds(policy.disabledSkillIds);
+  const disabledSkillSet = new Set(disabledSkillIds);
+  const enabledSkillIds = dedupCapabilityIds(policy.enabledSkillIds).filter((id) => !disabledSkillSet.has(id));
+  const disabledMcpIds = dedupCapabilityIds(policy.disabledMcpIds);
+  const disabledMcpSet = new Set(disabledMcpIds);
+  const enabledMcpIds = dedupCapabilityIds(policy.enabledMcpIds).filter((id) => !disabledMcpSet.has(id));
+  if (
+    enabledSkillIds.length === 0
+    && disabledSkillIds.length === 0
+    && enabledMcpIds.length === 0
+    && disabledMcpIds.length === 0
+  ) {
+    return null;
+  }
+  return {
+    ...(enabledSkillIds.length > 0 ? { enabledSkillIds } : {}),
+    ...(disabledSkillIds.length > 0 ? { disabledSkillIds } : {}),
+    ...(enabledMcpIds.length > 0 ? { enabledMcpIds } : {}),
+    ...(disabledMcpIds.length > 0 ? { disabledMcpIds } : {}),
+  };
+}
+
+export function hasBotCapabilityOverrides(policy: BotCapabilityPolicy | null | undefined): boolean {
+  return normalizeBotCapabilityPolicy(policy) !== null;
+}
+
+export function resolveBotSkillEnabled(
+  policy: BotCapabilityPolicy | null | undefined,
+  skillId: string,
+  defaultEnabled: boolean,
+): boolean {
+  if (!policy) return defaultEnabled;
+  if (policy.disabledSkillIds?.includes(skillId)) return false;
+  if (policy.enabledSkillIds?.includes(skillId)) return true;
+  return defaultEnabled;
+}
+
+export function resolveBotMcpEnabled(
+  policy: BotCapabilityPolicy | null | undefined,
+  mcpId: string,
+  defaultEnabled: boolean,
+): boolean {
+  if (!policy) return defaultEnabled;
+  if (policy.disabledMcpIds?.includes(mcpId)) return false;
+  if (policy.enabledMcpIds?.includes(mcpId)) return true;
+  return defaultEnabled;
+}
+
+export function toggleBotSkillOverride(
+  policy: BotCapabilityPolicy | null | undefined,
+  skillId: string,
+  defaultEnabled: boolean,
+  nextEnabled: boolean,
+): BotCapabilityPolicy | null {
+  const id = skillId.trim();
+  if (!id) return normalizeBotCapabilityPolicy(policy);
+  const enabledSkillIds = dedupCapabilityIds(policy?.enabledSkillIds).filter((item) => item !== id);
+  const disabledSkillIds = dedupCapabilityIds(policy?.disabledSkillIds).filter((item) => item !== id);
+  if (nextEnabled !== defaultEnabled) {
+    if (nextEnabled) enabledSkillIds.push(id);
+    else disabledSkillIds.push(id);
+  }
+  return normalizeBotCapabilityPolicy({
+    ...policy,
+    enabledSkillIds,
+    disabledSkillIds,
+  });
+}
+
+export function toggleBotMcpOverride(
+  policy: BotCapabilityPolicy | null | undefined,
+  mcpId: string,
+  defaultEnabled: boolean,
+  nextEnabled: boolean,
+): BotCapabilityPolicy | null {
+  const id = mcpId.trim();
+  if (!id) return normalizeBotCapabilityPolicy(policy);
+  const enabledMcpIds = dedupCapabilityIds(policy?.enabledMcpIds).filter((item) => item !== id);
+  const disabledMcpIds = dedupCapabilityIds(policy?.disabledMcpIds).filter((item) => item !== id);
+  if (nextEnabled !== defaultEnabled) {
+    if (nextEnabled) enabledMcpIds.push(id);
+    else disabledMcpIds.push(id);
+  }
+  return normalizeBotCapabilityPolicy({
+    ...policy,
+    enabledMcpIds,
+    disabledMcpIds,
   });
 }

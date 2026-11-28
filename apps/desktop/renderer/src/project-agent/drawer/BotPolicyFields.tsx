@@ -54,11 +54,24 @@ export function BotPolicyFields({ profile, models, views, busy, feedback, modelF
   });
   function setPolicy(next: ProjectModelPolicy) { return onChange({ modelPolicy: next }); }
   const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
-  const roleField = (role: ModelRole) => <div className="bot-settings-row bot-model-settings-row" key={role}>
-    <span>{roleLabel(role)}</span>
-    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} feedback={modelFeedback} i18n={i18n}
-      onChange={setPolicy} />
-  </div>;
+  const roleSource = (role: ModelRole): string | null => {
+    if (!views[role]?.resolution.ok) return null;
+    const setting = policy.overrides?.[role];
+    if (!setting) return i18n.t('projectAgent.policy.inherit');
+    if (setting.mode === 'auto') return i18n.t('projectAgent.policy.autoPool');
+    return null;
+  };
+  const roleField = (role: ModelRole) => {
+    const source = roleSource(role);
+    return <div className="bot-settings-row bot-model-settings-row" key={role}>
+      <div className="bot-model-settings-head">
+        <span>{roleLabel(role)}</span>
+        {source ? <span className="bot-model-source">{source}</span> : null}
+      </div>
+      <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} hideSource feedback={modelFeedback} i18n={i18n}
+        onChange={setPolicy} />
+    </div>;
+  };
   return <SettingsGroup className="bot-settings-section bot-policy-fields" title={i18n.t('projectAgent.policy.models')} description={i18n.t('projectAgent.policy.modelsHint')}>
     {ROLES.slice(0, 3).map(roleField)}
     <MotionDetails className="bot-settings-disclosure bot-model-advanced">

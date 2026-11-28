@@ -1,19 +1,20 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { InputCandidate } from '@peer-agent/protocol';
 import type { useInputPrediction } from '../hooks/useInputPrediction';
 import './input-prediction.css';
 
-export function ComposerInputSuggestion({ prediction, text, i18n }: {
+function ComposerInputSuggestionOverlay({ prediction, candidate, text, i18n }: {
   readonly prediction: ReturnType<typeof useInputPrediction>;
+  readonly candidate: InputCandidate;
   readonly text: string;
   readonly i18n: I18nRuntime;
 }) {
   const mirror = useRef<HTMLDivElement>(null), suffix = useRef<HTMLSpanElement>(null);
   const [fits, setFits] = useState(false);
-  const candidate = prediction.view.candidate;
   useLayoutEffect(() => {
     const node = prediction.textareaRef.current, overlay = mirror.current;
-    if (!node || !overlay || !candidate || typeof ResizeObserver !== 'function') {
+    if (!node || !overlay || typeof ResizeObserver !== 'function') {
       prediction.markPresented(false); setFits(false); return;
     }
     let frame = 0;
@@ -30,10 +31,43 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
         textIndent: style.textIndent, textAlign: style.textAlign, tabSize: style.tabSize,
         overflowWrap: style.overflowWrap, wordBreak: style.wordBreak, direction: style.direction });
       overlay.scrollTop = node.scrollTop; overlay.scrollLeft = node.scrollLeft;
-      const range = document.createRange(); range.selectNodeContents(suffix.current);
-      const rects = [...range.getClientRects()];
-      const inside = rects.length > 0 && rects.every(rect => rect.top >= field.top - 1 && rect.bottom <= field.bottom + 1
+      const suffixNode = suffix.current;
+      const fullText = candidate.insertionText;
+      const fitsInside = (rects: readonly DOMRect[]) => rects.length > 0 && rects.every(rect =>
+        rect.top >= field.top - 1 && rect.bottom <= field.bottom + 1
         && rect.left >= field.left - 1 && rect.right <= field.right + 1);
+      const measureRects = (value: string) => {
+        suffixNode.textContent = value;
+        const range = document.createRange();
+        range.selectNodeContents(suffixNode);
+        return [...range.getClientRects()];
+      };
+      const fullRects = measureRects(fullText);
+      let inside = fitsInside(fullRects);
+      // When the composer starts at single-line height, a longer suggestion can wrap past field.bottom.
+      // Clip the visual ghost preview with an ellipsis so the suggestion and Tab affordance remain usable
+      // while accepting still inserts the full candidate.insertionText.
+      if (!inside && fullRects.length > 0
+        && fullRects[0].top >= field.top - 1 && fullRects[0].bottom <= field.bottom + 1
+        && fullRects[0].left >= field.left - 1) {
+        const chars = Array.from(fullText);
+        let lo = 1, hi = chars.length - 1, best = 0;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (fitsInside(measureRects(`${chars.slice(0, mid).join('')}…`))) {
+            best = mid;
+            lo = mid + 1;
+          } else {
+            hi = mid - 1;
+          }
+        }
+        if (best > 0) {
+          suffixNode.textContent = `${chars.slice(0, best).join('')}…`;
+          inside = true;
+        } else {
+          suffixNode.textContent = fullText;
+        }
+      }
       overlay.style.visibility = inside ? 'visible' : 'hidden';
       prediction.markPresented(inside); setFits(inside);
     };
@@ -48,7 +82,6 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
     return () => { observer.disconnect(); appearance?.disconnect(); cancelAnimationFrame(frame); node.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule); document.fonts?.removeEventListener('loadingdone', schedule); prediction.markPresented(false); };
   }, [candidate, prediction.view.status, text, prediction.textareaRef]);
-  if (!candidate) return null;
   return <>
     <div ref={mirror} className="input-prediction-mirror" aria-hidden="true">
       <span className="input-prediction-prefix">{text}</span><span ref={suffix}>{candidate.insertionText}</span>
@@ -64,3 +97,13 @@ export function ComposerInputSuggestion({ prediction, text, i18n }: {
     </> : null}
   </>;
 }
+
+export const ComposerInputSuggestion = memo(function ComposerInputSuggestion({ prediction, text, i18n }: {
+  readonly prediction: ReturnType<typeof useInputPrediction>;
+  readonly text: string;
+  readonly i18n: I18nRuntime;
+}) {
+  const candidate = prediction.view.candidate;
+  if (!candidate) return null;
+  return <ComposerInputSuggestionOverlay prediction={prediction} candidate={candidate} text={text} i18n={i18n} />;
+});

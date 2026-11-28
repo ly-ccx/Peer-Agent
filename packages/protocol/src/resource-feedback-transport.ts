@@ -2,6 +2,7 @@ import type { ProjectInputAttachment } from './delegation.ts';
 import { normalizeResourceFeedback, normalizeResourceFeedbackList, type ResourceFeedback } from './resource-feedback.ts';
 
 export const INTERACTIVE_FEEDBACK_TRANSPORT = 'peer-interactive-selection-1';
+export const INPUT_ATTACHMENT_LIMIT = 100;
 const fail = (code: string): never => { throw Object.assign(new TypeError(code), { code }); };
 const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -57,7 +58,7 @@ export function encodeResourceFeedbackTransport(rawRows: unknown, rawAttachments
     if (previous && !equal(readInteractiveFeedbackAttachment(previous), row)) return fail('RESOURCE_FEEDBACK_ID_CONFLICT');
     if (!previous) attachments.push(attachment);
   }
-  if (attachments.length > 8) return fail('RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
+  if (attachments.length > INPUT_ATTACHMENT_LIMIT) return fail('RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
   return { ...(legacy.length ? { resourceFeedback: legacy } : {}), ...(attachments.length ? { attachments } : {}) };
 }
 

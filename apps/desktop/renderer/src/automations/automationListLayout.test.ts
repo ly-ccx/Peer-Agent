@@ -43,7 +43,7 @@ test('Automation list search sits inside list toolbar panel, not a freestanding 
 
   assert.match(css, /\.automation-list-panel\{[^}]*background:var\(--paper-sheet\)/);
   assert.match(css, /\.automation-list-toolbar\{[^}]*justify-content:flex-end/);
-  assert.match(css, /\.automation-list-toolbar\{[^}]*border-bottom:1px solid var\(--za-line\)/);
-  assert.match(css, /\.automation-list-toolbar input\{[^}]*background:var\(--za-control-fill\)/);
+  assert.match(css, /\.automation-list-toolbar\{[^}]*border-bottom:1px solid var\(--chrome-hairline\)/);
+  assert.match(css, /\.automation-list-toolbar input\{[^}]*background:var\(--control-fill\)/);
   assert.equal(css.includes('.automation-toolbar{'), false);
 });

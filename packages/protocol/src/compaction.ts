@@ -3,12 +3,16 @@
 // `_compaction` marker 是 Desktop 与 CLI/TUI 共享会话事实面的一部分:
 // 任一端压缩后,另一端必须能按同一形状恢复 active provider history 分界与连续性摘要。
 // 两端持久化必须经 buildCompactionMarker() 产出,不得手写字面量,防止字段漂移。
+import {normalizeCompactionHistorySelection, type CompactionHistorySelection} from './compaction-history-selection.ts';
+export {normalizeCompactionHistorySelection, COMPACTION_HISTORY_SELECTION_LIMITS} from './compaction-history-selection.ts';
+export type {CompactionHistorySelection} from './compaction-history-selection.ts';
 
 /** 压缩摘要的产生方式,与 runtime-core CompactionMethod 保持同枚举。 */
 export type CompactionMarkerMethod = 'llm' | 'structured' | 'structural' | 'fallback_drop';
 
 /** 持久化在 handoff 消息 `_compaction` 字段上的共享 marker 形状。 */
 export interface ConversationCompactionMarker {
+  readonly historySelection?: CompactionHistorySelection;
   readonly method: CompactionMarkerMethod;
   /** LLM 摘要失败降级原因(仅降级时存在)。 */
   readonly fallbackReason?: string;
@@ -54,6 +58,7 @@ function normalizeMethod(value: unknown): CompactionMarkerMethod {
  * 数值一律钳制为非负整数;method 非法时回退 'structured';可选降级字段仅在非空时出现。
  */
 export function buildCompactionMarker(input: {
+  readonly historySelection?: CompactionHistorySelection | null;
   readonly method?: unknown;
   readonly fallbackReason?: string | null;
   readonly fallbackDetail?: string | null;
@@ -69,6 +74,8 @@ export function buildCompactionMarker(input: {
   readonly canonicalCheckpoint?: Readonly<Record<string, unknown>> | null;
   readonly coldHistoryRefs?: readonly string[] | null;
 }): ConversationCompactionMarker {
+  const selection = input.historySelection == null ? null : normalizeCompactionHistorySelection(input.historySelection);
+  if (input.historySelection != null && (!selection || typeof input.summary !== 'string' || !input.summary.trim())) throw new Error('compaction_history_selection_invalid');
   const fallbackReason = typeof input.fallbackReason === 'string' && input.fallbackReason.trim()
     ? input.fallbackReason
     : undefined;
@@ -76,6 +83,7 @@ export function buildCompactionMarker(input: {
     ? input.fallbackDetail
     : undefined;
   return {
+    ...(selection ? {historySelection: selection} : {}),
     method: normalizeMethod(input.method),
     ...(fallbackReason ? { fallbackReason } : {}),
     ...(fallbackDetail ? { fallbackDetail } : {}),

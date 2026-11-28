@@ -6,7 +6,7 @@ import { checkEffortStability } from './bot-effort-stability-checks.mjs';
 import { checkModelSwitch, chooseModelInPanel, openModelProvider } from './bot-model-switch-checks.mjs';
 
 /** Actual production DOM, keyboard and persistence; no replacement of product results. */
-export async function checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory, effortCommandFile }) {
+export async function checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory, effortCommandFile, fixtureBot }) {
   const checks = report.accessibility = [];
   const focused = locator => locator.evaluate(node => node === document.activeElement);
   const list = page.getByRole('listbox', { name: 'Peer', exact: true });
@@ -23,6 +23,10 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   assert.equal(await page.locator('.bot-row.is-open').getAttribute('id'), rowIds.at(-1));
   await list.focus(); await list.press('Home'); await list.press('Enter');
   checks.push('Space opens the selected bot without scrolling the page');
+  // Recent-history order can put the archive ahead of the Bot that owns the memories.
+  const fixtureRow = page.locator(`#bot-row-${fixtureBot.workspaceId}`);
+  await fixtureRow.click();
+  await until(() => fixtureRow.getAttribute('aria-selected'), value => value === 'true');
   const trigger = page.getByRole('button', { name: '机器人设置', exact: true }); await trigger.focus(); await trigger.press('Enter');
   const tabs = page.locator('.bot-drawer-tabs');
   await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node => node.contains(document.activeElement)), Boolean);
@@ -44,14 +48,18 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   await checkSettings({ page, until, report, captureDirectory, effortCommandFile });
   await tabs.getByRole('tab', { name: '设置', exact: true }).focus();
   await page.keyboard.press('Home'); await page.keyboard.press('ArrowRight');
-  assert.equal(await focused(tabs.getByRole('tab', { name: '任务', exact: true })), true);
+  assert.equal(await focused(tabs.getByRole('tab', { name: '目标', exact: true })), true);
   assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'arrows browse tabs without activating an expensive page');
-  assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'false');
+  assert.equal(await tabs.getByRole('tab', { name: '目标', exact: true }).getAttribute('aria-selected'), 'false');
   await page.keyboard.press('Enter');
-  assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await tabs.getByRole('tab', { name: '目标', exact: true }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator(BOT_DETAIL_SURFACE).count(), 1, 'tab Enter must not be intercepted by the shell');
   await trigger.click();
-  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'false', 'header toggle closes the drawer from any active tab');
+  await trigger.click();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor();
+  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'reopening via Bot settings enters configuration directly');
   await page.keyboard.press('Escape');
   await until(() => focused(trigger), Boolean);
   assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
@@ -308,15 +316,26 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   const row = role => form.locator('.bot-model-settings-row').filter({ has: page.getByText(role, { exact: true }) });
   const picker = role => row(role).locator('.pa-cascading-trigger');
   const choose = (role, model) => chooseModelInPanel({ page, picker: picker(role), model });
+  const slider = page.getByRole('slider', { name: '思考强度', exact: true });
+  const setLowEffort = async (control, role) => {
+    await until(() => control.isEnabled(), Boolean);
+    await control.click();
+    await slider.focus(); await slider.press('Home');
+    await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.[role]?.reasoningEffort === 'low');
+  };
   await choose('任务执行', second);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.session_worker?.modelProviderId === second.id);
+  // Native routing may initially inherit a higher effort. Commit a distinct
+  // worker setting through the owner UI before testing conversation-role isolation.
+  assert.equal(second.reasoningEffortLevels[0], 'low');
+  await setLowEffort(picker('任务执行'), 'session_worker');
+  await page.keyboard.press('Escape');
   await choose('对话模型', first);
   await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
   const highEffort = first.reasoningEffortLevels.at(-1);
   const strength = picker('对话模型');
   await until(() => strength.isEnabled(), Boolean);
   await strength.click();
-  const slider = page.getByRole('slider');
   if (effortCommandFile) await checkEffortStability({ page, slider, strength, until, getBot: () => getBot(workspaceId),
     failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })), report, captureDirectory, highEffort });
   await slider.focus(); await slider.press('End');
@@ -361,8 +380,10 @@ async function checkBotModels({ page, until, report, captureDirectory, effortCom
   if (effortCommandFile) {
     await page.locator(BOT_DETAIL_CLOSE).click();
     const compactStrength = page.locator('.bot-composer .model-selection-trigger');
-    await until(() => compactStrength.isEnabled(), Boolean); await compactStrength.click();
-    await checkEffortStability({ page, slider: page.getByRole('slider'), strength: compactStrength, until,
+    await chooseModelInPanel({ page, picker: compactStrength, model: first });
+    await until(() => getBot(workspaceId), profile => profile.modelPolicy?.overrides?.project_agent?.modelProviderId === first.id);
+    await setLowEffort(compactStrength, 'project_agent');
+    await checkEffortStability({ page, slider, strength: compactStrength, until,
       getBot: () => getBot(workspaceId), failNext: () => writeFileSync(effortCommandFile, JSON.stringify({ failNext: true })),
       report, captureDirectory, highEffort, scope: 'composer' });
     await page.keyboard.press('Escape');

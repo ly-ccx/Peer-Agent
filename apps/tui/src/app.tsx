@@ -1242,6 +1242,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
       model,
       planCoordinator,
       getConversationId: () => persistence.ensureConversation(),
+      assertConversationExecutionAvailable: persistence.assertExecutionAvailable,
       getContextWindow: () => {
         const selection = selectedModelRef.current;
         if (!selection || !modelSelection) return undefined;

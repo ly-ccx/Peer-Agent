@@ -1,0 +1,1908 @@
+{
+  "schemaVersion": 1,
+  "config": {
+    "triggerRatio": 0.8,
+    "hardRatio": 0.92,
+    "driftToleranceRatio": 0.02
+  },
+  "cases": [
+    {
+      "name": "count verify then drift and degraded subsequent count",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 60,
+          "usage": {
+            "inputTokens": 48,
+            "cacheReadTokens": 12
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "b",
+          "count": 66,
+          "usage": {
+            "inputTokens": 40,
+            "cacheReadTokens": 10
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 66,
+                "percent": 66,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 66,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 50,
+                "percent": 50,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 50,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "b",
+                  "countedInputTokens": 66,
+                  "observedInputTokens": 50,
+                  "absoluteDelta": 16,
+                  "relativeDelta": 0.32,
+                  "tolerance": 0.02,
+                  "status": "drift",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "c",
+          "count": 70,
+          "usage": {
+            "inputTokens": 55
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 5,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 50,
+                "percent": 50,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 50,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "b",
+                  "countedInputTokens": 66,
+                  "observedInputTokens": 50,
+                  "absoluteDelta": 16,
+                  "relativeDelta": 0.32,
+                  "tolerance": 0.02,
+                  "status": "drift",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 6,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 55,
+                "percent": 55,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 55,
+                  "requestFingerprint": "c",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "b",
+                  "countedInputTokens": 66,
+                  "observedInputTokens": 50,
+                  "absoluteDelta": 16,
+                  "relativeDelta": 0.32,
+                  "tolerance": 0.02,
+                  "status": "drift",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "missing observations retain separate last observation and current count",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 60,
+          "usage": {
+            "inputTokens": 60
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "b",
+          "count": 70,
+          "usage": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 70,
+                "percent": 70,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 70,
+                "percent": 70,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "c",
+          "count": null,
+          "usage": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 5,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 6,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "observed-only never invents capacity from text",
+      "window": 100,
+      "counter": false,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "usage": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000
+              }
+            ],
+            "decision": null,
+            "sent": 1,
+            "counted": 0
+          }
+        },
+        {
+          "fingerprint": "b",
+          "usage": {
+            "inputTokens": 60
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              }
+            ],
+            "decision": null,
+            "sent": 1,
+            "counted": 0
+          }
+        },
+        {
+          "fingerprint": "c",
+          "usage": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 5,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 6,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "observed_usage_only"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "unknown window retains numeric source with null percent",
+      "window": null,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 20,
+          "usage": {
+            "inputTokens": 20
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": null,
+                "inputBudget": null,
+                "compactionThresholdTokens": null,
+                "authoritativeInputTokens": 20,
+                "percent": null,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 20,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": null,
+                "inputBudget": null,
+                "compactionThresholdTokens": null,
+                "authoritativeInputTokens": 20,
+                "percent": null,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 20,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 20,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 20,
+                  "observedInputTokens": 20,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": null,
+            "sent": 1,
+            "counted": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "failed counter degrades before healthy generation",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": "error",
+          "usage": {
+            "inputTokens": 50
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 50,
+                "percent": 50,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 50,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              }
+            ],
+            "decision": null,
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "b",
+          "count": 75,
+          "usage": {
+            "inputTokens": 55
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 50,
+                "percent": 50,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 50,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 55,
+                "percent": 55,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "degraded",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 55,
+                  "requestFingerprint": "b",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "same immutable request observation supersedes a new count",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 60,
+          "usage": {
+            "inputTokens": 60
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "a",
+          "count": 70,
+          "usage": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "compaction supersedes old observations and recounts at new epoch",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 60,
+          "usage": {
+            "inputTokens": 60
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "b",
+          "count": 90,
+          "compact": true,
+          "afterFingerprint": "compacted",
+          "recount": 30,
+          "usage": {
+            "inputTokens": 30
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "post_compaction",
+                "compactionEpoch": 1,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 30,
+                "percent": 30,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000,
+                  "supersededByCompactionRevision": 1
+                },
+                "nextCounted": {
+                  "inputTokens": 30,
+                  "requestFingerprint": "compacted",
+                  "compactionEpoch": 1,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 4,
+                "phase": "request_preflight",
+                "compactionEpoch": 1,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 30,
+                "percent": 30,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000,
+                  "supersededByCompactionRevision": 1
+                },
+                "nextCounted": {
+                  "inputTokens": 30,
+                  "requestFingerprint": "compacted",
+                  "compactionEpoch": 1,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 5,
+                "phase": "turn_complete",
+                "compactionEpoch": 1,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 30,
+                "percent": 30,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 30,
+                  "requestFingerprint": "compacted",
+                  "compactionEpoch": 1,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 30,
+                  "requestFingerprint": "compacted",
+                  "compactionEpoch": 1,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "compacted",
+                  "countedInputTokens": 30,
+                  "observedInputTokens": 30,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "manual compact does not send or retain old occupancy as current",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 60,
+          "usage": {
+            "inputTokens": 60
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": 60,
+                "percent": 60,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": false,
+              "force": false,
+              "pressure": "ok",
+              "reason": "below_threshold",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 80,
+              "hardLimit": 92
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        },
+        {
+          "fingerprint": "b",
+          "count": 70,
+          "command": "manual_compact",
+          "compact": true,
+          "afterFingerprint": "compacted",
+          "recount": null,
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 3,
+                "phase": "post_compaction",
+                "compactionEpoch": 1,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 60,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000,
+                  "supersededByCompactionRevision": 1
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 60,
+                  "observedInputTokens": 60,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": null,
+            "sent": 0,
+            "counted": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "output reserve affects input threshold independently of window",
+      "window": 100,
+      "reserve": 20,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 70,
+          "usage": {
+            "inputTokens": 70
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 80,
+                "compactionThresholdTokens": 64,
+                "authoritativeInputTokens": 70,
+                "percent": 70,
+                "pressureSource": "provider_count_api",
+                "pendingUncountedChanges": false,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                }
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 80,
+                "compactionThresholdTokens": 64,
+                "authoritativeInputTokens": 70,
+                "percent": 70,
+                "pressureSource": "provider_usage",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000,
+                "lastObserved": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_usage",
+                  "observedAt": 1000
+                },
+                "nextCounted": {
+                  "inputTokens": 70,
+                  "requestFingerprint": "a",
+                  "compactionEpoch": 0,
+                  "source": "provider_count_api",
+                  "countedAt": 1000
+                },
+                "verification": {
+                  "requestFingerprint": "a",
+                  "countedInputTokens": 70,
+                  "observedInputTokens": 70,
+                  "absoluteDelta": 0,
+                  "relativeDelta": 0,
+                  "tolerance": 0.02,
+                  "status": "verified",
+                  "verifiedAt": 1000
+                }
+              }
+            ],
+            "decision": {
+              "shouldCompact": true,
+              "force": false,
+              "pressure": "soft",
+              "reason": "soft_limit",
+              "triggerRatio": 0.8,
+              "hardRatio": 0.92,
+              "softLimit": 64,
+              "hardLimit": 73
+            },
+            "sent": 1,
+            "counted": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "zero count is not authority",
+      "window": 100,
+      "steps": [
+        {
+          "fingerprint": "a",
+          "count": 0,
+          "usage": {
+            "inputTokens": 0,
+            "cacheReadTokens": 0
+          },
+          "expected": {
+            "snapshots": [
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 1,
+                "phase": "request_preflight",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000
+              },
+              {
+                "version": 1,
+                "conversationId": "c",
+                "contentRevision": 1,
+                "modelKey": "provider::model",
+                "revision": 2,
+                "phase": "turn_complete",
+                "compactionEpoch": 0,
+                "contextWindow": 100,
+                "inputBudget": 100,
+                "compactionThresholdTokens": 80,
+                "authoritativeInputTokens": null,
+                "percent": null,
+                "pressureSource": "unknown",
+                "pendingUncountedChanges": true,
+                "pendingContentChars": 0,
+                "countCapability": {
+                  "kind": "provider_count_api"
+                },
+                "counterStatus": "active",
+                "updatedAt": 1000
+              }
+            ],
+            "decision": null,
+            "sent": 1,
+            "counted": 1
+          }
+        }
+      ]
+    }
+  ]
+}

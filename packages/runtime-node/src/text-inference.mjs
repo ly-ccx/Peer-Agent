@@ -1,7 +1,6 @@
 import { sendOpenAIChatStream } from './provider-adapters/openai-chat-adapter.mjs';
 import { sendAnthropicMessagesStream } from './provider-adapters/anthropic-messages-adapter.mjs';
 import { sendGeminiStream } from './provider-adapters/gemini-adapter.mjs';
-import { sendQoderPrivateStream } from './provider-adapters/qoder-private-adapter.mjs';
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
 import { consumeResponsesStream } from './chatgpt-responses-provider.ts';
 
@@ -12,7 +11,7 @@ export function createProviderTextInference({ resolveCredential, resolveChannel,
     const credential = await resolveCredential(provider, signal);
     if (signal.aborted) throw new Error('CANCELLED');
     const channel = resolveChannel({ ...provider, apiKey: credential.apiKey,
-      accountId: credential.accountId, oauthProjectId: provider.oauthProjectId || credential.oauthProjectId });
+      accountId: credential.accountId });
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true });
@@ -35,11 +34,7 @@ export function createProviderTextInference({ resolveCredential, resolveChannel,
         const system = messages.filter(row => row.role === 'system').map(row => row.content).join('\n\n');
         result = await sendAnthropicMessagesStream({ ...common, system,
           messages: messages.filter(row => row.role !== 'system') });
-      } else if (channel.wire === 'gemini') result = await sendGeminiStream({ ...common,
-        authMethod: channel.authMethod, projectId: channel.oauthProjectId });
-      else if (channel.wire === 'qoder-private') result = await sendQoderPrivateStream({ ...common,
-        modelOptions: provider.modelOptions, modelOptionValues: provider.modelOptionValues,
-        maxQueueRetries: 0, transientRetryDelaysMs: [], duplicateRetryDelaysMs: [], queueBudgetMs: 0 });
+      } else if (channel.wire === 'gemini') result = await sendGeminiStream(common);
       else if (channel.wire === 'openai-responses') {
         const body = encodeOpenAIResponsesRequest({ ...common,
           omitMaxOutputTokens: channel.authMethod === 'oauth_chatgpt' });

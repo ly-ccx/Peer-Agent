@@ -34,12 +34,16 @@ export function useReplyFooterBounds() {
       if (!bounds) {
         footer.style.marginInlineStart = `${padStart}px`;
         footer.style.width = `calc(100% - ${padStart + padEnd}px)`;
+        footer.style.minWidth = '';
         footer.style.maxWidth = `calc(100% - ${padStart + padEnd}px)`;
       } else {
+        const offsetStart = Math.max(0, bounds.left - parent.left + padStart);
         const inner = Math.max(0, bounds.width - padStart - padEnd);
-        footer.style.marginInlineStart = `${Math.max(0, bounds.left - parent.left + padStart)}px`;
+        const available = Math.max(0, parent.width - offsetStart - padEnd);
+        footer.style.marginInlineStart = `${offsetStart}px`;
         footer.style.width = `${inner}px`;
-        footer.style.maxWidth = `${inner}px`;
+        footer.style.minWidth = 'fit-content';
+        footer.style.maxWidth = `${Math.max(inner, available)}px`;
       }
       if (observed.length !== bubbles.length || observed.some((node, index) => node !== bubbles[index])) {
         observed.forEach(node => resize.unobserve(node));

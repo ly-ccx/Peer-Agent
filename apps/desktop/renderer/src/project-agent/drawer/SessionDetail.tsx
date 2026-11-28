@@ -53,14 +53,17 @@ export function SessionDetail({
   const followUp = session.followUp;
   const needsYou = followUp ? followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
   const label = session.coordination?.phase === 'stopping' ? formatDrawerSessionStatus(session, i18n)
-    : session.status === 'result_ready' && !needsYou ? i18n.t('projectAgent.chat.work.resultSettling')
+    : session.status === 'result_ready' && !needsYou
+      ? i18n.t(followUp?.reason === 'verification_failed'
+        ? 'projectAgent.chat.work.verificationFailed'
+        : 'projectAgent.chat.work.resultSettling')
     : status === 'waiting_user' ? i18n.t('projectAgent.chat.work.waiting')
     : status === 'result_ready' ? i18n.t('projectAgent.chat.work.resultReady')
     : status ? i18n.t(`projectAgent.chat.sessionState.${status}`) : i18n.t('projectAgent.chat.work.unavailable');
   const progress = taskProgressPreview(session, context, i18n);
   const stamp = formatDrawerStamp(session.spawnedAt);
   const hint = needsYou ? 'confirm'
-    : session.status === 'failed' || session.status === 'unavailable' ? 'failed'
+    : session.status === 'failed' || session.status === 'unavailable' || followUp?.reason === 'verification_failed' ? 'failed'
     : session.status === 'accepted' || session.status === 'cancelled' ? 'ended' : 'working';
   const question = needsYou ? context?.question : null;
   const ended = followUp ? followUp.owner === 'none' : session.status === 'accepted' || session.status === 'cancelled';

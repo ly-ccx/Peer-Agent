@@ -1,0 +1,47 @@
+[package]
+name = "peer-store"
+version = "0.1.0-rc.45"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+test-fixtures = []
+
+[[example]]
+name = "fence-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "resource-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "durable-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "usage-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "model-config-conformance"
+required-features = ["test-fixtures"]
+
+[dependencies]
+peer-protocol = { path = "../peer-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rusqlite = { version = "=0.37.0", features = ["bundled", "limits"] }
+tempfile = "3.23.0"
+time = { version = "=0.3.55", features = ["formatting", "parsing"] }
+uuid = { version = "=1.18.1", features = ["v4"] }
+yaml-rust2 = { version = "=0.13.0", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+fs2 = "0.4.3"
+same-file = "1.0.6"

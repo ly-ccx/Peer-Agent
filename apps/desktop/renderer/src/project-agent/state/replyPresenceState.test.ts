@@ -13,16 +13,25 @@ const row = (patch: Partial<BotReplyRow> = {}): BotReplyRow => ({ type: 'reply',
   replyTo: ['input-i'], aliases: ['t'], messages: [], paragraphs: [], ...patch });
 const state = (patch: Partial<BotReplyRow>) => replyPresenceState(row(patch), i18n);
 
-test('normal provider and tool stages share a stable replying cue regardless of start time', () => {
-  assert.deepEqual(state({ activity }), { label: '正在回复', busy: true, refresh: false, replying: true });
+test('normal provider and tool stages mirror live activity status labels', () => {
+  assert.deepEqual(state({ activity }), { label: '等待模型响应', busy: true, refresh: false, replying: true });
+  assert.deepEqual(state({ activity: { ...activity, phase: 'thinking' } }),
+    { label: '正在整理思路', busy: true, refresh: false, replying: true });
   assert.equal(state({ activity: { ...activity, phase: 'tool', segments: [
     { kind: 'tool', id: 'read', name: 'read_file', status: 'running', summary: 'README.md' },
-  ] } }).label, '正在回复');
+  ] } }).label, '正在阅读 README.md');
+  assert.equal(state({ activity: { ...activity, phase: 'tool', segments: [
+    { kind: 'tool', id: 'search', name: 'search_files', status: 'running' },
+  ] } }).label, '正在查找相关内容');
+  assert.equal(state({ activity: { ...activity, phase: 'tool', segments: [
+    { kind: 'tool', id: 'list', name: 'list_files', status: 'running' },
+  ] } }).label, '正在查看文件目录');
+  assert.equal(state({ activity: { ...activity, phase: 'responding' } }).label, '正在整理回复');
 });
 
-test('public progress keeps the replying cue while decisions and recovery retain their own labels', () => {
+test('public progress keeps live activity status while decisions and recovery retain their own labels', () => {
   const paragraphs = [{ id: 'public', text: '我先核对这份文件。' }];
-  assert.deepEqual(state({ activity, paragraphs }), { label: '正在回复', busy: true, refresh: false, replying: true });
+  assert.deepEqual(state({ activity, paragraphs }), { label: '等待模型响应', busy: true, refresh: false, replying: true });
   assert.equal(state({ activity: { ...activity, phase: 'awaiting_permission' }, paragraphs }).label, '等待你的授权');
   assert.equal(state({ activity: { ...activity, recovery: 'connection' }, paragraphs }).label, '正在恢复这次回复');
   assert.equal(state({ activity, stopping: true, paragraphs }).label, i18n.t('projectAgent.chat.stopping'));

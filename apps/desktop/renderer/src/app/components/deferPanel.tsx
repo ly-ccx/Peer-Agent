@@ -1,4 +1,5 @@
-import { Component, Suspense, lazy, useState, type ComponentType, type ComponentProps, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useEffect, useState, type ComponentType, type ComponentProps, type ReactNode } from 'react';
+import { PeerIcon } from '../../ui/icons';
 import './deferred-panel.css';
 
 class PanelBoundary extends Component<{ children: ReactNode; retry: () => void; isZh: boolean; renderError?: () => ReactNode }, { failed: boolean }> {
@@ -8,30 +9,81 @@ class PanelBoundary extends Component<{ children: ReactNode; retry: () => void; 
   render() {
     if (!this.state.failed) return this.props.children;
     if (this.props.renderError) return this.props.renderError();
-    return <div className="deferred-panel" role="alert">
-      <p>{this.props.isZh ? '此页面暂时无法加载，请重试。' : 'This page could not load. Please retry.'}</p>
-      <button type="button" onClick={this.props.retry}>{this.props.isZh ? '重试' : 'Retry'}</button>
-    </div>;
+    return (
+      <div className="deferred-panel is-error" role="alert">
+        <p>{this.props.isZh ? '此页面暂时无法加载，请重试。' : 'This page could not load. Please retry.'}</p>
+        <button type="button" className="ui-button" onClick={this.props.retry}>
+          {this.props.isZh ? '重试' : 'Retry'}
+        </button>
+      </div>
+    );
   }
 }
 
-/** A local loading/retry boundary; an optional feature never suspends the application shell. */
+function DeferredPanelFallback({ isZh }: { readonly isZh: boolean }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(true), 120);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div className={`deferred-panel${visible ? ' is-visible' : ''}`} role="status" aria-live="polite">
+      {visible ? (
+        <span className="deferred-panel-loading">
+          <PeerIcon name="loader" size={16} className="deferred-panel-spinner" aria-hidden="true" />
+          <span>{isZh ? '正在加载…' : 'Loading…'}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** A local loading/retry boundary; caches resolved modules across remounts so revisiting a panel never flashes Loading again. */
 export function deferPanel<T extends ComponentType<any>>(load: () => Promise<{ default: T }>, options?: {
   readonly renderError?: (props: ComponentProps<T>, retry: () => void) => ReactNode;
 }) {
   type P = ComponentProps<T>;
+  let resolved: T | null = null;
+  const createLazy = () =>
+    lazy(async () => {
+      const mod = await load();
+      resolved = mod.default;
+      return mod;
+    });
+  let sharedLazy = createLazy();
+
   return function DeferredPanel(props: P) {
-    const [content, setContent] = useState(() => ({ Component: lazy(load), revision: 0 }));
+    const [revision, setRevision] = useState(0);
+    // Keep the tree shape stable for the lifetime of a mounted panel so parent
+    // re-renders after lazy resolution never switch branches and remount it.
+    const [directAtMount, setDirectAtMount] = useState(() => resolved !== null);
     const locale = 'i18n' in props && props.i18n && typeof props.i18n === 'object' && 'locale' in props.i18n
-      ? String(props.i18n.locale) : document.documentElement.lang;
+      ? String(props.i18n.locale)
+      : (typeof document !== 'undefined' ? document.documentElement.lang : 'zh-CN');
     const isZh = 'isZh' in props && typeof props.isZh === 'boolean' ? props.isZh : !locale.toLowerCase().startsWith('en');
-    const Content = content.Component as ComponentType<P>;
-    const retry = () => setContent(current => ({ Component: lazy(load), revision: current.revision + 1 }));
-    return <PanelBoundary key={content.revision} isZh={isZh} retry={retry}
-      renderError={options?.renderError ? () => options.renderError!(props, retry) : undefined}>
-      <Suspense fallback={<div className="deferred-panel" role="status">{isZh ? '正在加载…' : 'Loading…'}</div>}>
-        <Content {...props} />
-      </Suspense>
-    </PanelBoundary>;
+    const retry = () => {
+      resolved = null;
+      sharedLazy = createLazy();
+      setDirectAtMount(false);
+      setRevision((current) => current + 1);
+    };
+    const Direct = (directAtMount ? resolved : null) as ComponentType<P> | null;
+    const Lazy = sharedLazy as ComponentType<P>;
+    return (
+      <PanelBoundary
+        key={revision}
+        isZh={isZh}
+        retry={retry}
+        renderError={options?.renderError ? () => options.renderError!(props, retry) : undefined}
+      >
+        {Direct ? (
+          <Direct {...props} />
+        ) : (
+          <Suspense fallback={<DeferredPanelFallback isZh={isZh} />}>
+            <Lazy {...props} />
+          </Suspense>
+        )}
+      </PanelBoundary>
+    );
   };
 }

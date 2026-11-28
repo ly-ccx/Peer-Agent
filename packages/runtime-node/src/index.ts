@@ -473,11 +473,6 @@ export {
   countGeminiCanonicalRequest,
 } from './provider-adapters/context-count-adapter.mjs';
 export {
-  ensureFreshGoogleTokens,
-  refreshGoogleAccessToken,
-  startGoogleBrowserLogin,
-} from './llm-oauth/google-oauth.mjs';
-export {
   GROK_CLI_CLIENT_ID,
   GROK_LOGIN_SCOPE,
   GROK_OIDC_ISSUER,
@@ -490,37 +485,11 @@ export {
   clearSubscriptionQuotaCache,
   expireFreshSubscriptionQuotaCache,
   fetchChatGptUsage,
-  fetchGeminiQuota,
   fetchGrokQuota,
   fetchProviderSubscriptionQuota,
-  fetchQoderQuota,
-  mapQoderUsageToQuota,
-  resolveGeminiCodeAssistProjectId,
   supportsSubscriptionQuota,
 } from './subscription-quota.mjs';
 export { createAccountUsageAdapters } from './account-usage-adapters.mjs';
-export {
-  decryptQoderModelCache,
-  extractEmbeddedAuthWasmBytes,
-  loadQoderAccessToken,
-  loadQoderLocalAuth,
-  prepareQoderInferRequest,
-  resolveHostNodeBinary,
-  resolveQoderCliBinary,
-  resolveQoderConfigDir,
-  resolveQoderInferenceEndpoint,
-} from './provider-adapters/qoder-local-auth.mjs';
-export {
-  getQoderModelCatalog,
-  getQoderModelMetadata,
-  listQoderModels,
-  qoderModelsPathForDebug,
-  resolveQoderModelOptionProjection,
-} from './provider-adapters/qoder-model-catalog.mjs';
-export {
-  fetchOfficialQoderModelCatalog,
-  fetchQoderUsageInfo,
-} from './provider-adapters/qoder-official-model-catalog.mjs';
 export {
   consumeOpenAIStream,
   sendOpenAIChatStream,
@@ -539,32 +508,6 @@ export {
   unsupportedToolResponseCorrection,
   unsupportedToolResponseError,
 } from './chat-runtime/response-guard.mjs';
-export {
-  QODER_CONNECTION_RETRY_DELAYS_MS,
-  QODER_DUPLICATE_RETRY_DELAYS_MS,
-  QODER_QUEUE_DEFAULT_WAIT_MS,
-  QODER_QUEUE_LONG_WAIT_HINT_MS,
-  QODER_QUEUE_MAX_RETRIES,
-  QODER_QUEUE_MAX_WAIT_MS,
-  QODER_QUEUE_TOTAL_BUDGET_MS,
-  QODER_TRANSIENT_RETRY_DELAYS_MS,
-  buildQoderPrivateHeaders,
-  buildQoderPrivateRequestBody,
-  buildQoderRemoteChatAsk,
-  classifyQoderStreamFailure,
-  computeQoderQueueWaitMs,
-  formatQoderDuplicateError,
-  formatQoderQueueError,
-  formatQoderQueueStatusMessage,
-  mergeConsecutiveAssistants,
-  normalizeQoderModel,
-  normalizeQoderPreparedEndpoint,
-  qoderModelServerBaseUrl,
-  qoderTurnTaskId,
-  resolveQoderReasoningEffortParam,
-  sanitizeQoderToolPairing,
-  sendQoderPrivateStream,
-} from './provider-adapters/qoder-private-adapter.mjs';
 // ADR 75 remote access: outbound device connector + local binding store.
 // Not exported before because nothing in production consumed them; the desktop
 // setup-remote-access module is the first real caller.
@@ -710,6 +653,8 @@ export { createWorkingContextProvider } from './project-agent/working-context-pr
 export { readWorkingContext } from './project-agent/working-context.mjs';
 export { CONTINUITY_TOOL_SPECS, CONTINUITY_CAPABILITY_IDS, WORKING_CONTEXT_DESCRIPTION } from './project-agent/working-context-specs.mjs';
 
-export { trackExecutionHandle } from './project-agent/execution-handles.mjs';
+export { stopExecutionHandles, trackExecutionHandle } from './project-agent/execution-handles.mjs';
 export { providerExecutionScopes, providerFileScopes, declaredDispatchScopes } from './project-agent/execution-scopes.mjs';
+export { localRecorderIdentity } from './project-agent/execution-recorder.mjs';
+export { ordinaryToolGrant, commitOrdinaryToolOutcome } from './ordinary-tool-outcome.mjs';
 export { admitInteractiveToolSet } from './interactive-results/role-policy.mjs';

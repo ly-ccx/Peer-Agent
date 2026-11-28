@@ -1,9 +1,9 @@
-/* 模型分工。对齐设置页其它分区：标题、卡片行、自定义下拉。 */
+/* 模型分工 · Peer Frost A × G 哑光排版（2×2 档位卡 + 结构化角色行） */
 
 .model-routing-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
   box-sizing: border-box;
   width: 100%;
   max-width: var(--settings-panel-max-width);
@@ -14,100 +14,35 @@
 
 .model-routing-header h2 {
   margin: 0;
-  color: var(--pa-text-primary);
-  font-family: var(--font-serif-zh);
-  font-size: 1.25rem;
+  color: var(--graphite-base);
+  font-family: var(--font-sans);
+  font-size: 1.875rem;
   font-weight: 600;
+  letter-spacing: -0.04em;
 }
 
 .model-routing-header p,
 .model-routing-banner {
   margin: 6px 0 0;
-  max-width: 42rem;
+  max-width: 44rem;
   color: var(--graphite-soft);
-  font-size: 0.82rem;
+  font-size: var(--ui-font-meta);
   line-height: 1.55;
 }
 
 .model-routing-banner {
   margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--pa-border-subtle);
-  border-radius: var(--ui-radius-panel);
-  background: var(--pa-surface-card);
+  padding: 12px 16px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-inset);
+  background: var(--paper-raised);
 }
 
 .model-routing-card > .frost-group-content {
   container: model-routing / inline-size;
 }
 
-.model-routing-card h3 {
-  margin: 0;
-  font-size: 0.98rem;
-}
-
-.model-routing-pref {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  min-height: 44px;
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--pa-border-subtle);
-  color: var(--pa-text-primary);
-  font-size: 0.92rem;
-}
-
-.model-routing-head {
-  color: var(--pa-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.model-routing-tier,
-.model-routing-role {
-  display: grid;
-  align-items: center;
-  column-gap: var(--space-4);
-}
-
-.model-routing-tier {
-  grid-template-columns: 88px minmax(180px, 260px) minmax(0, 1fr);
-}
-
-.model-routing-role {
-  grid-template-columns: minmax(72px, .75fr) minmax(90px, 1fr) minmax(100px, 1.1fr) minmax(116px, 1.2fr) minmax(130px, 1.4fr) minmax(96px, .9fr);
-  align-items: start;
-  column-gap: var(--space-3);
-}
-
-.model-routing-row {
-  min-height: 52px;
-  padding: var(--space-3) 0;
-}
-
-.model-routing-row + .model-routing-row {
-  border-top: 1px solid var(--pa-border-subtle);
-}
-
-.model-routing-row.model-routing-tier,
-.model-routing-row.model-routing-role {
-  align-items: start;
-}
-
-.model-routing-name {
-  min-width: 0;
-  min-height: 32px;
-  overflow: hidden;
-  color: var(--pa-text-primary);
-  font-size: 0.92rem;
-  font-weight: 600;
-  line-height: 32px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* ── 统一所有下拉与输入框材质（消灭黑槽与灰框色差） ── */
 .model-routing-panel .pa-dropdown,
 .model-routing-panel .model-routing-model-menu {
   display: block;
@@ -115,53 +50,240 @@
   min-width: 0;
 }
 
+.model-routing-panel .pa-dropdown-trigger,
 .model-routing-panel .model-routing-model-menu .pa-cascading-trigger {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
   max-width: none;
-  height: auto;
-  min-height: 32px;
-  justify-content: space-between;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--chrome-hairline);
+  min-height: 36px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
   border-radius: var(--ui-radius-control);
-  background: var(--chrome-sunken);
+  background: var(--control-fill);
   color: var(--graphite-base);
-  font-size: 0.82rem;
+  font-family: var(--font-sans);
+  font-size: var(--ui-font-control);
   font-weight: 400;
+  transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
+.model-routing-panel .pa-dropdown-trigger:hover:not(:disabled),
+.model-routing-panel .model-routing-model-menu .pa-cascading-trigger:hover:not(:disabled) {
+  background: var(--control-fill-hover);
+}
+
+.model-routing-panel .pa-dropdown-trigger:is(.open, :active):not(:disabled),
+.model-routing-panel .model-routing-model-menu .pa-cascading-trigger:is(.open, :active):not(:disabled) {
+  background: var(--control-fill-active);
+}
+
+.model-routing-panel .model-routing-model-menu.is-missing .pa-cascading-trigger {
+  border-color: color-mix(in srgb, var(--state-danger) 46%, var(--chrome-hairline));
+  background: color-mix(in srgb, var(--state-danger) 8%, var(--control-fill));
+}
+
+.model-routing-panel .model-routing-model-menu.is-fallback-add {
+  width: auto;
+  flex: 0 1 auto;
+}
+
+.model-routing-panel .model-routing-model-menu.is-fallback-add .pa-cascading-trigger {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px dashed var(--chrome-hairline);
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-soft);
+  font-size: 12px;
+}
+
+.model-routing-panel .model-routing-model-menu.is-fallback-add .pa-cascading-trigger:hover:not(:disabled) {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--graphite-soft) 35%, var(--chrome-hairline));
+  background: var(--control-fill);
+  color: var(--graphite-base);
+}
+
+.model-routing-panel .model-routing-model-menu.is-fallback-add .pa-cascading-trigger > svg {
+  display: none;
+}
+
+/* ── 档位：2×2 Bento 卡片网格 ── */
+.model-routing-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+.model-routing-tier-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-inset);
+  background: var(--paper-sheet);
+  transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.model-routing-tier-card:hover {
+  border-color: color-mix(in srgb, var(--graphite-soft) 24%, var(--chrome-hairline));
+}
+
+.model-routing-tier-card.is-warning {
+  border-color: color-mix(in srgb, var(--state-danger) 36%, var(--chrome-hairline));
+}
+
+.model-routing-tier-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+
+.model-routing-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control-compact);
+  background: var(--paper-raised);
+  color: var(--graphite-base);
+}
+
+.model-routing-tier-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-routing-tier-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.model-routing-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--graphite-base);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-routing-tier-desc {
+  margin: 0;
+  color: var(--graphite-fade);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.model-routing-status-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--control-fill);
+  color: var(--graphite-soft);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.model-routing-status-tag.is-warn {
+  background: var(--state-danger-soft);
+  color: var(--state-danger);
+}
+
+.model-routing-tier-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-width: 0;
+}
+
+/* ── 通用字段标签 ── */
+.model-routing-field,
+.model-routing-parameter,
+.model-routing-spend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.model-routing-field-label,
+.model-routing-parameter-label {
+  display: block;
+  margin: 0;
+  color: var(--graphite-fade);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.model-routing-parameters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.model-routing-parameters.has-channel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.model-routing-reasoning-note {
+  margin: 2px 0 0;
+  color: var(--graphite-fade);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ── 备选芯片条 ── */
 .model-routing-fallbacks {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
   min-width: 0;
-}
-
-.model-routing-fallbacks > .pa-dropdown,
-.model-routing-fallbacks > .model-routing-model-menu {
-  flex: 0 0 168px;
-  width: 168px;
 }
 
 .model-routing-chip {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   max-width: 100%;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 4px 0 10px;
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control);
-  background: var(--chrome-sunken);
+  border-radius: var(--ui-radius-control-compact);
+  background: var(--paper-raised);
   color: var(--graphite-base);
-  font-size: 0.82rem;
+  font-size: 12px;
 }
 
 .model-routing-chip__label {
   overflow: hidden;
-  max-width: 180px;
+  max-width: 168px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -169,6 +291,7 @@
 .model-routing-chip__actions {
   display: inline-flex;
   align-items: center;
+  gap: 1px;
 }
 
 .model-routing-chip__actions button {
@@ -178,61 +301,166 @@
   width: 22px;
   height: 22px;
   padding: 0;
-  border-radius: var(--ui-radius-control);
+  border-radius: var(--ui-radius-detail);
   color: var(--graphite-soft);
 }
 
 .model-routing-chip__actions button:hover:not(:disabled) {
-  background: var(--chrome-hover);
+  background: var(--control-fill-hover);
   color: var(--graphite-base);
 }
 
-.model-routing-icon {
-  display: block;
+/* ── 角色顶部开关条 ── */
+.model-routing-pref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--chrome-hairline);
 }
 
-.model-routing-icon--up {
-  transform: rotate(180deg);
-}
-
-.model-routing-resolved {
+.model-routing-pref-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  color: var(--graphite-soft);
-  font-size: 0.82rem;
-  line-height: 1.5;
-  white-space: pre-line;
-  overflow-wrap: anywhere;
 }
 
-.model-routing-field,
-.model-routing-reasoning,
-.model-routing-spend { min-width: 0; }
-.model-routing-reasoning-note {
-  margin: 4px 0 0;
-  color: var(--graphite-soft);
-  font-size: var(--ui-font-caption, 12px);
+.model-routing-pref-title {
+  color: var(--graphite-base);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.model-routing-pref-desc {
+  margin: 0;
+  color: var(--graphite-fade);
+  font-size: 12px;
   line-height: 1.45;
+}
+
+/* ── 角色两段式结构化行 ── */
+.model-routing-role-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-routing-role-item {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 15px 18px 16px;
+}
+
+.model-routing-role-item + .model-routing-role-item {
+  border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 75%, transparent);
+}
+
+.model-routing-role-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.model-routing-resolved-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 460px);
+  padding: 3px 10px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-pill);
+  background: var(--paper-sheet);
+  color: var(--graphite-soft);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.model-routing-resolved-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ui-radius-circle);
+  flex: none;
+  background: var(--graphite-fade);
+}
+
+.model-routing-resolved-pill.is-ok .model-routing-resolved-dot {
+  background: var(--state-success);
+}
+
+.model-routing-resolved-pill.is-warn {
+  border-color: color-mix(in srgb, var(--state-danger) 36%, var(--chrome-hairline));
+  background: color-mix(in srgb, var(--state-danger) 8%, var(--paper-sheet));
+  color: var(--state-danger);
+}
+
+.model-routing-resolved-pill.is-warn .model-routing-resolved-dot {
+  background: var(--state-danger);
+}
+
+.model-routing-resolved-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-routing-role-controls {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.85fr) minmax(156px, 1.3fr) minmax(156px, 1.25fr) 118px;
+  align-items: start;
+  gap: 10px;
+}
+
+/* ── 日花费上限输入 ── */
+.model-routing-spend-wrap {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control);
+  background: var(--control-fill);
+  transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.model-routing-spend-wrap:hover {
+  background: var(--control-fill-hover);
+}
+
+.model-routing-spend-wrap:focus-within {
+  border-color: color-mix(in srgb, var(--graphite-base) 26%, var(--chrome-hairline));
+  background: var(--control-fill-active);
+}
+
+.model-routing-spend-prefix {
+  margin-right: 4px;
+  color: var(--graphite-fade);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .model-routing-spend input {
   box-sizing: border-box;
   width: 100%;
-  min-height: 32px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control);
-  background: var(--chrome-sunken);
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--graphite-base);
-  font-size: 0.82rem;
+  font-size: var(--ui-font-control);
   font-variant-numeric: tabular-nums;
+  outline: none;
 }
 
 .model-routing-spend input::placeholder {
-  color: var(--graphite-mute);
-}
-
-.model-routing-spend input:focus {
-  border-color: var(--za-primary-control-bg, var(--chrome-hairline));
+  color: var(--graphite-fade);
 }
 
 .model-routing-spend input::-webkit-outer-spin-button,
@@ -241,78 +469,20 @@
   -webkit-appearance: none;
 }
 
-.model-routing-pool {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  min-width: 0;
-  padding-top: 2px;
-}
-
-.model-routing-pool-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  color: var(--pa-text-secondary);
-  font-size: 0.78rem;
-}
-
-@container model-routing (max-width: 740px) {
-  .model-routing-head.model-routing-role {
-    display: none;
+/* ── 响应式容器断点 ── */
+@container model-routing (max-width: 660px) {
+  .model-routing-tier-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .model-routing-role {
+  .model-routing-role-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: var(--space-2);
-    align-items: start;
-  }
-
-  .model-routing-role .model-routing-name {
-    grid-column: 1 / -1;
-  }
-
-  .model-routing-resolved {
-    line-height: 1.4;
-  }
-
-  .model-routing-field::before,
-  .model-routing-resolved::before,
-  .model-routing-reasoning::before,
-  .model-routing-spend::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 4px;
-    color: var(--pa-text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.35;
   }
 }
 
-@container model-routing (max-width: 430px) {
-  .model-routing-role { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* Tier parameters share the model/fallback width; roles keep their existing six columns. */
-.model-routing-parameters { display: grid; gap: var(--space-3); min-width: 0; }
-.model-routing-tier > .model-routing-parameters {
-  grid-column: 2 / -1;
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: var(--space-3);
-}
-.model-routing-tier > .model-routing-parameters.has-channel {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.model-routing-parameter { min-width: 0; }
-.model-routing-parameter-label {
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--graphite-soft);
-  font-size: var(--ui-font-caption, 12px);
-  line-height: 1.4;
-}
-@container model-routing (max-width: 430px) {
-  .model-routing-tier > .model-routing-parameters.has-channel { grid-template-columns: minmax(0, 1fr); }
+@container model-routing (max-width: 420px) {
+  .model-routing-role-controls,
+  .model-routing-parameters.has-channel {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -1,0 +1,4318 @@
+{
+  "schemaVersion": 1,
+  "vectors": [
+    {
+      "name": "clean",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "changes",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "mv",
+            "tracked.txt",
+            "renamed file.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "write": "repo/renamed file.txt",
+          "content": "changed\n"
+        },
+        {
+          "write": "repo/new\tname.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/new\nline🦀.txt",
+          "content": "unicode"
+        }
+      ],
+      "input": {
+        "path": "repo",
+        "limit": 2
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": false,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 1,
+          "untracked": 2,
+          "entries": [
+            {
+              "index": "R",
+              "worktree": "M",
+              "path": "renamed file.txt",
+              "from": "tracked.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "new\tname.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "new\nline🦀.txt"
+            }
+          ],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 2,
+            "entries": [
+              {
+                "index": "R",
+                "worktree": "M",
+                "path": "renamed file.txt",
+                "from": "tracked.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "new\tname.txt"
+              }
+            ],
+            "truncated": true
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": true
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 2,
+            "entries": [
+              {
+                "index": "R",
+                "worktree": "M",
+                "path": "renamed file.txt",
+                "from": "tracked.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "new\tname.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "new\nline🦀.txt"
+              }
+            ],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "status",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "write": "repo/tracked.txt",
+          "content": "modified"
+        }
+      ],
+      "input": {
+        "path": "repo",
+        "operation": "status",
+        "limit": 1
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "status",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [],
+        "status": {
+          "clean": false,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 1,
+          "untracked": 0,
+          "entries": [
+            {
+              "index": " ",
+              "worktree": "M",
+              "path": "tracked.txt"
+            }
+          ],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "status",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "status",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 0,
+            "entries": [
+              {
+                "index": " ",
+                "worktree": "M",
+                "path": "tracked.txt"
+              }
+            ],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "status",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 0,
+            "entries": [
+              {
+                "index": " ",
+                "worktree": "M",
+                "path": "tracked.txt"
+              }
+            ],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "log",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "write": "repo/second.txt",
+          "content": "second"
+        },
+        {
+          "git": [
+            "add",
+            "second.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "second sk-ABCDEFGHIJKLMNOPQRSTUV"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo",
+        "operation": "log",
+        "limit": 2
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "log",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "second [REDACTED_API_KEY]"
+          },
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ]
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "log",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "log",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "second [REDACTED_API_KEY]"
+            },
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "log",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "f5caad04e56bfbc9b7c1671c64c2f51b7576211b",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "second [REDACTED_API_KEY]"
+            },
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "detached",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "checkout",
+            "--detach"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": null,
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": null,
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": null,
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "branch-js-trim",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "checkout",
+            "-b",
+            "﻿branch﻿"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "﻿branch",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "﻿branch",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "﻿branch",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "branch-next-line",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "checkout",
+            "-b",
+            "branch"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "branch",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "branch",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "branch",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "unborn",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        }
+      ],
+      "actions": [],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": null,
+        "branch": "main",
+        "unborn": true,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": null,
+          "branch": "main",
+          "unborn": true,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": null,
+          "branch": "main",
+          "unborn": true,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "worktree",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "worktree",
+            "add",
+            "--detach",
+            "../linked"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "linked"
+      },
+      "engine": {
+        "repositoryPath": "<root>/linked",
+        "gitDirectory": "<root>/repo/.git/worktrees/linked",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": null,
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/linked",
+        "<root>/linked",
+        "<root>/repo/.git/worktrees/linked",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo",
+              "<root>/linked"
+            ]
+          }
+        },
+        "requested": [
+          "<root>/linked"
+        ],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/linked",
+          "gitDirectory": "<root>/repo/.git/worktrees/linked",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": null,
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/linked",
+          "gitDirectory": "<root>/repo/.git/worktrees/linked",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": null,
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "included-filter",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "write": "outside-config",
+          "content": "[filter \"hostile\"]\n clean = touch UNEXPECTED_EXECUTION\n process = touch UNEXPECTED_EXECUTION\n required = true\n"
+        },
+        {
+          "git": [
+            "config",
+            "include.path",
+            "../../outside-config"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "config",
+            "core.fsmonitor",
+            "touch UNEXPECTED_EXECUTION"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "write": "repo/.gitattributes",
+          "content": "*.txt filter=hostile\n"
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "changed"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config",
+          "<root>/outside-config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": null,
+          "filtersDisabled": true,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 1,
+          "untracked": 1,
+          "entries": [
+            {
+              "index": " ",
+              "worktree": "M",
+              "path": "tracked.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": ".gitattributes"
+            }
+          ],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config",
+        "<root>/outside-config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo",
+              "<root>/outside-config"
+            ]
+          }
+        },
+        "requested": [
+          "<root>/outside-config"
+        ],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config",
+            "<root>/outside-config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": null,
+            "filtersDisabled": true,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 1,
+            "entries": [
+              {
+                "index": " ",
+                "worktree": "M",
+                "path": "tracked.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": ".gitattributes"
+              }
+            ],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config",
+            "<root>/outside-config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": null,
+            "filtersDisabled": true,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 1,
+            "untracked": 1,
+            "entries": [
+              {
+                "index": " ",
+                "worktree": "M",
+                "path": "tracked.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": ".gitattributes"
+              }
+            ],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "submodule",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000",
+            "<HEAD>",
+            "dependency"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "gitlink without recursive inspection"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "gitlink without recursive inspection"
+          }
+        ],
+        "status": {
+          "clean": null,
+          "filtersDisabled": false,
+          "submoduleCount": 1,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "gitlink without recursive inspection"
+            }
+          ],
+          "status": {
+            "clean": null,
+            "filtersDisabled": false,
+            "submoduleCount": 1,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "285d1430e00e74b6703f149d0a5d1f8e18c51e88",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "gitlink without recursive inspection"
+            }
+          ],
+          "status": {
+            "clean": null,
+            "filtersDisabled": false,
+            "submoduleCount": 1,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "origin-redaction",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "config",
+            "remote.origin.url",
+            "https://user:private-token@example.invalid/repo?access_token=secret"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [
+          "https://[redacted]@example.invalid/repo?access_token=[redacted]"
+        ],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [
+            "https://[redacted]@example.invalid/repo?access_token=[redacted]"
+          ],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": false
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [
+            "https://[redacted]@example.invalid/repo?access_token=[redacted]"
+          ],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "long-origin",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "config",
+            "remote.origin.url",
+            "https://example.invalid/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [
+          "https://example.invalid/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n...[preview truncated]"
+        ],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [
+        "origin"
+      ],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [
+            "https://example.invalid/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": true
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [
+            "https://example.invalid/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n...[preview truncated]"
+          ],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "long-subject",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "git": [
+            "commit",
+            "--allow-empty",
+            "-m",
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "input": {
+        "path": "repo"
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "afbbfdb3424a65de472b0de8dc0b7a347f6335eb",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "afbbfdb3424a65de472b0de8dc0b7a347f6335eb",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n...[preview truncated]"
+          }
+        ],
+        "status": {
+          "clean": true,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 0,
+          "entries": [],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [
+        "commits.subject"
+      ],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "afbbfdb3424a65de472b0de8dc0b7a347f6335eb",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": true
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "afbbfdb3424a65de472b0de8dc0b7a347f6335eb",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "afbbfdb3424a65de472b0de8dc0b7a347f6335eb",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n...[preview truncated]"
+            }
+          ],
+          "status": {
+            "clean": true,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 0,
+            "entries": [],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "preview",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "write": "repo/000-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/001-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/002-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/003-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/004-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/005-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/006-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/007-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/008-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/009-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/010-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/011-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/012-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/013-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/014-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/015-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/016-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/017-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/018-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/019-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/020-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/021-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/022-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/023-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/024-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/025-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/026-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/027-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/028-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/029-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/030-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/031-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/032-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/033-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/034-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/035-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/036-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/037-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/038-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/039-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/040-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/041-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/042-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/043-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/044-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/045-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/046-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/047-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/048-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/049-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/050-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/051-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/052-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/053-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/054-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/055-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/056-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/057-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/058-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/059-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/060-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/061-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/062-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/063-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/064-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/065-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/066-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/067-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/068-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/069-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/070-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/071-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/072-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/073-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/074-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/075-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/076-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/077-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/078-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/079-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/080-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/081-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/082-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/083-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/084-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/085-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/086-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/087-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/088-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/089-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/090-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/091-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/092-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/093-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/094-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        },
+        {
+          "write": "repo/095-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt",
+          "content": "fact"
+        }
+      ],
+      "input": {
+        "path": "repo",
+        "limit": 200
+      },
+      "engine": {
+        "repositoryPath": "<root>/repo",
+        "gitDirectory": "<root>/repo/.git",
+        "commonDirectory": "<root>/repo/.git",
+        "configurationSources": [
+          "<root>/repo/.git/config"
+        ],
+        "operation": "snapshot",
+        "startedAt": "<time>",
+        "finishedAt": "<time>",
+        "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+        "branch": "main",
+        "unborn": false,
+        "origin": [],
+        "consistent": true,
+        "atomic": false,
+        "commits": [
+          {
+            "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+            "committedAt": "2026-11-17T00:00:00+05:30",
+            "subject": "base"
+          }
+        ],
+        "status": {
+          "clean": false,
+          "filtersDisabled": false,
+          "submoduleCount": 0,
+          "submodulesInspected": false,
+          "changed": 0,
+          "untracked": 96,
+          "entries": [
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "000-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "001-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "002-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "003-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "004-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "005-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "006-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "007-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "008-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "009-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "010-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "011-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "012-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "013-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "014-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "015-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "016-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "017-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "018-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "019-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "020-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "021-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "022-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "023-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "024-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "025-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "026-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "027-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "028-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "029-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "030-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "031-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "032-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "033-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "034-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "035-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "036-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "037-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "038-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "039-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "040-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "041-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "042-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "043-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "044-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "045-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "046-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "047-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "048-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "049-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "050-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "051-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "052-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "053-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "054-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "055-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "056-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "057-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "058-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "059-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "060-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "061-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "062-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "063-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "064-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "065-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "066-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "067-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "068-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "069-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "070-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "071-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "072-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "073-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "074-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "075-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "076-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "077-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "078-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "079-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "080-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "081-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "082-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "083-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "084-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "085-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "086-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "087-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "088-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "089-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "090-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "091-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "092-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "093-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "094-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            },
+            {
+              "index": "?",
+              "worktree": "?",
+              "path": "095-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+            }
+          ],
+          "truncated": false
+        }
+      },
+      "authorized": [
+        "<root>/repo",
+        "<root>/repo",
+        "<root>/repo/.git",
+        "<root>/repo/.git/config"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "success",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo"
+            ]
+          }
+        },
+        "requested": [],
+        "preview": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 96,
+            "entries": [
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "000-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "001-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "002-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "003-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "004-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "005-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "006-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "007-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "008-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "009-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "010-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "011-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "012-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "013-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              }
+            ],
+            "truncated": true
+          },
+          "artifactPath": "<artifact>",
+          "retrievalHint": {
+            "tool": "read_file",
+            "path": "<artifact>"
+          },
+          "contextPreviewTruncated": true
+        },
+        "artifact": {
+          "kind": "local_git_observation",
+          "repositoryPath": "<root>/repo",
+          "gitDirectory": "<root>/repo/.git",
+          "commonDirectory": "<root>/repo/.git",
+          "configurationSources": [
+            "<root>/repo/.git/config"
+          ],
+          "operation": "snapshot",
+          "startedAt": "<time>",
+          "finishedAt": "<time>",
+          "head": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+          "branch": "main",
+          "unborn": false,
+          "origin": [],
+          "consistent": true,
+          "atomic": false,
+          "commits": [
+            {
+              "hash": "fe6077a4d864ae78e77c43420876f21a2159ef2e",
+              "committedAt": "2026-11-17T00:00:00+05:30",
+              "subject": "base"
+            }
+          ],
+          "status": {
+            "clean": false,
+            "filtersDisabled": false,
+            "submoduleCount": 0,
+            "submodulesInspected": false,
+            "changed": 0,
+            "untracked": 96,
+            "entries": [
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "000-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "001-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "002-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "003-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "004-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "005-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "006-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "007-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "008-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "009-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "010-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "011-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "012-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "013-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "014-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "015-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "016-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "017-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "018-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "019-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "020-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "021-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "022-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "023-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "024-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "025-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "026-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "027-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "028-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "029-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "030-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "031-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "032-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "033-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "034-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "035-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "036-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "037-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "038-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "039-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "040-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "041-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "042-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "043-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "044-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "045-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "046-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "047-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "048-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "049-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "050-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "051-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "052-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "053-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "054-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "055-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "056-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "057-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "058-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "059-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "060-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "061-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "062-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "063-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "064-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "065-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "066-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "067-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "068-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "069-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "070-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "071-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "072-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "073-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "074-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "075-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "076-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "077-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "078-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "079-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "080-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "081-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "082-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "083-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "084-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "085-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "086-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "087-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "088-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "089-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "090-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "091-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "092-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "093-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "094-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              },
+              {
+                "index": "?",
+                "worktree": "?",
+                "path": "095-namenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamenamename.txt"
+              }
+            ],
+            "truncated": false
+          }
+        }
+      }
+    },
+    {
+      "name": "not-repository",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [
+        {
+          "mkdir": "outside"
+        }
+      ],
+      "input": {
+        "path": "outside"
+      },
+      "engine": {
+        "error": "git_not_repository"
+      },
+      "authorized": [
+        "<root>/outside"
+      ],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "failed",
+        "grant": {
+          "granted": true,
+          "scope": {
+            "capabilityId": "local.git.query",
+            "operation": "snapshot",
+            "paths": [
+              "<root>/repo",
+              "<root>/outside"
+            ]
+          }
+        },
+        "requested": [
+          "<root>/outside"
+        ],
+        "preview": {
+          "status": "failed",
+          "reason": "git_not_repository",
+          "capabilityId": "local.git.query",
+          "detail": "fatal: not a git repository (or any of the parent directories): .git\n",
+          "diagnostic": {
+            "stage": "execution",
+            "capabilityId": "local.git.query",
+            "reason": "git_not_repository",
+            "retryable": true,
+            "userActionRequired": false
+          }
+        },
+        "artifact": null
+      }
+    },
+    {
+      "name": "missing",
+      "base": [
+        {
+          "git": [
+            "init",
+            "--initial-branch=main",
+            "repo"
+          ]
+        },
+        {
+          "write": "repo/tracked.txt",
+          "content": "original\n"
+        },
+        {
+          "git": [
+            "add",
+            "tracked.txt"
+          ],
+          "cwd": "repo"
+        },
+        {
+          "git": [
+            "commit",
+            "-m",
+            "base"
+          ],
+          "cwd": "repo"
+        }
+      ],
+      "actions": [],
+      "input": {
+        "path": "missing"
+      },
+      "engine": {
+        "error": "git_path_not_found"
+      },
+      "authorized": [],
+      "nativeFieldsTruncated": [],
+      "provider": {
+        "status": "failed",
+        "grant": {
+          "granted": false,
+          "scope": "local.git.query"
+        },
+        "requested": [],
+        "preview": {
+          "status": "failed",
+          "reason": "git_path_not_found",
+          "capabilityId": "local.git.query",
+          "diagnostic": {
+            "stage": "execution",
+            "capabilityId": "local.git.query",
+            "reason": "git_path_not_found",
+            "retryable": true,
+            "userActionRequired": false
+          }
+        },
+        "artifact": null
+      }
+    }
+  ],
+  "invalid": [
+    null,
+    [],
+    {},
+    {
+      "path": ".",
+      "command": "touch x"
+    },
+    {
+      "path": ".",
+      "env": {}
+    },
+    {
+      "path": ".",
+      "operation": "fetch"
+    },
+    {
+      "path": ".",
+      "limit": 201
+    },
+    {
+      "path": ".",
+      "limit": 0
+    },
+    {
+      "path": ".",
+      "limit": 1.5
+    },
+    {
+      "path": "x\nname"
+    },
+    {
+      "path": "x\u0000name"
+    }
+  ],
+  "failures": [
+    {
+      "name": "output-limit",
+      "reason": "git_query_output_limit"
+    },
+    {
+      "name": "timeout",
+      "reason": "git_query_timeout"
+    },
+    {
+      "name": "missing-git",
+      "reason": "git_unavailable"
+    }
+  ],
+  "outsideDenial": {
+    "status": "denied",
+    "reason": "git_read_permission_required",
+    "granted": false
+  }
+}

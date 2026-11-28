@@ -8,9 +8,9 @@ import type { ProjectInputAttachment } from '@peer-agent/protocol';
 // 不会被提升为 system 指令。这里只做读取，不做任何提示词拼装。
 
 /** 单条消息最多可携带的附件数量。 */
-export const MAX_ATTACHMENTS = 8;
-/** 图片附件的最大字节数（8 MiB）。 */
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 100;
+/** 图片附件的最大字节数（32 MiB）。 */
+export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
 /** 文本类附件的最大字节数（512 KiB）。 */
 export const MAX_TEXT_FILE_BYTES = 512 * 1024;
 
@@ -77,7 +77,7 @@ export async function intakeAttachments(
     try {
       if (file.type.startsWith('image/')) {
         if (file.size > MAX_IMAGE_BYTES) {
-          error = isZh ? `${file.name} 超过 8MB，未添加` : `${file.name} is larger than 8MB and was not attached`;
+          error = isZh ? `${file.name} 超过 32MB，未添加` : `${file.name} is larger than 32MB and was not attached`;
           continue;
         }
         attachments.push({

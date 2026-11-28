@@ -231,25 +231,25 @@ describe('TUI model selection', () => {
     // Mirrors real Desktop data: the primary model row has entryId === groupId,
     // additional models in the same channel carry their own entry uuid.
     const control = createTuiModelSelectionControl({
-      providerId: 'group-qoder',
+      providerId: 'group-models',
       modelId: 'gm51model',
-      displayName: 'GLM-5.2 · Qoder CLI',
+      displayName: 'GLM-5.2 · Fixture API',
       catalog: [
         {
-          providerId: 'group-qoder',
+          providerId: 'group-models',
           modelId: 'gm51model',
-          entryId: 'group-qoder',
-          displayName: 'GLM-5.2 · Qoder CLI',
+          entryId: 'group-models',
+          displayName: 'GLM-5.2 · Fixture API',
           supportsTools: true,
           supportedReasoningEfforts: ['off', 'default'],
           defaultReasoningEffort: 'default',
           available: true,
         },
         {
-          providerId: 'group-qoder',
+          providerId: 'group-models',
           modelId: 'ultimate',
           entryId: 'entry-ultimate',
-          displayName: 'Ultimate · Qoder CLI',
+          displayName: 'Ultimate · Fixture API',
           supportsTools: true,
           supportedReasoningEfforts: ['off', 'default'],
           defaultReasoningEffort: 'default',
@@ -270,23 +270,23 @@ describe('TUI model selection', () => {
 
     // groupId binding (CLI-written form) resolves exactly.
     expect(resolvePersistedModelSelection(control, {
-      providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off',
-    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off' });
+      providerId: 'group-models', modelId: 'ultimate', reasoningEffort: 'off',
+    })).toEqual({ providerId: 'group-models', modelId: 'ultimate', reasoningEffort: 'off' });
 
     // Desktop model entry uuid binding maps back to the groupId-keyed entry.
     expect(resolvePersistedModelSelection(control, {
       providerId: 'entry-ultimate', modelId: 'ultimate', reasoningEffort: 'off',
-    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'off' });
+    })).toEqual({ providerId: 'group-models', modelId: 'ultimate', reasoningEffort: 'off' });
 
     // Unsupported persisted effort clamps to the entry default.
     expect(resolvePersistedModelSelection(control, {
       providerId: 'entry-ultimate', modelId: 'ultimate', reasoningEffort: 'xhigh',
-    })).toEqual({ providerId: 'group-qoder', modelId: 'ultimate', reasoningEffort: 'default' });
+    })).toEqual({ providerId: 'group-models', modelId: 'ultimate', reasoningEffort: 'default' });
 
     // Group binding with a drifted model snapshot keeps the provider.
     expect(resolvePersistedModelSelection(control, {
-      providerId: 'group-qoder', modelId: 'unknown-model', reasoningEffort: 'default',
-    })).toEqual({ providerId: 'group-qoder', modelId: 'gm51model', reasoningEffort: 'default' });
+      providerId: 'group-models', modelId: 'unknown-model', reasoningEffort: 'default',
+    })).toEqual({ providerId: 'group-models', modelId: 'gm51model', reasoningEffort: 'default' });
 
     // Unavailable entries and unknown bindings resolve to null, never throw.
     expect(resolvePersistedModelSelection(control, {

@@ -3,7 +3,7 @@ const ROLES = new Set(['project_agent', 'session_worker', 'explorer', 'verifier'
 const TIERS = new Set(['strong', 'fast', 'economy', 'vision']);
 
 /** Validate the whole patch before any profile write; a project only narrows configured models. */
-export function profilePolicyPatch(payload, models = []) {
+export function profilePolicyPatch(payload, models = [], currentPolicy = null) {
   const patch = {};
   if (payload.autoHandoffOnPolicyAccept !== undefined) {
     if (typeof payload.autoHandoffOnPolicyAccept !== 'boolean') return { ok: false, code: 'INVALID_HANDOFF_POLICY' };
@@ -23,12 +23,16 @@ export function profilePolicyPatch(payload, models = []) {
       const policy = payload.modelPolicy;
       const allowed = new Set(models.filter((model) => model.enabled !== false).map((model) => model.id));
       const ids = (value) => Array.isArray(value) && value.length <= 100 && value.every((id) => typeof id === 'string' && allowed.has(id));
+      const shapeIds = (value) => Array.isArray(value) && value.length <= 100 && value.every((id) => typeof id === 'string' && id.trim().length > 0);
       const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
+      const sameJson = (a, b) => a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b);
       if (!object(policy) || Object.keys(policy).some((key) => !['scope', 'overrides'].includes(key))) return { ok: false, code: 'INVALID_MODEL_POLICY' };
       if (policy.scope != null) {
         const scope = policy.scope;
+        const scopeIdsUnchanged = sameJson(scope.modelProviderIds, currentPolicy?.scope?.modelProviderIds);
+        const validScopeIds = scopeIdsUnchanged ? shapeIds(scope.modelProviderIds) : ids(scope.modelProviderIds);
         if (!object(scope) || Object.keys(scope).some((key) => !['modelProviderIds', 'families', 'localOnly'].includes(key))
-          || scope.modelProviderIds !== undefined && !ids(scope.modelProviderIds)
+          || scope.modelProviderIds !== undefined && !validScopeIds
           || scope.families !== undefined && (!Array.isArray(scope.families) || scope.families.length > 100 || !scope.families.every((family) => typeof family === 'string' && family.trim() && family.length <= 100))
           || scope.localOnly !== undefined && typeof scope.localOnly !== 'boolean') return { ok: false, code: 'INVALID_MODEL_POLICY' };
       }
@@ -36,17 +40,20 @@ export function profilePolicyPatch(payload, models = []) {
         if (!object(policy.overrides)) return { ok: false, code: 'INVALID_MODEL_POLICY' };
         for (const [role, setting] of Object.entries(policy.overrides)) {
           if (!ROLES.has(role) || !object(setting)) return { ok: false, code: 'INVALID_MODEL_POLICY' };
+          const unchanged = sameJson(setting, currentPolicy?.overrides?.[role]);
           const valid = setting.mode === 'tier' && TIERS.has(setting.tier)
-            || setting.mode === 'fixed' && allowed.has(setting.modelProviderId)
-            || setting.mode === 'auto' && ids(setting.pool) && setting.pool.length > 0;
+            || setting.mode === 'fixed' && (unchanged
+              ? typeof setting.modelProviderId === 'string' && setting.modelProviderId.trim().length > 0
+              : allowed.has(setting.modelProviderId))
+            || setting.mode === 'auto' && (unchanged ? shapeIds(setting.pool) : ids(setting.pool)) && setting.pool.length > 0;
           if (setting.reasoningEffort != null && (!isModelReasoningEffort(setting.reasoningEffort)
-            || setting.mode === 'fixed' && !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
+            || !unchanged && setting.mode === 'fixed' && !modelReasoningLevels(models.find(model => model.id === setting.modelProviderId) || {}).includes(setting.reasoningEffort))) {
             return { ok: false, code: 'INVALID_REASONING_EFFORT' };
           }
           if (setting.fastMode !== undefined) {
             const chosen = models.find(model => model.id === setting.modelProviderId);
             const subscription = chosen && modelSupportsFastMode(chosen);
-            if (typeof setting.fastMode !== 'boolean' || (setting.fastMode === true && setting.mode === 'fixed' && !subscription)) {
+            if (typeof setting.fastMode !== 'boolean' || (!unchanged && setting.fastMode === true && setting.mode === 'fixed' && !subscription)) {
               return { ok: false, code: 'INVALID_FAST_MODE' };
             }
           }
@@ -54,6 +61,40 @@ export function profilePolicyPatch(payload, models = []) {
         }
       }
       patch.modelPolicy = policy;
+    }
+  }
+  if (payload.capabilityPolicy !== undefined) {
+    if (payload.capabilityPolicy === null) {
+      patch.capabilityPolicy = null;
+    } else {
+      const cap = payload.capabilityPolicy;
+      const isObj = cap && typeof cap === 'object' && !Array.isArray(cap);
+      const allowedKeys = new Set(['enabledSkillIds', 'disabledSkillIds', 'enabledMcpIds', 'disabledMcpIds']);
+      const validIdList = (value) => Array.isArray(value)
+        && value.length <= 256
+        && value.every((id) => typeof id === 'string' && id.trim().length > 0 && id.trim().length <= 200 && !/[\u0000-\u001f\u007f]/.test(id));
+      if (!isObj || Object.keys(cap).some((key) => !allowedKeys.has(key))) {
+        return { ok: false, code: 'INVALID_CAPABILITY_POLICY' };
+      }
+      for (const key of allowedKeys) {
+        if (cap[key] !== undefined && !validIdList(cap[key])) {
+          return { ok: false, code: 'INVALID_CAPABILITY_POLICY' };
+        }
+      }
+      const dedup = (arr) => [...new Set((arr || []).map((id) => id.trim()).filter(Boolean))];
+      const disabledSkillIds = dedup(cap.disabledSkillIds);
+      const disabledSkillSet = new Set(disabledSkillIds);
+      const enabledSkillIds = dedup(cap.enabledSkillIds).filter((id) => !disabledSkillSet.has(id));
+      const disabledMcpIds = dedup(cap.disabledMcpIds);
+      const disabledMcpSet = new Set(disabledMcpIds);
+      const enabledMcpIds = dedup(cap.enabledMcpIds).filter((id) => !disabledMcpSet.has(id));
+      const normalized = {
+        ...(enabledSkillIds.length ? { enabledSkillIds } : {}),
+        ...(disabledSkillIds.length ? { disabledSkillIds } : {}),
+        ...(enabledMcpIds.length ? { enabledMcpIds } : {}),
+        ...(disabledMcpIds.length ? { disabledMcpIds } : {}),
+      };
+      patch.capabilityPolicy = Object.keys(normalized).length > 0 ? normalized : null;
     }
   }
   return { ok: true, patch };

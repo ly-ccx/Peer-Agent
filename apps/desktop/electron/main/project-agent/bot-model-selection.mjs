@@ -8,7 +8,7 @@ export function createBotModelSelectionUpdater({ get, updateProfile }) {
       || (payload.reasoningEffort !== undefined && typeof payload.reasoningEffort !== 'string')) {
       return { ok: false, code: 'INVALID_INPUT' };
     }
-    const result = get({ workspaceId: payload.workspaceId });
+    const result = await get({ workspaceId: payload.workspaceId });
     if (!result?.ok) return result;
     const current = result.item?.profile;
     if (!current || current.status === 'archived') return { ok: false, code: 'NOT_FOUND' };

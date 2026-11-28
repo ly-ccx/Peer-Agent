@@ -84,6 +84,7 @@ export function createDesktopHostVisualReview({ runVerifier = runPlanVisualVerif
       started = runVerifierWithIndexGrace(runVerifier, {
         plan, verifierRunId, signal: controller.signal,
         goalPlanStore: context.goalPlanStore, workspacePath: context.workspacePath,
+        llmConfigStore: context.llmConfigStore, resolveCredential: context.resolveCredential,
         llmChatService: context.llmChatService, modelProviderId: context.modelProviderId,
       }, controller.signal);
     } catch (error) {

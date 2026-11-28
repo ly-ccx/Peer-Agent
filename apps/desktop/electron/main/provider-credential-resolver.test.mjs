@@ -5,29 +5,11 @@ import {
   createProviderCredentialError,
   getProviderCredentialErrorCode,
   getProviderCredentialErrorMessage,
-  mapQoderLocalAuthCredentialError,
   refreshExpiredOAuthProviders,
   resolveProviderCredential,
 } from './provider-credential-resolver.mjs';
 
 describe('provider credential resolver', () => {
-  it('resolves Qoder local auth providers without a stored API key', async () => {
-    const credential = await resolveProviderCredential({
-      provider: { id: 'qoder-1', authMethod: 'qoder_local_auth' },
-      llmConfigStore: {
-        getDecryptedApiKey: () => {
-          throw new Error('Qoder local auth should not read stored api key');
-        },
-      },
-      loadQoderToken: async () => 'qoder-token',
-    });
-
-    assert.deepEqual(credential, {
-      authMethod: 'qoder_local_auth',
-      apiKey: 'qoder-token',
-      accountId: null,
-    });
-  });
 
   it('resolves ChatGPT subscription OAuth tokens and refreshes through the shared credential seam', async () => {
     const refreshedTokens = {
@@ -49,7 +31,12 @@ describe('provider credential resolver', () => {
             accountId: 'acct-1',
           },
         }),
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshChatGptTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });
@@ -97,7 +84,12 @@ describe('provider credential resolver', () => {
             tokens: { access: 'old', refresh: 'old-r', expires: Date.now() - 1, accountId: 'acct-1' },
           };
         },
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshChatGptTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });
@@ -121,7 +113,12 @@ describe('provider credential resolver', () => {
         getCredential: () => ({
           tokens: { access: 'grok-old', refresh: 'grok-refresh', expires: 0 },
         }),
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshGrokAccessTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });
@@ -153,7 +150,6 @@ describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
             authMethod: 'oauth_chatgpt',
             oauthStatus: { status: 'expired' },
           },
-          { id: 'google-1', authMethod: 'oauth_google', oauthStatus: { status: 'connected' } },
         ]),
       },
       resolveCredential: async ({ provider }) => {
@@ -172,7 +168,7 @@ describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
       llmConfigStore: {
         listProviders: () => ([
           { id: 'grok-1', authMethod: 'oauth_grok', oauthStatus: { status: 'expired' } },
-          { id: 'google-1', authMethod: 'oauth_google', oauthStatus: { status: 'expired' } },
+          { id: 'chatgpt-1', authMethod: 'oauth_chatgpt', oauthStatus: { status: 'expired' } },
         ]),
       },
       resolveCredential: async ({ provider }) => {
@@ -205,84 +201,55 @@ describe('refreshExpiredOAuthProviders (settings list silent refresh)', () => {
     assert.equal(resolveCalled, false);
   });
 
-  it('maps bare Node EPERM from Qoder local auth to a readable credential error', async () => {
-    const native = Object.assign(new Error('EPERM: operation not permitted, open \'/tmp/.auth/user\''), {
-      code: 'EPERM',
-    });
-
-    await assert.rejects(
-      () => resolveProviderCredential({
-        provider: { id: 'qoder-1', authMethod: 'qoder_local_auth' },
-        llmConfigStore: {
-          getDecryptedApiKey: () => {
-            throw new Error('should not read stored api key');
-          },
-        },
-        loadQoderToken: async () => {
-          throw native;
-        },
+  it('dedupes multi-model OAuth groups by groupId and does not broadcast when status remains expired', async () => {
+    const refreshCalls = [];
+    const expiredAt = Date.now() - 60_000;
+    let status = 'expired';
+    const llmConfigStore = {
+      listProviders: () => ([
+        { id: 'grok-m1', groupId: 'grok-group', authMethod: 'oauth_grok', oauthStatus: { status } },
+        { id: 'grok-m2', groupId: 'grok-group', authMethod: 'oauth_grok', oauthStatus: { status } },
+      ]),
+      getCredential: () => ({
+        tokens: { access: 'already-fresh-in-vault', refresh: 'r1', expires: Date.now() + 3_600_000, scope: 'api:access' },
       }),
-      (error) => {
-        assert.equal(error.code, 'qoder_auth_permission_denied');
-        assert.notEqual(error.message, 'EPERM');
-        assert.match(error.message, /permission denied|login state/i);
-        assert.equal(error.cause, native);
-        return true;
+      refreshOAuthTokens: async (id, tokens) => {
+        refreshCalls.push(id);
+        // Simulate metadata hint write failing or lagging so listProviders() still reports 'expired'.
+        return { tokens, refreshed: false };
       },
-    );
-  });
+    };
 
-  it('preserves stable qoder_auth_* codes and readable messages from the auth layer', async () => {
-    const authError = Object.assign(
-      new Error('Cannot read Qoder local login state (permission denied). Check ~/.qoder/.auth permissions or re-login in Qoder.'),
-      { code: 'qoder_auth_permission_denied' },
-    );
+    const stuck = await refreshExpiredOAuthProviders({ llmConfigStore });
+    assert.deepEqual(refreshCalls, ['grok-m1']);
+    assert.deepEqual(stuck, { attempted: 1, refreshed: 0 });
 
-    await assert.rejects(
-      () => resolveProviderCredential({
-        provider: { id: 'qoder-1', authMethod: 'qoder_local_auth' },
-        llmConfigStore: {
-          getDecryptedApiKey: () => {
-            throw new Error('should not read stored api key');
-          },
-        },
-        loadQoderToken: async () => {
-          throw authError;
-        },
-      }),
-      (error) => {
-        assert.equal(error.code, 'qoder_auth_permission_denied');
-        assert.equal(error.message, authError.message);
-        return true;
+    // Once metadata hints catch up so listProviders() reports 'connected', notify once.
+    refreshCalls.length = 0;
+    const syncedStore = {
+      ...llmConfigStore,
+      refreshOAuthTokens: async (id, tokens) => {
+        refreshCalls.push(id);
+        status = 'connected';
+        return { tokens: { ...tokens, expires: Math.max(expiredAt, Date.now() + 3_600_000) }, refreshed: false };
       },
-    );
-  });
-
-  it('createProviderCredentialError and mapQoderLocalAuthCredentialError never use bare EPERM as message', () => {
-    const mapped = mapQoderLocalAuthCredentialError(
-      Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }),
-    );
-    assert.equal(mapped.code, 'qoder_auth_permission_denied');
-    assert.notEqual(mapped.message, 'EPERM');
-    assert.match(mapped.message, /permission denied|login state/i);
-    assert.equal(getProviderCredentialErrorCode(mapped), 'qoder_auth_permission_denied');
-    // sanity: known oauth code still maps to readable text
-    const oauth = createProviderCredentialError('oauth_not_logged_in');
-    assert.equal(oauth.code, 'oauth_not_logged_in');
-    assert.notEqual(oauth.message, 'oauth_not_logged_in');
+    };
+    const synced = await refreshExpiredOAuthProviders({ llmConfigStore: syncedStore });
+    assert.deepEqual(refreshCalls, ['grok-m1']);
+    assert.deepEqual(synced, { attempted: 1, refreshed: 1 });
   });
 
   it('getProviderCredentialErrorMessage prefers readable message over bare code for chat bubbles', () => {
-    const readable = createProviderCredentialError('qoder_auth_permission_denied');
-    assert.equal(getProviderCredentialErrorCode(readable), 'qoder_auth_permission_denied');
-    assert.notEqual(getProviderCredentialErrorMessage(readable), 'qoder_auth_permission_denied');
-    assert.match(getProviderCredentialErrorMessage(readable), /permission denied|Full Disk Access|QODER_ACCESS_TOKEN/i);
+    const readable = createProviderCredentialError('unsupported_auth_method');
+    assert.equal(getProviderCredentialErrorCode(readable), 'unsupported_auth_method');
+    assert.notEqual(getProviderCredentialErrorMessage(readable), 'unsupported_auth_method');
+    assert.match(getProviderCredentialErrorMessage(readable), /retired|available model/i);
 
     // If only a bare code-like message is present, still expand via the message map.
-    const bare = Object.assign(new Error('qoder_auth_permission_denied'), {
-      code: 'qoder_auth_permission_denied',
+    const bare = Object.assign(new Error('unsupported_auth_method'), {
+      code: 'unsupported_auth_method',
     });
-    assert.notEqual(getProviderCredentialErrorMessage(bare), 'qoder_auth_permission_denied');
-    assert.match(getProviderCredentialErrorMessage(bare), /permission denied|Full Disk Access|login state/i);
+    assert.notEqual(getProviderCredentialErrorMessage(bare), 'unsupported_auth_method');
+    assert.match(getProviderCredentialErrorMessage(bare), /retired|available model/i);
   });
 });

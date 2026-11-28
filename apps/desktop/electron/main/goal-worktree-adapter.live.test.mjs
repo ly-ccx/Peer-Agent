@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-import { resolveActiveGoalExecutionBinding } from './chat-runtime/goal-mode-gate.mjs';
 import { createAutomationWorktreeAdapter } from './automation-worktree-adapter.mjs';
 import { createGoalWorktreeAdapter } from './goal-worktree-adapter.mjs';
 
@@ -102,12 +101,6 @@ describe('goal worktree live isolation', () => {
     assert.ok(taskBranch);
     assert.equal(git(['-C', repository, 'status', '--porcelain']), '?? user-dirty.txt');
     assert.equal(existsSync(path.join(repository, 'goal-only.txt')), false);
-
-    const binding = resolveActiveGoalExecutionBinding('c1', prepared.originWorkspacePath, {
-      getActivePlanByConversation: () => prepared,
-    });
-    assert.equal(binding.executionWorkspacePath, path.resolve(worktreePath));
-    assert.deepEqual(binding.writableRoots, [path.resolve(worktreePath)]);
 
     writeFileSync(path.join(worktreePath, 'goal-only.txt'), 'isolated write\n');
     assert.equal(existsSync(path.join(repository, 'goal-only.txt')), false);

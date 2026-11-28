@@ -1,0 +1,1147 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "input": {
+        "version": 1,
+        "servers": []
+      },
+      "expected": []
+    },
+    {
+      "name": "legacy empty",
+      "input": [],
+      "expected": []
+    },
+    {
+      "name": "visible defaults",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "legacy fields",
+      "input": [
+        {
+          "mcpId": "legacy",
+          "name": "Legacy",
+          "serverUrl": "https://synthetic.invalid/mcp",
+          "tools": [
+            {
+              "toolName": "read",
+              "toolDesc": "legacy description"
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "capabilityId": "local.mcp.legacy.read",
+          "name": "mcp__legacy__read",
+          "displayName": "Legacy: read",
+          "description": "legacy description",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "legacy",
+          "providerLabel": "Legacy",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.legacy.read"
+          },
+          "origin": {
+            "providerId": "legacy",
+            "transport": "streamable_http",
+            "toolName": "read",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "{\"enabled\":false}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "enabled": false
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "{\"policy\":{\"trusted\":false}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "policy": {
+              "trusted": false
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "{\"health\":{\"status\":\"failed\"}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "health": {
+              "status": "failed"
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "{\"toolVisibility\":{\"read.file\":false}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "toolVisibility": {
+              "read.file": false
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "{\"policy\":{\"visibleByDefault\":false}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "policy": {
+              "visibleByDefault": false
+            }
+          }
+        ]
+      },
+      "expected": []
+    },
+    {
+      "name": "{\"policy\":{\"visibleByDefault\":false},\"toolVisibility\":{\"read.file\":true}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "policy": {
+              "visibleByDefault": false
+            },
+            "toolVisibility": {
+              "read.file": true
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "{\"policy\":{\"requirePermission\":false}}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "policy": {
+              "requirePermission": false
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "available",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": false
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "{\"transport\":\"sse\"}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "sse",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "sse",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "{\"transport\":\"streamable_http\"}",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "streamable_http",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "streamable_http",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "UTF16 aliases and title",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "中文🙂",
+            "displayName": "工具服务",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "a/🙂",
+                "inputSchema": {},
+                "riskLevel": "L1_local_read",
+                "dataLevel": "D1_internal"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.中文🙂.a/🙂",
+          "name": "mcp________a___",
+          "displayName": "工具服务: a/🙂",
+          "description": "MCP tool a/🙂 from 工具服务.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "中文🙂",
+          "providerLabel": "工具服务",
+          "riskLevel": "L1_local_read",
+          "dataLevel": "D1_internal",
+          "inputSchema": {},
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.中文🙂.a/🙂"
+          },
+          "origin": {
+            "providerId": "中文🙂",
+            "transport": "stdio",
+            "toolName": "a/🙂",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "auth none",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "none",
+              "credentialRef": "ignored"
+            },
+            "headers": {
+              "Authorization": "fixture-secret-do-not-export"
+            },
+            "env": {
+              "TOKEN": "fixture-secret-do-not-export"
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "none",
+            "hasCredential": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "auth http_bearer",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "http_bearer",
+              "credentialRef": "token"
+            },
+            "headers": {
+              "Authorization": "fixture-secret-do-not-export"
+            },
+            "env": {
+              "TOKEN": "fixture-secret-do-not-export"
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "http_bearer",
+            "hasCredential": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "auth http_header",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "http_header",
+              "headerName": " X-Token ",
+              "credentialRef": "mcp-cred:token"
+            },
+            "headers": {
+              "Authorization": "fixture-secret-do-not-export"
+            },
+            "env": {
+              "TOKEN": "fixture-secret-do-not-export"
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "http_header",
+            "hasCredential": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "auth stdio_env",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "stdio_env",
+              "envName": "TOKEN_2",
+              "credentialRef": "token"
+            },
+            "headers": {
+              "Authorization": "fixture-secret-do-not-export"
+            },
+            "env": {
+              "TOKEN": "fixture-secret-do-not-export"
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "stdio_env",
+            "hasCredential": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "auth oauth2",
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "oauth2",
+              "credentialRef": "oauth"
+            },
+            "headers": {
+              "Authorization": "fixture-secret-do-not-export"
+            },
+            "env": {
+              "TOKEN": "fixture-secret-do-not-export"
+            }
+          }
+        ]
+      },
+      "expected": [
+        {
+          "capabilityId": "local.mcp.files.local.read.file",
+          "name": "mcp__files_local__read_file",
+          "displayName": "Local files: read.file",
+          "description": "External tool description is metadata.",
+          "source": "mcp",
+          "locality": "local",
+          "health": "needs_permission",
+          "providerId": "files.local",
+          "providerLabel": "Local files",
+          "riskLevel": "L3_external_write",
+          "dataLevel": "D2_sensitive",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          "permissionPolicy": {
+            "kind": "mcp-tool",
+            "required": true
+          },
+          "runtime": {
+            "executor": "local-tool-host",
+            "executorCapabilityId": "local.mcp.files.local.read.file"
+          },
+          "origin": {
+            "providerId": "files.local",
+            "transport": "stdio",
+            "toolName": "read.file",
+            "authMode": "oauth2",
+            "hasCredential": true
+          }
+        }
+      ]
+    }
+  ],
+  "rejections": [
+    {
+      "input": {
+        "version": 99,
+        "servers": []
+      },
+      "error": "mcp_inventory_version_unsupported"
+    },
+    {
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "websocket",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "error": "mcp_transport_unsupported"
+    },
+    {
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "future"
+            }
+          }
+        ]
+      },
+      "error": "mcp_auth_unsupported"
+    },
+    {
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "files.local",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "auth": {
+              "mode": "http_bearer"
+            }
+          }
+        ]
+      },
+      "error": "mcp_inventory_invalid"
+    },
+    {
+      "input": {
+        "version": 1,
+        "servers": [
+          {
+            "id": "a.b",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "a?b",
+            "displayName": "Local files",
+            "transport": "stdio",
+            "command": "/synthetic/mcp-server",
+            "tools": [
+              {
+                "name": "read.file",
+                "description": "External tool description is metadata.",
+                "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "error": "mcp_projection_alias_conflict"
+    }
+  ]
+}

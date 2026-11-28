@@ -41,3 +41,30 @@ test('profile effort is validated before any write and persists across restart',
     assert.equal(profilePolicyPatch({ modelPolicy: policy }, [{ ...model, supportsReasoning: false }]).ok, false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('editing one role is not blocked by an untouched stale role or scope entry', () => {
+  const currentPolicy = {
+    scope: { modelProviderIds: ['removed-model', 'm'] },
+    overrides: {
+      session_worker: { mode: 'fixed', modelProviderId: 'removed-model', reasoningEffort: 'max' },
+      verifier: { mode: 'fixed', modelProviderId: 'm', reasoningEffort: 'default' },
+    },
+  };
+  const nextPolicy = {
+    ...currentPolicy,
+    overrides: {
+      ...currentPolicy.overrides,
+      project_agent: { mode: 'fixed', modelProviderId: 'm', reasoningEffort: 'low' },
+    },
+  };
+  assert.equal(profilePolicyPatch({ modelPolicy: nextPolicy }, [model], currentPolicy).ok, true);
+  // Modifying the stale role to another invalid model/effort still fails validation.
+  const badEdit = {
+    ...currentPolicy,
+    overrides: {
+      ...currentPolicy.overrides,
+      session_worker: { mode: 'fixed', modelProviderId: 'still-missing', reasoningEffort: 'low' },
+    },
+  };
+  assert.equal(profilePolicyPatch({ modelPolicy: badEdit }, [model], currentPolicy).ok, false);
+});

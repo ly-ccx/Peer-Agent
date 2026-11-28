@@ -31,7 +31,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-6) var(--space-8);
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 78%, transparent);
   box-shadow: var(--shadow-popover);
@@ -46,7 +46,7 @@
   height: 46px;
   border-radius: var(--ui-radius-circle);
   background: var(--ui-accent, var(--azure-seal));
-  color: var(--za-accent-ink);
+  color: var(--paper-raised);
   font-size: 1.9rem;
   line-height: 1;
   box-shadow: 0 10px 26px color-mix(in srgb, var(--azure-seal) 28%, transparent);
@@ -87,9 +87,9 @@
   z-index: 24;
   box-sizing: border-box;
   padding: var(--space-2) var(--space-6);
-  border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--chrome-hairline) 58%, transparent);
   background: color-mix(in srgb, var(--chrome-canvas) 88%, transparent);
-  color: var(--ink-base);
+  color: var(--graphite-base);
   font-size: var(--ui-font-control, 0.8125rem);
   line-height: 1.45;
 }
@@ -101,8 +101,8 @@
 .selection-child-banner blockquote {
   margin: var(--space-1) 0 0;
   padding-left: var(--space-3);
-  border-left: 2px solid color-mix(in srgb, var(--ink-hairline) 80%, transparent);
-  color: var(--ink-fade);
+  border-left: 2px solid color-mix(in srgb, var(--chrome-hairline) 80%, transparent);
+  color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -137,7 +137,7 @@
   min-height: 42px;
   padding: var(--space-2) var(--space-6);
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--ink-hairline) 58%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--chrome-hairline) 58%, transparent);
   border-radius: var(--ui-radius-panel);
   /* 独立于三栏基础 Chrome 的局部玻璃层：保留透明采样和下方投影，不叠顶部 inset 高光。 */
   background: var(--glass-frosted-chrome-background);
@@ -152,7 +152,7 @@
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--ink-fade);
+  color: var(--graphite-fade);
 }
 
 .current-turn-context-text {
@@ -162,7 +162,7 @@
   white-space: nowrap;
   font-size: var(--ui-font-control, 0.8125rem);
   font-weight: 600;
-  color: var(--ink-base);
+  color: var(--graphite-base);
 }
 
 
@@ -180,7 +180,7 @@
 .chat-thread-loading-mark {
   width: 28px;
   height: 28px;
-  color: var(--azure-seal, #3b82f6);
+  color: var(--azure-seal);
   animation: motion-spin 0.8s linear infinite;
 }
 .chat-thread-loading p {
@@ -234,27 +234,27 @@
 }
 .chat-empty-primary-btn {
   appearance: none;
-  border: 1px solid color-mix(in srgb, var(--ink-base) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--graphite-base) 14%, transparent);
   border-radius: var(--ui-radius-pill);
   padding: 7px 16px;
   font: inherit;
   font-size: 13px;
   font-weight: 520;
   letter-spacing: 0.01em;
-  color: var(--ink-strong, var(--ink-base));
+  color: var(--graphite-base);
   background: transparent;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease;
 }
 .chat-empty-primary-btn:hover {
-  background: color-mix(in srgb, var(--ink-base) 7%, transparent);
-  border-color: color-mix(in srgb, var(--ink-base) 22%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 7%, transparent);
+  border-color: color-mix(in srgb, var(--graphite-base) 22%, transparent);
 }
 .chat-empty-primary-btn:active {
-  background: color-mix(in srgb, var(--ink-base) 10%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 10%, transparent);
 }
 .chat-empty-primary-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--ink-base) 28%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--graphite-base) 28%, transparent);
   outline-offset: 3px;
 }
 .chat-empty-cards {
@@ -283,8 +283,8 @@
     transform var(--za-motion-fast, 120ms) ease;
 }
 .chat-empty-card:hover {
-  border-color: color-mix(in srgb, var(--azure-seal) 34%, var(--ui-border-subtle, transparent));
-  background: color-mix(in srgb, var(--chrome-canvas) 80%, var(--azure-trace) 20%);
+  border-color: var(--chrome-hairline-strong);
+  background: var(--paper-hover);
   transform: translateY(-1px);
 }
 .chat-empty-card:focus-visible {
@@ -368,7 +368,7 @@
 
 .chat-scroll-bottom-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--ui-focus-ring, var(--za-focus)), var(--shadow-popover);
+  box-shadow: 0 0 0 3px var(--ui-focus-ring, var(--ui-focus-glow)), var(--shadow-popover);
 }
 
 /* ── Messages ── */
@@ -493,7 +493,7 @@
 }
 
 .chat-message-editor-error {
-  color: var(--status-danger, #b42318);
+  color: var(--state-danger);
   font-size: 0.78rem;
 }
 
@@ -531,7 +531,7 @@
 }
 
 .chat-msg-assistant {
-  background: var(--za-message-bg, var(--paper-sheet));
+  background: var(--paper-raised);
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-message);
   padding: var(--space-4) var(--space-5);
@@ -562,23 +562,23 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--za-control-fill);
-  border: 1px solid var(--ui-border-subtle, var(--za-line));
+  background: var(--control-fill);
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-panel);
-  color: var(--ink-base);
+  color: var(--graphite-base);
   font-size: var(--ui-font-control, 13px);
   line-height: 1.4;
 }
 .chat-stream-error-icon {
   flex-shrink: 0;
   display: inline-flex;
-  color: var(--ink-soft);
+  color: var(--graphite-soft);
 }
 .chat-stream-error-text {
   min-width: 0;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
-  color: var(--ink-base);
+  color: var(--graphite-base);
 }
 .chat-stream-error-actions {
   display: inline-flex;
@@ -590,10 +590,10 @@
 .chat-stream-error-resume {
   appearance: none;
   padding: 4px 12px;
-  border: 1px solid var(--ui-border-subtle, var(--ink-hairline));
+  border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-control);
-  background: var(--za-control-fill-hover);
-  color: var(--ink-base);
+  background: var(--control-fill-hover);
+  color: var(--graphite-base);
   font: inherit;
   font-size: 12px;
   line-height: 1.4;
@@ -603,8 +603,8 @@
     border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 .chat-stream-error-resume:hover:not(:disabled) {
-  background: var(--ui-surface-hover, var(--za-hover));
-  border-color: var(--ink-soft);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  border-color: var(--graphite-soft);
 }
 .chat-stream-error-resume:disabled {
   opacity: 0.45;
@@ -620,12 +620,12 @@
   border: 0;
   border-radius: var(--ui-radius-control);
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--graphite-soft);
   cursor: pointer;
 }
 .chat-stream-error-dismiss:hover {
-  background: var(--ui-surface-hover, var(--za-hover));
-  color: var(--ink-base);
+  background: var(--ui-surface-hover, var(--paper-hover));
+  color: var(--graphite-base);
 }
 
 /* ── Segments (interleaved text + tool-call groups) ── */
@@ -772,8 +772,8 @@
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .tool-call-card.synthetic {
-  border-color: var(--za-warn-soft);
-  background: var(--za-surface-0);
+  border-color: var(--state-warn-soft);
+  background: var(--paper-raised);
 }
 /* 普通命令卡极简单行：去掉边框/背景/圆角与运行态脉冲，压扁为一行文字。
    交互卡(.interaction-card)仍保留卡片外观，故用 :not 排除。 */
@@ -825,7 +825,7 @@
   color: var(--state-success);
 }
 .tool-call-card.synthetic .tool-call-icon {
-  color: var(--za-warn);
+  color: var(--state-warn);
 }
 .tool-call-label {
   flex: 1;
@@ -861,12 +861,12 @@
   margin: var(--space-1) 0;
   border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
   border-radius: var(--ui-radius-panel);
-  background: color-mix(in srgb, var(--azure-soft, #5b8def) 8%, var(--ui-surface-raised, var(--paper-sheet)));
+  background: var(--paper-raised);
   overflow: hidden;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .skill-capsule-card.running {
-  border-color: color-mix(in srgb, var(--azure-soft, #5b8def) 45%, var(--ui-border-subtle, var(--chrome-hairline)));
+  border-color: color-mix(in srgb, var(--azure-soft) 45%, var(--ui-border-subtle, var(--chrome-hairline)));
 }
 .skill-capsule-card.done {
   background: var(--ui-surface-raised, var(--paper-sheet));
@@ -892,13 +892,13 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  color: var(--azure-seal, #3b6fd8);
+  color: var(--azure-seal);
 }
 .skill-capsule-card.running .skill-capsule-icon {
-  color: var(--azure-soft, #5b8def);
+  color: var(--azure-soft);
 }
 .skill-capsule-card.done .skill-capsule-icon {
-  color: var(--state-success, #2f9d63);
+  color: var(--state-success);
 }
 .skill-capsule-spinner-svg {
   animation: spin 0.9s linear infinite;
@@ -918,8 +918,8 @@
   min-width: 0;
   padding: 2px 8px;
   border-radius: var(--ui-radius-pill);
-  border: 1px solid color-mix(in srgb, var(--azure-soft, #5b8def) 35%, transparent);
-  background: color-mix(in srgb, var(--azure-soft, #5b8def) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--azure-soft) 35%, transparent);
+  background: color-mix(in srgb, var(--azure-soft) 14%, transparent);
   color: var(--graphite-base);
 }
 .skill-capsule-pill-label {
@@ -928,7 +928,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--azure-seal, #3b6fd8);
+  color: var(--azure-seal);
 }
 .skill-capsule-pill-name {
   min-width: 0;
@@ -1022,24 +1022,24 @@
   min-width: 0;
 }
 .interaction-option-button:hover:not(:disabled) {
-  background: var(--ui-surface-selected, var(--azure-trace));
-  border-color: var(--ui-selected-border, var(--azure-soft));
+  background: var(--paper-hover);
+  border-color: var(--chrome-hairline-strong);
 }
 /* 已选项：高亮标记。即便整组已置灰不可点，已选项仍保持可读的强调态。 */
 .interaction-option-button.selected {
-  border-color: var(--ui-selected-border, var(--azure-seal));
-  color: var(--ui-accent, var(--azure-seal));
-  background: var(--ui-surface-selected, var(--azure-trace));
+  border-color: var(--azure-seal);
+  color: var(--graphite-base);
+  background: var(--paper-active);
   font-weight: 600;
 }
 .interaction-option-badge {
   flex: none;
   font-size: var(--ui-font-caption, 11px);
   font-weight: 600;
-  color: var(--ui-accent, var(--azure-seal));
+  color: var(--azure-seal);
   padding: 1px var(--space-2);
   border-radius: var(--ui-radius-pill);
-  background: var(--azure-soft);
+  background: color-mix(in srgb, var(--azure-seal) 14%, transparent);
 }
 .interaction-option-button:disabled {
   cursor: not-allowed;
@@ -1448,8 +1448,8 @@
   /* 单层浮层:显式覆盖全局 .pa-dropdown-menu 的 border/radius/背景,
      避免实心底 + 半透明层 + 错位描边叠成"双层框"。 */
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-control);
-  background: color-mix(in srgb, var(--chrome-raised) 88%, transparent);
+  border-radius: var(--ui-radius-panel);
+  background: color-mix(in srgb, var(--paper-raised) 92%, transparent);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow-popover);
 }
@@ -1494,7 +1494,7 @@
 .composer-dropdown .pa-dropdown-item.danger:hover,
 .composer-dropdown .pa-dropdown-item.danger.active,
 .composer-dropdown .pa-dropdown-item.danger.selected {
-  background: var(--za-danger-soft);
+  background: var(--state-danger-soft);
 }
 
 .token-usage-wrap {
@@ -1550,8 +1550,8 @@
       var(--chrome-sunken) 0
     );
   /* mask 挖空中心，避免硬编码底色在毛玻璃/主题下露馅 */
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), rgb(0 0 0) calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), rgb(0 0 0) calc(100% - 2px));
   transition: background var(--za-motion-medium);
 }
 .ctx-pct {
@@ -1569,7 +1569,7 @@
   box-sizing: border-box;
   width: 296px;
   padding: 14px 16px 12px;
-  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--chrome-hairline)) 82%, transparent);
   border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
   box-shadow: var(--glass-modal-shadow);
@@ -1777,7 +1777,7 @@
   box-sizing: border-box;
   width: 240px;
   padding: 12px 14px 10px;
-  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--za-line)) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ui-border-subtle, var(--chrome-hairline)) 82%, transparent);
   border-radius: var(--ui-radius-panel);
   background: color-mix(in srgb, var(--paper-sheet) 96%, transparent);
   box-shadow: var(--glass-modal-shadow);
@@ -1888,7 +1888,7 @@
 }
 .composer-edit-banner-cancel:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 
 .chat-composer {
@@ -1909,7 +1909,7 @@
 }
 .chat-composer:focus-within {
   border-color: var(--graphite-base);
-  box-shadow: var(--shadow-soft, var(--shadow-composer)), 0 0 0 3px var(--za-focus);
+  box-shadow: var(--shadow-soft, var(--shadow-composer)), 0 0 0 3px var(--ui-focus-glow);
 }
 
 .slash-command-menu {
@@ -1953,7 +1953,7 @@
   width: 24px;
   height: 24px;
   border-radius: var(--ui-radius-control);
-  background: var(--azure-trace);
+  background: var(--control-fill);
   color: var(--azure-seal);
   font-family: var(--font-mono);
   font-size: var(--ui-font-control, 0.8125rem);
@@ -2069,7 +2069,7 @@
   align-items: center;
   max-width: calc(100% - 48px);
   pointer-events: none;
-  color: var(--azure-seal, #1f6f78);
+  color: var(--azure-seal);
   white-space: nowrap;
 }
 .composer-quote-flow-item {
@@ -2123,7 +2123,7 @@
   min-width: 0;
   max-width: min(100%, 42rem);
   margin: 6px 0 0;
-  color: var(--azure-seal, #1f6f78);
+  color: var(--azure-seal);
   font-size: 14px;
   line-height: 1.45;
 }
@@ -2187,7 +2187,7 @@
   overflow: hidden;
   border: 0;
   border-radius: var(--ui-radius-modal);
-  background: var(--chrome-sunken, #eef1f4);
+  background: var(--chrome-sunken);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--chrome-hairline) 55%, transparent),
     0 1px 2px rgba(26, 29, 33, 0.05),
@@ -2217,8 +2217,8 @@
   width: 22px;
   height: 22px;
   border-radius: var(--ui-radius-circle);
-  background: color-mix(in srgb, #111 58%, transparent);
-  color: #fff;
+  background: rgb(17 17 17 / 58%);
+  color: rgb(255 255 255);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow:
@@ -2226,8 +2226,8 @@
     0 1px 3px rgba(0, 0, 0, 0.16);
 }
 .attachment-chip--media .attachment-remove:hover {
-  background: color-mix(in srgb, #111 76%, transparent);
-  color: #fff;
+  background: rgb(17 17 17 / 76%);
+  color: rgb(255 255 255);
 }
 
 .attachment-chip.is-dragging {
@@ -2235,7 +2235,7 @@
   cursor: grabbing;
 }
 .attachment-chip.is-drop-target {
-  outline: 2px solid color-mix(in srgb, var(--za-accent, #7c6af7) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
   outline-offset: 2px;
 }
 
@@ -2256,8 +2256,8 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--azure-seal, #3b6cff) 12%, var(--chrome-sunken));
-  color: var(--azure-seal, #3b6cff);
+  background: color-mix(in srgb, var(--azure-seal) 12%, var(--chrome-sunken));
+  color: var(--azure-seal);
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
@@ -2284,7 +2284,7 @@
 }
 .attachment-thumb-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 .attachment-thumb {
   display: block;
@@ -2382,8 +2382,8 @@
   cursor: grabbing;
 }
 .message-queue-card.is-drop-target {
-  border-color: var(--za-line-strong, var(--chrome-border));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--za-accent, #5b8def) 45%, transparent);
+  border-color: var(--chrome-hairline-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--azure-seal) 45%, transparent);
 }
 .message-queue-card-main {
   display: flex;
@@ -2402,9 +2402,9 @@
   height: 28px;
   padding: 0 8px;
   border-radius: var(--ui-radius-control);
-  background: color-mix(in srgb, var(--azure-soft, rgba(91, 141, 239, 0.16)) 88%, transparent);
-  color: var(--azure-seal, #3d6fd8);
-  border: 1px solid color-mix(in srgb, var(--azure-seal, #3d6fd8) 18%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+  color: var(--azure-seal);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 22%, transparent);
 }
 .message-queue-badge-icon {
   display: block;
@@ -2486,13 +2486,13 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
 }
 .message-queue-force-send:hover {
-  border-color: var(--chrome-border);
-  background: var(--azure-soft);
-  color: var(--azure-seal);
+  border-color: var(--chrome-hairline);
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
 }
 .message-queue-force-send:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 .message-queue-edit {
   display: inline-flex;
@@ -2512,13 +2512,13 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast), border-color var(--za-motion-fast);
 }
 .message-queue-edit:hover {
-  border-color: var(--chrome-border);
-  background: var(--azure-soft);
-  color: var(--azure-seal);
+  border-color: var(--chrome-hairline);
+  background: var(--chrome-hover);
+  color: var(--graphite-base);
 }
 .message-queue-edit:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 .message-queue-remove {
   display: inline-flex;
@@ -2536,12 +2536,12 @@
   transition: background var(--za-motion-fast), color var(--za-motion-fast);
 }
 .message-queue-remove:hover {
-  background: var(--state-danger-soft, rgba(220, 80, 80, 0.14));
+  background: var(--state-danger-soft);
   color: var(--state-danger);
 }
 .message-queue-remove:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 
 /* Codex 风格：队列收敛为紧凑单行，操作仅在 hover / 键盘聚焦时出现。 */
@@ -2639,9 +2639,9 @@
   border: none;
   background: transparent;
   /* Prefer theme text tokens so light/dark stay readable on control-composer. */
-  color: var(--graphite-base, var(--za-text));
-  caret-color: var(--graphite-base, var(--za-text));
-  -webkit-text-fill-color: var(--graphite-base, var(--za-text));
+  color: var(--graphite-base);
+  caret-color: var(--graphite-base);
+  -webkit-text-fill-color: var(--graphite-base);
   font-size: 0.9rem;
   line-height: 1.5;
   padding: 6px 8px;
@@ -2658,8 +2658,8 @@
 }
 .chat-composer textarea::placeholder {
   /* mute is too faint on light control surfaces; soft/fade stay readable. */
-  color: var(--graphite-soft, var(--graphite-fade, var(--za-text-soft)));
-  -webkit-text-fill-color: var(--graphite-soft, var(--graphite-fade, var(--za-text-soft)));
+  color: var(--graphite-soft, var(--graphite-fade));
+  -webkit-text-fill-color: var(--graphite-soft, var(--graphite-fade));
   opacity: 1;
 }
 
@@ -2669,8 +2669,8 @@
   height: 32px;
   border: none;
   border-radius: var(--ui-radius-composer);
-  background: var(--za-primary-control-bg);
-  color: var(--za-primary-control-ink);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2847,10 +2847,6 @@
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
 }
 .provider-recovery-notice--connection {
-  color: var(--za-warning-ink, var(--graphite-soft));
-}
-/* Upstream slow-queue (Qoder 10605): informational, not an error. */
-.provider-recovery-notice--queue {
   color: var(--graphite-soft);
 }
 .provider-recovery-body {
@@ -2867,7 +2863,7 @@
   width: 100%;
   margin: 0 auto;
   padding: var(--space-2) 0;
-  color: var(--za-warning-ink, var(--graphite-soft));
+  color: var(--graphite-soft);
   font-size: 0.78rem;
   --motion-enter-from: -4px;
   animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -2883,7 +2879,7 @@
   padding: 0 2px;
 }
 .branch-push-notice-dismiss:hover {
-  color: var(--pa-text-primary);
+  color: var(--graphite-base);
 }
 .provider-recovery-meta {
   max-width: 42%;
@@ -3209,7 +3205,7 @@
   outline: none;
 }
 .message-rail-item:focus-visible {
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 
 /* 导航高亮:scrollToMessage 命中后短暂闪烁目标消息。 */
@@ -3281,7 +3277,7 @@
 }
 .chat-find-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--za-focus);
+  box-shadow: 0 0 0 3px var(--ui-focus-glow);
 }
 
 /* 匹配高亮:CSS Custom Highlight API,不向消息 DOM 注入节点。 */
@@ -3410,11 +3406,11 @@
 }
 
 .batch-search-card.done .batch-search-summary-dot {
-  background: var(--moss-base, #5a8f6e);
+  background: var(--state-success);
 }
 
 .batch-search-card.error .batch-search-summary-dot {
-  background: var(--rust-base, #b4453a);
+  background: var(--state-danger);
 }
 
 .batch-search-summary-text {
@@ -3476,11 +3472,11 @@
 }
 
 .batch-search-lane.done .batch-search-lane-dot {
-  background: var(--moss-base, #5a8f6e);
+  background: var(--state-success);
 }
 
 .batch-search-lane.error .batch-search-lane-dot {
-  background: var(--rust-base, #b4453a);
+  background: var(--state-danger);
 }
 
 
@@ -3516,7 +3512,7 @@
 }
 
 .batch-search-lane.error .batch-search-lane-state {
-  color: var(--rust-base, #b4453a);
+  color: var(--state-danger);
 }
 
 .batch-search-results {
@@ -3617,7 +3613,7 @@
 /* 工作台打开时左右顶栏共用一条 40px 底边，并铺同一块实色纸面。
    左侧默认磨砂会把下面的消息采进去，和右侧不透明画布对不齐。 */
 :root[data-workbench-open='true'] .chat-header {
-  background: var(--chrome-canvas, var(--za-app-bg));
+  background: var(--chrome-canvas);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border-bottom-color: var(--chrome-hairline);
@@ -3641,9 +3637,9 @@
   align-items: center;
   padding: 1px 7px;
   border-radius: var(--ui-radius-pill);
-  border: 1px solid color-mix(in srgb, var(--azure-seal, #4f7cff) 28%, transparent);
-  background: color-mix(in srgb, var(--azure-seal, #4f7cff) 12%, transparent);
-  color: var(--azure-seal, #4f7cff);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 28%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+  color: var(--azure-seal);
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -3720,7 +3716,7 @@
 
 .chat-header-title-input:focus {
   border-color: var(--azure-seal);
-  box-shadow: 0 0 0 2px var(--za-focus);
+  box-shadow: 0 0 0 2px var(--ui-focus-glow);
 }
 
 .chat-header-right {
@@ -3762,7 +3758,7 @@
 .chat-header-action-btn:focus-visible,
 .chat-header-menu-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--za-focus);
+  box-shadow: 0 0 0 2px var(--ui-focus-glow);
 }
 
 /* ── Header Context Menu ── */
@@ -3859,14 +3855,14 @@
 }
 
 .chat-header-cap-pill.active {
-  background: var(--za-accent-soft);
-  border-color: var(--za-accent);
-  color: var(--za-accent);
+  background: var(--chrome-active);
+  border-color: var(--chrome-hairline);
+  color: var(--graphite-base);
 }
 
 .chat-header-cap-pill:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--za-focus);
+  box-shadow: 0 0 0 2px var(--ui-focus-glow);
 }
 
 .chat-header-cap-pill svg {
@@ -4059,7 +4055,7 @@ button.chat-header-cap-item:focus-visible {
 
 .chat-header-cap-service-head:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--za-focus);
+  box-shadow: 0 0 0 2px var(--ui-focus-glow);
 }
 
 .chat-header-cap-service-caret {
@@ -4109,7 +4105,7 @@ button.chat-header-cap-item:focus-visible {
   border-top: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control-compact);
   background: transparent;
-  color: var(--za-accent);
+  color: var(--azure-seal);
   font-size: 0.76rem;
   font-weight: 500;
   text-align: left;
@@ -4256,15 +4252,15 @@ button.chat-header-cap-item:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 28px,
-    #000 calc(100% - 28px),
+    rgb(0 0 0) 28px,
+    rgb(0 0 0) calc(100% - 28px),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 28px,
-    #000 calc(100% - 28px),
+    rgb(0 0 0) 28px,
+    rgb(0 0 0) calc(100% - 28px),
     transparent 100%
   );
 }
@@ -4313,7 +4309,7 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .pa-cascading-group-row.selected {
-  color: var(--za-accent, var(--azure-seal));
+  color: var(--azure-seal);
   font-weight: 600;
 }
 
@@ -4366,16 +4362,20 @@ button.chat-header-cap-item:focus-visible {
   cursor: default;
 }
 
-/* 选中项：强调色背景条 */
+/* 选中项：中性哑光高亮 + 冰湖青勾选记号 */
 .pa-cascading-item.selected {
-  background: var(--za-accent-soft, rgba(99, 179, 237, 0.16));
-  color: var(--za-accent, var(--azure-seal));
+  background: var(--chrome-active);
+  color: var(--graphite-base);
   font-weight: 600;
 }
 
 .pa-cascading-item.selected:hover,
 .pa-cascading-item.selected.active {
-  background: var(--za-accent-soft, rgba(99, 179, 237, 0.22));
+  background: var(--control-fill-active);
+}
+
+.pa-cascading-item.selected .pa-cascading-item-check {
+  color: var(--azure-seal);
 }
 
 .pa-cascading-item-check {
@@ -4401,7 +4401,7 @@ button.chat-header-cap-item:focus-visible {
   width: min(720px, calc(100% - 40px));
   margin: 10px auto 22px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--za-accent) 20%, var(--graphite-hairline));
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   background: var(--paper-sheet);
   color: var(--graphite-base);
@@ -4416,7 +4416,7 @@ button.chat-header-cap-item:focus-visible {
   min-height: 42px;
   padding: 0 16px;
   border-bottom: 1px solid var(--graphite-hairline);
-  background: color-mix(in srgb, var(--za-accent) 6%, transparent);
+  background: var(--paper-hover);
 }
 
 .automation-proposal-card-mark {
@@ -4426,8 +4426,8 @@ button.chat-header-cap-item:focus-visible {
   width: 26px;
   height: 26px;
   border-radius: var(--ui-radius-control);
-  color: var(--za-accent);
-  background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+  color: var(--azure-seal);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
 }
 
 .automation-proposal-card-kicker {
@@ -4444,7 +4444,7 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .automation-proposal-card.is-created .automation-proposal-card-status {
-  color: var(--success-text, var(--za-accent));
+  color: var(--state-success);
 }
 
 .automation-proposal-card.is-failed .automation-proposal-card-status {
@@ -4515,8 +4515,8 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .automation-proposal-receipt {
-  border: 1px solid color-mix(in srgb, var(--success-text, var(--za-accent)) 22%, transparent);
-  background: color-mix(in srgb, var(--success-text, var(--za-accent)) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-success) 24%, transparent);
+  background: var(--state-success-soft);
 }
 
 .automation-proposal-card-error {
@@ -4574,13 +4574,13 @@ button.chat-header-cap-item:focus-visible {
 }
 
 .automation-proposal-primary {
-  border: 1px solid color-mix(in srgb, var(--za-accent) 78%, transparent);
-  color: var(--white, #fff);
-  background: var(--za-accent);
+  border: 1px solid var(--chrome-keycap-border);
+  color: var(--chrome-keycap-fg);
+  background: var(--chrome-keycap-bg);
 }
 
 .automation-proposal-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--za-accent) 88%, black);
+  background: color-mix(in srgb, var(--chrome-keycap-bg) 90%, var(--chrome-keycap-fg));
 }
 
 .automation-proposal-card-actions button:disabled {
@@ -4790,7 +4790,7 @@ button.chat-header-cap-item:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
-  color: var(--ink-strong, var(--ink-base));
+  color: var(--graphite-base);
   /* 收紧欢迎语字号，贴近正文节奏，避免首页显得过大。 */
   font-size: clamp(1.35rem, 2.1vw, 1.75rem);
   font-weight: 650;
@@ -4838,9 +4838,9 @@ button.chat-header-cap-item:focus-visible {
   max-width: var(--chat-content-max);
   padding: 10px;
   border-radius: var(--ui-radius-composer);
-  border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--ink-base) 22%);
+  border-color: color-mix(in srgb, var(--graphite-hairline) 78%, var(--graphite-base) 22%);
   background: color-mix(in srgb, var(--chrome-canvas) 92%, var(--chrome-raised) 8%);
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink-base) 8%, transparent), 0 1px 4px color-mix(in srgb, var(--ink-base) 4%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--graphite-base) 8%, transparent), 0 1px 4px color-mix(in srgb, var(--graphite-base) 4%, transparent);
 }
 
 /* 有附件时才补出顶部附件行；无附件时保持两行，高度与间距不变。 */
@@ -4899,7 +4899,7 @@ button.chat-header-cap-item:focus-visible {
   min-height: 178px;
   padding: 10px;
   border-radius: var(--ui-radius-composer);
-  box-shadow: 0 18px 48px color-mix(in srgb, var(--ink-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--ink-base) 5%, transparent);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--graphite-base) 10%, transparent), 0 2px 8px color-mix(in srgb, var(--graphite-base) 5%, transparent);
 }
 
 /* 会话态：默认单行文本区，随输入扩展。 */
@@ -5082,7 +5082,7 @@ button.chat-header-cap-item:focus-visible {
   border-radius: var(--ui-radius-control);
   background: transparent;
   box-shadow: none;
-  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  color: var(--composer-addon-color, var(--graphite-soft));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
   line-height: 1.2;
 }
@@ -5091,7 +5091,7 @@ button.chat-header-cap-item:focus-visible {
 .composer-home-model-slot .pa-cascading-trigger.open,
 .composer-home-model-slot .reasoning-effort-trigger:hover,
 .composer-home-model-slot .reasoning-effort-trigger.open {
-  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
 }
 
 .composer-home-model-slot .token-usage-model {
@@ -5099,13 +5099,13 @@ button.chat-header-cap-item:focus-visible {
   background: transparent;
   box-shadow: none;
   padding: 0 8px;
-  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  color: var(--composer-addon-color, var(--graphite-soft));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
 .composer-home-model-slot .token-usage-context-window {
   padding: 0 8px;
-  color: var(--composer-addon-color, var(--graphite-soft, #6B6F76));
+  color: var(--composer-addon-color, var(--graphite-soft));
   font-size: var(--composer-addon-font-size, var(--ui-font-control, 0.8125rem));
 }
 
@@ -5161,14 +5161,14 @@ button.chat-header-cap-item:focus-visible {
   border: 0;
   background: transparent;
   box-shadow: none;
-  color: color-mix(in srgb, var(--ink-base) 70%, transparent);
+  color: color-mix(in srgb, var(--graphite-base) 70%, transparent);
   font-size: var(--composer-addon-font-size);
 }
 
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger:hover:not(:disabled),
 .chat-composer-wrap--empty-home .composer-dropdown .pa-dropdown-trigger.open,
 .chat-composer-wrap--empty-home .composer-workspace-add:hover {
-  background: color-mix(in srgb, var(--ink-base) 6%, transparent);
+  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
 }
 
 @media (max-width: 820px) {

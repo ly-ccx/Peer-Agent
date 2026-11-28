@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "runtime": "peer-native",
+  "canonicalLocations": ["work.budget.attempts.*.nativeRecorder", "work.budget.attempts.*.pendingTools.*.nativeRecorder", "work.budget.uncertainDispatches.*.nativeRecorder"],
+  "required": ["schemaVersion", "runtime", "execution", "recorder"],
+  "recorderFields": ["bootId", "pid", "pidStart", "hostId", "acquiredAt"],
+  "proof": "same execution, unanimous complete tuples, actual OS death observation and no open capability handles",
+  "doesNotProve": ["capability permission", "tool outcome", "goal acceptance", "external process completion"]
+}

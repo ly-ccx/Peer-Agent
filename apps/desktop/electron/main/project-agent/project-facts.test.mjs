@@ -173,3 +173,19 @@ test('unbound legacy failures are not marked recovered by unrelated turns or ass
     assert.equal(cards.find(card => card.refs.turnId === 't2').resolvedState, 'open');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('questionCards reuses caller-supplied sessions without re-projecting sessionsForProject', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'b4-question-cards-reuse-'));
+  let sessionQueries = 0;
+  try {
+    const facts = createDesktopProjectFacts({
+      runtimeRoot: root,
+      supervisor: { sessionsForProject: () => { sessionQueries += 1; return []; }, acceptance: () => null },
+      approvalStore: { list: () => [] },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages: [] }) },
+    });
+    assert.deepEqual(facts.questionCards('w', [{ sessionId: 's1', status: 'completed', title: 'done' }]), []);
+    assert.equal(sessionQueries, 0, 'knownSessions should bypass redundant supervisor.sessionsForProject scan');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

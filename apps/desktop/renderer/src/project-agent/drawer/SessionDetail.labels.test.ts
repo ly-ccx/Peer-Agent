@@ -61,6 +61,9 @@ test('a Bot-owned result does not manufacture user acceptance in its header', ()
   const label = find(tree, 'bot-task-status').props.children;
   assert.equal(label, createI18n('zh-CN').t('projectAgent.chat.work.resultSettling'));
   assert.notEqual(label, '结果待确认');
+
+  const failedTree = render({ status: 'result_ready', followUp: { owner: 'bot', inCurrentList: true, reason: 'verification_failed' } });
+  assert.equal(find(failedTree, 'bot-task-status').props.children, createI18n('zh-CN').t('projectAgent.chat.work.verificationFailed'));
 });
 
 test('withdrawn history uses the host-ended follow-up copy rather than assigning work back to the Bot', () => {

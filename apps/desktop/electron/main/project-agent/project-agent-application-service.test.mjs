@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { createConversationStore } from '../../../../../packages/conversation-store/src/index.mjs';
 import { createBotLifecycle } from '../../../../../packages/runtime-node/src/project-agent/bot-lifecycle.mjs';
+import { createBotProfileStore } from '../../../../../packages/runtime-node/src/project-agent/bot-profile-store.mjs';
 import { createInputQueue } from '../../../../../packages/runtime-node/src/project-agent/input-queue.mjs';
 import { createProjectRegistry } from '../../../../../packages/runtime-node/src/project-registry.mjs';
 import { createApprovalStore } from '../../../../../packages/runtime-node/src/project-agent/approval-store.mjs';
@@ -19,6 +20,7 @@ const METHODS = [
   ['readAvatar', { workspaceId: 'ws-1' }],
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
+  ['rebindFolder', { workspaceId: 'ws-1', workspacePath: '/tmp/next' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
   ['readInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
   ['writeInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
@@ -197,6 +199,30 @@ test('头像选色通过宿主保存并返回最新档案', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.profile.avatar.color, '#61b68c');
   assert.deepEqual(calls, [['ws-1', '#61b68c']]);
+});
+
+test('头像模块化部件通过宿主保存并返回最新档案', async () => {
+  const calls = [];
+  let profile = { workspaceId: 'ws-1', status: 'active', avatar: { kind: 'generated', shape: 'circle', color: '#6474e5', variant: 0 } };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    profileStore: { read: () => profile },
+    lifecycle: {
+      setAvatarParts(workspaceId, parts) {
+        calls.push([workspaceId, parts]);
+        profile = { ...profile, avatar: { ...profile.avatar, ...parts } };
+        return { ok: true, profile };
+      },
+    },
+  });
+  const result = await service.updateProfile({
+    workspaceId: 'ws-1',
+    avatarParts: { shape: 'diamond', color: '#55bac7', head: 'beret', neck: 'scarf', backdrop: true },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.profile.avatar.head, 'beret');
+  assert.equal(result.profile.avatar.neck, 'scarf');
+  assert.deepEqual(calls, [['ws-1', { shape: 'diamond', color: '#55bac7', head: 'beret', neck: 'scarf', backdrop: true }]]);
 });
 
 test('automatic merge is explicit, saved through host policy, and invalid patches are atomic', async () => {
@@ -988,4 +1014,243 @@ test('task detail refuses a claim the host cannot close without showing a card',
   assert.equal(result.ok, false);
   assert.equal(result.code, 'claim_not_closeable');
   assert.equal(requested, 0);
+});
+
+test('rust bot host interactive resourceFeedback validates via inputQueue then wakes Rust idempotently, and deleteBot finalizes cleanup errors', async () => {
+  const rustCalls = [];
+  const bridge = {
+    isProjectBotHostActive: () => true,
+    isAvailable: () => true,
+    async projectBotSubmitInput(payload) {
+      rustCalls.push(['submitInput', payload]);
+      return { ok: true, input: { inputId: payload.inputId, text: payload.text }, delivery: 'queued' };
+    },
+    async projectBotDelete(payload) {
+      rustCalls.push(['delete', payload]);
+      if (payload.phase === 'prepare') {
+        return {
+          ok: true,
+          archived: true,
+          managed: true,
+          path: '/tmp/nonexistent-managed-folder-for-test',
+          profile: {
+            workspaceId: payload.workspaceId,
+            managed: true,
+            status: 'archived',
+            deletionCleanup: {
+              folder: '/tmp/nonexistent-managed-folder-for-test',
+              trashPending: true,
+              removePending: true,
+            },
+          },
+        };
+      }
+      return {
+        ok: false,
+        archived: true,
+        cleanupPending: true,
+        code: payload.cleanupError || 'CLEANUP_FAILED',
+      };
+    },
+  };
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: bridge,
+    inputQueue: {
+      submitInput(value) {
+        return { ...value, inputId: value.inputId || 'rf-in-1', text: value.text ?? '' };
+      },
+    },
+    moveToTrash: async () => ({ ok: true }),
+    removeWorkspace: async () => {
+      throw Object.assign(new Error('disk locked'), { code: 'REMOVE_FAILED' });
+    },
+  });
+
+  const feedback = [{ id: 'rf-1', recipient: { workspaceId: 'w1', conversationId: 'c1' }, excerpt: 'sel' }];
+  const submitted = await service.submitInput({
+    workspaceId: 'w1',
+    inputId: 'rf-in-1',
+    text: '',
+    resourceFeedback: feedback,
+  });
+  assert.equal(submitted.ok, true);
+  assert.equal(rustCalls[0][0], 'submitInput');
+  assert.equal(rustCalls[0][1].inputId, 'rf-in-1');
+
+  const delFailed = await service.deleteBot({ workspaceId: 'w1', confirmManaged: true });
+  assert.equal(delFailed.ok, false);
+  assert.equal(delFailed.cleanupPending, true);
+  assert.equal(delFailed.code, 'REMOVE_FAILED');
+  assert.equal(rustCalls[2][0], 'delete');
+  assert.equal(rustCalls[2][1].phase, 'finalize');
+  assert.equal(rustCalls[2][1].folderRemoved, false);
+});
+
+test('rebindFolder validates missing/taken folders, clears managed flag, syncs workspace settings, and delegates when Rust bridge is active', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'rebind-folder-app-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const oldFolder = path.join(root, 'old-repo');
+  const nextFolder = path.join(root, 'next-repo');
+  const takenFolder = path.join(root, 'taken-repo');
+  mkdirSync(oldFolder);
+  mkdirSync(nextFolder);
+  mkdirSync(takenFolder);
+
+  const dataHome = path.join(root, 'data');
+  const registry = createProjectRegistry({ filePath: path.join(dataHome, 'projects', 'registry.json') });
+  const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
+  const profileStore = createBotProfileStore({ rootDir: dataHome });
+  const lifecycle = createBotLifecycle({ rootDir: dataHome, registry, conversationStore, profileStore });
+  const entryA = registry.ensureForPath(oldFolder);
+  const entryB = registry.ensureForPath(takenFolder);
+  assert.equal(lifecycle.ensureBot(entryA.workspaceId, { managed: true }).ok, true);
+  assert.equal(lifecycle.ensureBot(entryB.workspaceId, { managed: false }).ok, true);
+
+  const syncedCalls = [];
+  const changed = [];
+  let pickedValue = null;
+  let sawCurrentPath = null;
+  const fallbackService = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: {
+      get: (id) => ({ ok: true, path: registry.diagnosticSnapshot().find(r => r.workspaceId === id)?.path || '' }),
+      list: () => [],
+      search: () => [],
+    },
+    profileStore,
+    relinkWorkspace: (id, nextPath) => registry.relinkWorkspace(id, nextPath),
+    chooseFolder: async (_sender, currentPath) => {
+      sawCurrentPath = currentPath;
+      return pickedValue;
+    },
+    syncReboundWorkspace: (info) => syncedCalls.push(info),
+    broadcast: (channel, payload) => { if (channel === 'project-agent:changed') changed.push(...payload.workspaceIds); },
+    schedule: (fn) => { fn(); return 1; },
+  });
+
+  // Cancel in picker
+  pickedValue = null;
+  assert.deepEqual(await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId }), { ok: false, code: 'CANCELLED' });
+  assert.equal(sawCurrentPath, oldFolder);
+
+  // Non-existent explicit path
+  assert.deepEqual(
+    await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId, workspacePath: path.join(root, 'missing') }),
+    { ok: false, code: 'FOLDER_NOT_FOUND' },
+  );
+
+  // Path already bound to another bot
+  assert.deepEqual(
+    await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId, workspacePath: takenFolder }),
+    { ok: false, code: 'PATH_TAKEN' },
+  );
+
+  // Picker chooses valid nextFolder -> clears managed=true, syncs workspace, broadcasts changed
+  pickedValue = nextFolder;
+  const rebound = await fallbackService.rebindFolder({ workspaceId: entryA.workspaceId });
+  assert.equal(rebound.ok, true);
+  assert.equal(rebound.path, nextFolder);
+  assert.equal(rebound.previousPath, oldFolder);
+  assert.equal(rebound.pathExists, true);
+  assert.equal(rebound.unchanged, false);
+  assert.equal(rebound.profile.managed, false);
+  assert.equal(profileStore.read(entryA.workspaceId).managed, false);
+  assert.equal(syncedCalls.length, 1);
+  assert.equal(syncedCalls[0].path, nextFolder);
+  assert.ok(changed.includes(entryA.workspaceId));
+
+  // Rust bridge delegation path
+  const bridgeCalls = [];
+  const bridgeSynced = [];
+  const rustService = createProjectAgentApplicationService({
+    enabled: () => true,
+    classicCoreBridge: {
+      isAvailable: () => true,
+      async projectBotGet() { return { ok: true, path: oldFolder }; },
+      async projectBotRebindFolder(params) {
+        bridgeCalls.push(params);
+        return {
+          ok: true,
+          workspaceId: params.workspaceId,
+          path: params.workspacePath,
+          previousPath: oldFolder,
+          pathExists: true,
+          unchanged: false,
+          profile: { workspaceId: params.workspaceId, displayName: 'Moved Bot', managed: false },
+        };
+      },
+    },
+    chooseFolder: async () => nextFolder,
+    syncReboundWorkspace: (info) => bridgeSynced.push(info),
+    schedule: () => 1,
+  });
+  const rustRes = await rustService.rebindFolder({ workspaceId: 'ws-rust-1' });
+  assert.equal(rustRes.ok, true);
+  assert.deepEqual(bridgeCalls, [{ workspaceId: 'ws-rust-1', workspacePath: nextFolder }]);
+  assert.equal(bridgeSynced.length, 1);
+  assert.equal(bridgeSynced[0].path, nextFolder);
+});
+
+test('rust bot host compacts draft-backed images to draftBlobDigest on submit and falls back on DRAFT_TOO_LARGE_FOR_RPC read', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'draft-compact-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workspaceId = 'ws-img-compact';
+  const digest = 'a'.repeat(64);
+  const wsRoot = path.join(root, workspaceId);
+  mkdirSync(path.join(wsRoot, 'input-drafts'), { recursive: true });
+  mkdirSync(path.join(wsRoot, 'input-draft-blobs'), { recursive: true });
+  writeFileSync(
+    path.join(wsRoot, 'input-drafts', 'desktop.json'),
+    JSON.stringify({ schemaVersion: 1, revision: 1, draft: { text: '', quote: null, attachmentIds: ['att-1'] }, pending: [], uploads: { 'att-1': digest } }),
+  );
+  writeFileSync(
+    path.join(wsRoot, 'input-draft-blobs', `${digest}.json`),
+    JSON.stringify({ id: 'att-1', name: '8k.png', mimeType: 'image/png', size: 123456, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,AAAA' }),
+  );
+
+  const submittedCalls = [];
+  let localReadCalled = false;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    draftRootDir: root,
+    inputDrafts: {
+      read(payload) {
+        localReadCalled = true;
+        return { ok: true, snapshot: { revision: 1, draft: { text: 'huge-draft', quote: null, attachments: [] }, pending: [] }, fromLocal: payload.workspaceId };
+      },
+      write() { return { ok: true, revision: 2 }; },
+    },
+    classicCoreBridge: {
+      isAvailable: () => true,
+      isProjectBotHostActive: () => true,
+      async projectBotReadInputDraft() { return { ok: false, code: 'DRAFT_TOO_LARGE_FOR_RPC' }; },
+      async projectBotSubmitInput(params) {
+        submittedCalls.push(params);
+        return { ok: true, input: { inputId: params.inputId }, delivery: 'queued' };
+      },
+    },
+    schedule: () => 1,
+  });
+
+  const draftRes = await service.readInputDraft({ workspaceId, surface: 'desktop' });
+  assert.equal(draftRes.ok, true);
+  assert.equal(localReadCalled, true);
+  assert.equal(draftRes.snapshot.draft.text, 'huge-draft');
+
+  const submitRes = await service.submitInput({
+    workspaceId,
+    inputId: 'in-big-1',
+    surface: 'desktop',
+    text: 'look at these',
+    attachments: [
+      { id: 'att-1', name: '8k.png', mimeType: 'image/png', size: 123456, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,AAAA' },
+      { id: 'att-inline', name: 'quick.png', mimeType: 'image/png', size: 100, sourceKind: 'user_upload', kind: 'image', dataUrl: 'data:image/png;base64,BBBB' },
+    ],
+  });
+  assert.equal(submitRes.ok, true);
+  assert.equal(submittedCalls.length, 1);
+  assert.equal(submittedCalls[0].attachments[0].draftBlobDigest, digest);
+  assert.equal('dataUrl' in submittedCalls[0].attachments[0], false);
+  assert.equal(submittedCalls[0].attachments[1].dataUrl, 'data:image/png;base64,BBBB');
 });

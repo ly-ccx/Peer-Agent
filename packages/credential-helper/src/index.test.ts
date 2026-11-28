@@ -66,6 +66,17 @@ test('rejects invalid credential keys and empty secrets before transport', () =>
   assert.equal(transport.requests.length, 0);
 });
 
+test('MCP immutable slot namespace accepts canonical keys and rejects malformed identities', () => {
+  const transport = new MemoryTransport();
+  const client = new CredentialHelperClient(transport);
+  const key=`mcp/${'a'.repeat(64)}/12345678-1234-4123-8123-123456789abc`;
+  client.setSecret(key,'synthetic-envelope');
+  assert.equal(client.getSecret(key),'synthetic-envelope');
+  for(const invalid of [key.replace('/aaa','/AAA'),key.replace('4123','5123'),key.replace('8123','c123'),`${key}/extra`,'mcp/../token','mcp/arbitrary/token']) {
+    assert.throws(()=>client.getSecret(invalid),CredentialHelperError);
+  }
+});
+
 test('resolves explicit, packaged and development helper locations', () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'peer-credential-client-'));
   const explicit = path.join(directory, 'explicit-helper');

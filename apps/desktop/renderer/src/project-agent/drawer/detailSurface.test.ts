@@ -20,7 +20,13 @@ function find(node: any, type: string): any {
 test('explicit embedded task scene keeps the child conversation and has no nested modal or visible Workbench', async () => {
   const effects: (() => any)[] = [], calls: string[] = [];
   const scene = moduleFrom('./ConversationScene.tsx', {
-    react: { useState: (value: any) => [value, () => {}], useEffect: (effect: () => any) => effects.push(effect) },
+    react: {
+      memo: (component: unknown) => component,
+      useCallback: (callback: unknown) => callback,
+      useMemo: (factory: () => unknown) => factory(),
+      useState: (value: any) => [value, () => {}],
+      useEffect: (effect: () => any) => effects.push(effect),
+    },
     'react/jsx-runtime': jsx, '../../app/components/Drawer': { Drawer: 'drawer' },
     '../../app/components/deferredPanels': { ChatSurface: 'chat', WorkbenchPanel: 'workbench' }, '../../clientApi': { clientApi: {
       llmListProviders: async () => { calls.push('read-providers'); return []; }, getSettings: async () => { calls.push('read-settings'); return {}; },
@@ -36,9 +42,19 @@ test('explicit embedded task scene keeps the child conversation and has no neste
   assert.equal(find(tree, 'workbench-provider').props.isPageActive, false);
   assert.equal(find(tree, 'chat').props.isPageActive, false);
   assert.equal(find(tree, 'chat').props.showComposer, false);
+  assert.equal(find(tree, 'chat').props.showHeader, true);
   assert.deepEqual(find(tree, 'document-preview').props.task, task);
+
   const cleanups = effects.map(effect => effect()); await Promise.resolve();
   assert.deepEqual(calls.sort(), ['read-providers', 'read-settings']); cleanups.forEach(fn => fn?.());
+
+  const seamlessTree = scene.ConversationSceneDrawer({ embedded: true, seamless: true, active: true, isLive: true, workspaceId: 'A', workspacePath: '/synthetic/project', conversationId: 'child',
+    conversationRevision: 'running:1', title: 'Task', i18n: { t: (key: string) => key }, isZh: false, task, onClose() {} });
+  assert.equal(find(seamlessTree, 'header'), undefined);
+  assert.equal(find(seamlessTree, 'chat').props.showHeader, false);
+  assert.equal(find(seamlessTree, 'chat').props.showComposer, false);
+  assert.equal(find(seamlessTree, 'chat').props.externalStreaming, true);
+  assert.equal(find(seamlessTree, 'chat').props.conversationRevision, 'running:1');
 });
 
 test('task Evidence stays in the same reading surface and only selects the original EvidenceRef', () => {

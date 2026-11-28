@@ -1,6 +1,6 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
   formatConversationStamp,
@@ -18,6 +18,8 @@ import { ConversationRow as ConversationRowView } from './ConversationRow';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
 import { ContinuousReply } from './ContinuousReply';
 import { conversationRowShowsAuthor, replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
+import { isActivityRunning } from '../state/botActivityState';
+import { useLiveToolReveal } from './useLiveToolReveal';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
@@ -27,7 +29,7 @@ import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
 import { ReplyContext } from './ReplyContext';
 import { AgentActivityRow } from './AgentActivityRow';
-import type { BotWorkIndex } from '../state/botWorkState';
+import { threadTaskReferences, type BotWorkIndex } from '../state/botWorkState';
 import { RecoveryHistory } from './RecoveryHistory';
 import { isRetiredRecovery, agentFailurePresentation } from '../state/recoveryPresentation';
 
@@ -80,6 +82,8 @@ export function BotMessageList({
   /** Sits with the latest line. Kept inside the thread so the unused scroll area cannot open a gap above it. */
   readonly trailing?: ReactNode;
 }) {
+  const activeReplyActivity = rows.find(row => row.type === 'reply' && isActivityRunning(row.activity ?? null));
+  const showToolMood = useLiveToolReveal(activeReplyActivity?.type === 'reply' ? activeReplyActivity.activity : undefined);
   const loadingOlderRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const previousRows = useRef({ keys: new Set(rows.map(conversationRowKey)), followRequestId });
@@ -104,6 +108,7 @@ export function BotMessageList({
   }, [focusTaskRequest, taskMessageVisible, scroll.scrollerRef]);
   const highlighted = useMessageHighlight(highlightedId, highlightRequestId, scroll.visibleRows.some(row => replyRowContains(row, highlightedId)));
   const references = replyReferencesForRows(rows);
+  const taskReferences = useMemo(() => threadTaskReferences(rows, workIndex), [rows, workIndex]);
   const messages = rows.flatMap(row => row.type === 'reply' ? [...row.messages] : row.type === 'message' ? [row.message] : []);
   const anchors = replyAnchorsForMessages(messages, { user: i18n.t('projectAgent.chat.you'), bot: label });
   const replied = repliedUserIds(messages);
@@ -172,17 +177,18 @@ export function BotMessageList({
           className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
         {conversationRowShowsAuthor(row) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
-            animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row) : 'idle'} /><span>{label}</span></div>
+            animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row, { showToolMood }) : 'idle'} /><span>{label}</span></div>
         ) : null}
         {row.type === 'reply' ? <ContinuousReply workspaceId={workspaceId} reply={row} referenceIds={references.get(row) ?? []}
           i18n={i18n} anchors={anchors} highlighted={replyRowContains(row, highlighted)} onJump={onJump} onQuote={onQuote}
-          onReload={onReload} onOpenDetails={onOpenDetails} workIndex={workIndex} onOpenWork={onLocateSession} /> : row.type === 'separator' ? (
+          onReload={onReload} onOpenDetails={onOpenDetails} workIndex={workIndex} taskRows={taskReferences.get(row) ?? []} onOpenWork={onLocateSession} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
             key={conversationRowKey(row)}
             message={row.message}
             replied={replied.has(row.message.id)}
+            workIndex={workIndex}
             anchors={anchors}
             onJump={onJump}
             highlighted={highlighted === row.message.id}
@@ -210,6 +216,8 @@ export function BotMessageList({
             anchors={anchors}
             onJump={onJump}
             onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
+            workIndex={workIndex}
+            onOpenWork={onLocateSession}
             welcome={rows.length === 1 && row.message.cards.some((card) => card.kind === 'familiarize')}
             avatar={avatar}
             label={label}
@@ -230,6 +238,7 @@ export function BotMessageList({
             onQuote={(excerpt) => onQuote(row.message.id, excerpt)}
             onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
             workIndex={workIndex}
+            taskRows={taskReferences.get(row) ?? []}
             onOpenWork={onLocateSession}
           />
         )}
@@ -254,6 +263,8 @@ function SystemCard({
   anchors,
   onJump,
   onOpenDetails,
+  workIndex,
+  onOpenWork,
   activity,
   processRounds,
   narration = [],
@@ -268,6 +279,8 @@ function SystemCard({
   readonly referenceIds: readonly string[];
   readonly welcome: boolean;
   readonly onOpenDetails?: () => void;
+  readonly workIndex: BotWorkIndex;
+  readonly onOpenWork: (sessionId: string) => void;
   readonly activity?: ProjectAgentActivity;
   readonly processRounds?: readonly BotToolRound[];
   readonly narration?: readonly BotNarrationSegment[];
@@ -288,7 +301,7 @@ function SystemCard({
       <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
       <BotNarration segments={narration} />
       {retired ? <RecoveryHistory messageKey={agentFailurePresentation(cards[0]).messageKey} createdAt={message.createdAt} highlighted={highlighted} i18n={i18n} onOpenDetails={onOpenDetails} />
-        : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />}
+        : <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} workIndex={workIndex} onOpenWork={onOpenWork} />}
       {!welcome && !retired && (activity || processRounds?.length || cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')) ?
         <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} /> : null}
     </div>

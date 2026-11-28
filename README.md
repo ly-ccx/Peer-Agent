@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.40`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.45`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -104,6 +104,14 @@ To package Linux Desktop x64 (the AppImage and `.deb` need libdbus-1-dev, fakero
 
     pnpm pack:linux    # unpacked directory for sandbox and smoke checks
     pnpm dist:linux    # AppImage + .deb
+
+### Native Rust CLI migration candidate
+
+Build the separate candidate with `cargo build --release --locked -p peer-cli -p peer-credential-helper`. `target/release/peer-native` runs natively without a Bun/Node sidecar; the installed/default `peer` has not switched yet.
+
+The first execution slice is `peer-native exec --plan <canonical-goal-id> [--max-turns N]`, using an explicitly isolated existing data root through `PEER_AGENT_HOME`. It accepts a fresh delegated worker admission, an existing plain OpenAI-compatible chat channel, and bounded file/foreground Shell tools. `recover --plan <id>` observes interrupted native execution and retains unknown effects without replaying tools. A reply pauses execution and leaves Goal acceptance pending. Other context/auth/wire adapters and full Bot/TUI parity remain in migration; unsupported paths fail explicitly.
+
+Development verification: `node scripts/native-cli/verify.mjs <temporary-output-directory>`. Node/Bun run the existing implementation as a test reference; they are not runtime children of the candidate.
 
 ## Local control and evidence
 

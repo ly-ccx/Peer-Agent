@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "index": [],
+      "messages": [],
+      "expectedList": {
+        "exitCode": 0,
+        "stdout": [],
+        "stderr": [
+          "No sessions."
+        ]
+      },
+      "expectedMarkdown": null
+    },
+    {
+      "name": "roles-and-order",
+      "index": [
+        {
+          "id": "a",
+          "title": "  First\tline\nnext  ",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-15T00:00:00Z",
+          "contentRevision": 1
+        },
+        {
+          "id": "b",
+          "title": "工作",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-16T00:00:00Z",
+          "contentRevision": 1,
+          "role": "work_session"
+        },
+        {
+          "id": "c",
+          "title": "Bot",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-15T00:00:00Z",
+          "contentRevision": 1,
+          "role": "project_agent"
+        },
+        {
+          "id": "d",
+          "title": " ",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "",
+          "contentRevision": 1,
+          "role": "future-role"
+        }
+      ],
+      "messages": [],
+      "expectedList": {
+        "exitCode": 0,
+        "stdout": [
+          "2026-11-16T00:00:00Z\tb\t工作\twork_session\n2026-11-15T00:00:00Z\ta\tFirst line next\n2026-11-15T00:00:00Z\tc\tBot\tproject_agent\n-\td\tUntitled session"
+        ],
+        "stderr": []
+      },
+      "expectedMarkdown": "# First\tline next\n\nsession: a\nupdated: 2026-11-15T00:00:00Z\n"
+    },
+    {
+      "name": "visible-content",
+      "index": [
+        {
+          "id": "a",
+          "title": "  First\tline\nnext  ",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-15T00:00:00Z",
+          "contentRevision": 1
+        }
+      ],
+      "messages": [
+        {
+          "id": "u",
+          "role": "user",
+          "content": "  hello sk-abcdefgh- and Bearer token+/= 中ya29.good  "
+        },
+        {
+          "id": "h",
+          "role": "tool",
+          "content": "not visible",
+          "apiKey": "not-visible-secret"
+        },
+        {
+          "id": "m",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "text": "not visible"
+            },
+            {
+              "type": "text",
+              "text": "part one"
+            },
+            "part two",
+            {
+              "content": "legacy text"
+            }
+          ]
+        },
+        {
+          "id": "obj",
+          "role": "assistant",
+          "content": {
+            "text": "object text"
+          }
+        },
+        {
+          "id": "empty",
+          "role": "assistant",
+          "content": "   "
+        }
+      ],
+      "expectedList": {
+        "exitCode": 0,
+        "stdout": [
+          "2026-11-15T00:00:00Z\ta\tFirst line next"
+        ],
+        "stderr": []
+      },
+      "expectedMarkdown": "# First\tline next\n\nsession: a\nupdated: 2026-11-15T00:00:00Z\n\n## user\n\nhello [redacted]- and [redacted] 中[redacted]\n\n## assistant\n\npart one\npart two\nlegacy text\n\n## assistant\n\nobject text\n"
+    },
+    {
+      "name": "stream-patch",
+      "index": [
+        {
+          "id": "a",
+          "title": "  First\tline\nnext  ",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-15T00:00:00Z",
+          "contentRevision": 1
+        }
+      ],
+      "messages": [
+        {
+          "id": "u",
+          "role": "user",
+          "content": "hello"
+        },
+        {
+          "id": "m",
+          "role": "assistant",
+          "content": "old draft"
+        }
+      ],
+      "sidecar": {
+        "version": 1,
+        "conversationId": "a",
+        "messageId": "m",
+        "patch": {
+          "content": "visible stream",
+          "isStreaming": true
+        }
+      },
+      "expectedList": {
+        "exitCode": 0,
+        "stdout": [
+          "2026-11-15T00:00:00Z\ta\tFirst line next"
+        ],
+        "stderr": []
+      },
+      "expectedMarkdown": "# First\tline next\n\nsession: a\nupdated: 2026-11-15T00:00:00Z\n\n## user\n\nhello\n\n## assistant\n\nvisible stream\n"
+    },
+    {
+      "name": "stream-role-and-null",
+      "index": [
+        {
+          "id": "a",
+          "title": "  First\tline\nnext  ",
+          "createdAt": "2026-11-14T00:00:00Z",
+          "updatedAt": "2026-11-15T00:00:00Z",
+          "contentRevision": 1
+        }
+      ],
+      "messages": [
+        {
+          "id": "m",
+          "role": "assistant",
+          "content": "hidden by role"
+        },
+        {
+          "id": "later",
+          "role": "user",
+          "content": "still visible"
+        }
+      ],
+      "sidecar": {
+        "version": 1,
+        "conversationId": "a",
+        "messageId": "m",
+        "patch": {
+          "role": "tool",
+          "content": null
+        }
+      },
+      "expectedList": {
+        "exitCode": 0,
+        "stdout": [
+          "2026-11-15T00:00:00Z\ta\tFirst line next"
+        ],
+        "stderr": []
+      },
+      "expectedMarkdown": "# First\tline next\n\nsession: a\nupdated: 2026-11-15T00:00:00Z\n\n## user\n\nstill visible\n"
+    }
+  ],
+  "argv": [
+    {
+      "argv": [
+        "sessions"
+      ],
+      "expected": {
+        "kind": "sessions",
+        "sessions": {
+          "action": "list"
+        }
+      }
+    },
+    {
+      "argv": [
+        "sessions",
+        "list"
+      ],
+      "expected": {
+        "kind": "sessions",
+        "sessions": {
+          "action": "list"
+        }
+      }
+    },
+    {
+      "argv": [
+        "sessions",
+        "list",
+        "extra"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer sessions list does not take arguments",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "sessions",
+        "--yes"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer sessions: --yes is only valid with delete",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "sessions",
+        "--bogus"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer sessions: unknown option --bogus",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "sessions",
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "sessions"
+      }
+    },
+    {
+      "argv": [
+        "doctor"
+      ],
+      "expected": {
+        "kind": "doctor"
+      }
+    },
+    {
+      "argv": [
+        "doctor",
+        "--bogus"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer doctor: unknown option --bogus",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "doctor",
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "doctor"
+      }
+    },
+    {
+      "argv": [
+        "export"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer export requires a session id",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "a"
+      ],
+      "expected": {
+        "kind": "export",
+        "sessionId": "a",
+        "force": false
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "a",
+        "--output",
+        "out.md",
+        "--force"
+      ],
+      "expected": {
+        "kind": "export",
+        "sessionId": "a",
+        "outputPath": "out.md",
+        "force": true
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "--output=out.md",
+        "a"
+      ],
+      "expected": {
+        "kind": "export",
+        "sessionId": "a",
+        "outputPath": "out.md",
+        "force": false
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "a",
+        "--output"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer export: --output requires a path",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "a",
+        "--force"
+      ],
+      "expected": {
+        "kind": "export",
+        "sessionId": "a",
+        "force": true
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "a",
+        "--bogus"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer export: unknown option --bogus",
+        "exitCode": 2
+      }
+    },
+    {
+      "argv": [
+        "export",
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "export"
+      }
+    }
+  ],
+  "help": {
+    "sessions": "peer 0.1.0-rc.45\n\npeer sessions — list, resume, or delete a stored session\n\nUsage:\n  peer sessions\n  peer sessions resume <id>\n  peer sessions delete <id> [--yes]\n\nlist writes updated time, id, and title to stdout.\nresume opens that session in the TUI and needs a TTY.\ndelete removes that session and its goal plans. A TTY asks first; otherwise pass --yes.",
+    "doctor": "peer 0.1.0-rc.45\n\npeer doctor — check the local install\n\nUsage:\n  peer doctor\n\nChecks the peer binary, credential helper, data root, and version.\nIt does not install, sign in, or change configuration.",
+    "export": "peer 0.1.0-rc.45\n\npeer export — write a stored session as Markdown\n\nUsage:\n  peer export <id>\n  peer export <id> --output <path> [--force]\n\nThe file is a reading copy, not Evidence. An existing output path is kept unless --force is set."
+  },
+  "redaction": [
+    {
+      "text": "sk-abcdefgh",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "sk-1234567",
+      "expected": "sk-1234567"
+    },
+    {
+      "text": "sk-abcdefgh----",
+      "expected": "[redacted]----"
+    },
+    {
+      "text": "xsk-abcdefgh",
+      "expected": "xsk-abcdefgh"
+    },
+    {
+      "text": "中sk-abcdefgh",
+      "expected": "中[redacted]"
+    },
+    {
+      "text": "Bearer abc+/==",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "Bearer abc",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "Bearer﻿abc",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "ya29.a-b.",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "YA29.token",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "secret without prefix",
+      "expected": "secret without prefix"
+    },
+    {
+      "text": "Bearer =",
+      "expected": "Bearer ="
+    },
+    {
+      "text": "sk---------A",
+      "expected": "[redacted]"
+    },
+    {
+      "text": "Bearer a\nBearer b",
+      "expected": "[redacted]\n[redacted]"
+    }
+  ]
+}

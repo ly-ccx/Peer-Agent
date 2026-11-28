@@ -9,6 +9,9 @@ test('effort choices use declarations without inventing capabilities', () => {
   assert.deepEqual(modelReasoningLevels({ reasoningEffortLevels: ['max', 'high', 'bogus', 'high', 'low'] }), ['low', 'high', 'max']);
   assert.equal(modelDefaultReasoningEffort({ reasoningEffortLevels: ['low', 'medium', 'high'] }), 'medium');
   assert.equal(modelDefaultReasoningEffort({ reasoningEffortLevels: ['low', 'high'], defaultEffort: 'low' }), 'low');
+  assert.equal(modelDefaultReasoningEffort({ reasoningEffortLevels: ['off', 'default'], reasoningDefaultEffort: 'off' }), 'off');
+  assert.deepEqual(modelReasoningLevels({ supportsReasoning: true, reasoningEffortMap: { xhigh: 'xhigh', low: 'low', bogus: 'x' } }), ['low', 'xhigh']);
+  assert.deepEqual(modelReasoningLevels({ supportsReasoning: false, reasoningEffortMap: { low: 'low' } }), []);
 });
 
 test('fixed effort enters selection only when the chosen model supports it', () => {

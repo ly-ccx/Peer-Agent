@@ -21,7 +21,7 @@ export function clampDrawerWidth(width: number): number {
   return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, Math.round(width)));
 }
 
-export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings';
+export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'capabilities' | 'memory' | 'settings';
 export type DrawerLayout = 'push' | 'cover';
 export type TaskGroup = 'needsYou' | 'running' | 'queued' | 'paused' | 'done';
 
@@ -40,6 +40,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly followUpEpoch?: number;
   readonly parentSessionId?: string;
   readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
   readonly planId?: string;
@@ -61,6 +62,8 @@ export interface DrawerSession {
   readonly objectiveId?: string;
   readonly modelLabel: string;
   readonly summary: string;
+  readonly workerOutput?: string;
+  readonly failure?: { readonly code: string; readonly message?: string; readonly at?: string };
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
   readonly resourceBlocker?: ExecutionResourceBlocker;
@@ -103,7 +106,7 @@ export interface MemoryFilter {
   readonly status: string;
 }
 
-const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'memory', 'settings']);
+const TABS = new Set<DrawerTab>(['overview', 'tasks', 'objectives', 'capabilities', 'memory', 'settings']);
 const NEEDS_YOU = new Set(['waiting_user', 'result_ready']);
 const RUNNING = new Set(['starting', 'running', 'waiting_agent', 'stopping', 'awaiting_outcome', 'verifying']);
 const QUEUED = new Set(['queued']);
@@ -228,7 +231,11 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
 }
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
-  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return i18n.t('projectAgent.chat.work.resultSettling');
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') {
+    return i18n.t(session.followUp.reason === 'verification_failed'
+      ? 'projectAgent.chat.work.verificationFailed'
+      : 'projectAgent.chat.work.resultSettling');
+  }
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
   if (session.resourceBlocker?.kind === 'protection') return i18n.t(session.resourceBlocker.code === 'execution_outcome_unknown'
@@ -265,8 +272,10 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && Number.isSafeInteger(progress.observationCount) && progress.observationCount >= 0
     && Number.isFinite(Date.parse(progress.startedAt)) && Number.isFinite(Date.parse(progress.lastProgressAt))
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
+  const epoch = record.followUpEpoch;
   return {
     sessionId,
+    ...(typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch >= 0 ? { followUpEpoch: epoch } : {}),
     ...(readString(origin.parentSessionId) ? { parentSessionId: readString(origin.parentSessionId) } : {}),
     ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),
     sourceRevision: readString(record.sourceRevision),
@@ -288,6 +297,12 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     // This drawer field is the task instruction disclosure. Worker output now
     // has a distinct source; it must not be relabeled as task instructions.
     summary: readString(report.taskBrief) || (report.contentSource ? '' : readString(report.summary)),
+    ...(report.contentSource && readString(report.summary)
+      ? { workerOutput: readString(report.summary) }
+      : readString(origin.lastWorkerOutput)
+        ? { workerOutput: readString(origin.lastWorkerOutput) }
+        : {}),
+    ...(readSessionFailure(report.failure, origin.error) ? { failure: readSessionFailure(report.failure, origin.error) } : {}),
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
@@ -393,12 +408,38 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readSessionFailure(
+  rawFailure: unknown,
+  originError: unknown,
+): { readonly code: string; readonly message?: string; readonly at?: string } | undefined {
+  if (rawFailure && typeof rawFailure === 'object') {
+    const rec = rawFailure as Record<string, unknown>;
+    const code = readString(rec.code) || readString(originError);
+    if (code) {
+      const message = readString(rec.message);
+      const at = readString(rec.at);
+      return {
+        code,
+        ...(message && message !== code ? { message } : {}),
+        ...(at ? { at } : {}),
+      };
+    }
+  }
+  const fallback = readString(originError);
+  return fallback ? { code: fallback } : undefined;
+}
+
 function readVerification(value: unknown, sessionId: string): SessionVerificationDetail | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const row = value as SessionVerificationDetail;
   if (row.sessionId !== sessionId || !['passed', 'failed', 'partial', 'unverifiable'].includes(row.outcome)
     || !Array.isArray(row.checks) || !Array.isArray(row.reviewAttempts) || !Array.isArray(row.outputs)) return undefined;
-  return { ...row, checks: row.checks.filter(check => check && typeof check.name === 'string'
+  const summary = readString((row as { summary?: unknown }).summary);
+  const error = readString((row as { error?: unknown }).error);
+  return { ...row,
+    ...(summary ? { summary } : {}),
+    ...(error ? { error } : {}),
+    checks: row.checks.filter(check => check && typeof check.name === 'string'
     && ['passed', 'failed'].includes(check.result) && Array.isArray(check.evidenceRefs)),
     reviewAttempts: row.reviewAttempts.filter(attempt => attempt && typeof attempt.verifierRunId === 'string'
       && typeof attempt.failureReason === 'string' && Array.isArray(attempt.failedCriteria) && Array.isArray(attempt.missingEvidence)),

@@ -89,6 +89,24 @@ test('recordMove and relink keep the id and remember the old path', () => {
   assert.equal(minted, 2);
 });
 
+test('sync resolves an already-known workspaceId before creating a duplicate entry for a stale path', () => {
+  let minted = 0;
+  const registry = createProjectRegistry({
+    createId: () => idFor(++minted),
+  });
+  const original = registry.ensureForPath('/repo');
+  const moved = registry.recordMove(original.workspaceId, '/repo-next');
+  assert.equal(moved.ok, true);
+  assert.equal(minted, 1);
+
+  const synced = registry.sync([{ id: original.workspaceId, path: '/repo' }]);
+  assert.equal(synced.length, 1);
+  assert.equal(synced[0].workspaceId, original.workspaceId);
+  assert.equal(synced[0].path, '/repo-next');
+  assert.equal(minted, 1);
+  assert.equal(registry.list().length, 1);
+});
+
 test('a corrupt registry is backed up and rebuilt from the settings cache', () => {
   const dir = tempDir();
   const file = path.join(dir, 'registry.json');

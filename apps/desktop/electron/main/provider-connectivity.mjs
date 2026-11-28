@@ -139,9 +139,6 @@ export function classifyProviderError(error, context = {}) {
     || text.includes('network')
     || text.includes('socket')
   ) {
-    if (context.authMethod === 'qoder_local_auth' || context.authMethod === 'local_cli') {
-      return 'local_runtime_stopped';
-    }
     return 'endpoint_unreachable';
   }
   if (text.includes('timeout') || text.includes('etimedout') || text.includes('aborted')) {

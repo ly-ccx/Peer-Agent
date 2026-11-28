@@ -157,12 +157,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Rust native binaries（host 架构）。electron-builder.yml extraResources
-      # 从 target/release/ 拷贝 peer-credential-helper。
+      # 从 target/release/ 拷贝 peer-credential-helper 与 peer-native。
       # 注意（阶段一）：Windows arm64 安装包将打包 x64 native binaries（在 win-arm64
       # 上以模拟方式运行）；arm64-native 交叉编译留待阶段二。
       # Linux Desktop 阶段一仅 x64；linux-arm64 Desktop 留待后续。
       - name: Build Rust native binaries
-        run: cargo build --locked --release --package peer-credential-helper
+        run: cargo build --locked --release --package peer-credential-helper --bin peer-credential-helper --package peer-cli --bin peer-native
+
+      - name: Build built-in marketplace catalog
+        run: pnpm marketplace:build
 
       - name: Build frontend
         run: pnpm --filter @peer-agent/desktop build
@@ -290,21 +293,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.22.0
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.2.17
 
       - name: Verify macOS build architecture
         if: runner.os == 'macOS'
@@ -332,34 +324,25 @@ jobs:
         shell: bash
         run: node scripts/stamp-version.mjs "${{ needs.meta.outputs.version }}"
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Workspace packages export dist/*; clean CI must build them before bun compile.
-      - name: Build workspace packages for CLI
-        run: |
-          set -euo pipefail
-          pnpm --filter @peer-agent/protocol build
-          pnpm --filter @peer-agent/runtime-core build
-          pnpm --filter @peer-agent/runtime-sdk build
-          pnpm --filter @peer-agent/runtime-node build
-          pnpm --filter @peer-agent/credential-helper build
-          pnpm --filter @peer-agent/conversation-store build
-
-      - name: Build CLI (peer + credential helper)
-        env:
-          PEER_CLI_VERSION: ${{ needs.meta.outputs.version }}
-        run: pnpm --filter @peer-agent/tui build
-
-      - name: Verify peer --version
+      - name: Build native Rust CLI (peer + credential helper)
         shell: bash
         run: |
           set -euo pipefail
-          OUT="$(./apps/tui/dist/peer --version)"
+          cargo build --locked --release -p peer-cli --bin peer-native -p peer-credential-helper --bin peer-credential-helper
+          mkdir -p cli-native-dist
+          cp target/release/peer-native cli-native-dist/peer
+          cp target/release/peer-credential-helper cli-native-dist/peer-credential-helper
+          chmod 755 cli-native-dist/peer cli-native-dist/peer-credential-helper
+
+      - name: Verify native peer --version (zero Node/Bun)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$(PATH=/nonexistent ./cli-native-dist/peer --version)"
           echo "peer --version → $OUT"
           test "$OUT" = "peer ${{ needs.meta.outputs.version }}"
-          test -x ./apps/tui/dist/peer
-          test -x ./apps/tui/dist/peer-credential-helper
+          test -x ./cli-native-dist/peer
+          test -x ./cli-native-dist/peer-credential-helper
 
       # Preserve the Desktop helper's Developer ID identity for shared keychain access.
       # This is build-time assembly; the installed CLI remains self-contained.
@@ -372,16 +355,33 @@ jobs:
 
       - name: Prepare signed macOS CLI helper
         if: matrix.target == 'darwin-arm64'
-        run: node scripts/prepare-macos-cli-helper.mjs "${{ needs.meta.outputs.version }}"
+        run: node scripts/prepare-macos-cli-helper.mjs "${{ needs.meta.outputs.version }}" signed-desktop cli-native-dist
 
       - name: Package CLI archive
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ needs.meta.outputs.version }}"
-          node scripts/package-cli-archive.mjs "${{ matrix.target }}"
+          node scripts/package-cli-archive.mjs --dist-dir cli-native-dist "${{ matrix.target }}"
           ls -la cli-dist
-          echo "Packaged CLI ${VERSION} → cli-dist/peer-${{ matrix.target }}.tar.gz"
+          echo "Packaged native Rust CLI ${VERSION} → cli-dist/peer-${{ matrix.target }}.tar.gz"
+
+      - name: Verify unpacked CLI archive without Node/Bun
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNPACK="$(mktemp -d)"
+          tar -xzf "cli-dist/peer-${{ matrix.target }}.tar.gz" -C "$UNPACK"
+          BIN="$UNPACK/peer-${{ matrix.target }}/peer"
+          HELPER="$UNPACK/peer-${{ matrix.target }}/peer-credential-helper"
+          test -x "$BIN"
+          test -x "$HELPER"
+          VER="$(PATH=/nonexistent "$BIN" --version)"
+          test "$VER" = "peer ${{ needs.meta.outputs.version }}"
+          PATH=/nonexistent "$BIN" --help >/dev/null
+          PATH=/nonexistent "$BIN" completions zsh >/dev/null
+          PATH=/nonexistent "$BIN" update --help >/dev/null
+          rm -rf "$UNPACK"
 
       - name: Upload CLI artifacts
         uses: actions/upload-artifact@v7
@@ -429,6 +429,10 @@ jobs:
           test "${#mac_dmgs[@]}" -ge 1
           test "${#mac_zips[@]}" -ge 1
           test -f release-assets/latest-mac.yml -o -f release-assets/beta-mac.yml
+          # Desktop Windows 一等产物：NSIS 安装包 + 更新清单
+          win_exes=(release-assets/Peer-Agent-Setup-*.exe)
+          test "${#win_exes[@]}" -ge 1
+          test -f release-assets/latest.yml -o -f release-assets/beta.yml
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

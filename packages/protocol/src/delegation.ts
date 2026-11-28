@@ -91,6 +91,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly resultConfirmationRequired?: boolean;
   readonly accepted?: boolean;
   readonly verifying?: boolean;
+  readonly verificationFailed?: boolean;
   readonly phase?: 'starting' | 'verifying' | 'paused';
   /** 进程内执行所有权（runtime 采集）；缺省表示该入口尚未接入所有权事实。 */
   readonly executionOwnership?: ExecutionOwnership;
@@ -98,6 +99,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly followUpEpoch?: number;
   readonly executionOwnership?: ExecutionOwnership;
   readonly followUp?: import('./task-overview.ts').FollowUpProjection;
   readonly verificationProgress?: VerificationProgress;
@@ -133,6 +135,7 @@ export interface SessionReport {
   readonly keyFindings: readonly string[];
   readonly changedFiles: readonly { readonly path: string; readonly summary: string }[];
   readonly evidenceRefs: readonly string[];
+  readonly failure?: { readonly code: string; readonly message?: string; readonly at?: string };
   /** Persisted worker output is a claim; verification still comes from host Evidence. */
   readonly contentSource?: {
     readonly kind: 'worker_message' | 'task_results';
@@ -308,6 +311,8 @@ export interface SessionVerificationDetail {
   readonly workerModel: string | null;
   readonly verifierModel: string | null;
   readonly sameSource: boolean;
+  readonly summary?: string;
+  readonly error?: string;
   readonly reviewAttempts: readonly VerificationAttemptDiagnostic[];
   readonly outputs: readonly { readonly name: string; readonly evidenceRef: string; readonly summary: string; readonly truncated: boolean }[];
 }
@@ -519,6 +524,7 @@ export function projectWorkSession(
     superseded: Boolean(conversationMeta.supersededBy),
     needsUser: plan.status === 'awaiting_approval' || plan.needsUser === true,
     verificationActive: conversationMeta.verifying === true,
+    ...(conversationMeta.verificationFailed === true ? { verificationFailed: true } : {}),
     ...(conversationMeta.phase ? { phase: conversationMeta.phase } : {}),
     blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
     interrupted: plan.interrupted,

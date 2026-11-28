@@ -25,14 +25,21 @@ test('uses the latest active operation without reusing a completed predecessor',
   assert.equal(label([tool('read_file')], 'responding'), '正在整理回复');
 });
 test('only structured tool facts select action language', () => {
-  const cases = [['search_files', '正在查找相关内容'], ['edit_file', '正在调整内容'], ['view_image', '正在查看图片'],
-    ['verify_session', '正在核对结果'], ['spawn_session', '正在安排执行'], ['memory_search', '正在查阅项目记忆'],
-    ['memory_remember', '正在更新项目记忆'], ['memory_forget', '正在更新项目记忆'], ['list_directory', '正在查看文件目录'],
+  const cases = [['search_files', '正在查找相关内容'], ['search_conversation', '正在查找相关内容'],
+    ['edit_file', '正在调整内容'], ['view_image', '正在查看图片'],
+    ['verify_session', '正在核对结果'], ['spawn_session', '正在安排执行'], ['wait_for_sessions', '等待子任务完成'],
+    ['memory_search', '正在查阅项目记忆'],
+    ['memory_remember', '正在更新项目记忆'], ['memory_forget', '正在更新项目记忆'],
+    ['list_directory', '正在查看文件目录'], ['list_files', '正在查看文件目录'],
+    ['git_query', '正在查看仓库状态'],
+    ['web_search', '正在联网搜索'], ['web_fetch', '正在查阅网页'],
     ['unrecognized_tool', '正在一点一点推进']] as const;
   for (const [name, expected] of cases) {
     assert.equal(label([tool(name)]), expected);
     assert.equal(label([tool(name, 'preparing')]), '正在准备下一步');
   }
+  assert.equal(label([tool('post_reply')]), '正在整理回复');
+  assert.equal(replyActivityLabel({ ...base, segments: [tool('git_query')] }, en), 'Checking repository status');
 });
 test('file captions keep only bounded safe names, never paths or diagnostic text', () => {
   assert.equal(label([tool('read_file', 'running', 'C:\\private\\项目\\设计说明.md')]), '正在阅读 设计说明.md');

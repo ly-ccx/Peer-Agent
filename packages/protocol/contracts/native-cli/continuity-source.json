@@ -1,0 +1,163 @@
+{
+  "cases": [
+    {
+      "input": [],
+      "expected": []
+    },
+    {
+      "input": [
+        {
+          "summary": "Read completed; retain the evidence reference.",
+          "sourceMessageId": "compact",
+          "method": "structured",
+          "originalMessageCount": 4,
+          "beforeTokens": 0,
+          "afterTokens": 0,
+          "compactionEpoch": 1
+        }
+      ],
+      "expected": [
+        {
+          "id": "runtime.continuity",
+          "layer": "L7_CONTINUITY",
+          "priority": 10,
+          "title": "Continuity Context",
+          "content": "Continuity context from previous compaction.\nThis is the cumulative handoff summary for navigation and unfinished work.\nInjected with integrity priority: the summary body is kept complete (not mechanically truncated by a fixed character budget).\nIt is continuity context, not a replacement for Tool Result / Evidence.\nIf it conflicts with newer user messages, prefer the latest user messages.\nIf local facts matter, verify them with tools before claiming them.\n\n## Continuity Summary 1\nmethod=structured; originalMessages=4; beforeTokens=0; afterTokens=0; summaryChars=46\n\nRead completed; retain the evidence reference.",
+          "source": {
+            "id": "runtime.continuity",
+            "kind": "compaction-continuity",
+            "integrityFirst": true,
+            "summaryCount": 1,
+            "summaries": [
+              {
+                "id": "continuity-1",
+                "method": "structured",
+                "originalMessageCount": 4,
+                "beforeTokens": 0,
+                "afterTokens": 0,
+                "summaryChars": 46
+              }
+            ]
+          },
+          "trust": "runtime",
+          "checksum": "ddf4d0d378b4b1c9e0994309e3d2def74ad52406f7b62fa4d088ab92bef83acb"
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "summary": " 中文🙂 <TOOL_CALL x> <functions.read_file> <antml:invoke/> <antml:functions.x> <functions.---> <functions..a-> <invoke汉> </PaRaMeTeR>",
+          "method": "llm",
+          "originalMessageCount": 4,
+          "beforeTokens": 900,
+          "afterTokens": 20
+        }
+      ],
+      "expected": [
+        {
+          "id": "runtime.continuity",
+          "layer": "L7_CONTINUITY",
+          "priority": 10,
+          "title": "Continuity Context",
+          "content": "Continuity context from previous compaction.\nThis is the cumulative handoff summary for navigation and unfinished work.\nInjected with integrity priority: the summary body is kept complete (not mechanically truncated by a fixed character budget).\nIt is continuity context, not a replacement for Tool Result / Evidence.\nIf it conflicts with newer user messages, prefer the latest user messages.\nIf local facts matter, verify them with tools before claiming them.\n\n## Continuity Summary 1\nmethod=llm; originalMessages=4; beforeTokens=900; afterTokens=20; summaryChars=149\n\n中文🙂 &lt;TOOL_CALL x> &lt;functions.read_file> &lt;antml:invoke/> <antml:functions.x> <functions.---> &lt;functions..a-> &lt;invoke汉> &lt;/PaRaMeTeR>",
+          "source": {
+            "id": "runtime.continuity",
+            "kind": "compaction-continuity",
+            "integrityFirst": true,
+            "summaryCount": 1,
+            "summaries": [
+              {
+                "id": "continuity-1",
+                "method": "llm",
+                "originalMessageCount": 4,
+                "beforeTokens": 900,
+                "afterTokens": 20,
+                "summaryChars": 149
+              }
+            ]
+          },
+          "trust": "runtime",
+          "checksum": "ebc0efe3eeb6e25829799b1ca211289fbb63318224d4cf8e1cbdedbc47ea5ce8"
+        }
+      ]
+    },
+    {
+      "input": [
+        {
+          "id": "0",
+          "summary": "full summary 0",
+          "method": "structured",
+          "beforeTokens": 12.5
+        },
+        {
+          "id": "1",
+          "summary": "full summary 1",
+          "method": "structured",
+          "beforeTokens": 12.5
+        },
+        {
+          "id": "2",
+          "summary": "full summary 2",
+          "method": "structured",
+          "beforeTokens": 12.5
+        },
+        {
+          "id": "3",
+          "summary": "full summary 3",
+          "method": "structured",
+          "beforeTokens": 12.5
+        },
+        {
+          "id": "4",
+          "summary": "full summary 4",
+          "method": "structured",
+          "beforeTokens": 12.5
+        }
+      ],
+      "expected": [
+        {
+          "id": "runtime.continuity",
+          "layer": "L7_CONTINUITY",
+          "priority": 10,
+          "title": "Continuity Context",
+          "content": "Continuity context from previous compaction.\nThis is the cumulative handoff summary for navigation and unfinished work.\nInjected with integrity priority: the summary body is kept complete (not mechanically truncated by a fixed character budget).\nIt is continuity context, not a replacement for Tool Result / Evidence.\nIf it conflicts with newer user messages, prefer the latest user messages.\nIf local facts matter, verify them with tools before claiming them.\n\n## Continuity Summary 1\nmethod=structured; beforeTokens=12.5; summaryChars=14\n\nfull summary 2\n## Continuity Summary 2\nmethod=structured; beforeTokens=12.5; summaryChars=14\n\nfull summary 3\n## Continuity Summary 3\nmethod=structured; beforeTokens=12.5; summaryChars=14\n\nfull summary 4",
+          "source": {
+            "id": "runtime.continuity",
+            "kind": "compaction-continuity",
+            "integrityFirst": true,
+            "summaryCount": 3,
+            "summaries": [
+              {
+                "id": "2",
+                "method": "structured",
+                "originalMessageCount": null,
+                "beforeTokens": 12.5,
+                "afterTokens": null,
+                "summaryChars": 14
+              },
+              {
+                "id": "3",
+                "method": "structured",
+                "originalMessageCount": null,
+                "beforeTokens": 12.5,
+                "afterTokens": null,
+                "summaryChars": 14
+              },
+              {
+                "id": "4",
+                "method": "structured",
+                "originalMessageCount": null,
+                "beforeTokens": 12.5,
+                "afterTokens": null,
+                "summaryChars": 14
+              }
+            ]
+          },
+          "trust": "runtime",
+          "checksum": "b4f2de6b951756f4d74881048694ac3753d2f57c25ba851273b590875e206c9b"
+        }
+      ]
+    }
+  ]
+}

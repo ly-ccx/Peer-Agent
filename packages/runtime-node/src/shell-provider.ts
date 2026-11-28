@@ -383,6 +383,9 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
 
         const timeoutMs = normalizeTimeout(input.timeoutMs, defaultTimeoutMs, maxTimeoutMs);
         const background = input.background === true;
+        if (options.ownForeground && (background || !sessionManager)) {
+          throw new Error('conversation_execution_out_of_scope');
+        }
         const grant = createNodePermissionGrant({
           clock,
           call,
@@ -394,6 +397,7 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
         });
 
         if (!background && sessionManager) {
+          const ownership = options.ownForeground?.(call, grant);
           const requestedCwd = typeof input.cwd === 'string' && input.cwd.trim()
             ? classification.cwd
             : undefined;
@@ -404,11 +408,13 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
             cwd: requestedCwd,
             timeoutMs,
             signal: context.signal,
+            ownership,
             beforeExecute: cwd => {
               if (context.signal?.aborted) throw new Error('aborted');
               if (approvalValidate && !approvalValidate()) throw new Error('permission_policy_changed');
               const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerExecutionScopes(cwd)) : null;
               if (reason) throw new Error(reason);
+              ownership?.authorize(cwd);
             },
           });
           const stopReason = sessionResult.timedOut

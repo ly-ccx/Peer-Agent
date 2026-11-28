@@ -1,4 +1,4 @@
-import { formatResourceFeedbackContext, projectResourceFeedbackTransport } from '@peer-agent/protocol';
+import { formatResourceFeedbackContext, projectResourceFeedbackTransport, normalizeCompactionHistorySelection } from '@peer-agent/protocol';
 /**
  * Canonical persisted-conversation -> active provider history projection.
  *
@@ -9,7 +9,7 @@ import { formatResourceFeedbackContext, projectResourceFeedbackTransport } from 
  * local file before the provider request. This projector does not drop them.
  */
 
-export const CANONICAL_HISTORY_PROJECTOR_VERSION = 2;
+export const CANONICAL_HISTORY_PROJECTOR_VERSION = 3;
 
 type AnyRecord = Record<string, unknown>;
 
@@ -40,6 +40,7 @@ export interface CanonicalHistoryMessage {
 }
 
 export interface CanonicalHistoryContinuity {
+  readonly compactionEpoch?: number;
   readonly summary: string;
   readonly sourceMessageId: string;
   readonly method: string;
@@ -539,12 +540,40 @@ function scanCompactionBoundary(messages: readonly unknown[]): {
   return { compactionBoundaryIndex, continuity };
 }
 
+/** Append-only compaction preserves raw chronology and stable source identity. */
+function historySelectionCollector(messages: readonly unknown[], boundary: number) {
+  const row = recordOf(messages[boundary]); const marker = row && compactionMarker(row);
+  if (!marker || marker.historySelection === undefined) return null;
+  const selection = normalizeCompactionHistorySelection(marker.historySelection);
+  if (!selection || !row?.id || !continuityFromBoundary(row, boundary)?.summary) throw new Error('compaction_history_selection_invalid');
+  const wanted = new Set(selection.retainedMessageIds); const found = new Map<string, unknown>(); const ordered: string[] = [];
+  return {
+    visit(i: number, raw: unknown) {
+      const value = recordOf(raw); const id = typeof value?.id === 'string' ? value.id : '';
+      if (!wanted.has(id)) return;
+      if (i >= boundary || found.has(id) || !value || compactionMarker(value) || !['user','assistant','tool'].includes(String(value.role)) || ['agent_message','agent_activity'].includes(String(value.kind))) throw new Error('compaction_history_selection_invalid');
+      found.set(id, value); ordered.push(id);
+    },
+    finish(): readonly unknown[] {
+      if (ordered.length !== wanted.size || ordered.some((id,i) => id !== selection.retainedMessageIds[i])) throw new Error('compaction_history_selection_invalid');
+      return [...selection.retainedMessageIds.map(id => found.get(id)), ...messages.slice(boundary + 1)];
+    },
+  };
+}
+function selectedHistory(messages: readonly unknown[], boundary: number): readonly unknown[] {
+  const collector = historySelectionCollector(messages, boundary);
+  if (!collector) return messages.slice(boundary + 1);
+  messages.forEach((row, i) => collector.visit(i,row)); return collector.finish();
+}
+
 export function projectConversationHistory(
   values: readonly unknown[],
 ): CanonicalConversationHistory {
   const messages = Array.isArray(values) ? values : [];
   const scanned = scanCompactionBoundary(messages);
-  const active = foldLegacyToolRows(messages.slice(scanned.compactionBoundaryIndex + 1));
+  const active = foldLegacyToolRows(selectedHistory(messages, scanned.compactionBoundaryIndex));
+  const selection = recordOf(compactionMarker(recordOf(messages[scanned.compactionBoundaryIndex]) ?? {})?.historySelection);
+  if (selection && scanned.continuity) scanned.continuity = {...scanned.continuity, compactionEpoch: Number(selection.compactionEpoch)};
   return finishCanonicalHistory(
     scanned.compactionBoundaryIndex,
     scanned.continuity,
@@ -577,7 +606,16 @@ export async function projectConversationHistoryYielding(
     compactionBoundaryIndex = index;
     continuity = continuityFromBoundary(message, index);
   }
-  const active = foldLegacyToolRows(messages.slice(compactionBoundaryIndex + 1));
+  const collector = historySelectionCollector(messages, compactionBoundaryIndex);
+  if (collector) {
+    for (let index = 0; index < messages.length; index++) {
+      if (index > 0 && index % yieldEvery === 0) await pause();
+      collector.visit(index,messages[index]);
+    }
+  }
+  const active = foldLegacyToolRows(collector ? collector.finish() : messages.slice(compactionBoundaryIndex + 1));
+  const selection = recordOf(compactionMarker(recordOf(messages[compactionBoundaryIndex]) ?? {})?.historySelection);
+  if (selection && continuity) continuity = {...continuity, compactionEpoch: Number(selection.compactionEpoch)};
   const projectedMessages: CanonicalHistoryMessage[] = [];
   for (let index = 0; index < active.length; index += 1) {
     if (index > 0 && index % yieldEvery === 0) await pause();

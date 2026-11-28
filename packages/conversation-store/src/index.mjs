@@ -1,8 +1,8 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
-import { readPersistedHistoryFiles } from './persisted-history.mjs';
+import { readPersistedHistoryFiles, readPersistedHistoryTailFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
 import { createInteractionReader } from './interaction-reader.mjs';
 import { createHistorySourceReader, createListPreviewSource } from './history-source-reader.mjs';
@@ -11,11 +11,16 @@ import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
-import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
+import { contextAccountingModelKey, normalizeContextUsageBreakdown, normalizeConversationExecution } from '@peer-agent/protocol';
 import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
+import { createOrdinaryExecutionAdmission } from './ordinary-execution-admission.mjs';
 import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
+import {normalizeContextSnapshot,projectDurableContextSnapshot,unknownCompactionContext,mergeContextSnapshot} from './context-accounting.mjs';
+const AUTOMATION_TRIGGER_SOURCES = new Set(['scheduled', 'manual', 'retry']);
+import {readContextHistoryBinding,contextSnapshotMatchesBinding} from './context-history-binding.mjs';
+import { recordRuntimeTurnUsage as commitRuntimeTurnUsage } from './usage-ledger.mjs';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -31,12 +36,18 @@ function readJsonl(filePath) {
     .filter(Boolean);
 }
 
-function writeJsonl(filePath, rows) {
+function writeJsonl(filePath, rows, options) {
+  replaceText(filePath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), options);
+}
+
+function replaceText(filePath, text, { durable = false, beforeReplace, mode } = {}) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), 'utf8');
   try {
+    writeFileSync(temporaryPath, text, {encoding:'utf8',flush:durable,mode});
+    beforeReplace?.();
     renameSync(temporaryPath, filePath);
+    if (durable) syncDirectory(path.dirname(filePath));
   } catch (error) {
     try { unlinkSync(temporaryPath); } catch {}
     throw error;
@@ -57,12 +68,18 @@ function readJson(filePath) {
   }
 }
 
-function writeJson(filePath, value) {
+function syncDirectory(directory) {
+  const fd = openSync(directory, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+function writeJson(filePath, value, { durable = false } = {}) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, JSON.stringify(value), 'utf8');
+  writeFileSync(temporaryPath, JSON.stringify(value), {encoding:'utf8',flush:durable});
   try {
     renameSync(temporaryPath, filePath);
+    if (durable) syncDirectory(path.dirname(filePath));
   } catch (error) {
     try { unlinkSync(temporaryPath); } catch {}
     throw error;
@@ -119,207 +136,6 @@ function normalizeStatuses(status) {
   return null;
 }
 
-function normalizeContextSnapshot(snapshot, meta) {
-  if (!snapshot || typeof snapshot !== 'object') return null;
-  if (snapshot.version !== 1) return null;
-  const conversationId = typeof snapshot.conversationId === 'string'
-    ? snapshot.conversationId.trim()
-    : '';
-  const contentRevision = Number(snapshot.contentRevision);
-  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
-  const revision = Number(snapshot.revision);
-  const compactionEpoch = Number(snapshot.compactionEpoch);
-  if (!conversationId || !modelKey) return null;
-  if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) return null;
-  if (!Number.isSafeInteger(revision) || revision < 0) return null;
-  if (!Number.isSafeInteger(compactionEpoch) || compactionEpoch < 0) return null;
-  const phases = new Set([
-    'request_preflight',
-    'stream_preview',
-    'tool_result',
-    'post_compaction',
-    'turn_complete',
-    'restored',
-    'model_changed',
-  ]);
-  if (!phases.has(snapshot.phase)) return null;
-  const normalizeNullablePositive = (value) => {
-    if (value === null || value === undefined) return null;
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined;
-  };
-  const normalizeNullableNonNegative = (value) => {
-    if (value === null || value === undefined) return null;
-    const number = Number(value);
-    return Number.isFinite(number) && number >= 0 ? number : undefined;
-  };
-  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
-  const inputBudget = normalizeNullablePositive(snapshot.inputBudget);
-  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens);
-  const authoritativeInputTokens = normalizeNullableNonNegative(snapshot.authoritativeInputTokens);
-  const percent = normalizeNullableNonNegative(snapshot.percent);
-  if (
-    contextWindow === undefined
-    || inputBudget === undefined
-    || compactionThresholdTokens === undefined
-    || authoritativeInputTokens === undefined
-    || percent === undefined
-  ) return null;
-  const pressureSources = new Set([
-    'provider_usage',
-    'provider_count_api',
-    'provider_tokenizer',
-    'provider_error_evidence',
-    'unknown',
-  ]);
-  if (!pressureSources.has(snapshot.pressureSource)) return null;
-  if (typeof snapshot.pendingUncountedChanges !== 'boolean') return null;
-  const pendingContentChars = Number(snapshot.pendingContentChars);
-  if (!Number.isSafeInteger(pendingContentChars) || pendingContentChars < 0) return null;
-  const capability = snapshot.countCapability;
-  if (!capability || typeof capability !== 'object') return null;
-  if (![
-    'provider_count_api',
-    'provider_tokenizer',
-    'observed_usage_only',
-    'unavailable',
-  ].includes(capability.kind)) return null;
-  if (
-    capability.kind === 'provider_tokenizer'
-    && (typeof capability.tokenizerVersion !== 'string' || !capability.tokenizerVersion.trim())
-  ) return null;
-  if (snapshot.counterStatus !== 'active' && snapshot.counterStatus !== 'degraded') return null;
-  const updatedAt = Number(snapshot.updatedAt);
-  if (!Number.isFinite(updatedAt) || updatedAt < 0) return null;
-  if (conversationId !== String(meta?.id ?? '')) return null;
-  if (contentRevision !== Number(meta?.contentRevision ?? 0)) return null;
-  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
-  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
-    ? meta.model.trim()
-    : null;
-  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
-  const legacyModelKey = providerBinding ?? storedModel;
-  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
-  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
-  const normalized = {
-    ...snapshot,
-    version: 1,
-    conversationId,
-    contentRevision,
-    modelKey: expectedModelKey,
-    revision,
-    phase: snapshot.phase,
-    compactionEpoch,
-    contextWindow,
-    inputBudget,
-    compactionThresholdTokens,
-    authoritativeInputTokens,
-    percent,
-    pressureSource: snapshot.pressureSource,
-    pendingUncountedChanges: snapshot.pendingUncountedChanges,
-    pendingContentChars,
-    countCapability: capability.kind === 'provider_tokenizer'
-      ? { kind: capability.kind, tokenizerVersion: capability.tokenizerVersion.trim() }
-      : { kind: capability.kind },
-    counterStatus: snapshot.counterStatus,
-    updatedAt,
-  };
-  if (usageBreakdown) normalized.usageBreakdown = usageBreakdown;
-  else delete normalized.usageBreakdown;
-  return normalized;
-}
-
-function projectDurableContextSnapshot(snapshot, meta) {
-  const exact = normalizeContextSnapshot(snapshot, meta);
-  if (exact) return exact;
-  if (!snapshot || typeof snapshot !== 'object') return null;
-  if (snapshot.version !== 1) return null;
-  const conversationId = typeof snapshot.conversationId === 'string'
-    ? snapshot.conversationId.trim()
-    : '';
-  if (!conversationId || conversationId !== String(meta?.id ?? '')) return null;
-  const observation = snapshot.lastObserved;
-  if (!observation || typeof observation !== 'object') return null;
-  if (observation.source !== 'provider_usage') return null;
-  const inputTokens = Number(observation.inputTokens);
-  if (!Number.isFinite(inputTokens) || inputTokens < 0) return null;
-  const modelKey = typeof snapshot.modelKey === 'string' ? snapshot.modelKey.trim() : '';
-  if (!modelKey) return null;
-  const providerBinding = normalizeModelProviderId(meta?.modelProviderId);
-  const storedModel = typeof meta?.model === 'string' && meta.model.trim()
-    ? meta.model.trim()
-    : null;
-  const expectedModelKey = contextAccountingModelKey(providerBinding, storedModel);
-  const legacyModelKey = providerBinding ?? storedModel;
-  if (modelKey !== expectedModelKey && modelKey !== legacyModelKey) return null;
-  const contentRevisionRaw = Number(meta?.contentRevision);
-  const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
-    ? contentRevisionRaw
-    : 0;
-  const revisionRaw = Number(snapshot.revision);
-  const revision = Number.isSafeInteger(revisionRaw) && revisionRaw >= 0 ? revisionRaw : 0;
-  const compactionEpochRaw = Number(
-    observation.compactionEpoch ?? snapshot.compactionEpoch ?? 0,
-  );
-  const compactionEpoch = Number.isSafeInteger(compactionEpochRaw) && compactionEpochRaw >= 0
-    ? compactionEpochRaw
-    : 0;
-  const normalizeNullablePositive = (value) => {
-    if (value === null || value === undefined) return null;
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
-  };
-  const contextWindow = normalizeNullablePositive(snapshot.contextWindow);
-  const inputBudget = normalizeNullablePositive(snapshot.inputBudget) ?? contextWindow;
-  const compactionThresholdTokens = normalizeNullablePositive(snapshot.compactionThresholdTokens)
-    ?? (contextWindow == null ? null : Math.floor(contextWindow * 0.8));
-  const observedAtRaw = Number(observation.observedAt ?? snapshot.updatedAt);
-  const updatedAt = Number.isFinite(observedAtRaw) && observedAtRaw >= 0
-    ? observedAtRaw
-    : Date.now();
-  const requestFingerprint = typeof observation.requestFingerprint === 'string'
-    ? observation.requestFingerprint.trim()
-    : '';
-  const countCapability = snapshot.countCapability && typeof snapshot.countCapability === 'object'
-    ? snapshot.countCapability
-    : { kind: 'observed_usage_only' };
-  const counterStatus = snapshot.counterStatus === 'degraded' ? 'degraded' : 'active';
-  const usageBreakdown = normalizeContextUsageBreakdown(snapshot.usageBreakdown);
-  return {
-    version: 1,
-    conversationId,
-    contentRevision,
-    modelKey,
-    revision,
-    phase: 'restored',
-    compactionEpoch,
-    contextWindow,
-    inputBudget,
-    compactionThresholdTokens,
-    authoritativeInputTokens: inputTokens,
-    percent: contextWindow == null
-      ? null
-      : Math.min(100, Math.round((inputTokens / contextWindow) * 100)),
-    pressureSource: 'provider_usage',
-    pendingUncountedChanges: true,
-    pendingContentChars: 0,
-    countCapability,
-    counterStatus,
-    updatedAt,
-    lastObserved: {
-      inputTokens,
-      requestFingerprint: requestFingerprint
-        || `restored_observation_${conversationId}_${compactionEpoch}`,
-      compactionEpoch,
-      source: 'provider_usage',
-      observedAt: updatedAt,
-    },
-    ...(usageBreakdown ? { usageBreakdown } : {}),
-  };
-}
-
-
-const AUTOMATION_TRIGGER_SOURCES = new Set(['scheduled', 'manual', 'retry']);
 
 function normalizeAutomationOrigin(origin) {
   if (!origin || typeof origin !== 'object') return null;
@@ -544,6 +360,8 @@ export function createConversationStore(options = {}) {
     const rawSnapshot = readJson(contextSnapshotFile(meta.id))
       ?? meta.contextSnapshot
       ?? null;
+    const binding=readContextHistoryBinding(convFile(meta.id));
+    if (!contextSnapshotMatchesBinding(rawSnapshot,binding)) return unknownCompactionContext(meta,binding);
     return projectDurableContextSnapshot(rawSnapshot, meta);
   }
   function publishChange(meta, changeType) {
@@ -566,10 +384,21 @@ export function createConversationStore(options = {}) {
     previewIndexToken = null;
     previewIndexTurn = null;
   }
-  function writeIndex(rows) {
+  function writeIndex(rows, options) {
     forgetPreviewIndex();
-    writeJsonl(indexFile, rows);
+    writeJsonl(indexFile, rows, options);
   }
+  const executionAdmission = createOrdinaryExecutionAdmission({
+    indexFile, convFile, streamPatchFile, contextSnapshotFile,
+    writeIndexText(text, beforeReplace) {
+      forgetPreviewIndex();
+      replaceText(indexFile, text, { durable: true, beforeReplace });
+    },
+    writeHistoryText(file, text, beforeReplace) {
+      replaceText(file, text, { durable: true, beforeReplace, mode: 0o600 });
+    },
+    commitUsage: recordRuntimeTurnUsage,
+  });
   function appendIndex(row) {
     forgetPreviewIndex();
     appendJsonl(indexFile, row);
@@ -740,6 +569,12 @@ export function createConversationStore(options = {}) {
     const meta = readIndex().find((row) => row.id === id);
     if (!meta) return null;
     return projectSessionPreview({ ...meta, contextSnapshot: durableContextSnapshot(meta) });
+  }
+
+  function executionAvailable(id) {
+    const meta = executionMetadata(readIndex(), id);
+    if (!meta) throw new Error('conversation_not_found');
+    checkExecutionAvailable(meta);
   }
 
   function withMessageCount(meta) {
@@ -1213,8 +1048,9 @@ export function createConversationStore(options = {}) {
 
   function updateMode(id, mode) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     meta.mode = normalizeMode(mode);
     meta.updatedAt = new Date().toISOString();
     writeIndex(index);
@@ -1223,8 +1059,9 @@ export function createConversationStore(options = {}) {
 
   function updateFastMode(id, fastMode) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     meta.fastMode = fastMode === true;
     meta.updatedAt = new Date().toISOString();
     writeIndex(index);
@@ -1258,8 +1095,9 @@ export function createConversationStore(options = {}) {
   // 不可用则自动回退；这里只负责如实存取用户的选择。
   function updateModelEffort(id, { effort, modelProviderId, model } = {}) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     const previousProviderId = normalizeModelProviderId(meta.modelProviderId);
     const previousModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
     const previousContextModelKey = contextAccountingModelKey(previousProviderId, previousModel);
@@ -1281,14 +1119,18 @@ export function createConversationStore(options = {}) {
 
   function updateContextSnapshot(id, snapshot = {}) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     const contentRevisionRaw = Number(meta.contentRevision);
     const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
       ? contentRevisionRaw
       : 0;
+    const binding=readContextHistoryBinding(convFile(id));
+    if(!binding || binding.selectionVersion===1 && Number(snapshot.compactionEpoch)!==binding.compactionEpoch)return null;
     const candidate = {
       ...snapshot,
+      projectorVersion:3,compactionBoundaryId:binding.compactionBoundaryId,
       conversationId: id,
       contentRevision,
       modelKey: contextAccountingModelKey(
@@ -1296,7 +1138,10 @@ export function createConversationStore(options = {}) {
         typeof meta.model === 'string' ? meta.model : null,
       ),
     };
-    const normalized = normalizeContextSnapshot(candidate, { ...meta, contentRevision });
+    const hasSidecar=existsSync(contextSnapshotFile(id));
+    const previous=hasSidecar?readJson(contextSnapshotFile(id)):meta.contextSnapshot;
+    if (hasSidecar && (!previous || previous.version!==1)) return null;
+    const normalized = normalizeContextSnapshot(mergeContextSnapshot(previous,candidate), { ...meta, contentRevision });
     if (!normalized) return null;
     meta.contentRevision = contentRevision;
     meta.contextSnapshot = normalized;
@@ -1338,9 +1183,17 @@ export function createConversationStore(options = {}) {
       return { conversationId: id, contentRevision: meta.contentRevision, createdAt: meta.createdAt, historyFile, sidecarFile,
         version: JSON.stringify([meta.contentRevision, meta.createdAt, fileVersion(historyFile), fileVersion(sidecarFile)]) };
     };
+    const tailLimit = Number.isInteger(options.tailLimit) && options.tailLimit > 0 ? options.tailLimit : 0;
+    const headLimit = Number.isInteger(options.headLimit) && options.headLimit >= 0 ? options.headLimit : 16;
     return createHistoryProjectionReader({ ...options, project, describe,
-      load: description => historySources(description, { immutableInput: options.immutableInput === true,
-        isCurrent: () => describe(description.conversationId)?.version === description.version }),
+      load: tailLimit > 0
+        ? description => readPersistedHistoryTailFiles({
+          ...description,
+          tailLimit,
+          headLimit,
+        })
+        : description => historySources(description, { immutableInput: options.immutableInput === true,
+          isCurrent: () => describe(description.conversationId)?.version === description.version }),
     });
   }
 
@@ -1485,7 +1338,9 @@ export function createConversationStore(options = {}) {
    */
   function patchStreamingMessage(id, messageId, patch) {
     if (!id || !messageId || !patch || typeof patch !== 'object') return false;
+    const previous = readStreamPatchForCommit(id, messageId);
     writeJson(streamPatchFile(id), {
+      ...previous,
       version: 1,
       conversationId: id,
       messageId,
@@ -1499,8 +1354,26 @@ export function createConversationStore(options = {}) {
   function clearStreamPatch(id) {
     try {
       const filePath = streamPatchFile(id);
-      if (existsSync(filePath)) unlinkSync(filePath);
-    } catch {}
+      if (existsSync(filePath)) {
+        readStreamPatchForCommit(id);
+        unlinkSync(filePath);
+        syncDirectory(storeDir);
+      }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+
+  function readStreamPatchForCommit(id, messageId) {
+    const file = streamPatchFile(id);
+    if (!existsSync(file)) return null;
+    let marker;
+    try { marker = JSON.parse(readFileSync(file, 'utf8')); }
+    catch { throw Object.assign(new Error('Invalid streaming state'), {code:'BACKGROUND_STREAM_STATE_INVALID'}); }
+    if (marker?.version !== 1 || marker.conversationId !== id || typeof marker.messageId !== 'string'
+      || !marker.messageId || !marker.patch || typeof marker.patch !== 'object' || Array.isArray(marker.patch)
+      || messageId !== undefined && marker.messageId !== messageId) {
+      throw Object.assign(new Error('Streaming state does not belong to this commit'), {code:'BACKGROUND_STREAM_STATE_INVALID'});
+    }
+    return marker;
   }
 
   /**
@@ -1519,6 +1392,7 @@ export function createConversationStore(options = {}) {
       ?? meta.contextSnapshot
       ?? null;
     if (!rawSnapshot || rawSnapshot.version !== 1) return null;
+    if (!contextSnapshotMatchesBinding(rawSnapshot,readContextHistoryBinding(convFile(conversationId)))) return null;
     if (String(rawSnapshot.conversationId || '') !== conversationId) return null;
     const expectedModelKey = typeof modelKey === 'string' && modelKey.trim()
       ? contextAccountingModelKey(modelKey.trim(), null)
@@ -1612,13 +1486,14 @@ export function createConversationStore(options = {}) {
   function appendMessage(id, message, { returnMessages = true } = {}) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
-      const meta = index.find((c) => c.id === id);
+      const meta = executionMetadata(index, id);
       if (!meta) return null;
       // Refuse empty user bubbles (no text, no attachments). They only surface as a bare
       // "你" label in the UI and have no durable conversation value.
       if (isEmptyUserMessage(message)) {
         return withMessageCount(meta);
       }
+      checkExecutionAvailable(meta);
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
       // 首条用户消息只写短草稿标题，禁止原话全文当永久名。
       // plan/manual 覆盖后不再被消息回填。
@@ -1726,15 +1601,25 @@ export function createConversationStore(options = {}) {
   const terminalCommitter = createTerminalMessageCommitter({ storeDir,
     commitPrepared: async prepared => {
       const result = await withFileLocksAsync([indexFile, prepared.historyFile], () => {
-        const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+        const index = readIndex(), meta = executionMetadata(index, prepared.id);
         if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+        checkExecutionAvailable(meta);
         if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
-        renameSync(prepared.temporaryFile, prepared.historyFile);
-        meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
-        meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
-        assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
-        writeIndex(index);
-        if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+        const marker = readStreamPatchForCommit(prepared.id, prepared.messageId);
+        // The target stays provisional across body/index/cleanup failures. An
+        // empty patch protects visibility without publishing unconfirmed text.
+        try {
+          writeJson(streamPatchFile(prepared.id), marker ?? {version:1,conversationId:prepared.id,messageId:prepared.messageId,patch:{},patchedAt:new Date().toISOString()}, {durable:true});
+          renameSync(prepared.temporaryFile, prepared.historyFile);
+          syncDirectory(storeDir);
+          meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+          meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+          assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
+          writeIndex(index, {durable:true});
+          clearStreamPatch(prepared.id);
+        } catch (cause) {
+          throw Object.assign(new Error('Conversation terminal commit is uncertain', {cause}), {code:'STORE_COMMIT_UNCERTAIN'});
+        }
         return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
       });
       if (result === false) return false;
@@ -1744,6 +1629,7 @@ export function createConversationStore(options = {}) {
     },
   });
   const messageWrite = operation => (...args) => withFileLock(indexFile, () => withFileLock(convFile(args[0]), () => operation(...args)));
+  const historyWrite = operation => messageWrite(guardExecutionWrite(operation));
 
   // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
   // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
@@ -1771,170 +1657,11 @@ export function createConversationStore(options = {}) {
     return meta.lifetimeUsage;
   }
 
-  /**
-   * Merge one runtime turn into the per-model ledger slice of lifetimeUsage.
-   * Keyed by modelProviderId (fallback 'unknown' when attribution is absent),
-   * so switching providers keeps historical per-model totals accurate.
-   */
-  function mergeLifetimeUsageByModel(previousByModel = {}, { attribution = {}, tokens, estimatedCostUsd }) {
-    const modelProviderId =
-      typeof attribution.modelProviderId === 'string' && attribution.modelProviderId.trim()
-        ? attribution.modelProviderId.trim()
-        : 'unknown';
-    const previousEntry = previousByModel[modelProviderId] || {};
-    const inputTokens = Number(previousEntry.inputTokens || 0) + Number(tokens.inputTokens || 0);
-    const outputTokens = Number(previousEntry.outputTokens || 0) + Number(tokens.outputTokens || 0);
-    const cacheReadTokens = Number(previousEntry.cacheReadTokens || 0) + Number(tokens.cacheReadTokens || 0);
-    const cacheWriteTokens = Number(previousEntry.cacheWriteTokens || 0) + Number(tokens.cacheWriteTokens || 0);
-    const requestCount = Number(previousEntry.requestCount || 0) + 1;
-    return {
-      ...previousByModel,
-      [modelProviderId]: {
-        modelProviderId,
-        model: attribution.model || previousEntry.model || undefined,
-        providerName: attribution.providerName || previousEntry.providerName || undefined,
-        inputTokens,
-        outputTokens,
-        totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        estimatedCostUsd:
-          Number(previousEntry.estimatedCostUsd || 0) + (Number.isFinite(estimatedCostUsd) ? estimatedCostUsd : 0),
-        requestCount,
-      },
-    };
-  }
-
-  /**
-   * Canonical durable sink for one completed runtime turn.
-   *
-   * This is intentionally deeper than the Desktop/TUI hosts: it validates the
-   * scope, updates conversation lifetime, and appends the runtime-turn ledger
-   * row together so both hosts have identical persistence semantics.
-   */
+  /** Caller wrapper owns the canonical index lock; the sink owns recovery. */
   function recordRuntimeTurnUsage(id, { usage, attribution = {} } = {}) {
-    if (usage?.usageScope !== 'runtime_turn') {
-      throw new TypeError('recordRuntimeTurnUsage requires usageScope=runtime_turn');
-    }
-    const providerRequestCount = Number(usage.providerRequestCount);
-    if (!Number.isSafeInteger(providerRequestCount) || providerRequestCount < 1) {
-      throw new TypeError('recordRuntimeTurnUsage requires providerRequestCount >= 1');
-    }
-    const conversationId = typeof id === 'string' ? id.trim() : '';
-    if (!conversationId) return null;
-    const ledgerId = typeof attribution.id === 'string' && attribution.id.trim()
-      ? attribution.id.trim()
-      : `runtime_turn_${Date.now()}_${randomUUID()}`;
-    const usageTransactionFile = path.join(storeDir, '.usage-ledger-transaction');
-    return withFileLock(usageTransactionFile, () => {
-      const existing = readJsonl(usageLogFile).find(
-        (row) => row?.id === ledgerId && row?.conversationId === conversationId,
-      );
-      if (existing) {
-        const meta = readIndex().find((candidate) => candidate.id === conversationId);
-        return meta
-          ? {
-              lifetimeUsage: {
-                usageScope: 'conversation_lifetime',
-                runtimeTurnCount: Number(meta.runtimeTurnCount || 0),
-                inputTokens: Number(meta.lifetimeUsage?.inputTokens || 0),
-                outputTokens: Number(meta.lifetimeUsage?.outputTokens || 0),
-                cacheReadTokens: Number(meta.lifetimeUsage?.cacheReadTokens || 0),
-                cacheWriteTokens: Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
-                totalTokens:
-                  Number(meta.lifetimeUsage?.inputTokens || 0)
-                  + Number(meta.lifetimeUsage?.outputTokens || 0)
-                  + Number(meta.lifetimeUsage?.cacheReadTokens || 0)
-                  + Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
-                ...(meta.lifetimeUsage?.byModel ? { byModel: meta.lifetimeUsage.byModel } : {}),
-              },
-              ledgerRow: existing,
-            }
-          : null;
-      }
-
-      const normalizedToken = (value) => {
-        const number = Number(value);
-        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
-      };
-      const tokens = {
-        inputTokens: normalizedToken(usage.inputTokens),
-        outputTokens: normalizedToken(usage.outputTokens),
-        cacheReadTokens: normalizedToken(usage.cacheReadTokens),
-        cacheWriteTokens: normalizedToken(usage.cacheWriteTokens),
-      };
-      const index = readIndex();
-      const meta = index.find((candidate) => candidate.id === conversationId);
-      if (!meta) return null;
-      const previous = meta.lifetimeUsage || {};
-      meta.lifetimeUsage = {
-        inputTokens: Number(previous.inputTokens || 0) + tokens.inputTokens,
-        outputTokens: Number(previous.outputTokens || 0) + tokens.outputTokens,
-        cacheReadTokens: Number(previous.cacheReadTokens || 0) + tokens.cacheReadTokens,
-        cacheWriteTokens: Number(previous.cacheWriteTokens || 0) + tokens.cacheWriteTokens,
-        // 按模型拆分累计：切换 Provider 后历史累计仍按各自模型归因，不再串账。
-        byModel: mergeLifetimeUsageByModel(previous.byModel, {
-          attribution,
-          tokens,
-          estimatedCostUsd: Number(attribution.estimatedCostUsd) || 0,
-        }),
-      };
-      meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
-      meta.updatedAt = new Date().toISOString();
-      writeIndex(index);
-
-      const optionalText = (value) => (
-        typeof value === 'string' && value.trim() ? value.trim() : null
-      );
-      const estimatedCost = Number(attribution.estimatedCostUsd);
-      const ledgerRow = {
-        id: ledgerId,
-        at: optionalText(attribution.at) || new Date().toISOString(),
-        conversationId,
-        streamId: optionalText(attribution.streamId),
-        modelProviderId: optionalText(attribution.modelProviderId),
-        // 统计按渠道归组：优先写入方解析好的 groupId；回退从复合 id 拆。
-        // 裸 uuid（模型条目 id）不猜，留给聚合层用 provider 索引归组。
-        groupId: (() => {
-          const explicit = optionalText(attribution.groupId);
-          if (explicit) return explicit;
-          const raw = optionalText(attribution.modelProviderId);
-          if (raw && raw.includes('::')) {
-            const group = raw.slice(0, raw.indexOf('::')).trim();
-            if (group) return group;
-          }
-          return null;
-        })(),
-        model: optionalText(attribution.model),
-        providerName: optionalText(attribution.providerName),
-        usageScope: 'runtime_turn',
-        providerRequestCount,
-        ...tokens,
-        totalTokens:
-          tokens.inputTokens
-          + tokens.outputTokens
-          + tokens.cacheReadTokens
-          + tokens.cacheWriteTokens,
-        estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
-        pricingSource: optionalText(attribution.pricingSource),
-        ...(optionalText(attribution.role) ? { role: optionalText(attribution.role) } : {}),
-        ...(optionalText(attribution.workspaceId) ? { workspaceId: optionalText(attribution.workspaceId) } : {}),
-      };
-      appendJsonl(usageLogFile, ledgerRow);
-      return {
-        lifetimeUsage: {
-          usageScope: 'conversation_lifetime',
-          runtimeTurnCount: meta.runtimeTurnCount,
-          ...meta.lifetimeUsage,
-          totalTokens:
-            meta.lifetimeUsage.inputTokens
-            + meta.lifetimeUsage.outputTokens
-            + meta.lifetimeUsage.cacheReadTokens
-            + meta.lifetimeUsage.cacheWriteTokens,
-        },
-        ledgerRow,
-      };
-    });
+    if (typeof id !== 'string' || !id.trim()) return null;
+    return commitRuntimeTurnUsage({ storeDir, usageLogFile, conversationId: id.trim(), usage, attribution,
+      onIndexChanged: forgetPreviewIndex });
   }
 
   function setArchiveStatus(id, status) {
@@ -2039,8 +1766,42 @@ export function createConversationStore(options = {}) {
     return { archivedIds, archivedCount: archivedIds.length };
   }
 
+  function checkExecutionAvailable(meta) {
+    if (!Object.hasOwn(meta, 'runtimeExecution')) return null;
+    const run = normalizeConversationExecution(meta.runtimeExecution);
+    if (run.identity.conversationId !== meta.id) throw new Error('conversation_execution_invalid');
+    // A validated stopped phase includes the original stop receipt and settled usage.
+    if (run.phase !== 'stopped') throw new Error('conversation_execution_busy');
+    return run;
+  }
+
+  function executionMetadata(rows, id) {
+    const matches = rows.filter((row) => row.id === id);
+    if (matches.length > 1) throw new Error('conversation_execution_invalid');
+    return matches[0];
+  }
+
+  function guardExecutionWrite(operation) {
+    return (id, ...args) => {
+      const meta = executionMetadata(readIndex(), id);
+      if (meta) checkExecutionAvailable(meta);
+      return operation(id, ...args);
+    };
+  }
+
+  function assertConversationRemovalAllowed(meta) {
+    const run = checkExecutionAvailable(meta);
+    if (run && (run.handles.length > 0 || lstatSync(streamPatchFile(meta.id), { throwIfNoEntry: false }))) {
+      throw new Error('conversation_execution_busy');
+    }
+  }
+
   function deleteConversation(id) {
-    const index = readIndex().filter((c) => c.id !== id);
+    const index = readIndex().filter((meta) => {
+      if (meta.id !== id) return true;
+      assertConversationRemovalAllowed(meta);
+      return false;
+    });
     writeIndex(index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
     clearStreamPatch(id);
@@ -2068,6 +1829,7 @@ export function createConversationStore(options = {}) {
       else kept.push(meta);
     }
     if (removed.length === 0) return [];
+    for (const meta of removed) assertConversationRemovalAllowed(meta);
     writeIndex(kept);
     for (const meta of removed) {
       try { if (existsSync(convFile(meta.id))) unlinkSync(convFile(meta.id)); } catch {}
@@ -2154,6 +1916,8 @@ export function createConversationStore(options = {}) {
     getConversation,
     readSessionPreview,
     readSessionMeta,
+    assertExecutionAvailable: executionAvailable,
+    ordinaryExecutionAdmission: executionAdmission,
     readConversationWindow,
     readConversationYielding,
     getPersistedConversationHistory,
@@ -2181,14 +1945,15 @@ export function createConversationStore(options = {}) {
     updateModelEffort: metadataWrite(updateModelEffort),
     updateContextSnapshot: metadataWrite(updateContextSnapshot),
     appendMessage: changed(appendMessage, 'messages-updated'),
-    updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
-    updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
+    updateLastMessage: changed(historyWrite(updateLastMessage), 'messages-updated'),
+    updateMessageById: changed(historyWrite(updateMessageById), 'messages-updated'),
     commitStreamingMessage: terminalCommitter.commit,
     drainPendingCommits: terminalCommitter.drain,
     // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
-    patchStreamingMessage,
-    clearStreamPatch,
-    replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
+    patchStreamingMessage: (...args) => !args[0] || !args[1] || !args[2] || typeof args[2] !== 'object'
+      ? false : historyWrite(patchStreamingMessage)(...args),
+    clearStreamPatch: id => id ? historyWrite(clearStreamPatch)(id) : undefined,
+    replaceMessages: changed(historyWrite(replaceMessages), 'messages-updated'),
     addUsage: metadataWrite(addUsage),
     recordRuntimeTurnUsage: metadataWrite(recordRuntimeTurnUsage),
     archiveConversation: metadataWrite(archiveConversation),
@@ -2209,3 +1974,5 @@ export {
   createSessionService,
 } from './session-service.mjs';
 export { coerceSessionPreview, truncatePreview } from './session-preview.mjs';
+
+export { appendAuxiliaryUsageRecord } from './usage-ledger.mjs';

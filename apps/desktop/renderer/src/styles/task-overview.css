@@ -7,16 +7,16 @@
   .task-overview-page-layer {
     --task-overview-compact-height: 3.75rem;
     @apply relative h-full min-h-0 min-w-0 overflow-hidden;
-    background: var(--za-app-bg);
+    background: var(--chrome-canvas);
     border-radius: var(--ui-radius-panel);
   }
 
   .workbench-open-notice {
     @apply mx-7 mt-4 mb-0 px-3 py-2 text-sm;
     border-radius: var(--ui-radius-control-compact);
-    color: var(--za-text);
-    background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
+    color: var(--graphite-base);
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
   }
 
   .task-overview-scroll-region {
@@ -38,14 +38,14 @@
     z-index: 19;
     top: 0;
     height: var(--task-overview-compact-height);
-    background: var(--za-app-bg);
+    background: var(--chrome-canvas);
   }
 
   .task-overview-page-layer:has(.task-overview-compact-header.is-visible)::after {
     z-index: 21;
     top: calc(var(--task-overview-compact-height) - 1px);
     height: 1px;
-    background: var(--za-line);
+    background: var(--chrome-hairline);
   }
 
   .task-overview-page {
@@ -69,25 +69,25 @@
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.55rem 1.5rem;
-    border-top: 1px solid var(--za-line);
-    background: color-mix(in srgb, var(--za-app-bg) 88%, transparent);
+    border-top: 1px solid var(--chrome-hairline);
+    background: color-mix(in srgb, var(--chrome-canvas) 88%, transparent);
     backdrop-filter: blur(16px);
     pointer-events: auto;
   }
 
   .task-overview-background-bar__cluster {
     @apply inline-flex min-w-0 cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-background-bar__cluster:disabled,
   .task-overview-background-bar__cluster.is-quiet {
     cursor: default;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-background-bar__cluster:not(:disabled):hover .task-overview-background-bar__hint {
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .task-overview-background-bar__copy {
@@ -95,13 +95,13 @@
   }
 
   .task-overview-background-bar__copy b {
-    color: var(--za-accent);
+    color: var(--azure-seal);
     font-variant-numeric: tabular-nums;
   }
 
   .task-overview-background-bar__hint {
     @apply min-w-0 truncate text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     max-width: 18rem;
   }
 
@@ -109,8 +109,8 @@
     width: 0.5rem;
     height: 0.5rem;
     border-radius: var(--ui-radius-circle);
-    background: var(--za-accent);
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--za-accent) 18%, transparent);
+    background: var(--azure-seal);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--azure-seal) 18%, transparent);
   }
 
   .task-overview-background-bar__meter {
@@ -119,14 +119,14 @@
     height: 0.3rem;
     overflow: hidden;
     border-radius: var(--ui-radius-pill);
-    background: color-mix(in srgb, var(--za-line) 80%, transparent);
+    background: color-mix(in srgb, var(--chrome-hairline) 80%, transparent);
   }
 
   .task-overview-background-bar__meter i {
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   .task-overview-inbox-cards {
@@ -158,8 +158,8 @@
     gap: 1rem;
     height: var(--task-overview-compact-height);
     padding: 0.75rem 1.75rem;
-    background: var(--za-app-bg);
-    box-shadow: 0 8px 20px color-mix(in srgb, var(--za-app-bg) 70%, transparent);
+    background: var(--chrome-canvas);
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--chrome-canvas) 70%, transparent);
     opacity: 0;
     pointer-events: none;
     transform: translateY(-100%);
@@ -179,22 +179,22 @@
 
   .task-overview-compact-context strong {
     @apply shrink-0 text-sm font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-compact-stats {
     @apply shrink-0 text-xs;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-compact-stats span + span {
     @apply border-l pl-3;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .task-overview-compact-stats b {
     @apply mr-1 font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   /* ---------- topline：面包屑 + Workspace 徽标 ---------- */
@@ -212,30 +212,30 @@
 
   .task-overview-crumb {
     @apply flex items-center gap-2 text-sm;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-crumb b {
     @apply font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-scope {
     @apply inline-flex items-center gap-2 rounded-[var(--ui-radius-pill)] border px-3 py-1 text-xs;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
-    color: var(--za-text-soft);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-soft);
   }
 
   .task-overview-scope-dot {
     @apply inline-block h-1.5 w-1.5 rounded-[var(--ui-radius-circle)];
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   /* ---------- hero ---------- */
   .task-overview-hero {
     @apply mb-8 flex flex-wrap items-end justify-between gap-6 border-b pb-6;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .task-overview-hero-copy {
@@ -244,24 +244,24 @@
 
   .task-overview-kicker {
     @apply mb-2 text-xs font-medium uppercase tracking-[0.14em];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-kicker::before {
     content: '— ';
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .task-overview-hero h1,
   .task-overview-header h1 {
     @apply text-3xl font-semibold leading-tight tracking-tight;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-hero-copy p,
   .task-overview-subtitle {
     @apply mt-2 max-w-xl text-sm leading-relaxed;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-hero-stats {
@@ -274,17 +274,17 @@
   }
 
   .task-overview-stat + .task-overview-stat {
-    border-left: 1px solid var(--za-line);
+    border-left: 1px solid var(--chrome-hairline);
   }
 
   .task-overview-stat b {
     @apply text-2xl font-semibold tabular-nums leading-none;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-stat span {
     @apply mt-1.5 text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-header {
@@ -306,18 +306,18 @@
 
   .task-overview-section-title h2 {
     @apply text-base font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-section-title small {
     @apply inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--ui-radius-pill)] px-1.5 text-[11px] font-semibold tabular-nums;
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .task-overview-section-meta {
     @apply text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-section-link {
@@ -326,7 +326,7 @@
     margin-right: -0.375rem;
     background: transparent;
     border-color: transparent;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     transition:
       background 140ms ease,
       border-color 140ms ease,
@@ -339,8 +339,8 @@
 
   .task-overview-section-link__count {
     @apply inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--ui-radius-pill)] px-1 text-[10px] font-semibold leading-none tabular-nums;
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
     transition:
       background 140ms ease,
       color 140ms ease;
@@ -352,14 +352,14 @@
   }
 
   .task-overview-section-link:hover {
-    background: var(--za-surface-1);
-    border-color: var(--za-line);
-    color: var(--za-text);
+    background: var(--control-fill);
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-base);
   }
 
   .task-overview-section-link:hover .task-overview-section-link__count {
-    background: color-mix(in srgb, var(--za-accent) 14%, transparent);
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 14%, transparent);
+    color: var(--azure-seal);
   }
 
   .task-overview-section-link:hover .task-overview-section-link__arrow {
@@ -367,15 +367,15 @@
   }
 
   .task-overview-section-link:active {
-    background: var(--za-surface-1);
-    border-color: var(--za-line-strong);
+    background: var(--control-fill);
+    border-color: var(--chrome-hairline-strong);
     transform: translateY(0.5px);
   }
 
   .task-overview-section-link:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--za-accent) 45%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--azure-seal) 45%, transparent);
     outline-offset: 2px;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -401,39 +401,39 @@
 
   .task-overview-discussion-link__label {
     @apply text-sm font-medium;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-discussion-link__meta {
     @apply text-[11px] font-normal tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-discussion-link__arrow {
     @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] text-sm transition-all;
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .task-overview-discussion-link:hover,
   .task-overview-discussion-link:focus-visible {
-    background: var(--za-surface-0);
+    background: var(--paper-raised);
   }
 
   .task-overview-discussion-link:hover .task-overview-discussion-link__label,
   .task-overview-discussion-link:focus-visible .task-overview-discussion-link__label {
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .task-overview-discussion-link:hover .task-overview-discussion-link__arrow,
   .task-overview-discussion-link:focus-visible .task-overview-discussion-link__arrow {
-    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+    color: var(--azure-seal);
     transform: translateX(2px);
   }
 
   .task-overview-discussion-link:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--za-accent) 45%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--azure-seal) 45%, transparent);
     outline-offset: 2px;
   }
 
@@ -445,8 +445,8 @@
 
   .task-overview-discussion-card {
     @apply flex min-h-32 min-w-0 flex-col rounded-[var(--ui-radius-panel)] border p-4 transition-colors;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
 
   .task-overview-discussion-card.is-clickable {
@@ -454,14 +454,14 @@
   }
 
   .task-overview-discussion-card.is-clickable:hover {
-    background: var(--za-surface-1);
-    border-color: color-mix(in srgb, var(--za-accent) 42%, var(--za-line));
+    background: var(--control-fill);
+    border-color: color-mix(in srgb, var(--azure-seal) 42%, var(--chrome-hairline));
   }
 
   .task-overview-discussion-card__meta,
   .task-overview-discussion-card__footer {
     @apply flex min-w-0 items-center justify-between gap-3 text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-discussion-card__status {
@@ -473,17 +473,17 @@
   }
 
   .task-overview-discussion-card__status.is-unread {
-    color: var(--za-accent);
-    background: color-mix(in srgb, var(--za-accent) 12%, transparent);
+    color: var(--azure-seal);
+    background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
   }
 
   .task-overview-discussion-card__status.is-unread i {
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   .task-overview-discussion-card__status.is-read {
-    color: var(--za-text-muted);
-    background: var(--za-surface-1);
+    color: var(--graphite-fade);
+    background: var(--control-fill);
   }
 
   .task-overview-discussion-card__status.is-read i {
@@ -497,7 +497,7 @@
 
   .task-overview-discussion-card h3 {
     @apply my-3 min-w-0 overflow-hidden text-sm font-semibold leading-5;
-    color: var(--za-text);
+    color: var(--graphite-base);
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
@@ -513,7 +513,7 @@
 
   .task-overview-discussion-card__footer strong {
     @apply inline-flex shrink-0 items-center gap-0.5 font-semibold;
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   /* ---------- 待处理卡：单条限宽，多条双列 ---------- */
@@ -529,16 +529,16 @@
   .task-overview-handoff-row {
     @apply grid min-w-0 items-center gap-4 rounded-[var(--ui-radius-row)] border px-5 py-4;
     grid-template-columns: minmax(0, 1fr) auto;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
     transition:
       background-color var(--za-motion-fast) var(--za-ease-standard),
       border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .task-overview-handoff-row:hover {
-    background: var(--za-surface-1);
-    border-color: var(--za-line-strong);
+    background: var(--control-fill);
+    border-color: var(--chrome-hairline-strong);
   }
 
   .task-overview-handoff-row > button:is(.task-overview-btn) {
@@ -555,18 +555,18 @@
 
   .task-overview-task-copy strong {
     @apply block truncate font-semibold tracking-tight;
-    color: var(--za-text);
+    color: var(--graphite-base);
     font-size: var(--ui-font-body-lg, 15px);
   }
 
   .task-overview-handoff-reason {
     @apply mt-1 truncate text-sm;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-handoff-context {
     @apply mt-2 flex min-w-0 items-center gap-1.5 overflow-hidden text-[11px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-handoff-context span {
@@ -593,23 +593,23 @@
   }
 
   .task-overview-btn--primary {
-    background: var(--za-text);
-    color: var(--za-surface-0);
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
   }
 
   .task-overview-btn--primary:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--za-text) 88%, var(--za-surface-0));
+    background: color-mix(in srgb, var(--chrome-keycap-bg) 88%, var(--chrome-keycap-fg));
   }
 
   .task-overview-btn--secondary {
-    background: var(--za-surface-0);
-    color: var(--za-text);
-    border: 1px solid var(--za-line);
+    background: var(--paper-raised);
+    color: var(--graphite-base);
+    border: 1px solid var(--chrome-hairline);
   }
 
   .task-overview-btn--secondary:hover:not(:disabled) {
-    background: var(--za-surface-1);
-    border-color: var(--za-line-strong);
+    background: var(--control-fill);
+    border-color: var(--chrome-hairline-strong);
   }
 
   .task-overview-btn:disabled {
@@ -650,8 +650,8 @@
 
   .task-overview-work-item {
     @apply flex flex-col rounded-[var(--ui-radius-panel)] border px-4 py-3.5;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
 
   .task-overview-work-item.is-clickable {
@@ -659,7 +659,7 @@
   }
 
   .task-overview-work-item.is-clickable:hover {
-    box-shadow: 0 8px 24px color-mix(in srgb, var(--za-text) 8%, transparent);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--graphite-base) 8%, transparent);
   }
 
   .task-overview-work-top {
@@ -668,7 +668,7 @@
 
   .task-overview-work-state {
     @apply inline-flex items-center gap-1.5 font-medium;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-spinner {
@@ -679,7 +679,7 @@
   .task-overview-work-top time,
   .task-overview-work-meta {
     @apply tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-work-meta {
@@ -701,17 +701,17 @@
   }
 
   .task-overview-work-meta-sep {
-    color: color-mix(in srgb, var(--za-text-muted) 70%, transparent);
+    color: color-mix(in srgb, var(--graphite-fade) 70%, transparent);
   }
 
   .task-overview-work-provider {
     @apply font-medium uppercase tracking-wide;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-work-model {
     @apply font-medium;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-overview-work-duration {
@@ -720,12 +720,12 @@
 
   .task-overview-work-item h3 {
     @apply text-sm font-semibold leading-snug;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-overview-work-item p {
     @apply mt-1 text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-plan-steps {
@@ -735,11 +735,11 @@
   .task-overview-plan-step {
     @apply grid items-center gap-2 text-[12px] leading-snug;
     grid-template-columns: 10px minmax(0, 1fr) auto;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-plan-step.is-current {
-    color: var(--za-text);
+    color: var(--graphite-base);
     font-weight: 550;
   }
 
@@ -748,12 +748,12 @@
   }
 
   .task-overview-plan-step.is-failed {
-    color: var(--za-danger, #ef4444);
+    color: var(--state-danger);
   }
 
   .task-overview-plan-step-marker {
     @apply block h-2 w-2 rounded-[var(--ui-radius-circle)];
-    background: color-mix(in srgb, var(--za-text-muted) 55%, transparent);
+    background: color-mix(in srgb, var(--graphite-fade) 55%, transparent);
   }
 
   /* 当前/进行中子任务：静止蓝点 + 外扩 ring（motion-ripple 基元），与 sidebar
@@ -764,9 +764,9 @@
     position: relative;
     isolation: isolate;
     overflow: visible;
-    background: var(--za-accent, #3b82f6);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent, #3b82f6) 22%, transparent);
-    --motion-ripple-color: var(--za-accent, #3b82f6);
+    background: var(--azure-seal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--azure-seal) 22%, transparent);
+    --motion-ripple-color: var(--azure-seal);
     --motion-ripple-strength: 45%;
     --motion-ripple-scale: 2.4;
     --motion-ripple-duration: 1.6s;
@@ -780,7 +780,7 @@
     inset: 0;
     border: 1px solid color-mix(
       in srgb,
-      var(--motion-ripple-color, var(--za-accent, #3b82f6)) var(--motion-ripple-strength, 45%),
+      var(--motion-ripple-color, var(--azure-seal)) var(--motion-ripple-strength, 45%),
       transparent
     );
     border-radius: inherit;
@@ -792,11 +792,11 @@
   }
 
   .task-overview-plan-step.is-completed .task-overview-plan-step-marker {
-    background: color-mix(in srgb, var(--za-success, #22c55e) 85%, transparent);
+    background: color-mix(in srgb, var(--state-success) 85%, transparent);
   }
 
   .task-overview-plan-step.is-failed .task-overview-plan-step-marker {
-    background: var(--za-danger, #ef4444);
+    background: var(--state-danger);
   }
 
   .task-overview-plan-step-title {
@@ -805,21 +805,21 @@
 
   .task-overview-plan-step-status {
     @apply shrink-0 text-[11px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-overview-plan-step.is-current .task-overview-plan-step-status {
-    color: var(--za-accent, #3b82f6);
+    color: var(--azure-seal);
   }
 
   .task-overview-progress {
     @apply mt-3 h-1 overflow-hidden rounded-[var(--ui-radius-pill)];
-    background: var(--za-surface-1);
+    background: var(--control-fill);
   }
 
   .task-overview-progress i {
     @apply block h-full rounded-[var(--ui-radius-pill)];
-    background: var(--za-text);
+    background: var(--graphite-base);
   }
 
   /* ---------- 结果待验收（与推进中同款双列瀑布流） ---------- */
@@ -833,13 +833,13 @@
   }
 
   .result-card-state {
-    color: #2f7a57;
+    color: var(--state-success);
   }
 
   .result-card-seal {
     @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] text-[10px] font-semibold not-italic;
-    background: color-mix(in srgb, #3f9a6f 18%, var(--za-surface-0));
-    color: #2f7a57;
+    background: var(--state-success-soft);
+    color: var(--state-success);
   }
 
   /* 结果卡：按钮贴右下 */
@@ -881,9 +881,9 @@
 
   .result-card--celebrating,
   .result-card--exiting {
-    border-color: color-mix(in srgb, var(--za-accent) 38%, var(--za-line));
-    background: color-mix(in srgb, var(--za-accent) 7%, var(--za-surface-0));
-    box-shadow: 0 14px 34px color-mix(in srgb, var(--za-accent) 13%, transparent);
+    border-color: color-mix(in srgb, var(--azure-seal) 38%, var(--chrome-hairline));
+    background: color-mix(in srgb, var(--azure-seal) 7%, var(--paper-raised));
+    box-shadow: 0 14px 34px color-mix(in srgb, var(--azure-seal) 13%, transparent);
   }
 
   .result-card--celebrating {
@@ -896,14 +896,14 @@
 
   .result-card--celebrating .result-card-accept,
   .result-card--exiting .result-card-accept {
-    color: var(--za-surface-0);
-    background: var(--za-accent);
+    color: var(--paper-raised);
+    background: var(--azure-seal);
   }
 
   .result-card--exiting {
     opacity: 0;
     transform: translateY(-10px) scale(0.97);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--za-accent) 4%, transparent);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--azure-seal) 4%, transparent);
     pointer-events: none;
   }
 
@@ -921,7 +921,7 @@
     width: 5px;
     height: 5px;
     border-radius: var(--ui-radius-circle);
-    background: var(--za-accent);
+    background: var(--azure-seal);
     animation: result-card-spark 860ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
@@ -958,8 +958,8 @@
 
   .task-artifacts {
     @apply mt-3 rounded-[var(--ui-radius-panel)] border;
-    border-color: color-mix(in srgb, var(--za-border) 78%, transparent);
-    background: color-mix(in srgb, var(--za-card) 72%, transparent);
+    border-color: color-mix(in srgb, var(--chrome-hairline) 78%, transparent);
+    background: color-mix(in srgb, var(--paper-raised) 72%, transparent);
     interpolate-size: allow-keywords;
   }
 
@@ -977,7 +977,7 @@
 
   .task-artifacts-summary {
     @apply flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-xs font-semibold;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-artifacts-summary::-webkit-details-marker {
@@ -986,7 +986,7 @@
 
   .task-artifacts-count {
     @apply font-normal;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-artifacts-chevron {
@@ -1001,17 +1001,17 @@
 
   .task-artifacts-content {
     @apply space-y-3 border-t px-3 pb-2 pt-2;
-    border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
+    border-color: color-mix(in srgb, var(--chrome-hairline) 65%, transparent);
   }
 
   .task-artifacts-group-title {
     @apply mb-2 flex items-center justify-between text-[0.6875rem] font-semibold;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-artifacts-group-title span:last-child {
     @apply font-normal tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   /* 行距由行自身声明：每行 li 自带 my-1，hover 高亮的四边留白不再依赖
@@ -1026,11 +1026,11 @@
 
   .task-artifact {
     @apply flex w-full items-center gap-2 rounded-[var(--ui-radius-control-compact)] px-1.5 py-1 text-left transition-colors;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-artifact:not(:disabled):hover {
-    background: color-mix(in srgb, var(--za-accent) 10%, transparent);
+    background: color-mix(in srgb, var(--azure-seal) 10%, transparent);
   }
 
   .task-artifact:disabled {
@@ -1043,7 +1043,7 @@
 
   .task-artifact-copy strong {
     @apply shrink-0 text-[0.6875rem] font-semibold;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-artifact-copy span {
@@ -1056,11 +1056,11 @@
   }
 
   .task-artifact-stat-add {
-    color: var(--za-diff-add-fg);
+    color: var(--diff-add-fg);
   }
 
   .task-artifact-stat-del {
-    color: var(--za-diff-del-fg);
+    color: var(--diff-del-fg);
   }
 
   /* 长文件名截断，避免撑破卡片并挤掉右侧徽标与操作文案。 */
@@ -1070,7 +1070,7 @@
 
   .task-artifact-action {
     @apply shrink-0 text-[0.6875rem] font-medium;
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .task-artifact-preview {
@@ -1091,12 +1091,12 @@
 
   .task-artifact-preview-header {
     @apply flex items-center justify-between gap-3 border-b px-3 py-2 text-xs;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .task-artifact-preview-header strong {
     @apply min-w-0 truncate;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-artifact-preview-stats {
@@ -1105,12 +1105,12 @@
 
   .task-artifact-preview-additions,
   .task-artifact-diff-line--added {
-    color: var(--za-diff-add-fg);
+    color: var(--diff-add-fg);
   }
 
   .task-artifact-preview-deletions,
   .task-artifact-diff-line--deleted {
-    color: var(--za-diff-del-fg);
+    color: var(--diff-del-fg);
   }
 
   .task-artifact-diff {
@@ -1120,7 +1120,7 @@
     padding: 0.5rem 0;
     font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     text-align: left;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-artifact-diff-line {
@@ -1137,14 +1137,14 @@
     width: 2.25rem;
     padding-right: 0.375rem;
     text-align: right;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     user-select: none;
     font-variant-numeric: tabular-nums;
   }
 
   .task-artifact-diff-gutter--new {
     margin-right: 0.5rem;
-    border-right: 1px solid var(--za-line);
+    border-right: 1px solid var(--chrome-hairline);
     padding-right: 0.5rem;
   }
 
@@ -1158,11 +1158,11 @@
   }
 
   .task-artifact-diff-line--added {
-    background: color-mix(in srgb, var(--za-success, #238636) 10%, transparent);
+    background: color-mix(in srgb, var(--state-success) 10%, transparent);
   }
 
   .task-artifact-diff-line--deleted {
-    background: color-mix(in srgb, var(--za-danger, #cf222e) 10%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 10%, transparent);
   }
 
   .task-artifact-preview--image {
@@ -1176,12 +1176,12 @@
     max-height: 20rem;
     border-radius: var(--ui-radius-panel);
     object-fit: contain;
-    background: color-mix(in srgb, var(--za-text) 4%, transparent);
+    background: color-mix(in srgb, var(--graphite-base) 4%, transparent);
   }
 
   .task-artifacts-limit-note {
     @apply m-0 text-center text-[0.6875rem];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .work-item-actions {
@@ -1199,20 +1199,20 @@
   }
   .task-overview-result-row {
     @apply flex items-center gap-4 rounded-[var(--ui-radius-row)] border px-4 py-3.5;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
   .task-overview-result-seal {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] text-sm font-semibold;
-    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
-    color: #2f7a57;
+    background: var(--state-success-soft);
+    color: var(--state-success);
   }
 
   /* ---------- 空态 ---------- */
   .task-overview-empty {
     @apply flex flex-col items-center justify-center gap-3 rounded-[var(--ui-radius-modal)] border border-dashed py-16 text-sm;
-    border-color: var(--za-line);
-    color: var(--za-text-muted);
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-fade);
   }
 
   .task-overview-empty-action {
@@ -1230,7 +1230,7 @@
 
   .task-collection-head h1 {
     @apply text-2xl font-semibold leading-tight tracking-tight;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-collection-tools {
@@ -1239,29 +1239,29 @@
 
   .task-filter-group {
     @apply inline-flex flex-wrap items-center gap-1 rounded-[var(--ui-radius-pill)] border p-1;
-    background: color-mix(in srgb, var(--za-surface-1) 70%, var(--za-surface-0));
-    border-color: var(--za-line);
+    background: color-mix(in srgb, var(--control-fill) 70%, var(--paper-raised));
+    border-color: var(--chrome-hairline);
   }
 
   .task-filter-group button {
     @apply rounded-[var(--ui-radius-pill)] px-3 py-1.5 text-xs font-medium transition-colors;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     background: transparent;
   }
 
   .task-filter-group button em {
     @apply ml-1 not-italic tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-filter-group button.is-active {
-    background: var(--za-surface-0);
-    color: var(--za-text);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 8%, transparent);
+    background: var(--paper-raised);
+    color: var(--graphite-base);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 8%, transparent);
   }
 
   .task-filter-group button.is-active em {
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .task-read-tools {
@@ -1270,14 +1270,14 @@
 
   .task-unread-count {
     @apply text-xs tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-mark-all-read {
     @apply inline-flex items-center rounded-[var(--ui-radius-pill)] border px-3 py-1.5 text-xs font-semibold transition-colors;
-    border-color: color-mix(in srgb, var(--za-accent) 40%, var(--za-line));
-    background: color-mix(in srgb, var(--za-accent) 10%, var(--za-surface-0));
-    color: var(--za-accent);
+    border-color: color-mix(in srgb, var(--azure-seal) 40%, var(--chrome-hairline));
+    background: color-mix(in srgb, var(--azure-seal) 10%, var(--paper-raised));
+    color: var(--azure-seal);
   }
 
   .task-mark-all-read:disabled {
@@ -1291,9 +1291,9 @@
     gap: 0.625rem;
     padding: 0.625rem 0.875rem;
     border-radius: var(--ui-radius-control);
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
-    color: var(--za-text-muted);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-fade);
   }
 
   .task-search-box__icon {
@@ -1309,35 +1309,35 @@
 
   .task-search-box input {
     @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-search-box input::placeholder {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-table {
     @apply overflow-hidden rounded-[var(--ui-radius-panel)] border;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
 
   .task-table-head {
     @apply grid items-center gap-3 border-b px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.08em];
     grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 7.5rem;
-    border-color: var(--za-line);
-    color: var(--za-text-muted);
-    background: color-mix(in srgb, var(--za-surface-1) 55%, var(--za-surface-0));
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-fade);
+    background: color-mix(in srgb, var(--control-fill) 55%, var(--paper-raised));
   }
 
   .task-record {
     @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
     grid-template-columns: minmax(0, 1.6fr) minmax(8rem, 0.9fr) minmax(8rem, 0.9fr) 5rem 7.5rem;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .task-record--unread {
-    background: color-mix(in srgb, var(--za-accent) 5%, transparent);
+    background: color-mix(in srgb, var(--azure-seal) 5%, transparent);
   }
 
   /* Grid items default min-width:auto; allow columns to shrink and clip. */
@@ -1356,24 +1356,24 @@
 
   .task-status-dot {
     @apply mt-1.5 inline-block h-2 w-2 shrink-0 rounded-[var(--ui-radius-circle)];
-    background: var(--za-text-faint);
+    background: var(--graphite-mute);
   }
 
   .task-status-dot--user {
-    background: #c48a3a;
+    background: var(--bot-tone-amber);
   }
 
   .task-status-dot--peer {
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   .task-status-dot--review {
-    background: #3f9a6f;
+    background: var(--state-success);
   }
 
   .task-status-dot--paused,
   .task-status-dot--read {
-    background: var(--za-text-faint);
+    background: var(--graphite-mute);
   }
 
   .task-status-dot--read {
@@ -1381,12 +1381,12 @@
   }
 
   .task-status-dot--unread {
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   .task-record-title strong {
     @apply inline-block max-w-full truncate align-middle text-sm font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-record--unread .task-record-title strong {
@@ -1395,49 +1395,49 @@
 
   .task-new-activity {
     @apply ml-2 inline-flex rounded-[var(--ui-radius-pill)] px-1.5 py-0.5 align-middle text-[10px] font-semibold not-italic;
-    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 14%, var(--paper-raised));
+    color: var(--azure-seal);
   }
 
   .task-record-title span {
     @apply mt-0.5 block truncate text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-action-owner {
     @apply inline-flex w-fit max-w-full truncate rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-[11px] font-medium;
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .task-action-owner--user {
-    background: color-mix(in srgb, #c48a3a 16%, var(--za-surface-0));
-    color: #9a6a2a;
+    background: color-mix(in srgb, var(--bot-tone-amber) 14%, var(--paper-raised));
+    color: var(--bot-tone-amber);
   }
 
   .task-action-owner--peer {
-    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 14%, var(--paper-raised));
+    color: var(--azure-seal);
   }
 
   .task-action-owner--review {
-    background: color-mix(in srgb, #3f9a6f 14%, var(--za-surface-0));
-    color: #2f7a57;
+    background: var(--state-success-soft);
+    color: var(--state-success);
   }
 
   .task-action-owner--paused {
-    background: var(--za-surface-1);
-    color: var(--za-text-muted);
+    background: var(--control-fill);
+    color: var(--graphite-fade);
   }
 
   .task-action-owner--read {
-    background: var(--za-surface-1);
-    color: var(--za-text-muted);
+    background: var(--control-fill);
+    color: var(--graphite-fade);
   }
 
   .task-action-owner--unread {
-    background: color-mix(in srgb, var(--za-accent) 14%, var(--za-surface-0));
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 14%, var(--paper-raised));
+    color: var(--azure-seal);
   }
 
   .task-goal-progress {
@@ -1446,22 +1446,22 @@
 
   .task-goal-progress b {
     @apply shrink-0 text-xs font-semibold tabular-nums;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .task-goal-progress > div {
     @apply h-1.5 min-w-0 flex-1 overflow-hidden rounded-[var(--ui-radius-pill)];
-    background: var(--za-surface-1);
+    background: var(--control-fill);
   }
 
   .task-goal-progress > div > i {
     @apply block h-full rounded-[var(--ui-radius-pill)];
-    background: var(--za-accent);
+    background: var(--azure-seal);
   }
 
   .task-record time {
     @apply text-xs tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .task-row-actions {
@@ -1470,66 +1470,66 @@
 
   .task-row-open {
     @apply inline-flex items-center gap-0.5 rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-xs font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
     background: transparent;
   }
 
   .task-row-open:hover {
-    background: var(--za-surface-1);
+    background: var(--control-fill);
   }
 
   .task-row-abandon {
     @apply inline-flex items-center rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-xs font-semibold;
-    color: var(--state-danger, #c0392b);
+    color: var(--state-danger);
     background: transparent;
   }
 
   .task-row-abandon:hover {
-    background: color-mix(in srgb, var(--state-danger, #c0392b) 12%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 12%, transparent);
   }
 
   .task-table-empty {
     @apply m-0 rounded-none border-0 border-t;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   /* ---------- 历史页 history-list ---------- */
   .history-list {
     @apply overflow-hidden rounded-[var(--ui-radius-modal)] border;
-    background: var(--za-surface-0);
-    border-color: var(--za-line);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
   }
 
   .history-record {
     @apply grid items-center gap-3 border-b px-4 py-3.5 last:border-b-0;
     grid-template-columns: auto minmax(0, 1.5fr) minmax(4.5rem, 0.6fr) minmax(6rem, 0.8fr) auto;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .history-state {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-panel)] text-sm font-semibold;
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .history-state--accepted {
-    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
-    color: #2f7a57;
+    background: var(--state-success-soft);
+    color: var(--state-success);
   }
 
   .history-state--archived {
-    background: color-mix(in srgb, var(--za-accent) 12%, var(--za-surface-0));
-    color: var(--za-accent);
+    background: color-mix(in srgb, var(--azure-seal) 12%, var(--paper-raised));
+    color: var(--azure-seal);
   }
 
   .history-state--cancelled {
-    background: var(--za-surface-1);
-    color: var(--za-text-muted);
+    background: var(--control-fill);
+    color: var(--graphite-fade);
   }
 
   .history-state--failed {
-    background: color-mix(in srgb, #c45b5b 14%, var(--za-surface-0));
-    color: #a53f3f;
+    background: var(--state-danger-soft);
+    color: var(--state-danger);
   }
 
   .history-record-title {
@@ -1538,12 +1538,12 @@
 
   .history-record-title strong {
     @apply block truncate text-sm font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .history-record-title span {
     @apply mt-0.5 block truncate text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .history-badge {
@@ -1551,34 +1551,34 @@
   }
 
   .history-badge--accepted {
-    color: #2f7a57;
+    color: var(--state-success);
   }
 
   .history-badge--archived {
-    color: var(--za-accent);
+    color: var(--azure-seal);
   }
 
   .history-badge--cancelled {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .history-badge--failed {
-    color: #a53f3f;
+    color: var(--state-danger);
   }
 
   .history-evidence-count {
     @apply text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .history-row-open {
     @apply inline-flex items-center justify-self-end gap-0.5 rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-xs font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
     background: transparent;
   }
 
   .history-row-open:hover {
-    background: var(--za-surface-1);
+    background: var(--control-fill);
   }
 
   .history-list-empty {
@@ -1684,34 +1684,34 @@
 
   .workbench-collection-drawer-shell {
     @apply flex h-full min-h-0 flex-col;
-    background: var(--za-app-bg);
+    background: var(--chrome-canvas);
   }
 
   .workbench-collection-drawer-header {
     @apply flex items-center justify-between gap-4 border-b px-5 py-4;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
 
   .workbench-collection-drawer-kicker {
     @apply text-[11px] font-semibold uppercase tracking-[0.12em];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .workbench-collection-drawer-header h2 {
     @apply m-0 text-base font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .workbench-collection-drawer-header p {
     @apply m-0 mt-1 text-xs;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .workbench-collection-drawer-close {
     @apply rounded-[var(--ui-radius-pill)] border px-3 py-1.5 text-xs font-semibold;
-    border-color: var(--za-line);
-    background: var(--za-surface-0);
-    color: var(--za-text);
+    border-color: var(--chrome-hairline);
+    background: var(--paper-raised);
+    color: var(--graphite-base);
   }
 
   .workbench-collection-drawer-body {
@@ -1725,7 +1725,7 @@
 .conversation-result-drawer {
   --pa-drawer-width: 70vw;
   @apply flex h-full min-h-0 flex-col;
-  background: var(--za-surface-0);
+  background: var(--paper-raised);
   flex: 1 1 0;
   align-self: stretch;
   max-height: 100%;
@@ -1750,17 +1750,17 @@
 
 .conversation-result-drawer__icon-close {
   @apply absolute right-0 top-0 z-10 inline-flex h-7 w-7 items-center justify-center rounded-[var(--ui-radius-control-compact)] border-0 p-0;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   background: transparent;
 }
 
 .conversation-result-drawer__icon-close:hover {
-  color: var(--za-text);
-  background: var(--za-hover);
+  color: var(--graphite-base);
+  background: var(--paper-hover);
 }
 
 .conversation-result-drawer__icon-close:focus-visible {
-  outline: 2px solid var(--za-accent);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
 }
 
@@ -1778,7 +1778,7 @@
 .conversation-chat-drawer {
   --pa-drawer-width: min(1320px, 96vw);
   @apply flex h-full min-h-0 flex-col;
-  background: var(--za-surface-0);
+  background: var(--paper-raised);
   /* Overlay drawer 基座强制直角贴边；会话抽屉只恢复左侧可见圆角，右侧仍贴窗。 */
   border-radius: var(--ui-radius-modal) 0 0 var(--ui-radius-modal);
 }
@@ -1865,9 +1865,9 @@
 
 .conversation-result-view--celebrating .task-overview-btn--primary,
 .conversation-result-view--exiting .task-overview-btn--primary {
-  color: var(--za-surface-0);
-  background: var(--za-accent);
-  border-color: var(--za-accent);
+  color: var(--paper-raised);
+  background: var(--azure-seal);
+  border-color: var(--azure-seal);
 }
 
 .conversation-result-view--exiting {
@@ -1893,28 +1893,28 @@
 
 .conversation-result-view__kicker {
   @apply text-[11px] font-medium uppercase tracking-wide;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__title {
   @apply m-0 mt-1 text-lg font-semibold leading-snug;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__meta {
   @apply m-0 mt-1.5 text-xs;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__section-title {
   @apply mb-3 text-[11px] font-semibold tracking-wide;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__goal-count {
   margin: -4px 0 8px;
   font-size: var(--ui-font-meta);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__goal-list {
@@ -1925,7 +1925,7 @@
 
 .conversation-result-view__goal-card {
   padding: 10px 0;
-  border-bottom: 1px solid var(--za-line);
+  border-bottom: 1px solid var(--chrome-hairline);
 }
 
 .conversation-result-view__goal-card:last-child {
@@ -1934,23 +1934,23 @@
 
 .conversation-result-view__goal-kicker {
   font-size: var(--ui-font-caption);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__goal-card.is-current .conversation-result-view__goal-kicker {
-  color: var(--za-accent);
+  color: var(--azure-seal);
 }
 
 .conversation-result-view__goal-title {
   margin-top: 2px;
   font-size: var(--ui-font-control);
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__goal-outcome {
   margin-top: 4px;
   font-size: var(--ui-font-meta);
-  color: var(--za-text-soft);
+  color: var(--graphite-soft);
   line-height: 1.5;
 }
 
@@ -1958,7 +1958,7 @@
   margin-top: 4px;
   font-family: var(--font-mono);
   font-size: var(--ui-font-caption);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
   line-height: 1.45;
 }
 
@@ -1982,7 +1982,7 @@
 
 .conversation-result-view__auth {
   @apply m-0 mb-4 text-sm;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__section-title--sub {
@@ -1998,7 +1998,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 10px 2px;
-  border-bottom: 1px solid var(--za-line);
+  border-bottom: 1px solid var(--chrome-hairline);
 }
 
 .conversation-result-view__basis-item:last-child {
@@ -2009,7 +2009,7 @@
   flex: none;
   min-width: 2.5rem;
   font-size: 11px;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__basis-body {
@@ -2024,7 +2024,7 @@
 .conversation-result-view__basis-body em {
   font-size: 11px;
   font-style: normal;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__artifact-list {
@@ -2040,8 +2040,8 @@
   align-items: flex-start;
   gap: 12px;
   padding: 12px 2px;
-  border-bottom: 1px solid var(--za-line);
-  color: var(--za-text);
+  border-bottom: 1px solid var(--chrome-hairline);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__criterion:last-child {
@@ -2067,18 +2067,18 @@
 }
 
 .conversation-result-view__criterion.is-passed .conversation-result-view__mark {
-  background: color-mix(in srgb, var(--state-success, #2f8f5b) 16%, transparent);
-  color: var(--state-success, #2f8f5b);
+  background: color-mix(in srgb, var(--state-success) 16%, transparent);
+  color: var(--state-success);
 }
 
 .conversation-result-view__criterion.is-failed .conversation-result-view__mark {
-  background: color-mix(in srgb, var(--state-danger, #c0392b) 14%, transparent);
-  color: var(--state-danger, #c0392b);
+  background: color-mix(in srgb, var(--state-danger) 14%, transparent);
+  color: var(--state-danger);
 }
 
 .conversation-result-view__criterion.is-pending .conversation-result-view__mark {
-  background: color-mix(in srgb, var(--za-text-muted) 12%, transparent);
-  color: var(--za-text-muted);
+  background: color-mix(in srgb, var(--graphite-fade) 12%, transparent);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__criterion-body {
@@ -2096,13 +2096,13 @@
 
 .conversation-result-view__ref {
   font-size: 11px;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__criterion-body em {
   font-size: 11px;
   font-style: normal;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__thread > summary {
@@ -2120,32 +2120,32 @@
 
 .conversation-result-view__check {
   @apply flex items-start justify-between gap-3 text-xs;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__check b {
   @apply font-medium;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__progress {
   @apply h-1.5 overflow-hidden rounded-[var(--ui-radius-pill)];
-  background: color-mix(in srgb, var(--za-line) 80%, transparent);
+  background: color-mix(in srgb, var(--chrome-hairline) 80%, transparent);
 }
 
 .conversation-result-view__progress > i {
   @apply block h-full rounded-[var(--ui-radius-pill)];
-  background: #3f9a6f;
+  background: var(--state-success);
 }
 
 .conversation-result-view__hint {
   @apply m-0 mt-2 text-xs;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__error {
   @apply m-0 text-xs;
-  color: #c4554d;
+  color: var(--state-danger);
 }
 
 .conversation-result-view__task-list {
@@ -2154,13 +2154,13 @@
 
 .conversation-result-view__task-list li {
   @apply flex items-start gap-2 text-sm;
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .conversation-result-view__task-status {
   @apply shrink-0 rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[11px];
-  background: color-mix(in srgb, var(--za-line) 70%, transparent);
-  color: var(--za-text-muted);
+  background: color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
+  color: var(--graphite-fade);
 }
 
 .conversation-result-view__messages {
@@ -2180,19 +2180,19 @@
 
 .conversation-result-view__continue button {
   @apply border transition-colors;
-  border-color: var(--za-line-strong);
-  background: var(--za-surface-1);
-  color: var(--za-text);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--za-text) 8%, transparent);
+  border-color: var(--chrome-hairline-strong);
+  background: var(--control-fill);
+  color: var(--graphite-base);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 8%, transparent);
 }
 
 .conversation-result-view__continue button:hover:not(:disabled) {
-  border-color: var(--za-text-soft);
-  background: var(--za-surface-2);
+  border-color: var(--graphite-soft);
+  background: var(--control-fill-hover);
 }
 
 .conversation-result-view__continue button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--za-accent) 55%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
   outline-offset: 2px;
 }
 
@@ -2202,8 +2202,8 @@
   flex-wrap: wrap;
   margin-top: auto;
   margin-bottom: 0;
-  border-top: 1px solid var(--za-line);
-  background: var(--za-surface-0);
+  border-top: 1px solid var(--chrome-hairline);
+  background: var(--paper-raised);
   /* 与 panel 同色底，避免底部缝隙露出不同层的 vibrancy/scrim */
   flex-shrink: 0;
 }
@@ -2213,7 +2213,7 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--za-warn, #c0392b);
+  color: var(--state-warn);
 }
 
 .conversation-result-view__continue {
@@ -2222,19 +2222,19 @@
 
 .conversation-result-view__continue-hint {
   @apply text-xs leading-relaxed;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 /* 本任务高亮：只用一层边框，避免 border + box-shadow 叠成双边框 */
 .conversation-result-view__messages .chat-msg.is-task-target {
-  border-color: color-mix(in srgb, #3f9a6f 55%, var(--za-line));
-  background: color-mix(in srgb, #3f9a6f 6%, var(--za-surface-0));
+  border-color: color-mix(in srgb, var(--state-success) 55%, var(--chrome-hairline));
+  background: color-mix(in srgb, var(--state-success) 6%, var(--paper-raised));
 }
 
 .conversation-result-view__messages .chat-msg-target-tag {
   @apply rounded-[var(--ui-radius-pill)] px-1.5 py-0.5 text-[10px] font-medium;
-  background: color-mix(in srgb, #3f9a6f 18%, transparent);
-  color: #2f7a57;
+  background: var(--state-success-soft);
+  color: var(--state-success);
 }
 
 /* 讨论区降级：次于行动权三桶 */
@@ -2265,7 +2265,7 @@
   text-align: right;
   font-size: 0.72rem;
   line-height: 1.4;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
 }
 
 .thread-list {
@@ -2274,7 +2274,7 @@
   gap: 0.375rem;
   margin-top: 0.25rem;
   padding-top: 0.75rem;
-  border-top: 1px solid var(--za-line);
+  border-top: 1px solid var(--chrome-hairline);
 }
 
 .thread-list-row {
@@ -2287,7 +2287,7 @@
   padding: 0.375rem 0.625rem;
   border: 0;
   border-radius: var(--ui-radius-row);
-  background: color-mix(in srgb, var(--za-surface-1, var(--za-surface-0)) 70%, var(--za-surface-0));
+  background: color-mix(in srgb, var(--control-fill) 70%, var(--paper-raised));
   color: inherit;
   font: inherit;
   text-align: left;
@@ -2295,19 +2295,19 @@
 }
 
 .thread-list-row:hover {
-  background: var(--za-surface-hover, color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0)));
+  background: var(--paper-hover);
 }
 
 .thread-list-round {
   white-space: nowrap;
   font-size: 0.68rem;
   font-weight: 600;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
 }
 
 .thread-list-row.is-current {
-  background: var(--za-surface-0);
-  box-shadow: inset 0 0 0 1px var(--za-line);
+  background: var(--paper-raised);
+  box-shadow: inset 0 0 0 1px var(--chrome-hairline);
 }
 
 .thread-list-row.is-context {
@@ -2321,15 +2321,15 @@
   height: 1.375rem;
   padding: 0 0.5rem;
   border-radius: var(--ui-radius-pill);
-  background: color-mix(in srgb, var(--za-ok, #3e7a6b) 14%, transparent);
-  color: var(--za-ok, #3e7a6b);
+  background: color-mix(in srgb, var(--state-success) 14%, transparent);
+  color: var(--state-success);
   font-size: 0.6875rem;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .thread-tree-pill.is-wait {
-  background: color-mix(in srgb, var(--za-ok, #3e7a6b) 12%, #fff);
+  background: color-mix(in srgb, var(--state-success) 12%, var(--paper-raised));
 }
 
 .thread-tree-title {
@@ -2346,13 +2346,13 @@
 .thread-tree-frac,
 .thread-tree-chevron {
   font-size: 0.72rem;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
   white-space: nowrap;
 }
 
 .thread-tree-chevron {
   font-size: 1rem;
-  color: var(--za-text-mute, var(--za-text-soft));
+  color: var(--graphite-mute);
 }
 
 .goal-thread-group {
@@ -2361,9 +2361,9 @@
   gap: 0.5rem;
   min-width: 0;
   padding: 0.75rem 0.75rem 0.875rem;
-  border: 1px solid var(--za-line);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: color-mix(in srgb, var(--za-surface-0) 82%, transparent);
+  background: color-mix(in srgb, var(--paper-raised) 82%, transparent);
 }
 
 .goal-thread-group__head {
@@ -2378,7 +2378,7 @@
   width: 3px;
   height: 1.25rem;
   border-radius: var(--ui-radius-pill);
-  background: var(--za-accent);
+  background: var(--azure-seal);
   opacity: 0.85;
 }
 
@@ -2393,7 +2393,7 @@
 .goal-thread-group__name {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--za-text);
+  color: var(--graphite-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2401,7 +2401,7 @@
 
 .goal-thread-group__meta {
   font-size: 0.6875rem;
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 
 .goal-thread-group__runs {
@@ -2419,22 +2419,22 @@
   font-size: 0.6875rem;
   font-weight: 600;
   vertical-align: 1px;
-  background: color-mix(in srgb, var(--za-text) 8%, transparent);
-  color: var(--za-text-soft);
+  background: color-mix(in srgb, var(--graphite-base) 8%, transparent);
+  color: var(--graphite-soft);
 }
 
 .goal-thread-badge--derived {
-  background: color-mix(in srgb, var(--za-accent) 12%, transparent);
-  color: var(--za-accent);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
+  color: var(--azure-seal);
 }
 
 /* ADR 69 P2：合回收口面板——真冲突聚合为一次收口决断。 */
 .handoff-conflict-panel {
   margin: 10px 0 4px;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--za-accent, #7c6cff) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 28%, transparent);
   border-radius: var(--ui-radius-control);
-  background: color-mix(in srgb, var(--za-accent, #7c6cff) 6%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 6%, transparent);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2442,7 +2442,7 @@
 .handoff-conflict-panel__head {
   font-size: 13px;
   font-weight: 600;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
 }
 .handoff-conflict-panel__list {
   list-style: none;
@@ -2460,7 +2460,7 @@
 .handoff-conflict-panel__path {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  color: var(--za-fg-dim, #a3a3ad);
+  color: var(--graphite-fade);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2475,7 +2475,7 @@
   align-items: center;
   gap: 5px;
   font-size: 12.5px;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
   cursor: pointer;
 }
 .handoff-conflict-panel__preview,
@@ -2485,16 +2485,16 @@
   border-radius: var(--ui-radius-control-compact);
 }
 .handoff-conflict-panel__preview {
-  background: color-mix(in srgb, var(--za-ok, #34c759) 12%, transparent);
-  color: var(--za-ok, #34c759);
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+  color: var(--state-success);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
 .handoff-conflict-panel__error {
-  background: color-mix(in srgb, var(--za-danger, #ff453a) 12%, transparent);
-  color: var(--za-danger, #ff453a);
+  background: color-mix(in srgb, var(--state-danger) 12%, transparent);
+  color: var(--state-danger);
 }
 .handoff-conflict-panel__actions {
   display: flex;
@@ -2505,9 +2505,9 @@
   font-size: 12.5px;
   padding: 6px 12px;
   border-radius: var(--ui-radius-control);
-  border: 1px solid color-mix(in srgb, var(--za-fg-dim, #a3a3ad) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--graphite-fade) 30%, transparent);
   background: transparent;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
   cursor: pointer;
 }
 .handoff-conflict-panel__actions button:disabled {
@@ -2515,9 +2515,9 @@
   cursor: default;
 }
 .handoff-conflict-panel__actions .handoff-conflict-panel__apply {
-  background: var(--za-accent, #7c6cff);
-  border-color: transparent;
-  color: #fff;
+  background: var(--chrome-keycap-bg);
+  border-color: var(--chrome-keycap-border);
+  color: var(--chrome-keycap-fg);
 }
 
 /* Hover preview chrome lives in task-artifact-preview-overlay.css so

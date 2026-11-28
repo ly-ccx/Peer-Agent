@@ -55,15 +55,24 @@ export function useBotResourceOwner(
     onOwner(workspaceId ? { workspaceId, conversationId: null, path: null } : null);
   }, [workspaceId, onOwner, conversationHint]);
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId) return undefined;
     let disposed = false;
-    void clientApi.projectAgentGet({ workspaceId }).then(result => {
-      if (disposed || !result.ok) return;
-      const conversationId = result.profile?.agentConversationId ?? result.item?.profile.agentConversationId;
-      if (!conversationId || !result.path) return;
-      onOwner({ workspaceId, conversationId, path: result.path });
-    }).catch(() => {});
-    return () => { disposed = true; };
+    const refresh = () => {
+      void clientApi.projectAgentGet({ workspaceId }).then(result => {
+        if (disposed || !result.ok) return;
+        const conversationId = result.profile?.agentConversationId ?? result.item?.profile.agentConversationId;
+        if (!conversationId || !result.path) return;
+        onOwner({ workspaceId, conversationId, path: result.path });
+      }).catch(() => {});
+    };
+    refresh();
+    const offChanged = clientApi.onProjectAgentChanged?.(event => {
+      if (event.workspaceIds?.includes(workspaceId)) refresh();
+    });
+    return () => {
+      disposed = true;
+      offChanged?.();
+    };
   }, [workspaceId, onOwner, conversationHint]);
 }
 

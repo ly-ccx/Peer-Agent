@@ -267,7 +267,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
     >
       {!resourceMode ? resizer : null}
 
-      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} navigation={navigation} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
+      {resourceMode ? <ResourceWorkspaceHeader isZh={isZh} presentation={presentation} idPrefix={tabsId} /> : <div className="workbench-tab-rail" role="tablist" aria-orientation="horizontal" aria-label={isZh ? '工作台视图' : 'Workbench views'}
         onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedTab(null); }}>
         {TABS.map((tab) => {
           const disabled = tab.id === 'plan' && !hasGoalPlan;
@@ -327,7 +327,12 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
         {resourceMode ? <ResourceConversationViews isZh={isZh} visible={activeTab === 'conversations'} active={interactiveOpen} /> : null}
         {resourceMode ? <ResourceInteractiveViews isZh={isZh} visible={activeTab === 'interactive'} active={interactiveOpen} /> : null}
         {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
-          <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} onBrowseFiles={() => navigation.toggle('files')} />
+          <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent}
+            onChanges={() => setActiveTab('changes')}
+            onBrowseFiles={() => {
+              if (botWorkspaceId && workspace) workspace.openReference({ kind: 'directory', workspaceId: botWorkspaceId, path: '.' });
+              else navigation.toggle('files');
+            }} />
         </div> : null}
         <div
           className="workbench-view workbench-view--goal"
@@ -375,7 +380,10 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
             isZh={isZh}
             session={documentSession}
             onSessionChange={setDocumentSession}
-            onBrowseFiles={() => setActiveTab('files')}
+            onBrowseFiles={() => {
+              if (resourceMode && botWorkspaceId && workspace) workspace.openReference({ kind: 'directory', workspaceId: botWorkspaceId, path: '.' });
+              else setActiveTab('files');
+            }}
             hideTabStrip={resourceMode} botWorkspaceId={resourceMode ? botWorkspaceId : undefined}
             visible={!resourceMode || interactiveOpen && activeTab === 'documents'}
           /> : null}

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { nativeProcessesInWork, nativeWorkHasHookFacts } from '@peer-agent/protocol';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 import { applyWorkUpdate } from './work-delta.mjs';
 import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
@@ -34,7 +35,9 @@ export function reduceCoordination(state, entry) {
       next.events[id] = { ...next.events[id], handled: true };
     }
   } else if (entry.kind === 'work_updated') {
-    next.works[entry.workId] = applyWorkUpdate(next.works[entry.workId], entry);
+    const work = applyWorkUpdate(next.works[entry.workId], entry);
+    nativeWorkHasHookFacts(work);
+    next.works[entry.workId] = work;
   } else if (entry.kind === 'usage_observed') {
     const work = next.works[entry.workId];
     if (!work?.budget || !entry.observationId) throw new Error('coordination_usage_invalid');
@@ -47,11 +50,16 @@ export function reduceCoordination(state, entry) {
       next.works[entry.workId] = { ...work, budget };
     }
   } else if (entry.kind === 'work') {
+    nativeProcessesInWork(entry.work);
+    nativeWorkHasHookFacts(entry.work);
     next.works[entry.work.workId] = structuredClone(entry.work);
   } else if (entry.kind === 'continuations_coalesced') {
     if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
       || work.continuationOwnerWorkId !== entry.owner.workId || work.workId === entry.owner.workId)) throw new Error('invalid_continuation_custody');
-    for (const work of [entry.owner, ...entry.retired]) next.works[work.workId] = structuredClone(work);
+    for (const work of [entry.owner, ...entry.retired]) {
+      nativeWorkHasHookFacts(work);
+      next.works[work.workId] = structuredClone(work);
+    }
   } else if (entry.kind === 'reply_deferred') {
     if (!next.deliveries[entry.message.id]) next.deliveries[entry.message.id] = { message: structuredClone(entry.message), state: 'deferred' };
   } else if (entry.kind === 'reply_held') {
@@ -107,6 +115,10 @@ export function reduceCoordination(state, entry) {
       || createHash('sha256').update(canonical(entry.state)).digest('hex') !== entry.stateHash
       || !['events', 'works', 'deliveries'].every(key => entry.state[key] && typeof entry.state[key] === 'object' && !Array.isArray(entry.state[key])))
       throw new Error('coordination_repair_state_invalid');
+    for (const work of Object.values(entry.state.works)) {
+      nativeProcessesInWork(work);
+      nativeWorkHasHookFacts(work);
+    }
     next = { ...structuredClone(entry.state), revision: entry.revision,
       lastRecovery: { ...structuredClone(entry.recovery), at: entry.at } };
   } else if (entry.kind === 'history_resume_admitted') {

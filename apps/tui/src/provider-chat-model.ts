@@ -24,6 +24,7 @@ import type {
 import { modelAssistantMessage } from './provider-continuation.ts';
 import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet, sessionWaitProjected, spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
+import type { RuntimeTurnUsage } from '@peer-agent/protocol';
 
 import type {
   ChatMessage,
@@ -78,6 +79,11 @@ export interface CreateProviderChatModelOptions {
   /** Test seam. Production uses two short retries for a dropped model socket. */
   readonly streamRetryDelaysMs?: readonly number[];
   readonly streamRetryWait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Internal Host binding to the original durable ordinary execution. */
+  readonly resolveOwnedCognition?: (identity: { conversationId: string; streamId: string }) => {
+    assertCognitionSource(): void;
+    observeUsage(usage: RuntimeTurnUsage, unknown: boolean): void;
+  } | undefined;
 }
 
 export interface ProviderSystemPromptContext {
@@ -218,6 +224,9 @@ async function waitForRetry(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+type AttemptObserver = (usage: Awaited<ReturnType<ModelProvider['stream']>>['usage'], failed: boolean) => void;
+type OwnedAttempt = Readonly<{ beforeAttempt: () => void; observeAttempt: AttemptObserver }>;
+
 async function streamWithSafeRetry(
   provider: ModelProvider,
   request: Parameters<ModelProvider['stream']>[0],
@@ -226,6 +235,7 @@ async function streamWithSafeRetry(
     readonly waitImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
     readonly onRetry?: (info: { attempt: number; maxRetries: number; delayMs: number; reason: string }) => void;
     readonly onDiscardDraft?: (draft: { readonly textChars: number; readonly reasoningChars: number }) => void;
+    readonly ownedAttempt?: OwnedAttempt;
   } = {},
 ): Promise<Awaited<ReturnType<ModelProvider['stream']>>> {
   const retryDelaysMs = options.retryDelaysMs ?? DEFAULT_STREAM_RETRY_DELAYS_MS;
@@ -234,19 +244,27 @@ async function streamWithSafeRetry(
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    if (options.ownedAttempt) {
+      request.signal?.throwIfAborted();
+      options.ownedAttempt.beforeAttempt();
+    }
     let textChars = 0;
     let reasoningChars = 0;
+    let streamedUsage: Awaited<ReturnType<ModelProvider['stream']>>['usage'];
+    let result: Awaited<ReturnType<ModelProvider['stream']>>;
     const originalOnEvent = request.onEvent;
     try {
-      return await provider.stream({
+      result = await provider.stream({
         ...request,
         onEvent(event) {
           if (event.type === 'text.delta') textChars += event.content.length;
           if (event.type === 'reasoning.delta') reasoningChars += event.content.length;
+          if (options.ownedAttempt && event.type === 'usage') streamedUsage = event.usage;
           originalOnEvent?.(event);
         },
       });
     } catch (error) {
+      options.ownedAttempt?.observeAttempt(streamedUsage, true);
       lastError = error;
       const canRetry =
         attempt < maxRetries
@@ -269,7 +287,10 @@ async function streamWithSafeRetry(
         reason: describeConnectionFailure(error),
       });
       await waitImpl(delayMs, request.signal);
+      continue;
     }
+    options.ownedAttempt?.observeAttempt(result.usage ?? streamedUsage, false);
+    return result;
   }
 
   throw lastError instanceof Error ? lastError : connectionClosedError(lastError);
@@ -336,6 +357,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
     readonly onUsage?: (
       usage: Awaited<ReturnType<ModelProvider['stream']>>['usage'],
     ) => void;
+    readonly ownedAttempt?: OwnedAttempt;
   }): Promise<string> => {
     let streamedChars = 0;
     const summaryInputMaxChars = resolveTuiSummaryInputMaxChars({
@@ -379,6 +401,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
       }, {
         retryDelaysMs: options.streamRetryDelaysMs,
         waitImpl: options.streamRetryWait,
+        ownedAttempt: input.ownedAttempt,
         onDiscardDraft() {
           streamedChars = 0;
           reportLiveProgress();
@@ -483,6 +506,27 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ? Math.floor(contextWindowRaw)
         : null;
       const usageAccounting = state.usageAccounting ?? createRuntimeUsageAccounting();
+      const owner = context.run.conversationId && context.run.streamId
+        ? options.resolveOwnedCognition?.({ conversationId: context.run.conversationId, streamId: context.run.streamId })
+        : undefined;
+      function ownedAttemptFor(requestPurpose: 'agent' | 'compaction_summary'): OwnedAttempt | undefined {
+        if (!owner) return undefined;
+        return {
+          beforeAttempt() { owner.assertCognitionSource(); },
+          observeAttempt(usage, failed) {
+            const amounts = [usage?.inputTokens, usage?.outputTokens, usage?.cacheReadTokens, usage?.cacheWriteTokens];
+            const nextTotal = amounts.reduce<number>((sum, amount) => sum + (amount ?? 0), usageAccounting.snapshot().turnTotal.totalTokens);
+            const invalid = !Number.isSafeInteger(nextTotal)
+              || amounts.some(amount => amount != null && (!Number.isSafeInteger(amount) || amount < 0));
+            const observed = !invalid && amounts.some(amount => amount != null) ? usage : undefined;
+            const { turnTotal } = usageAccounting.observeProviderRequest(observed, {
+              requestPurpose, capacityBearing: requestPurpose === 'agent' && !failed,
+            });
+            owner.observeUsage(turnTotal, failed || !observed);
+            if (invalid) throw new Error('conversation_execution_usage_conflict');
+          },
+        };
+      }
       const midTurnCompactions: MidTurnCompaction[] = [];
       type PipelineState = Readonly<{ messages: readonly ModelMessage[] }>;
       type CanonicalRequest = Readonly<{
@@ -557,6 +601,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           // Align mid-turn compact with Desktop: LLM summary first, structural fallback.
           emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stageStartedPercent, 'started');
           emitCompactionProgress(COMPACTION_PROGRESS_CONFIG.stagePreparedPercent, 'progress');
+          let ownershipFailure: { error: unknown } | undefined;
+          const summaryAttempt = ownedAttemptFor('compaction_summary');
+          const checked = (action: () => void) => {
+            try { action(); }
+            catch (error) { ownershipFailure = { error }; throw error; }
+          };
           const strategy = await compactMessagesWithSummaryStrategy({
             messages: pipelineState.messages,
             keepRecentCount: TUI_COMPACT_KEEP_RECENT,
@@ -567,8 +617,12 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
                 messages: oldMessages as readonly ModelMessage[],
                 formattedHistory,
                 onProgress: (percent) => emitCompactionProgress(percent, 'progress'),
+                ownedAttempt: summaryAttempt && {
+                  beforeAttempt: () => checked(() => summaryAttempt.beforeAttempt()),
+                  observeAttempt: (usage, failed) => checked(() => summaryAttempt.observeAttempt(usage, failed)),
+                },
                 onUsage: (usage) => {
-                  usageAccounting.observeProviderRequest(usage, {
+                  if (!summaryAttempt) usageAccounting.observeProviderRequest(usage, {
                     requestPurpose: 'compaction_summary',
                     capacityBearing: false,
                   });
@@ -579,6 +633,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               buildStructuralSummary(messages as readonly ModelMessage[]),
             buildHandoffContent,
           });
+          if (ownershipFailure) throw ownershipFailure.error;
           if (!strategy.compacted || !strategy.summary || !strategy.handoffContent) {
             emitCompactionProgress(100, 'done');
             return { compacted: false, state: pipelineState };
@@ -619,6 +674,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           }, {
             retryDelaysMs: options.streamRetryDelaysMs,
             waitImpl: options.streamRetryWait,
+            ownedAttempt: ownedAttemptFor('agent'),
             onDiscardDraft(draft) {
               if (draft.textChars <= 0 && draft.reasoningChars <= 0) return;
               context.emit({ type: 'stream.discard', streamId, ...draft });
@@ -629,7 +685,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           return response.usage;
         },
         onProviderRequest({ usage, requestFingerprint }) {
-          usageAccounting.observeProviderRequest(usage, {
+          if (!owner) usageAccounting.observeProviderRequest(usage, {
             requestFingerprint,
           });
         },

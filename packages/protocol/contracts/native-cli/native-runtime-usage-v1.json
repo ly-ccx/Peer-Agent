@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "snapshotBytes": 16384,
+  "recoveryBatch": 64,
+  "activeField": "nativeUsage",
+  "pendingField": "nativeUsagePending",
+  "role": "work_session",
+  "usageScope": "runtime_turn",
+  "snapshotFields": [
+    "schemaVersion",
+    "workId",
+    "execution",
+    "conversationId",
+    "attribution",
+    "usage",
+    "knownAmountsOnly"
+  ],
+  "attributionFields": [
+    "id",
+    "streamId",
+    "at",
+    "modelProviderId",
+    "groupId",
+    "model",
+    "providerName",
+    "estimatedCostUsd",
+    "pricingSource",
+    "role",
+    "workspaceId"
+  ],
+  "valid": {
+    "schemaVersion": 1,
+    "workId": "work",
+    "execution": {
+      "planId": "plan",
+      "sessionId": "session",
+      "executionEpoch": "epoch"
+    },
+    "conversationId": "conversation",
+    "attribution": {
+      "id": "native-stream",
+      "streamId": "native-stream",
+      "at": "2026-11-15T00:00:00.000Z",
+      "modelProviderId": "channel::model",
+      "groupId": "channel",
+      "model": "model",
+      "role": "work_session",
+      "workspaceId": "workspace"
+    },
+    "usage": {
+      "usageScope": "runtime_turn",
+      "providerRequestCount": 2,
+      "inputTokens": 12,
+      "outputTokens": 4,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 16
+    },
+    "knownAmountsOnly": true
+  },
+  "usageFields": [
+    "usageScope",
+    "providerRequestCount",
+    "inputTokens",
+    "outputTokens",
+    "cacheReadTokens",
+    "cacheWriteTokens",
+    "totalTokens"
+  ],
+  "closedField": "nativeLoopFinished"
+}

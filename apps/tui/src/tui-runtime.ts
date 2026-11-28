@@ -32,19 +32,16 @@ import {
   createUnavailableChatModel,
   type ProviderSystemPromptContext,
 } from './provider-chat-model.ts';
-import { createQoderPrivateProvider } from './qoder-private-provider.ts';
 import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
 import { createGeminiProvider } from './gemini-provider.ts';
 import { resolveTuiWire } from './provider-wire-matrix.ts';
 import {
-  ensureFreshGoogleTokensFromDesktop,
   ensureFreshGrokTokensFromDesktop,
   startGrokReLoginFromDesktop,
-  loadQoderAccessTokenFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
 import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
-import { createTuiProviderFetch } from './provider-transport.ts';
+import { createTuiProviderFetch, createTuiOAuthRefreshFetch } from './provider-transport.ts';
 import { buildTuiSystemContext, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
 import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 import { createTuiThemeStore, type TuiThemeStore } from './tui-theme.ts';
@@ -63,6 +60,8 @@ export interface CreateTuiRuntimeOptions {
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
   readonly captureExecution?: import('./tui-host.ts').CreateTuiHostOptions['captureExecution'];
+  readonly ownedTool?: import('./tui-host.ts').CreateTuiHostOptions['ownedTool'];
+  readonly resolveOwnedCognition?: import('./provider-chat-model.ts').CreateProviderChatModelOptions['resolveOwnedCognition'];
 }
 
 export interface TuiRuntime {
@@ -81,6 +80,7 @@ export interface TuiRuntime {
 export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
   const { workspaceRoot, userDataPath } = options;
   const providerFetch = createTuiProviderFetch();
+  const oauthRefreshFetch = createTuiOAuthRefreshFetch();
   const providerSessionId = `peer-${randomUUID()}`;
   const languageStore = createTuiLanguageStore({ userDataPath });
   const themeStore = createTuiThemeStore({ userDataPath });
@@ -94,6 +94,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     goalPlanStore: options.goalPlanStore,
     sessionApprovals: options.sessionApprovals,
     captureExecution: options.captureExecution,
+    ownedTool: options.ownedTool,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);
@@ -153,19 +154,20 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
               ? { extraHeaders: GROK_SUBSCRIPTION_HEADERS }
               : {}),
             resolveTokens() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (!current?.oauthTokens) {
+              if (!selection.oauthTokens) {
                 throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
               }
-              return current.oauthTokens;
+              return selection.oauthTokens;
             },
             async refreshTokens(tokens) {
-              if (metadata.authMethod === 'oauth_chatgpt') {
-                return refreshChatGptOAuthTokens(tokens);
-              }
               try {
-                const fresh = await ensureFreshGrokTokensFromDesktop(tokens, { fetchImpl: providerFetch });
-                return fresh.tokens;
+                const result = await selection.refreshOAuthTokens(tokens, async (current) => {
+                  if (metadata.authMethod === 'oauth_chatgpt') {
+                    return { tokens: await refreshChatGptOAuthTokens(current, oauthRefreshFetch), refreshed: true };
+                  }
+                  return ensureFreshGrokTokensFromDesktop(current, { fetchImpl: oauthRefreshFetch });
+                }, true);
+                return result.tokens;
               } catch (err: any) {
                 if (err?.code === 'grok_oauth_scope_upgrade_required') {
                   // Scope upgrade requires a fresh device flow — refresh tokens
@@ -178,24 +180,6 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
                 }
                 throw err;
               }
-            },
-            persistTokens(tokens) {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (!current) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-              current.persistOAuthTokens(tokens);
-            },
-          }).stream(request);
-        }
-
-        // Qoder private SSE wire (not OpenAI-compatible chat/completions).
-        if (decision.wire === 'qoder-private') {
-          return createQoderPrivateProvider({
-            providerId: credentialId,
-            baseUrl,
-            async getAccessToken() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (current?.apiKey) return current.apiKey;
-              return loadQoderAccessTokenFromDesktop();
             },
           }).stream(request);
         }
@@ -216,32 +200,15 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
           }).stream(request);
         }
 
-        // Gemini generateContent SSE (Code Assist for OAuth; never .../v1beta/openai).
+        // Gemini generateContent SSE.
         if (decision.wire === 'gemini') {
           return createGeminiProvider({
             providerId: credentialId,
             baseUrl,
-            authMethod: metadata.authMethod || decision.authMethod || 'api_key',
             async getApiKey() {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (current?.apiKey) return current.apiKey;
-              if (metadata.authMethod === 'oauth_google' && current?.oauthTokens) {
-                const fresh = await ensureFreshGoogleTokensFromDesktop(current.oauthTokens);
-                if (fresh?.access) {
-                  current.persistOAuthTokens?.(fresh);
-                  return String(fresh.access);
-                }
-              }
-              throw new Error(
-                metadata.authMethod === 'oauth_google'
-                  ? 'Google OAuth access token is unavailable. Sign in via Desktop or unlock Keychain and retry.'
-                  : 'Desktop credential is locked. Allow Keychain access and retry.',
-              );
-            },
-            async getProjectId() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              const tokens = current?.oauthTokens as { projectId?: string; project_id?: string } | undefined;
-              return tokens?.projectId || tokens?.project_id || null;
+              if (!current?.apiKey) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
+              return current.apiKey;
             },
           }).stream(request);
         }
@@ -362,6 +329,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         getContextWindow: () => contextSelection.getContextWindow(),
         toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
         getSystemPrompt: systemPrompt,
+        resolveOwnedCognition: options.resolveOwnedCognition,
       })
     : createUnavailableChatModel(missingModelConfigurationMessage());
 

@@ -14,6 +14,7 @@ import { BotInputContext } from './BotInputContext';
 import { useQuestionDismissal } from './useQuestionDismissal';
 import { useCardPresence } from './useCardPresence';
 import { ApprovalReceipt } from './ApprovalReceipt';
+import type { BotWorkIndex } from '../state/botWorkState';
 
 /**
  * 所有动作通过应用服务，由宿主校验状态与项目归属。
@@ -22,11 +23,15 @@ export function CardView({
   workspaceId,
   cards,
   i18n,
+  workIndex,
+  onOpenWork,
   onDone,
 }: {
   readonly workspaceId: string;
   readonly cards: readonly BotChatCard[];
   readonly i18n: I18nRuntime;
+  readonly workIndex?: BotWorkIndex;
+  readonly onOpenWork?: (sessionId: string) => void;
   readonly onDone?: () => void;
 }) {
   const presence = useCardPresence(cards);
@@ -34,7 +39,8 @@ export function CardView({
   return (
     <div className="bot-cards">
       {presence.visible.map((card) => (
-        <CardItem key={card.cardId} workspaceId={workspaceId} card={card} i18n={i18n} onDone={onDone} onClosed={() => presence.close(card.cardId)} />
+        <CardItem key={card.cardId} workspaceId={workspaceId} card={card} i18n={i18n}
+          workIndex={workIndex} onOpenWork={onOpenWork} onDone={onDone} onClosed={() => presence.close(card.cardId)} />
       ))}
     </div>
   );
@@ -54,12 +60,16 @@ function CardItem({
   workspaceId,
   card: sourceCard,
   i18n,
+  workIndex,
+  onOpenWork,
   onDone,
   onClosed,
 }: {
   readonly workspaceId: string;
   readonly card: BotChatCard;
   readonly i18n: I18nRuntime;
+  readonly workIndex?: BotWorkIndex;
+  readonly onOpenWork?: (sessionId: string) => void;
   readonly onDone?: () => void;
   readonly onClosed: () => void;
 }) {
@@ -81,7 +91,14 @@ function CardItem({
   const resolved = card.resolvedState === 'resolved';
   const failure = card.kind === 'agent_unavailable' ? agentFailurePresentation(card) : undefined;
   const budgetDetail = failure && !failure.recovering ? budgetFailureDetail(card.recoveryAction) : null;
+  const planApproval = card.kind === 'plan_approval';
+  const sessionId = card.refs?.sessionId;
+  const session = planApproval && sessionId ? workIndex?.byId.get(sessionId) : undefined;
+  const summary = planApproval ? card.content.trim() : '';
+  const planTitle = session?.title.trim() || (summary !== 'goal.plan' && summary !== '计划待批准' ? summary : '');
+  const planLabel = i18n.t('projectAgent.chat.planApprovalPending');
   const actions = card.actions?.filter(action => action.id !== 'retry' || failure?.retryAllowed !== false);
+  if (planApproval) actions?.sort((left, right) => Number(left.id === 'approve') - Number(right.id === 'approve'));
   const imageApproval = card.kind === 'approval' && (card.refs?.capabilityId === 'local.image.read' || actions?.some(a => a.payload?.capabilityId === 'local.image.read'));
   const imageState = card.resolution?.state;
   const imageNotice = card.refs?.decisionReason === 'permission_policy_changed' ? 'projectAgent.access.changed' : card.refs?.decisionReason === 'permission_timeout' ? 'projectAgent.chat.imageTimeout'
@@ -103,11 +120,29 @@ function CardItem({
   const dismissal = useQuestionDismissal(question && resolved, onClosed, node =>
     node.closest('.bot-convo')?.querySelector<HTMLTextAreaElement>('.bot-composer textarea:not(:disabled)') ?? null);
   if (retired?.key === key && retired.source === sourceCard || question && !dismissal.present) return null;
-  if (['approval', 'plan_approval'].includes(card.kind) && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
+  if ((card.kind === 'approval' || planApproval) && resolved) {
+    return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined}
+      planTitle={planApproval ? planTitle : undefined} />;
+  }
+  const openWork = planApproval && sessionId && onOpenWork ? () => onOpenWork(sessionId) : undefined;
+  const planHeading = planApproval ? <>
+    <span className="bot-plan-approval-icon"><PeerIcon name="fileText" size={17} /></span>
+    <span className="bot-plan-approval-copy">
+      {planTitle ? <span className="bot-plan-approval-label">{planLabel}</span> : null}
+      <strong className="bot-plan-approval-title">
+        <span>{planTitle || planLabel}</span>{openWork ? <PeerIcon name="chevronRight" size={13} /> : null}
+      </strong>
+    </span>
+  </> : null;
   return (
     <section ref={dismissal.ref} aria-busy={busy} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
-      className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
-      {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
+      aria-label={planApproval ? [planLabel, planTitle].filter(Boolean).join(' · ') : undefined}
+      className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${planApproval ? ' bot-plan-approval' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+      {planApproval ? (
+        openWork ? <button type="button" className="bot-plan-approval-heading bot-plan-approval-link" onClick={openWork}
+          title={i18n.t('projectAgent.chat.work.open')}>{planHeading}</button>
+          : <div className="bot-plan-approval-heading">{planHeading}</div>
+      ) : card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>
       </> : failure ? <><p className="bot-reply-body" role={failure.recovering ? 'status' : undefined}>{i18n.t(failure.messageKey)}</p>
@@ -117,11 +152,12 @@ function CardItem({
         : imageApproval ? <><p role="status">{i18n.t(imageNotice)}</p><p>{card.content}</p>{!resolved && card.refs?.deadlineAt ? <p className="bot-drawer-note">{i18n.t('projectAgent.chat.imageWaitLimit')}</p> : null}</>
         : <p>{card.kind === 'question' && card.cardId.startsWith('card:question:reply:') ? i18n.t('projectAgent.chat.chooseAnswer') : card.content}</p>}
       {resolved && !question || !actions?.length ? null : (
-        <div className="bot-card-actions">
+        <div className={planApproval ? 'bot-card-actions bot-plan-approval-actions' : 'bot-card-actions'}>
           {actions.map((action, index) => (
             <button
               key={`${action.id}-${index}`}
               type="button"
+              data-primary={planApproval && action.id === 'approve' ? 'true' : undefined}
               disabled={busy || waitingForFacts || resolved}
               onClick={() => {
                 if (sending.current || waitingForFacts || resolved) return;
@@ -141,7 +177,7 @@ function CardItem({
                 }).catch(() => setError(i18n.t('projectAgent.chat.actionFailed'))).finally(() => { sending.current = false; setBusy(false); });
               }}
             >
-              {actionLabel(action, i18n)}
+              {planApproval && action.id === 'approve' ? i18n.t('projectAgent.chat.approvePlan') : actionLabel(action, i18n)}
             </button>
           ))}
         </div>

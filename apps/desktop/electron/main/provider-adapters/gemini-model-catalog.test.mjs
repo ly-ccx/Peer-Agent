@@ -12,7 +12,7 @@ import {
 
 describe('Gemini model catalog (gemini-cli curated)', () => {
   it('returns curated gemini-cli models instead of remote /models scraping', async () => {
-    const result = await listGeminiModels({ access: 'unused' });
+    const result = listGeminiModels();
     assert.equal(result.source, 'builtin');
     const ids = result.models.map((m) => m.id);
     assert.ok(ids.includes(GEMINI_DEFAULT_MODEL));
@@ -24,7 +24,7 @@ describe('Gemini model catalog (gemini-cli curated)', () => {
   });
 
   it('can hide preview models when requested', async () => {
-    const result = await listGeminiModels({ access: 'unused' }, { includePreview: false });
+    const result = listGeminiModels({ includePreview: false });
     assert.equal(result.models.some((m) => m.id.includes('preview')), false);
     assert.ok(result.models.some((m) => m.id === GEMINI_DEFAULT_MODEL));
   });

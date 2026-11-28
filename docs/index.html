@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="A project Bot that coordinates Agents, follows the work and brings back results with evidence. Open source, with local execution and authorization.">
-  <meta name="theme-color" content="#f7f8fa">
+  <meta name="description" content="A local work delegation system. Each project has a Bot that coordinates Agents in isolated worktrees, verifies results, and brings back evidence.">
+  <meta name="theme-color" content="#f4f5f8">
   <link rel="canonical" href="https://ly-ccx.github.io/Peer-Agent/">
   <link rel="icon" href="./favicon.png" type="image/png">
   <title>Peer — hand over the work, keep the decisions</title>
@@ -18,12 +18,19 @@
 </head>
 <body>
   <a class="skip" href="#main" data-i18n="skip">Skip to content</a>
+
   <header class="site-header">
     <div class="wrap header-row">
-      <a class="brand" href="./" aria-label="Peer home"><img src="./logo-light.png" data-logo-light="./logo-light.png" data-logo-dark="./logo-dark.png" alt="" width="32" height="32">Peer</a>
+      <a class="brand" href="./" aria-label="Peer home">
+        <img src="./logo-light.png" data-logo-light="./logo-light.png" data-logo-dark="./logo-dark.png" alt="" width="28" height="28">
+        <span>Peer</span>
+        <span class="brand-tag">0.1 preview</span>
+      </a>
       <nav class="site-nav" aria-label="Main navigation">
         <a href="#product" data-i18n="nav.product">Product</a>
-        <a href="#how" data-i18n="nav.how">How it works</a>
+        <a href="#how" data-i18n="nav.how">Workflow</a>
+        <a href="#capabilities" data-i18n="nav.capabilities">Capabilities</a>
+        <a href="#local" data-i18n="nav.local">Architecture</a>
         <a href="./docs.html" data-i18n="nav.docs">Docs</a>
         <a href="./changelog.html" data-i18n="nav.changelog">Changelog</a>
         <a href="#get" data-i18n="nav.download">Download</a>
@@ -31,129 +38,619 @@
       <div class="preferences" role="group" aria-label="Language and appearance">
         <button type="button" data-language="en" aria-pressed="true" disabled>EN</button>
         <button type="button" data-language="zh" aria-pressed="false" disabled>中文</button>
-        <button type="button" class="theme-button" data-theme-toggle data-site-control aria-label="Change appearance" disabled><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#theme"></use></svg></button>
+        <button type="button" class="theme-button" data-theme-toggle data-site-control aria-label="Change appearance" disabled>
+          <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#theme"></use></svg>
+        </button>
       </div>
     </div>
   </header>
+
   <main id="main" tabindex="-1">
-    <section class="hero wrap" id="product">
-      <p class="eyebrow" data-i18n="hero.eyebrow">Your projects. A working relationship.</p>
-      <h1><span data-i18n="hero.line1">Hand over the work.</span><span data-i18n="hero.line2">Keep the decisions.</span></h1>
-      <p class="intro" data-i18n="hero.body">One Bot for each project. Give it a goal, let it coordinate the work, and return for the decisions that need you. Execution, permissions and evidence stay under local control.</p>
-      <div class="actions">
-        <a class="button primary" href="#get"><span data-i18n="hero.download">Get the 0.1 preview</span><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg></a>
-        <a class="button" href="#how" data-i18n="hero.demo">See how work moves</a>
-      </div>
-      <p class="fine" data-i18n="hero.note">The project Bot experience is in the 0.1 preview. The 0.0 stable release uses the classic interface.</p>
-    </section>
-    <figure class="showcase wrap">
-      <div class="product-frame">
-        <img class="shot-light" src="./screenshots/project-bot-showcase-light.jpg" alt="Peer Desktop with three project Bots and a conversation about updating a website" data-i18n-alt="shot.alt" width="2560" height="1720" fetchpriority="high">
-        <img class="shot-dark" src="./screenshots/project-bot-showcase-dark.jpg" alt="Peer Desktop with three project Bots and a conversation about updating a website" data-i18n-alt="shot.alt" width="2560" height="1720">
-      </div>
-      <figcaption><span data-i18n="shot.caption">Actual Desktop interface · fictional projects and conversation</span><span data-i18n="shot.version">0.1 development build · not a real-model execution receipt</span></figcaption>
-    </figure>
+    <div class="hero-band">
+      <section class="hero wrap" id="product">
+        <p class="eyebrow eyebrow-pill" data-i18n="hero.eyebrow">Project Bot Delegation System · 0.1 Preview</p>
+        <h1>
+          <span data-i18n="hero.line1">Hand over the work.</span>
+          <span class="line-muted" data-i18n="hero.line2">Keep the decisions.</span>
+        </h1>
+        <p class="intro" data-i18n="hero.body">One Bot for each project. Give it a goal and boundaries—it coordinates parallel Agents in isolated worktrees, verifies returned work against criteria, and brings back results with evidence. Local tools, permissions and credentials never leave your machine.</p>
+        <div class="actions">
+          <a class="button primary" href="#get">
+            <span data-i18n="hero.download">Get the 0.1 preview</span>
+            <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg>
+          </a>
+          <a class="button" href="#how" data-i18n="hero.demo">Walk through a delegation</a>
+        </div>
+        <ul class="hero-specs">
+          <li data-i18n="hero.spec1">MIT Open Source</li>
+          <li data-i18n="hero.spec2">Desktop + peer TUI</li>
+          <li data-i18n="hero.spec3">macOS · Windows · Linux</li>
+          <li data-i18n="hero.spec4">v0.1.0-rc.40 preview · v0.0.18 stable</li>
+        </ul>
+      </section>
 
-    <section class="section wrap" id="work">
-      <div class="section-head">
-        <p class="eyebrow" data-i18n="cases.eyebrow">Start with something real</p>
-        <h2 data-i18n="cases.title">Give it the outcome you need.</h2>
-        <p data-i18n="cases.body">Code, documents and research can share the same working relationship. Start with a goal and a boundary; keep the relevant project close.</p>
-      </div>
-      <div class="case-grid">
-        <article class="case">
-          <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#terminal"></use></svg>
-          <h3 data-i18n="cases.fix.title">Investigate and repair</h3>
-          <p class="example" data-i18n="cases.fix.example">“Find why this request is slow, and fix the cause.”</p>
-          <p data-i18n="cases.fix.body">The Bot reads the project, narrows the scope and delegates bounded changes with criteria for checking the result.</p>
-          <p class="deliverable" data-i18n="cases.fix.result">Bring back: the explanation, a diff and the checks actually performed.</p>
-        </article>
-        <article class="case">
-          <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#blocks"></use></svg>
-          <h3 data-i18n="cases.change.title">Move an engineering change</h3>
-          <p class="example" data-i18n="cases.change.example">“Update this feature across the project. Keep the API compatible.”</p>
-          <p data-i18n="cases.change.body">Independent work can move in parallel. Additions and corrections return to the Bot that holds the project context.</p>
-          <p class="deliverable" data-i18n="cases.change.result">Bring back: related changes, review findings and remaining gaps.</p>
-        </article>
-        <article class="case">
-          <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#search"></use></svg>
-          <h3 data-i18n="cases.research.title">Research and document</h3>
-          <p class="example" data-i18n="cases.research.example">“Compare these approaches and write down a recommendation.”</p>
-          <p data-i18n="cases.research.body">Keep sources, notes and deliverables with the project. Read documents and code alongside the main conversation.</p>
-          <p class="deliverable" data-i18n="cases.research.result">Bring back: a readable conclusion, source references and open questions.</p>
-        </article>
-      </div>
-    </section>
+      <figure class="showcase wrap" aria-label="Interactive product preview">
+        <div class="stage-bar">
+          <div class="segmented" role="tablist" aria-label="Product surfaces">
+            <button type="button" role="tab" data-stage-tab="desktop" aria-selected="true" aria-controls="panel-desktop" disabled>
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#monitor"></use></svg>
+              <span data-i18n="stage.tab.desktop">Desktop · Project Bot</span>
+            </button>
+            <button type="button" role="tab" data-stage-tab="cli" aria-selected="false" tabindex="-1" aria-controls="panel-cli" disabled>
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#terminal"></use></svg>
+              <span data-i18n="stage.tab.cli">CLI · peer TUI</span>
+            </button>
+            <button type="button" role="tab" data-stage-tab="capture" aria-selected="false" tabindex="-1" aria-controls="panel-capture" disabled>
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#layout"></use></svg>
+              <span data-i18n="stage.tab.capture">Actual Capture</span>
+            </button>
+          </div>
+          <div class="scenario-pills" id="stage-scenarios" role="group" aria-label="Desktop workflow scenarios">
+            <button type="button" data-scenario="approval" aria-pressed="true" data-i18n="stage.sc.approval" disabled>01 · Needs Approval</button>
+            <button type="button" data-scenario="parallel" aria-pressed="false" data-i18n="stage.sc.parallel" disabled>02 · Parallel Worktrees</button>
+            <button type="button" data-scenario="verified" aria-pressed="false" data-i18n="stage.sc.verified" disabled>03 · Verified &amp; Accepted</button>
+          </div>
+        </div>
 
+        <div class="product-frame">
+          <!-- Panel 1: Interactive 3-Pane Project Bot Desktop Preview -->
+          <div id="panel-desktop" role="tabpanel" data-stage-panel="desktop">
+            <div class="sim-window">
+              <div class="sim-chrome">
+                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+                <div class="sim-title" data-i18n="sim.chromeTitle">Peer · Project Bot Shell</div>
+                <div class="sim-badge-host" data-i18n="sim.chromeHost">~/.peer-agent · local host</div>
+              </div>
+              <div class="sim-layout">
+                <aside class="sim-sidebar" aria-label="Project Bots">
+                  <div class="sim-sb-top">
+                    <div class="sim-sb-brand">
+                      <img src="./favicon.png" alt="" width="20" height="20">
+                      <div>
+                        <span>Peer</span>
+                        <small>0.1.0-rc.40</small>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="sim-filter-row">
+                    <span data-i18n="sim.filterNeeds">Needs you</span>
+                    <span class="sim-pill-count">1</span>
+                  </div>
+                  <div class="sim-bot-list" role="listbox" aria-label="Sample project Bots">
+                    <button type="button" class="sim-bot-row" data-sim-bot="peer-agent" role="option" aria-selected="true" disabled>
+                      <span class="bot-avatar mint" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v3M7 10a5 5 0 0 1 10 0v5a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4v-5Z"/><circle cx="10" cy="12" r=".8" fill="currentColor"/><circle cx="14" cy="12" r=".8" fill="currentColor"/></svg>
+                      </span>
+                      <span class="sim-bot-meta">
+                        <span class="sim-bot-head"><strong>Peer-Agent</strong><time>16:19</time></span>
+                        <span class="sim-bot-preview" data-i18n="sim.bot1.preview">Approve tests in worktree</span>
+                        <span class="sim-bot-state needs" data-i18n="sim.bot1.state">Needs you · 1</span>
+                      </span>
+                    </button>
+                    <button type="button" class="sim-bot-row" data-sim-bot="docs-site" role="option" aria-selected="false" disabled>
+                      <span class="bot-avatar ice" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v3M7 10a5 5 0 0 1 10 0v5a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4v-5Z"/><circle cx="10" cy="12" r=".8" fill="currentColor"/><circle cx="14" cy="12" r=".8" fill="currentColor"/></svg>
+                      </span>
+                      <span class="sim-bot-meta">
+                        <span class="sim-bot-head"><strong data-i18n="sim.bot2.name">Docs &amp; Website</strong><time>16:04</time></span>
+                        <span class="sim-bot-preview" data-i18n="sim.bot2.preview">2 worktrees running</span>
+                        <span class="sim-bot-state running" data-i18n="sim.bot2.state">Running · 2</span>
+                      </span>
+                    </button>
+                    <button type="button" class="sim-bot-row" data-sim-bot="research" role="option" aria-selected="false" disabled>
+                      <span class="bot-avatar plum" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v3M7 10a5 5 0 0 1 10 0v5a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4v-5Z"/><circle cx="10" cy="12" r=".8" fill="currentColor"/><circle cx="14" cy="12" r=".8" fill="currentColor"/></svg>
+                      </span>
+                      <span class="sim-bot-meta">
+                        <span class="sim-bot-head"><strong data-i18n="sim.bot3.name">Research Notes</strong><time>15:42</time></span>
+                        <span class="sim-bot-preview" data-i18n="sim.bot3.preview">6/6 checks · policy accepted</span>
+                        <span class="sim-bot-state quiet" data-i18n="sim.bot3.state">Accepted</span>
+                      </span>
+                    </button>
+                  </div>
+                  <div class="sim-sb-footer">
+                    <span data-i18n="sim.sbFooter">Settings · Models</span>
+                    <span>MIT</span>
+                  </div>
+                </aside>
+
+                <div class="sim-thread">
+                  <div class="sim-thread-head">
+                    <div class="sim-thread-id">
+                      <strong id="sim-thread-title">Peer-Agent</strong>
+                      <span id="sim-thread-sub">~/Develop/Peer-Agent · worktree ready</span>
+                    </div>
+                    <div class="sim-thread-tools">
+                      <span class="sim-chip" data-i18n="sim.wpBtn">Work Panel</span>
+                      <span class="sim-chip" data-i18n="sim.paneBtn">4th Pane</span>
+                    </div>
+                  </div>
+
+                  <div class="sim-stream">
+                    <div class="sim-user-msg" id="sim-user-msg">Find why the API router stalls on cold start and fix it without breaking public exports.</div>
+                    <div class="sim-user-receipt" id="sim-user-receipt">Received · 16:18</div>
+
+                    <div class="sim-bot-reply">
+                      <div class="sim-bot-label">
+                        <span data-i18n="sim.botRole">Project Bot</span>
+                        <span class="sim-card-tag warn" data-i18n="sim.botRo">Read-only coordinator</span>
+                      </div>
+                      <div class="sim-quote-ref" id="sim-quote-ref">Reply to: “Find why the API router stalls on cold start…”</div>
+                      <div class="sim-reply-body">
+                        <p id="sim-reply-body">Explorer traced the stall to synchronous manifest scanning on boot. I opened a bounded task in an isolated worktree to defer non-critical reads and preserve public exports. Running the regression suite requires your approval.</p>
+                      </div>
+
+                      <div class="sim-card">
+                        <div class="sim-card-head">
+                          <span id="sim-card-title">Needs your approval · local.shell.exec</span>
+                          <span class="sim-card-tag warn" id="sim-card-tag">Needs you</span>
+                        </div>
+                        <div class="sim-card-detail" id="sim-card-cmd">pnpm --filter @peer-agent/runtime-node test</div>
+                        <div class="sim-card-actions" id="sim-card-actions">
+                          <span class="sim-btn-mini primary">Allow once</span>
+                          <span class="sim-btn-mini">Allow this task</span>
+                          <span class="sim-btn-mini">Deny</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="sim-composer">
+                    <div class="sim-composer-text" id="sim-composer-text">Add context or reply to Peer-Agent…</div>
+                    <div class="sim-composer-bar">
+                      <div class="sim-composer-chips">
+                        <span class="sim-chip" data-i18n="sim.chipFast">Fast · Bot</span>
+                        <span class="sim-chip" data-i18n="sim.chipStrong">Strong · Task</span>
+                        <span class="sim-chip" data-i18n="sim.chipAsk">Ask on write</span>
+                      </div>
+                      <span class="sim-send-circle" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="sim-workpanel" aria-label="Work Panel preview">
+                  <div class="sim-wp-head">
+                    <span data-i18n="sim.wpTitle">Work Panel</span>
+                    <span class="sim-chip" data-i18n="sim.wpFacts">Live facts</span>
+                  </div>
+                  <div class="sim-wp-attention">
+                    <span id="sim-wp-focus-label">Waiting for permission</span>
+                    <strong id="sim-wp-focus-text">Approve test run inside worktree/fix-router-stall</strong>
+                  </div>
+                  <div class="sim-wp-section">
+                    <h4 data-i18n="sim.wpTasks">Delegated Tasks</h4>
+                    <div id="sim-wp-tasks">
+                      <div class="sim-task-item">
+                        <div class="sim-task-top"><span>Fix router cold-start stall</span><span class="cli-muted">64%</span></div>
+                        <div class="sim-task-sub">worktree/fix-router-stall · waiting_approval</div>
+                        <div class="sim-progress"><i style="width:64%"></i></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="sim-wp-section">
+                    <h4 data-i18n="sim.wpAgents">Child Agents</h4>
+                    <div id="sim-wp-agents">
+                      <div class="sim-task-item"><div class="sim-task-top"><span>Explorer · boot trace</span><span class="cli-muted">Done · 3 files</span></div></div>
+                      <div class="sim-task-item"><div class="sim-task-top"><span>Verifier · regression gate</span><span class="cli-muted">Queued</span></div></div>
+                    </div>
+                  </div>
+                  <div class="sim-wp-section">
+                    <h4 data-i18n="sim.wpMaterials">Workspace Materials</h4>
+                    <div id="sim-wp-materials">
+                      <div class="sim-material-row"><span>router-trace.md</span><span>4th pane</span></div>
+                      <div class="sim-material-row"><span>lazy-manifest.diff</span><span>4th pane</span></div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 2: CLI / peer TUI -->
+          <div id="panel-cli" role="tabpanel" data-stage-panel="cli" hidden>
+            <div class="cli-sim">
+              <div class="cli-chrome">
+                <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span>peer · ~/.peer-agent · v0.1.0-rc.40</span>
+                <span class="cli-good" data-i18n="sim.cliHost">Host: Running here</span>
+              </div>
+              <div class="cli-grid">
+                <div class="cli-pane-left">
+                  <div class="cli-heading"><span data-i18n="sim.cliBots">Bots</span><span>3</span></div>
+                  <div class="cli-bot-entry active">
+                    <div>› Peer-Agent <span class="cli-muted">16:19</span></div>
+                    <div class="cli-accent" data-i18n="sim.cliNeeds1">  Needs you 1  Running 1</div>
+                    <div class="cli-muted" data-i18n="sim.cliPreview1">  Approve test run in worktree</div>
+                  </div>
+                  <div class="cli-bot-entry">
+                    <div>  <span data-i18n="sim.bot2.name">Docs &amp; Website</span> <span class="cli-muted">16:04</span></div>
+                    <div class="cli-muted" data-i18n="sim.cliNeeds2">  Needs you 0  Running 2</div>
+                    <div class="cli-muted" data-i18n="sim.cliPreview2">  2 worktrees running</div>
+                  </div>
+                  <div class="cli-bot-entry">
+                    <div>  <span data-i18n="sim.bot3.name">Research Notes</span> <span class="cli-muted">15:42</span></div>
+                    <div class="cli-muted" data-i18n="sim.cliNeeds3">  Needs you 0  Running 0</div>
+                    <div class="cli-muted" data-i18n="sim.cliPreview3">  Accepted · 6/6 checks</div>
+                  </div>
+                </div>
+                <div class="cli-pane-right">
+                  <div class="cli-heading">
+                    <span>Peer-Agent · ~/Develop/Peer-Agent</span>
+                    <span data-i18n="sim.cliClassic">F2 · Task mode (/classic)</span>
+                  </div>
+                  <div><span class="cli-accent" data-i18n="sim.cliYou">You:</span> <span data-i18n="sim.cliUserMsg">Find why the API router stalls on cold start and fix it without breaking public exports.</span></div>
+                  <div style="margin-top:10px;"><span class="cli-good" data-i18n="sim.cliBot">Bot:</span> <span class="cli-muted" data-i18n="sim.cliQuote">Reply to: “Find why the API router stalls…”</span></div>
+                  <div data-i18n="sim.cliReply">Explorer traced synchronous manifest scanning on boot. Opened bounded task in worktree/fix-router-stall.</div>
+                  <div class="cli-card-box">
+                    <div><strong data-i18n="sim.cliCardTitle">#1 [Needs approval]</strong> <code>pnpm --filter @peer-agent/runtime-node test</code></div>
+                    <div class="cli-accent" style="margin-top:6px;" data-i18n="sim.cliCardActions">[1] Allow once   [2] Allow this task   [3] Deny   (/approve 1)</div>
+                  </div>
+                  <div class="cli-muted" data-i18n="sim.cliTaskRow">› Fix router cold-start stall · waiting_approval · worktree/fix-router-stall</div>
+                  <div class="cli-status-bar">
+                    <span>/bots /tasks /result /memory /objectives /cards /takeover</span>
+                    <span data-i18n="sim.cliShared">Same ~/.peer-agent as Desktop</span>
+                  </div>
+                  <div class="cli-prompt-box">
+                    <span data-i18n="sim.cliPrompt">› Message this bot (or type / for commands)…</span>
+                    <span class="cli-muted" data-i18n="sim.cliTabHint">Tab · cards</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 3: Actual Unedited Electron Capture -->
+          <div id="panel-capture" role="tabpanel" data-stage-panel="capture" hidden>
+            <div class="capture-bar">
+              <span id="capture-note">Bot List &amp; main thread (switches automatically with light/dark theme)</span>
+              <div class="scenario-pills">
+                <button type="button" data-capture-view="home" aria-pressed="true" data-i18n="stage.capture.home" disabled>Main conversation</button>
+                <button type="button" data-capture-view="profile" aria-pressed="false" data-i18n="stage.capture.profile" disabled>Bot profile &amp; routing</button>
+              </div>
+            </div>
+            <div class="capture-wrap" id="capture-home">
+              <img class="shot-light" src="./screenshots/project-bot-showcase-light.jpg" alt="Peer Desktop with three project Bots and a conversation about updating a website" data-i18n-alt="shot.alt" width="2560" height="1720">
+              <img class="shot-dark" src="./screenshots/project-bot-showcase-dark.jpg" alt="Peer Desktop with three project Bots and a conversation about updating a website" data-i18n-alt="shot.alt" width="2560" height="1720">
+            </div>
+            <div class="capture-wrap" id="capture-profile" hidden>
+              <img src="./screenshots/bot-profile-rc.png" alt="Peer Desktop Bot profile drawer showing model routing, host lease and acceptance policy settings" width="2560" height="1720">
+            </div>
+          </div>
+        </div>
+
+        <figcaption>
+          <span id="stage-caption" data-i18n="stage.caption.interactive">Interactive preview · illustrates 0.1 Project Bot, Work Panel and shared TUI workflows</span>
+          <span>MIT · Local Execution · ~/.peer-agent</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <!-- Section 2: 5-Step Delegation Walkthrough -->
     <section class="section wrap" id="how">
       <div class="section-head">
-        <p class="eyebrow" data-i18n="how.eyebrow">How you work together</p>
+        <p class="eyebrow" data-i18n="how.eyebrow">How delegation flows</p>
         <h2 data-i18n="how.title">One conversation. Work that keeps its context.</h2>
-        <p data-i18n="how.body">You should not have to manage every Agent turn. The project Bot is your point of contact as work is delegated, corrected and reviewed.</p>
+        <p data-i18n="how.body">You stop acting as the project manager for every turn. Set the goal and boundary once; the project Bot spawns scoped tasks, routes follow-ups, verifies results and surfaces only real decisions.</p>
       </div>
       <div class="walkthrough">
-        <div class="step-list" role="tablist" aria-label="Illustrated workflow">
+        <div class="step-list" role="tablist" aria-label="Delegation workflow stages">
           <button type="button" role="tab" id="step-0" aria-controls="story-panel" aria-selected="true" data-story="0" disabled><span class="step-number">01</span><span data-i18n="story.0">Set the goal</span></button>
-          <button type="button" role="tab" id="step-1" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="1" disabled><span class="step-number">02</span><span data-i18n="story.1">Delegate the work</span></button>
-          <button type="button" role="tab" id="step-2" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="2" disabled><span class="step-number">03</span><span data-i18n="story.2">Add or correct</span></button>
-          <button type="button" role="tab" id="step-3" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="3" disabled><span class="step-number">04</span><span data-i18n="story.3">Review the result</span></button>
-          <button type="button" role="tab" id="step-4" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="4" disabled><span class="step-number">05</span><span data-i18n="story.4">Keep continuity</span></button>
+          <button type="button" role="tab" id="step-1" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="1" disabled><span class="step-number">02</span><span data-i18n="story.1">Delegate &amp; isolate</span></button>
+          <button type="button" role="tab" id="step-2" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="2" disabled><span class="step-number">03</span><span data-i18n="story.2">Quote &amp; steer</span></button>
+          <button type="button" role="tab" id="step-3" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="3" disabled><span class="step-number">04</span><span data-i18n="story.3">Verify &amp; accept</span></button>
+          <button type="button" role="tab" id="step-4" aria-controls="story-panel" aria-selected="false" tabindex="-1" data-story="4" disabled><span class="step-number">05</span><span data-i18n="story.4">Pause, stop &amp; recover</span></button>
         </div>
         <div>
-          <article class="story-panel" id="story-panel" role="tabpanel" aria-labelledby="story-title" tabindex="0">
-            <span class="badge" id="story-version">0.1 preview workflow</span>
-            <h3 id="story-title">Set the goal</h3>
-            <dl>
-              <dt data-i18n="story.goal">Your request</dt><dd id="story-request">Update the website for the current product. Keep the CLI entry point.</dd>
-              <dt data-i18n="story.bot">What the project Bot does</dt><dd id="story-bot">The project Bot reads the folder and existing rules, clarifies the outcome and identifies the boundaries before arranging execution.</dd>
-              <dt data-i18n="story.owner">Your part</dt><dd id="story-owner">State the goal and any constraints. Clarify only the decisions that change the outcome.</dd>
-            </dl>
+          <article class="story-panel" id="story-panel" role="tabpanel" aria-labelledby="step-0" tabindex="0">
+            <div>
+              <span class="badge" id="story-version">0.1 delegation flow</span>
+              <h3 id="story-title">Set the goal</h3>
+              <dl>
+                <dt data-i18n="story.goal">Your instruction</dt>
+                <dd id="story-request">“Investigate why this API endpoint stalls on cold start, and fix it without breaking public types.”</dd>
+                <dt data-i18n="story.bot">How the project Bot coordinates</dt>
+                <dd id="story-bot">The project Bot stays read-only. It inspects the folder and project rules, confirms the boundary, and prepares a bounded GoalPlan before any write.</dd>
+                <dt data-i18n="story.owner">When it comes back to you</dt>
+                <dd id="story-owner">State the outcome and constraints once. Clarify only decisions that materially change scope.</dd>
+              </dl>
+            </div>
+            <div class="story-visual" id="story-visual" aria-label="Projected state for selected step">
+              <div class="sv-head"><span>STAGE 01 · INTAKE</span><span class="badge">Read-only scan</span></div>
+              <div class="sv-row highlight"><strong>Boundary locked</strong><span>Public API exports remain unchanged</span></div>
+              <div class="sv-row"><strong>Read-only tools used</strong><span>list_files · search_files · read_file</span></div>
+              <div class="sv-row"><strong>GoalPlan created</strong><span>3 verification criteria attached before spawn</span></div>
+            </div>
           </article>
-          <p class="story-caption" data-i18n="story.caption">Choose a stage to read the example. This walkthrough is illustrative; it does not start Agents or execute commands.</p>
+          <p class="story-caption" data-i18n="story.caption">Select each stage to inspect both the coordination rule and the live state projected to you.</p>
           <noscript><p><a href="./docs.html#working">Read the complete workflow guide.</a></p></noscript>
         </div>
       </div>
     </section>
 
-    <section class="section wrap" id="mechanisms">
+    <!-- Section 3: Core Capabilities Bento Grid -->
+    <section class="section wrap" id="capabilities">
       <div class="section-head">
-        <p class="eyebrow" data-i18n="working.eyebrow">A project, not a disposable chat</p>
-        <h2 data-i18n="working.title">Less supervision. Clearer handoffs.</h2>
+        <p class="eyebrow" data-i18n="cap.eyebrow">Built for real multi-project work</p>
+        <h2 data-i18n="cap.title">Everything around a project, organized without a ticket desk.</h2>
+        <p data-i18n="cap.body">Peer combines an IM-like Bot list for cross-project attention with isolated worktrees, role-based model routing, a fourth-pane workspace and sourced project memory.</p>
       </div>
-      <div class="working-grid">
-        <article><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#history"></use></svg><div><h3 data-i18n="working.context.title">The project stays with you</h3><p data-i18n="working.context.body">The folder, project memory, goals and history remain available. Long work uses governed context and retrieval rather than relying on one endless transcript.</p></div></article>
-        <article><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#blocks"></use></svg><div><h3 data-i18n="working.agents.title">Independent execution</h3><p data-i18n="working.agents.body">Work Agents have their own context and bounded goals. The main Bot coordinates additions and questions; execution still follows local permissions.</p></div></article>
-        <article><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#check"></use></svg><div><h3 data-i18n="working.result.title">Results with a basis</h3><p data-i18n="working.result.body">The Bot explains what changed, what was checked and what remains uncertain. Verification, acceptance and Git integration are distinct facts.</p></div></article>
-        <article><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#hand"></use></svg><div><h3 data-i18n="working.control.title">You keep control</h3><p data-i18n="working.control.body">Add context, change direction or ask to stop. User decisions and permissions are not replaced by an Agent saying it can handle them.</p></div></article>
+
+      <div class="bento-grid">
+        <article class="bento-card bento-span-7">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#blocks"></use></svg><span data-i18n="bento.radar.kicker">Bot List · Attention Radar</span></div>
+            <h3 data-i18n="bento.radar.title">Know what needs you without opening 12 tabs.</h3>
+            <p data-i18n="bento.radar.body">Every workspace becomes a project Bot. List badges separate what needs your approval or confirmation from tasks quietly running in the background.</p>
+          </div>
+          <div class="bento-artifact">
+            <div class="mini-row">
+              <div><strong>Peer-Agent</strong> <span class="fine" data-i18n="bento.radar.row1Sub">Allow test runner in worktree/fix-auth</span></div>
+              <span class="mini-tag azure" data-i18n="bento.radar.row1">Needs you · 1</span>
+            </div>
+            <div class="mini-row">
+              <div><strong>Docs &amp; Website</strong> <span class="fine" data-i18n="bento.radar.row2Sub">Verifier checking diff &amp; API compatibility</span></div>
+              <span class="mini-tag" data-i18n="bento.radar.row2">Running · 2</span>
+            </div>
+            <div class="mini-row">
+              <div><strong>Architecture Research</strong> <span class="fine" data-i18n="bento.radar.row3Sub">README structure updated · 6 checks passed</span></div>
+              <span class="mini-tag good" data-i18n="bento.radar.row3">Quiet · Policy accepted</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="bento-card bento-span-5">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#git-branch"></use></svg><span data-i18n="bento.wt.kicker">Parallelism · ADR 80</span></div>
+            <h3 data-i18n="bento.wt.title">Isolated Git worktrees per write task.</h3>
+            <p data-i18n="bento.wt.body">Independent engineering tasks run on their own worktrees while read-only explorers inspect in parallel. Git integration stays a separate explicit handoff.</p>
+          </div>
+          <div class="bento-artifact">
+            <div class="mini-row"><code>main</code><span class="mini-tag">protected base</span></div>
+            <div class="mini-row"><code>worktree/fix-auth</code><span class="mini-tag azure">write slot 1</span></div>
+            <div class="mini-row"><code>worktree/update-docs</code><span class="mini-tag azure">write slot 2</span></div>
+          </div>
+        </article>
+
+        <article class="bento-card bento-span-4">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#layers"></use></svg><span data-i18n="bento.route.kicker">Model Routing · ADR 83</span></div>
+            <h3 data-i18n="bento.route.title">Right model per role. Cross-source review.</h3>
+            <p data-i18n="bento.route.body">Assign Fast, Strong, Economy and Vision tiers across Bot conversation, execution, verification and memory curation—or lock a project to a strict model scope.</p>
+          </div>
+          <div class="bento-artifact">
+            <div class="mini-row"><span data-i18n="bento.route.r1">Bot Conversation</span><span class="mini-tag" data-i18n="bento.route.r1v">Fast tier</span></div>
+            <div class="mini-row"><span data-i18n="bento.route.r2">Task Execution</span><span class="mini-tag" data-i18n="bento.route.r2v">Strong tier</span></div>
+            <div class="mini-row"><span data-i18n="bento.route.r3">Verifier Review</span><span class="mini-tag azure" data-i18n="bento.route.r3v">Cross-source</span></div>
+            <div class="mini-row"><span data-i18n="bento.route.r4">Visual &amp; Probe</span><span class="mini-tag" data-i18n="bento.route.r4v">Vision / Economy</span></div>
+          </div>
+        </article>
+
+        <article class="bento-card bento-span-4">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#layout"></use></svg><span data-i18n="bento.pane.kicker">Workspace &amp; OpenUI</span></div>
+            <h3 data-i18n="bento.pane.title">Inspect diffs, docs and interactive results side-by-side.</h3>
+            <p data-i18n="bento.pane.body">Open files, diffs, web views and read-only child Agent threads beside the main conversation while keeping your draft intact. Opt-in OpenUI turns structured outputs into inspectable tables and filters.</p>
+          </div>
+          <div class="bento-artifact">
+            <div class="mini-row"><code>router.diff</code><span class="mini-tag good">+42 / -18</span></div>
+            <div class="mini-row"><code>peer result</code><span class="mini-tag azure">OpenUI table</span></div>
+            <div class="mini-row"><code>child-thread</code><span class="mini-tag">read-only</span></div>
+          </div>
+        </article>
+
+        <article class="bento-card bento-span-4">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#target"></use></svg><span data-i18n="bento.mem.kicker">Memory &amp; Objectives · ADR 81/82</span></div>
+            <h3 data-i18n="bento.mem.title">Context that compounds across days.</h3>
+            <p data-i18n="bento.mem.body">Project memory records verified facts and explicit preferences with source links—never elevating guesses into instructions. Objectives watch schedules, git or CI and speak only when facts change.</p>
+          </div>
+          <div class="bento-artifact">
+            <div class="mini-row"><code>memory/verified</code><span class="mini-tag good">sourced</span></div>
+            <div class="mini-row"><code>objective/ci-watch</code><span class="mini-tag azure">on change</span></div>
+            <div class="mini-row"><code>surfacing/policy</code><span class="mini-tag">quiet digest</span></div>
+          </div>
+        </article>
+
+        <article class="bento-card bento-span-12">
+          <div>
+            <div class="bento-kicker"><svg aria-hidden="true"><use href="./site/icons.svg#check-circle"></use></svg><span data-i18n="cases.eyebrow">What you can delegate</span></div>
+            <h3 data-i18n="cases.title">Give it the outcome you need.</h3>
+          </div>
+          <div class="case-grid">
+            <div class="case">
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#terminal"></use></svg>
+              <h3 data-i18n="cases.fix.title">Investigate and repair</h3>
+              <p class="example" data-i18n="cases.fix.example">“Find why this request is slow, and fix the cause.”</p>
+              <p data-i18n="cases.fix.body">The Bot reads the project, narrows the scope and delegates bounded changes with explicit verification criteria.</p>
+              <p class="deliverable" data-i18n="cases.fix.result">Bring back: root cause, diff and checks actually performed.</p>
+            </div>
+            <div class="case">
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#blocks"></use></svg>
+              <h3 data-i18n="cases.change.title">Move an engineering change</h3>
+              <p class="example" data-i18n="cases.change.example">“Update this feature across the project. Keep the API compatible.”</p>
+              <p data-i18n="cases.change.body">Independent write tasks isolate in worktrees. Quote a message anytime to add context or steer a specific task.</p>
+              <p class="deliverable" data-i18n="cases.change.result">Bring back: scoped diffs, verifier verdict and open gaps.</p>
+            </div>
+            <div class="case">
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#search"></use></svg>
+              <h3 data-i18n="cases.research.title">Research and document</h3>
+              <p class="example" data-i18n="cases.research.example">“Compare these approaches and write down a recommendation.”</p>
+              <p data-i18n="cases.research.body">Keep sources, notes and deliverables attached to the project. Read documents and code right beside the thread.</p>
+              <p class="deliverable" data-i18n="cases.research.result">Bring back: structured conclusion, references and open questions.</p>
+            </div>
+          </div>
+        </article>
       </div>
     </section>
 
+    <!-- Section 4: Local Authority & Contract Chain -->
     <section class="section wrap" id="local">
-      <div class="boundary">
-        <div><p class="eyebrow" data-i18n="boundary.eyebrow">Local authority</p><h2 data-i18n="boundary.title">Your machine keeps the authority.</h2><p data-i18n="boundary.body">Models provide cognition and may run with a cloud provider. Peer handles local capability execution, permission decisions and evidence. What a model may receive follows the configured provider and context permissions.</p></div>
-        <ul><li data-i18n="boundary.permission">Operations stay within the granted scope. Project Agents do not approve permissions on your behalf.</li><li data-i18n="boundary.evidence">A completed reply is not proof of completed work. Checks and evidence determine what can be handed back.</li><li data-i18n="boundary.recovery">Recovery keeps the original context and history. Unknown operations are reconciled before any replay.</li></ul>
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="local.eyebrow">Local authority &amp; contract chain</p>
+        <h2 data-i18n="local.title">Your machine keeps the authority.</h2>
+        <p data-i18n="local.body">Every capability—Bash, files, search, MCP, Skills or Plugins—must pass the exact same six-stage local contract. There are no hidden side doors.</p>
       </div>
+
+      <div class="chain-rail" aria-label="Enforced capability execution chain">
+        <div class="chain-node">
+          <span class="chain-node-num">01</span>
+          <strong data-i18n="chain.1.title">Capability Provider</strong>
+          <span data-i18n="chain.1.desc">Local files, shell, MCP, skills, plugins</span>
+        </div>
+        <div class="chain-node">
+          <span class="chain-node-num">02</span>
+          <strong data-i18n="chain.2.title">Manifest</strong>
+          <span data-i18n="chain.2.desc">Declared scope &amp; risk metadata</span>
+        </div>
+        <div class="chain-node is-gate">
+          <span class="chain-node-num">03</span>
+          <strong data-i18n="chain.3.title">Runtime Projection</strong>
+          <span data-i18n="chain.3.desc">Mode-gated visibility (bot stays read-only)</span>
+        </div>
+        <div class="chain-node">
+          <span class="chain-node-num">04</span>
+          <strong data-i18n="chain.4.title">Tool Call</strong>
+          <span data-i18n="chain.4.desc">Scoped to bound GoalPlan &amp; worktree</span>
+        </div>
+        <div class="chain-node is-gate">
+          <span class="chain-node-num">05</span>
+          <strong data-i18n="chain.5.title">PermissionGrant</strong>
+          <span data-i18n="chain.5.desc">Host-verified user or policy grant</span>
+        </div>
+        <div class="chain-node is-gate">
+          <span class="chain-node-num">06</span>
+          <strong data-i18n="chain.6.title">Evidence</strong>
+          <span data-i18n="chain.6.desc">Command stdout, exit code, diff &amp; verdict</span>
+        </div>
+      </div>
+
+      <div class="boundary-grid">
+        <article class="boundary-card">
+          <h3><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#shield"></use></svg><span data-i18n="boundary.local.title">What stays on your machine</span></h3>
+          <p data-i18n="boundary.local.body">Desktop, TUI and CLI share the same ~/.peer-agent state and OS keychain vault. Model text can never mint a permission or fake completion.</p>
+          <ul>
+            <li data-i18n="boundary.local.1">Operations stay within the project grant; the project Bot cannot approve permissions for you.</li>
+            <li data-i18n="boundary.local.2">A finished reply is not proof of done. Runtime verification gates evaluate actual Evidence.</li>
+            <li data-i18n="boundary.local.3">Interrupted or withdrawn tasks preserve history and reconcile unknown outcomes before any replay.</li>
+          </ul>
+        </article>
+        <article class="boundary-card">
+          <h3><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#lock"></use></svg><span data-i18n="boundary.cloud.title">What goes to model cognition</span></h3>
+          <p data-i18n="boundary.cloud.body">Cognition may run via cloud APIs, OAuth subscriptions, Coding Plans or local endpoints. Local-first means local control, not pretending cloud models receive nothing.</p>
+          <ul>
+            <li data-i18n="boundary.cloud.1">System Context assembles only admitted prompt sources—tool outputs never become system instructions.</li>
+            <li data-i18n="boundary.cloud.2">Attachment, image and context admissions respect per-project scope and explicit user consent.</li>
+            <li data-i18n="boundary.cloud.3">Credentials live in the native Secret Service / Keychain via Rust peer-credential-helper.</li>
+          </ul>
+        </article>
+      </div>
+
       <div class="ecosystem">
-        <strong data-i18n="ecosystem.title">Build on an open runtime</strong>
-        <a href="./docs.html#cli">CLI</a><a href="./docs.html#mcp">MCP</a><a href="./docs.html#skill">Skills</a><a href="./docs.html#plugin">Plugins</a><a href="./docs.html#model">Models</a><a href="./docs.html#runtime">Runtime SDK</a>
+        <strong data-i18n="ecosystem.title">Open runtime ecosystem</strong>
+        <a href="./docs.html#cli">CLI</a>
+        <a href="./docs.html#mcp">MCP</a>
+        <a href="./docs.html#skill">Skills</a>
+        <a href="./docs.html#plugin">Plugins</a>
+        <a href="./docs.html#model">Models</a>
+        <a href="./docs.html#runtime">Runtime SDK</a>
       </div>
-      <p class="fine" data-i18n="ecosystem.body">Desktop and CLI share the same local runtime. Models, MCP, Skills and Plugins add capabilities through governed contracts.</p>
     </section>
 
+    <!-- Section 5: Download & Entry Points -->
     <section class="section wrap" id="get">
-      <div class="section-head"><p class="eyebrow" data-i18n="download.eyebrow">Choose your entry point</p><h2 data-i18n="download.title">Start a working relationship.</h2><p data-i18n="download.body">Choose the project Bot preview, the classic stable release, or the terminal. Read the release notes for platform availability and upgrade guidance.</p></div>
+      <div class="section-head">
+        <p class="eyebrow" data-i18n="download.eyebrow">Choose your entry point</p>
+        <h2 data-i18n="download.title">Start a working relationship.</h2>
+        <p data-i18n="download.body">Try the 0.1 Project Bot preview across Desktop and TUI, or pick the classic 0.0.18 stable release. Always back up ~/.peer-agent before upgrading.</p>
+      </div>
+
       <div class="download-grid">
-        <article class="release-card"><span class="badge" data-i18n="release.preview">Project Bot preview</span><p class="version">0.1 preview</p><p data-i18n="release.preview.body">The 0.1 preview brings project Bots, a work panel for tasks and child Agents, memory, goals and an independent reading workspace. Optional input suggestions require a dedicated model. Preview software is still evolving.</p><a class="button primary" href="https://github.com/ly-ccx/Peer-Agent/releases"><span data-i18n="release.preview.action">Open preview downloads</span><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg></a><p class="fine" data-i18n="release.preview.note">Back up the full data directory before upgrading. Follow the release-specific compatibility notes.</p></article>
-        <article class="release-card"><span class="badge" data-i18n="release.stable">Classic stable release</span><p class="version">0.0.18</p><p data-i18n="release.stable.body">The 0.0 release uses the classic workflow interface. It does not include the default 0.1 project Bot experience shown above.</p><a class="button" href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18"><span data-i18n="release.stable.action">Open stable downloads</span><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg></a><p class="fine" data-i18n="release.stable.note">The current stable and preview channels are separate. Choose the one that matches the experience you need.</p></article>
+        <article class="release-card is-featured">
+          <div class="release-top">
+            <span class="badge" data-i18n="release.preview">Project Bot preview · Recommended</span>
+          </div>
+          <p class="version" data-i18n="release.preview.ver">0.1.0-rc.40 line</p>
+          <p data-i18n="release.preview.body">Includes Project Bots, the Attention Radar, Work Panel, isolated worktrees, role-based model routing, project memory, objectives and the fourth-pane Workspace.</p>
+          <div class="platform-tags">
+            <span>macOS (.dmg)</span>
+            <span>Windows (.exe)</span>
+            <span>Linux (.AppImage / .deb)</span>
+          </div>
+          <a class="button primary" href="https://github.com/ly-ccx/Peer-Agent/releases">
+            <span data-i18n="release.preview.action">Open preview downloads</span>
+            <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg>
+          </a>
+          <p class="fine" data-i18n="release.preview.note">Back up ~/.peer-agent before upgrading. Read the release notes for format compatibility.</p>
+        </article>
+
+        <article class="release-card">
+          <div class="release-top">
+            <span class="badge" data-i18n="release.stable">Classic stable release</span>
+          </div>
+          <p class="version" data-i18n="release.stable.ver">v0.0.18</p>
+          <p data-i18n="release.stable.body">Uses the classic Agent / Plan / Goal workbench interface on the shared local runtime. Does not include the default 0.1 Project Bot shell.</p>
+          <div class="platform-tags">
+            <span>Classic Workbench</span>
+            <span>npm @latest</span>
+          </div>
+          <a class="button" href="https://github.com/ly-ccx/Peer-Agent/releases/tag/v0.0.18">
+            <span data-i18n="release.stable.action">Open stable downloads</span>
+            <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#arrow"></use></svg>
+          </a>
+          <p class="fine" data-i18n="release.stable.note">Stable and rc/beta are separate channels. Switch channels only after backing up local state.</p>
+        </article>
       </div>
+
       <div class="cli-install" id="download-cli">
-        <div><h3 data-i18n="cli.title">Prefer the terminal?</h3><p class="fine" data-i18n="cli.body">Install peer for the TUI and scripted entry points. The rc channel corresponds to the project Bot preview.</p><a class="fine" href="./docs.html#cli" data-i18n="cli.guide">CLI guide</a></div>
-        <div><div class="cli-choice" role="group" aria-label="CLI release channel"><button type="button" data-cli-channel="rc" aria-pressed="true" data-i18n="cli.preview" disabled>Preview · @rc</button><button type="button" data-cli-channel="latest" aria-pressed="false" data-i18n="cli.stable" disabled>Stable · @latest</button></div><div class="command"><code id="cli-command">npm install -g @peer-agent/cli@rc</code><button type="button" class="copy-button" data-copy-target="cli-command" data-copy-status="copy-status" disabled><svg class="icon" aria-hidden="true"><use href="./site/icons.svg#copy"></use></svg><span data-i18n="copy">Copy</span></button></div><p class="fine" id="copy-status" aria-live="polite"></p></div>
+        <div>
+          <h3 data-i18n="cli.title">Start from the terminal with peer</h3>
+          <p class="fine" data-i18n="cli.body">Same local host, same Bots, same ~/.peer-agent truth. Run TUI interactively or attach as a client when Desktop is open.</p>
+          <a class="fine" href="./docs.html#cli" data-i18n="cli.guide">CLI guide</a>
+        </div>
+        <div>
+          <div class="cli-choice" role="group" aria-label="CLI release channel">
+            <button type="button" data-cli-channel="rc" aria-pressed="true" data-i18n="cli.preview" disabled>Preview · @rc</button>
+            <button type="button" data-cli-channel="latest" aria-pressed="false" data-i18n="cli.stable" disabled>Stable · @latest</button>
+          </div>
+          <div class="command">
+            <code id="cli-command">npm install -g @peer-agent/cli@rc</code>
+            <button type="button" class="copy-button" data-copy-target="cli-command" data-copy-status="copy-status" disabled>
+              <svg class="icon" aria-hidden="true"><use href="./site/icons.svg#copy"></use></svg>
+              <span data-i18n="copy">Copy</span>
+            </button>
+          </div>
+          <div class="cli-presets" aria-label="Common peer commands">
+            <code>peer</code>
+            <code>peer --classic</code>
+            <code>peer doctor</code>
+            <code>peer result</code>
+            <code>peer sessions</code>
+          </div>
+          <p class="fine" id="copy-status" aria-live="polite"></p>
+        </div>
       </div>
-      <div class="release-status"><p data-i18n="release.status">Stable 0.0.18 uses the classic interface. Follow published releases for the current 0.1 preview, platform assets and compatibility notes.</p><a href="https://github.com/ly-ccx/Peer-Agent/releases" data-i18n="release.all">All releases and current assets</a></div>
+
+      <div class="release-status">
+        <span data-i18n="release.status">Download availability is determined by published GitHub Releases and npm dist-tags.</span>
+        <a href="https://github.com/ly-ccx/Peer-Agent/releases" data-i18n="release.all">All releases and assets</a>
+      </div>
     </section>
   </main>
-  <footer class="site-footer"><div class="wrap footer-row"><span data-i18n="footer.copy">Peer · open source under MIT</span><nav class="footer-links" aria-label="Footer"><a href="./docs.html" data-i18n="nav.docs">Docs</a><a href="./changelog.html" data-i18n="footer.notes">Release notes</a><a href="https://github.com/ly-ccx/Peer-Agent" data-i18n="footer.source">Source code</a><a href="https://github.com/ly-ccx/Peer-Agent/issues" data-i18n="footer.issues">Feedback</a></nav></div></footer>
+
+  <footer class="site-footer">
+    <div class="wrap footer-row">
+      <span data-i18n="footer.copy">Peer · open source under MIT</span>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="./docs.html" data-i18n="nav.docs">Docs</a>
+        <a href="./changelog.html" data-i18n="footer.notes">Release notes</a>
+        <a href="https://github.com/ly-ccx/Peer-Agent" data-i18n="footer.source">Source code</a>
+        <a href="https://github.com/ly-ccx/Peer-Agent/issues" data-i18n="footer.issues">Feedback</a>
+      </nav>
+    </div>
+  </footer>
+
   <script type="module" src="./site/home.mjs"></script>
 </body>
 </html>

@@ -3,8 +3,8 @@
   .capability-workbench {
     @apply grid h-full min-h-0 min-w-0 overflow-hidden;
     grid-template-columns: minmax(0, 1fr) minmax(340px, 30vw);
-    color: var(--za-text);
-    /* 一级页面实色只由 .primary-page-shell 提供；这里再铺 --za-thread-bg
+    color: var(--graphite-base);
+    /* 一级页面实色只由 .primary-page-shell 提供；这里再铺纸面底色
        会在壳层圆角抗锯齿处叠出第二层，造成右上角色差。 */
     background: transparent;
     --motion-enter-from: 8px;
@@ -29,61 +29,63 @@
 
   .capability-hero>p:first-child {
     @apply m-0 flex items-center gap-3 text-[12px] font-semibold;
-    color: var(--cinnabar-seal);
+    color: var(--azure-seal);
     letter-spacing: 0.04em;
   }
 
   .capability-hero>p:first-child span {
     width: 24px;
     height: 1px;
-    background: var(--cinnabar-seal);
+    background: var(--azure-seal);
   }
 
   .capability-hero h2 {
     @apply m-0;
-    font-family: var(--font-serif-zh);
+    font-family: var(--font-sans);
     font-size: 32px;
     font-weight: 600;
     line-height: 1.15;
     letter-spacing: -0.02em;
-    color: var(--ink-base);
+    color: var(--graphite-base);
   }
 
   .capability-hero-copy {
     @apply m-0 text-[14px] leading-7;
-    color: var(--ink-fade);
+    color: var(--graphite-soft);
     max-width: 760px;
-    margin-top: 20px;
+    margin-top: 16px;
   }
 
   .capability-tabs {
     @apply grid h-10 w-full max-w-[420px] auto-cols-fr grid-flow-col gap-1 p-1;
     border-radius: var(--ui-radius-panel);
-    background: var(--za-surface-1);
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
   }
 
   .capability-tabs-row {
     @apply flex w-full items-center justify-between gap-4;
-    margin-top: 20px;
+    margin-top: 8px;
   }
 
   .capability-tabs button {
     @apply min-w-0 rounded-[var(--ui-radius-control)] px-3 text-[13px] font-semibold;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .capability-tabs button:hover {
-    color: var(--za-text);
-    background: var(--za-hover);
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
 
   .capability-tabs button.active {
-    color: var(--za-primary-control-ink);
-    background: var(--za-primary-control-bg);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
+    box-shadow: var(--chrome-keycap-shadow);
   }
 
   .capability-sections {
-    @apply grid gap-9 pt-10;
+    @apply grid gap-8 pt-6;
   }
 
   .capability-section {
@@ -92,24 +94,24 @@
 
   .capability-empty-state {
     @apply grid max-w-[520px] gap-2 px-5 py-6;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-panel);
-    background: var(--za-panel-1);
+    background: var(--paper-raised);
   }
 
   .capability-empty-state h3 {
     @apply m-0 text-[15px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .capability-empty-state p {
     @apply m-0 text-[13px] leading-6;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .capability-section h3 {
     @apply m-0 text-[13px] font-semibold;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     letter-spacing: 0.04em;
   }
 
@@ -120,10 +122,10 @@
 
   .capability-card {
     @apply relative grid min-h-[104px] min-w-0 content-start gap-2 px-5 py-4 text-left;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-panel);
-    color: var(--za-text);
-    background: var(--za-panel-1);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
   }
 
   .capability-card.local {
@@ -136,16 +138,16 @@
     top: 12px;
     bottom: 12px;
     width: 1px;
-    background: var(--cinnabar-seal);
+    background: var(--azure-seal);
   }
 
   .capability-card:hover {
-    background: var(--za-hover);
+    background: var(--paper-hover);
   }
 
   .capability-card.active {
-    border-color: var(--ink-base);
-    background: var(--za-active);
+    border-color: var(--graphite-base);
+    background: var(--paper-active);
   }
 
   .capability-card-head {
@@ -154,7 +156,7 @@
 
   .capability-card-head strong {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[16px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .capability-state {
@@ -170,22 +172,22 @@
 
   .capability-state.good,
   .capability-card-meta em.good {
-    color: var(--za-good);
+    color: var(--state-success);
   }
 
   .capability-state.warn,
   .capability-card-meta em.warn {
-    color: var(--za-warn);
+    color: var(--state-warn);
   }
 
   .capability-state.danger,
   .capability-card-meta em.danger {
-    color: var(--za-danger);
+    color: var(--state-danger);
   }
 
   .capability-state.muted,
   .capability-card-meta em.muted {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .capability-card-meta {
@@ -194,8 +196,8 @@
 
   .capability-card-meta code {
     @apply inline-flex min-h-6 items-center rounded-[var(--ui-radius-chip)] px-1.5 text-[12px];
-    border: 1px solid var(--za-line);
-    color: var(--za-text-soft);
+    border: 1px solid var(--chrome-hairline);
+    color: var(--graphite-soft);
     background: transparent;
     font-family: var(--font-mono);
   }
@@ -206,7 +208,7 @@
 
   .capability-card-subline {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     font-family: var(--font-mono);
   }
 
@@ -214,8 +216,8 @@
     @apply grid min-h-0 overflow-y-auto px-6 py-16;
     align-content: start;
     gap: 22px;
-    /* 两列只用发丝线分隔；背景透明，继承一级壳层 --za-app-bg。 */
-    border-left: 1px solid var(--za-line);
+    /* 两列只用发丝线分隔；背景透明，继承一级壳层底色。 */
+    border-left: 1px solid var(--chrome-hairline);
     background: transparent;
     --motion-enter-from: 10px;
     animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-out) both;
@@ -224,7 +226,7 @@
   .capability-detail-panel header {
     @apply flex items-start justify-between gap-4;
     padding-bottom: 20px;
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--chrome-hairline);
   }
 
   .capability-detail-title {
@@ -234,9 +236,9 @@
   .capability-detail-seal {
     @apply grid h-7 w-7 shrink-0 place-items-center;
     border-radius: var(--ui-radius-detail);
-    color: var(--surface-vellum-base);
-    background: var(--cinnabar-seal);
-    font-family: var(--font-serif-zh);
+    color: var(--paper-base);
+    background: var(--azure-seal);
+    font-family: var(--font-sans);
     font-size: 15px;
     font-weight: 700;
   }
@@ -244,58 +246,58 @@
   .capability-detail-title p,
   .capability-detail-panel h4 {
     @apply m-0 text-[11px] font-semibold;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     letter-spacing: 0.06em;
   }
 
   .capability-detail-title h3 {
     @apply m-0 pt-1 text-[18px] font-semibold;
-    font-family: var(--font-serif-zh);
-    color: var(--za-text);
+    font-family: var(--font-sans);
+    color: var(--graphite-base);
   }
 
   .capability-detail-panel header button {
     @apply h-7 w-7 rounded-[var(--ui-radius-control)] text-[18px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .capability-detail-panel header button:hover {
-    color: var(--za-text);
-    background: var(--za-hover);
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
 
   .capability-detail-panel section {
     @apply grid gap-2;
     padding-bottom: 18px;
-    border-bottom: 1px solid var(--za-line);
+    border-bottom: 1px solid var(--chrome-hairline);
   }
 
   .capability-detail-panel p {
     @apply m-0 text-[13px] leading-6;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .capability-detail-panel code {
     @apply block overflow-hidden text-ellipsis whitespace-nowrap text-[12px];
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     font-family: var(--font-mono);
   }
 
   .capability-detail-list {
     @apply m-0 grid gap-2 pl-5 text-[13px] leading-6;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .capability-detail-list li::marker {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     font-family: var(--font-mono);
   }
 
   .capability-manifest-preview {
     @apply m-0 max-h-56 overflow-auto whitespace-pre-wrap rounded-[var(--ui-radius-row)] p-3 text-[11px] leading-5;
-    border: 1px solid var(--za-line);
-    color: var(--za-text-soft);
-    background: var(--za-bg-2);
+    border: 1px solid var(--chrome-hairline);
+    color: var(--graphite-soft);
+    background: var(--paper-sunken);
     font-family: var(--font-mono);
   }
 
@@ -305,19 +307,19 @@
 
   .capability-detail-panel footer button {
     @apply h-9 rounded-[var(--ui-radius-control)] px-4 text-[13px] font-semibold;
-    border: 1px solid var(--za-line);
-    color: var(--za-text);
+    border: 1px solid var(--chrome-hairline);
+    color: var(--graphite-base);
     background: transparent;
   }
 
   .capability-detail-panel footer button:hover {
-    background: var(--za-hover);
+    background: var(--paper-hover);
   }
 
   .capability-detail-panel footer button.primary {
-    color: var(--za-primary-control-ink);
-    border-color: transparent;
-    background: var(--za-primary-control-bg);
+    color: var(--chrome-keycap-fg);
+    border-color: var(--chrome-keycap-border);
+    background: var(--chrome-keycap-bg);
   }
 
   .capability-detail-panel footer button:disabled {
@@ -325,7 +327,7 @@
   }
 
   .capability-detail-panel footer button.danger {
-    color: var(--za-danger);
+    color: var(--state-danger);
   }
 
   @media (max-width: 1180px) {
@@ -366,25 +368,25 @@
 
   .skill-scope-header h3 {
     @apply m-0 text-[16px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .skill-scope-header p {
     @apply m-0 mt-1 text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-scope-header > span {
     @apply rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[11px] font-medium;
-    color: var(--za-text-muted);
-    background: color-mix(in srgb, var(--za-text) 8%, transparent);
+    color: var(--graphite-soft);
+    background: var(--control-fill);
   }
 
   .skill-scope-empty {
-    @apply rounded-[var(--ui-radius-control)] px-4 py-8 text-center text-[13px];
-    color: var(--za-text-muted);
-    border: 1px dashed var(--za-line);
-    background: color-mix(in srgb, var(--za-panel-1) 70%, transparent);
+    @apply rounded-[var(--ui-radius-panel)] px-4 py-8 text-center text-[13px];
+    color: var(--graphite-fade);
+    border: 1px dashed var(--chrome-hairline);
+    background: var(--paper-raised);
   }
 
   .skill-panel-content {
@@ -393,23 +395,23 @@
 
   .skill-sub-tabs {
     @apply flex h-9 items-center gap-1 rounded-[var(--ui-radius-control)] p-1;
-    background: var(--za-surface-1);
+    background: var(--control-fill);
     width: fit-content;
   }
 
   .skill-sub-tabs button {
     @apply min-w-0 rounded-[var(--ui-radius-control)] px-4 py-1.5 text-[13px] font-medium;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
   }
 
   .skill-sub-tabs button:hover {
-    color: var(--za-text);
-    background: var(--za-hover);
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
 
   .skill-sub-tabs button.active {
-    color: var(--za-primary-control-ink);
-    background: var(--za-primary-control-bg);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
   }
 
   .skill-toolbar {
@@ -418,34 +420,36 @@
 
   .skill-search-box {
     @apply flex flex-1 items-center gap-2 rounded-[var(--ui-radius-control)] px-3;
-    height: 38px;
-    border: 1px solid var(--za-line);
-    background: var(--za-panel-1);
+    height: 36px;
+    border: 1px solid var(--chrome-hairline);
+    background: var(--paper-raised);
     max-width: 320px;
   }
 
   .skill-search-icon {
     @apply shrink-0 text-[14px];
-    opacity: 0.45;
+    color: var(--graphite-fade);
   }
 
   .skill-search-input {
-    @apply min-w-0 flex-1 border-none bg-transparent text-[14px] outline-none;
-    color: var(--za-text);
+    @apply min-w-0 flex-1 border-none bg-transparent text-[13px] outline-none;
+    color: var(--graphite-base);
   }
 
   .skill-search-input::placeholder {
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-upload-btn {
-    @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--ui-radius-pill)] px-5 text-[13px] font-semibold;
-    color: #fff;
-    background: #222;
+    @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--ui-radius-control)] px-4 text-[13px] font-semibold;
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
   }
 
   .skill-upload-btn:hover {
-    background: #333;
+    background: var(--paper-hover);
+    border-color: var(--chrome-hairline-strong);
   }
 
   .skill-grid {
@@ -460,22 +464,22 @@
 
   .skill-market-card {
     @apply relative flex min-w-0 items-start gap-2.5 px-3 py-2.5;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-row);
-    color: var(--za-text);
-    background: var(--za-panel-1);
-    transition: border-color 0.2s, box-shadow 0.2s;
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    transition: border-color var(--za-motion-fast) var(--za-ease-standard), box-shadow var(--za-motion-fast) var(--za-ease-standard);
     overflow: hidden;
   }
 
   .skill-market-card::after {
     content: '';
     @apply absolute inset-0 rounded-[var(--ui-radius-control)];
-    background: rgba(255, 255, 255, 0.2);
+    background: color-mix(in srgb, var(--paper-raised) 32%, transparent);
     backdrop-filter: blur(1.5px);
     -webkit-backdrop-filter: blur(2px);
     opacity: 0;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--za-motion-medium) var(--za-ease-standard);
     pointer-events: none;
   }
 
@@ -484,7 +488,8 @@
   }
 
   .skill-market-card:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    border-color: var(--chrome-hairline-strong);
+    box-shadow: var(--shadow-panel);
   }
 
   .skill-market-card-icon {
@@ -501,7 +506,7 @@
 
   .skill-market-card-desc {
     @apply m-0 text-[11px] leading-relaxed;
-    color: var(--za-text-soft);
+    color: var(--graphite-soft);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -510,7 +515,7 @@
 
   .skill-market-card-meta {
     @apply flex items-center gap-3 text-[10px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-market-card-footer {
@@ -531,8 +536,8 @@
 
   .skill-market-service-placeholder {
     @apply flex h-full w-full items-center justify-center rounded-[var(--ui-radius-chip)] text-[8px] font-medium;
-    background: var(--za-surface-1);
-    color: var(--za-text-muted);
+    background: var(--control-fill);
+    color: var(--graphite-fade);
   }
 
   .skill-market-card-tags {
@@ -541,8 +546,8 @@
 
   .skill-market-tag {
     @apply rounded-[var(--ui-radius-pill)] px-1.5 py-0 text-[8px];
-    background: var(--za-surface-1);
-    color: var(--za-text-soft);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .skill-market-card--installed::after {
@@ -558,11 +563,10 @@
     top: 10px;
     right: -20px;
     padding: 3px 24px;
-    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
-    color: #fff;
+    background: var(--state-success);
+    color: var(--paper-raised);
     transform: rotate(45deg);
     z-index: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   }
 
   .skill-market-card-install-btn {
@@ -571,14 +575,14 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1;
-    background: var(--za-primary-control-bg);
-    color: var(--za-primary-control-ink);
-    border: none;
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border: 1px solid var(--chrome-keycap-border);
     cursor: pointer;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.25s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: opacity var(--za-motion-medium) var(--za-ease-standard);
+    box-shadow: var(--chrome-keycap-shadow);
   }
 
   .skill-market-card:hover .skill-market-card-install-btn {
@@ -587,28 +591,27 @@
   }
 
   .skill-market-card-install-btn:hover {
-    filter: brightness(1.1);
+    opacity: 0.92;
   }
 
   .skill-market-card-install-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    filter: none;
   }
 
   .skill-card {
     @apply flex min-w-0 items-start gap-3 overflow-hidden px-4 py-3;
-    border: 1px solid var(--za-line);
-    border-radius: var(--ui-radius-control);
-    color: var(--za-text);
-    background: var(--za-panel-1);
+    border: 1px solid var(--chrome-hairline);
+    border-radius: var(--ui-radius-panel);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
     cursor: pointer;
-    transition: opacity 0.2s, box-shadow 0.2s, border-color 0.2s;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard), box-shadow var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .skill-card:hover {
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: var(--chrome-hairline-strong);
+    box-shadow: var(--shadow-panel);
   }
 
   .skill-card.disabled {
@@ -616,14 +619,15 @@
   }
 
   .skill-avatar {
-    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[13px] font-semibold;
-    color: var(--za-text-muted);
-    background: #f0f0f0;
+    @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--ui-radius-control-compact)] text-[13px] font-semibold;
+    color: var(--graphite-soft);
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
   }
 
   .skill-avatar--image {
     overflow: hidden;
-    background: transparent;
+    background: var(--paper-sunken);
     padding: 0;
   }
 
@@ -648,13 +652,13 @@
 
   .skill-card-name {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .skill-source-badge {
     @apply shrink-0 rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[10px] font-medium;
-    color: var(--za-text-muted);
-    background: color-mix(in srgb, var(--za-text) 8%, transparent);
+    color: var(--graphite-soft);
+    background: var(--control-fill);
   }
 
   .skill-card-actions {
@@ -663,37 +667,37 @@
 
   .skill-card-menu {
     @apply text-[14px] leading-none tracking-widest;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     padding: 2px 4px;
     border-radius: var(--ui-radius-chip);
   }
 
   .skill-card-menu:hover {
-    color: var(--za-text);
-    background: var(--za-hover);
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
 
   .skill-card-desc {
     @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] leading-5;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-loading {
     @apply py-12 text-center text-[14px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-aone-login-btn {
     @apply mt-3 rounded-[var(--ui-radius-control)] px-5 py-2 text-[14px] font-medium;
-    background: var(--za-primary-control-bg);
-    color: var(--za-primary-control-ink);
-    border: none;
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border: 1px solid var(--chrome-keycap-border);
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .skill-aone-login-btn:hover {
-    opacity: 0.85;
+    opacity: 0.9;
   }
 
   .skill-aone-login-btn:disabled {
@@ -710,7 +714,7 @@
   .aone-skill-sentinel {
     grid-column: 1 / -1;
     @apply flex justify-center py-4 text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .aone-skill-end {
@@ -718,21 +722,21 @@
   }
 
   .aone-skill-card {
-    @apply relative flex flex-col gap-1.5 rounded-[var(--ui-radius-control)] px-3 py-2.5;
-    border: 1px solid var(--za-line);
-    background: var(--za-surface-0);
-    transition: box-shadow 0.2s;
+    @apply relative flex flex-col gap-1.5 rounded-[var(--ui-radius-panel)] px-3 py-2.5;
+    border: 1px solid var(--chrome-hairline);
+    background: var(--paper-raised);
+    transition: box-shadow var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
     overflow: hidden;
   }
 
   .aone-skill-card::after {
     content: '';
-    @apply absolute inset-0 rounded-[var(--ui-radius-control)];
-    background: rgba(255, 255, 255, 0.2);
+    @apply absolute inset-0 rounded-[var(--ui-radius-panel)];
+    background: color-mix(in srgb, var(--paper-raised) 32%, transparent);
     backdrop-filter: blur(1.5px);
     -webkit-backdrop-filter: blur(2px);
     opacity: 0;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--za-motion-medium) var(--za-ease-standard);
     pointer-events: none;
   }
 
@@ -741,7 +745,8 @@
   }
 
   .aone-skill-card:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    border-color: var(--chrome-hairline-strong);
+    box-shadow: var(--shadow-panel);
   }
 
   /* 已接入卡片禁用 hover 效果 */
@@ -763,8 +768,8 @@
 
   .aone-skill-card-avatar {
     @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius-control-compact)] text-[12px] font-medium;
-    background: #f0f0f0;
-    color: #666;
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .aone-skill-card-title-row {
@@ -773,12 +778,12 @@
 
   .aone-skill-card-name {
     @apply truncate text-[13px] font-semibold;
-    color: var(--za-text-primary);
+    color: var(--graphite-base);
   }
 
   .aone-skill-card-stats {
     @apply flex shrink-0 items-center gap-1.5 text-[11px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .aone-skill-card-stat {
@@ -787,17 +792,18 @@
 
   .aone-skill-card-desc {
     @apply line-clamp-2 text-[12px] leading-snug;
-    color: var(--za-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .aone-skill-card-footer {
     @apply flex items-center gap-2 text-[11px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .aone-skill-card-tag {
     @apply rounded-[var(--ui-radius-chip)] px-1.5 py-0.5 shrink-0;
-    background: var(--za-surface-2);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .aone-skill-card-owner {
@@ -809,11 +815,10 @@
     top: 10px;
     right: -20px;
     padding: 3px 24px;
-    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
-    color: #fff;
+    background: var(--state-success);
+    color: var(--paper-raised);
     transform: rotate(45deg);
     z-index: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   }
 
   .aone-skill-card-install-btn {
@@ -822,14 +827,14 @@
     left: 50%;
     transform: translate(-50%, -50%);
     z-index: 1;
-    background: var(--za-primary-control-bg);
-    color: var(--za-primary-control-ink);
-    border: none;
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border: 1px solid var(--chrome-keycap-border);
     cursor: pointer;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.25s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: opacity var(--za-motion-medium) var(--za-ease-standard);
+    box-shadow: var(--chrome-keycap-shadow);
   }
 
   .aone-skill-card:hover .aone-skill-card-install-btn {
@@ -838,7 +843,7 @@
   }
 
   .aone-skill-card-install-btn:hover {
-    filter: brightness(1.1);
+    opacity: 0.92;
   }
 
   /* Upload dialog —— 遮罩/动效由 Overlay 基座提供；本类只负责面板布局 */
@@ -855,44 +860,45 @@
   }
 
   .skill-upload-dialog header h3 {
-    @apply m-0 text-[18px] font-bold;
-    color: var(--za-text);
+    @apply m-0 text-[18px] font-semibold;
+    color: var(--graphite-base);
   }
 
   .skill-upload-close {
     @apply flex h-7 w-7 items-center justify-center rounded-[var(--ui-radius-circle)] text-[16px] leading-none;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     background: transparent;
     border: none;
   }
 
   .skill-upload-close:hover {
-    color: var(--za-text);
-    background: #f0f0f0;
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
 
   /* Info banner */
   .skill-upload-banner {
     @apply flex items-center gap-2 rounded-[var(--ui-radius-control)] px-3 py-2.5 text-[13px];
-    background: #e8f4fd;
-    color: #1a1a1a;
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
+    color: var(--graphite-base);
   }
 
   .skill-upload-banner-icon {
     @apply grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[11px] font-bold;
-    background: #5bb7f0;
-    color: #fff;
+    background: var(--azure-seal);
+    color: var(--paper-raised);
   }
 
   .skill-upload-banner-close {
     @apply ml-auto grid h-5 w-5 shrink-0 place-items-center rounded-[var(--ui-radius-chip)] text-[14px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     background: transparent;
     border: none;
   }
 
   .skill-upload-banner-close:hover {
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   /* File field */
@@ -902,11 +908,11 @@
 
   .skill-upload-label {
     @apply text-[14px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .skill-upload-label .required {
-    color: #e53935;
+    color: var(--state-danger);
   }
 
   .skill-upload-file-row {
@@ -915,24 +921,24 @@
 
   .skill-upload-file-btn {
     @apply flex h-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-control)] px-4 text-[13px] font-medium leading-none;
-    border: 1px dashed #ccc;
-    color: var(--za-text);
+    border: 1px dashed var(--chrome-hairline-strong);
+    color: var(--graphite-base);
     background: transparent;
   }
 
   .skill-upload-file-btn:hover {
-    border-color: #999;
-    background: #fafafa;
+    border-color: var(--graphite-soft);
+    background: var(--paper-hover);
   }
 
   .skill-upload-tip {
     @apply text-[13px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-upload-error {
     @apply m-0 text-[13px];
-    color: var(--za-danger);
+    color: var(--state-danger);
   }
 
   .skill-upload-dialog footer {
@@ -940,25 +946,27 @@
   }
 
   .skill-btn-cancel {
-    @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
-    border: 1px solid #ddd;
-    color: var(--za-text);
-    background: transparent;
+    @apply h-9 rounded-[var(--ui-radius-control)] px-5 text-[13px] font-medium;
+    border: 1px solid var(--chrome-hairline);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
   }
 
   .skill-btn-cancel:hover {
-    background: #f5f5f5;
+    background: var(--paper-hover);
+    border-color: var(--chrome-hairline-strong);
   }
 
   .skill-btn-confirm {
-    @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
-    border: none;
-    color: #fff;
-    background: #222;
+    @apply h-9 rounded-[var(--ui-radius-control)] px-5 text-[13px] font-medium;
+    border: 1px solid var(--chrome-keycap-border);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
+    box-shadow: var(--chrome-keycap-shadow);
   }
 
-  .skill-btn-confirm:hover {
-    background: #333;
+  .skill-btn-confirm:hover:not(:disabled) {
+    opacity: 0.9;
   }
 
   .skill-btn-confirm:disabled {
@@ -968,19 +976,19 @@
 
   /* ── 从 a1 公共仓借用技能（软链投影）── */
   .skill-panel {
-    @apply relative grid gap-6;
+    @apply relative grid gap-5;
   }
 
   .skill-link-error {
     @apply m-0 rounded-[var(--ui-radius-control)] px-3 py-2 text-[13px];
-    color: var(--za-danger);
-    background: var(--za-panel-1);
-    border: 1px solid var(--za-line);
+    color: var(--state-danger);
+    background: var(--state-danger-soft);
+    border: 1px solid color-mix(in srgb, var(--state-danger) 28%, var(--chrome-hairline));
   }
 
   .skill-borrow-section {
     @apply grid gap-3 pt-2;
-    border-top: 1px solid var(--za-line);
+    border-top: 1px solid var(--chrome-hairline);
   }
 
   .skill-borrow-header {
@@ -989,12 +997,12 @@
 
   .skill-borrow-header strong {
     @apply text-[14px] font-semibold;
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
 
   .skill-borrow-hint {
     @apply text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .skill-card.borrowable {
@@ -1003,15 +1011,15 @@
 
   .skill-borrow-btn {
     @apply h-7 shrink-0 rounded-[var(--ui-radius-pill)] px-3 text-[12px] font-medium leading-none;
-    color: var(--za-primary-control-ink);
-    background: var(--za-primary-control-bg);
-    border: none;
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
+    border: 1px solid var(--chrome-keycap-border);
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .skill-borrow-btn:hover {
-    opacity: 0.85;
+    opacity: 0.88;
   }
 
   .skill-borrow-btn:disabled {
@@ -1034,8 +1042,8 @@
 
   .mcp-card-badge {
     @apply inline-flex items-center rounded-[var(--ui-radius-pill)] px-2 text-[10px] font-medium uppercase leading-[18px];
-    color: var(--za-danger, #d92d20);
-    background: color-mix(in srgb, var(--za-danger, #d92d20) 14%, transparent);
+    color: var(--state-danger);
+    background: var(--state-danger-soft);
   }
 
   .mcp-drawer-credentials .mcp-credential-list {
@@ -1045,9 +1053,9 @@
 
   .mcp-drawer-credentials .mcp-credential-item {
     @apply flex items-center justify-between gap-3 px-3 py-2;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-row);
-    background: var(--za-panel-1);
+    background: var(--paper-raised);
   }
 
   .mcp-drawer-credentials .mcp-credential-meta {
@@ -1060,16 +1068,16 @@
 
   .mcp-drawer-credentials .mcp-credential-meta small {
     @apply text-[11px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
 
   .mcp-drawer-credentials .mcp-credential-delete {
     @apply shrink-0 rounded-[var(--ui-radius-control-compact)] px-2 py-1 text-[12px];
-    color: var(--za-danger, #d92d20);
+    color: var(--state-danger);
     background: transparent;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity var(--za-motion-fast) var(--za-ease-standard);
   }
 
   .mcp-drawer-credentials .mcp-credential-delete:disabled {
@@ -1082,7 +1090,7 @@
     @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[var(--ui-radius-modal)];
     width: min(900px, 90vw);
     max-height: min(820px, 88vh);
-    color: var(--za-text);
+    color: var(--graphite-base);
     /* 背景/边/阴影/blur 由 .pa-overlay-panel glass-popover 统一提供 */
   }
 
@@ -1103,16 +1111,16 @@
   .skill-detail-title-row h2 { @apply m-0 text-[24px] font-semibold; }
   .skill-detail-heading > p {
     @apply m-0 mt-2 text-[14px] leading-6;
-    color: var(--za-text-muted);
+    color: var(--graphite-soft);
   }
 
   .skill-scope-badge { @apply rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-[11px] font-medium; }
-  .skill-scope-badge--workspace { color: #60a5fa; background: rgba(59, 130, 246, 0.14); }
-  .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
+  .skill-scope-badge--workspace { color: var(--azure-seal); background: color-mix(in srgb, var(--azure-seal) 12%, transparent); }
+  .skill-scope-badge--global { color: var(--graphite-soft); background: var(--control-fill); }
 
   .skill-detail-close {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] border-0 bg-transparent p-0;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     cursor: pointer;
   }
   .skill-detail-close svg {
@@ -1120,40 +1128,41 @@
     width: 14px;
     height: 14px;
   }
-  .skill-detail-close:hover { color: var(--za-text); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
+  .skill-detail-close:hover { color: var(--graphite-base); background: var(--paper-hover); }
 
   .skill-detail-footer {
     @apply mx-[18px] mb-[18px] mt-0 flex flex-col gap-3 border-t px-2 pt-4;
-    border-color: var(--za-line);
+    border-color: var(--chrome-hairline);
   }
   .skill-uninstall-btn,
   .skill-uninstall-cancel,
   .skill-uninstall-confirm-btn {
     @apply rounded-[var(--ui-radius-control)] px-3 py-2 text-sm font-medium;
-    border: 1px solid var(--za-line);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-uninstall-btn {
-    color: #b42318;
-    background: color-mix(in srgb, #b42318 8%, transparent);
+    color: var(--state-danger);
+    background: var(--state-danger-soft);
+    border-color: color-mix(in srgb, var(--state-danger) 28%, var(--chrome-hairline));
   }
   .skill-uninstall-btn:hover {
-    background: color-mix(in srgb, #b42318 14%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 18%, transparent);
   }
   .skill-uninstall-confirm p {
     @apply m-0 text-sm;
-    color: var(--za-text-muted);
+    color: var(--graphite-soft);
   }
   .skill-uninstall-actions {
     @apply mt-3 flex items-center justify-end gap-2;
   }
   .skill-uninstall-cancel {
-    color: var(--za-text);
+    color: var(--graphite-base);
     background: transparent;
   }
   .skill-uninstall-confirm-btn {
-    color: #fff;
-    background: #b42318;
-    border-color: #b42318;
+    color: var(--paper-raised);
+    background: var(--state-danger);
+    border-color: var(--state-danger);
   }
   .skill-uninstall-confirm-btn:disabled,
   .skill-uninstall-btn:disabled,
@@ -1163,67 +1172,86 @@
 
   .skill-detail-meta {
     @apply flex flex-wrap items-center gap-3 px-8 pb-4 text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-detail-meta code {
     @apply max-w-full truncate rounded-[var(--ui-radius-control-compact)] px-2 py-1;
-    background: color-mix(in srgb, var(--za-text) 7%, transparent);
+    background: var(--control-fill);
+    color: var(--graphite-soft);
   }
 
   .skill-detail-content {
     @apply min-h-0 flex-1 overflow-y-auto rounded-[var(--ui-radius-panel)] px-8 py-7;
     margin: 0 18px 18px;
-    /* 与弹窗同系浅色表面，避免混入黑色造成“灰黑块” */
-    background: var(--za-surface-1);
-    border: 1px solid var(--za-line);
+    /* 与弹窗同系中性哑光表面 */
+    background: var(--paper-base);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-detail-content .markdown-content { font-size: 14px; line-height: 1.75; }
   .skill-detail-when {
-    @apply mb-6 rounded-[var(--ui-radius-panel)] p-4;
-    background: color-mix(in srgb, #3b82f6 9%, transparent);
-    border: 1px solid color-mix(in srgb, #3b82f6 22%, transparent);
+    @apply mb-6 rounded-[var(--ui-radius-inset)] p-4;
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-detail-when h3, .skill-detail-when p { @apply m-0; }
-  .skill-detail-when h3 { @apply mb-2 text-[13px] font-semibold; }
-  .skill-detail-when p { @apply text-[13px] leading-6; color: var(--za-text-muted); }
+  .skill-detail-when h3 { @apply mb-2 text-[13px] font-semibold; color: var(--graphite-base); }
+  .skill-detail-when p { @apply text-[13px] leading-6; color: var(--graphite-soft); }
 
   .skill-view-tabs {
     @apply mb-0 inline-flex w-fit p-1;
     border-radius: var(--ui-radius-panel);
-    background: color-mix(in srgb, var(--za-text) 6%, transparent);
-    border: 1px solid var(--za-line);
+    background: var(--paper-sunken);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-view-tabs button {
     @apply rounded-[var(--ui-radius-control)] border-0 bg-transparent px-4 py-2 text-[13px] font-medium;
-    color: var(--za-text-muted);
+    color: var(--graphite-soft);
   }
-  .skill-view-tabs button.active { color: var(--za-text); background: var(--za-surface); box-shadow: var(--za-shadow-xs); }
+  .skill-view-tabs button:hover {
+    color: var(--graphite-base);
+  }
+  .skill-view-tabs button.active {
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    box-shadow: var(--chrome-glass-row-shadow);
+  }
   /* 搜索/分类/同步与顶部「市场/已安装」同一行右侧 */
   .skill-marketplace-toolbar {
-    @apply absolute right-0 top-0 z-10 flex items-center justify-end gap-3;
+    @apply absolute right-0 top-0 z-10 flex items-center justify-end gap-2.5;
     margin-bottom: 0;
   }
   .skill-marketplace-toolbar input {
     @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
-    color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
+    min-height: 36px;
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control);
+    transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+  }
+  .skill-marketplace-toolbar input::placeholder {
+    color: var(--graphite-fade);
+  }
+  .skill-marketplace-toolbar input:focus {
+    border-color: color-mix(in srgb, var(--graphite-base) 30%, var(--chrome-hairline));
   }
   .skill-marketplace {
     @apply pt-0;
   }
   .skill-marketplace-grid {
-    @apply grid gap-3;
+    @apply grid gap-3.5;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     align-items: stretch;
   }
   .skill-marketplace-card {
-    @apply flex h-full min-w-0 flex-col gap-2.5 rounded-[var(--ui-radius-panel)] p-3;
-    background: var(--za-surface); border: 1px solid var(--za-line);
-    transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+    @apply flex h-full min-w-0 flex-col gap-3 rounded-[var(--ui-radius-panel)] p-4;
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
+    transition: border-color var(--za-motion-fast) var(--za-ease-standard), box-shadow var(--za-motion-fast) var(--za-ease-standard);
   }
   .skill-marketplace-card:hover {
-    border-color: color-mix(in srgb, var(--za-accent) 35%, var(--za-line));
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--za-text) 6%, transparent);
+    border-color: var(--chrome-hairline-strong);
+    box-shadow: var(--shadow-panel);
   }
   .skill-marketplace-card-top {
     @apply flex min-w-0 items-center gap-2;
@@ -1237,7 +1265,7 @@
     outline: none;
   }
   .skill-marketplace-card-body:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--za-accent) 55%, transparent);
+    outline: 2px solid var(--azure-seal);
     outline-offset: 2px;
     border-radius: var(--ui-radius-panel);
   }
@@ -1247,36 +1275,67 @@
   .skill-marketplace-card-heading > span:nth-child(2) {
     @apply flex min-w-0 flex-1 flex-col;
   }
-  .skill-marketplace-card-heading strong { @apply truncate text-[14px]; }
-  .skill-marketplace-card-heading small { @apply truncate text-[11px]; color: var(--za-text-muted); }
+  .skill-marketplace-card-heading strong { @apply truncate text-[14px] font-semibold; color: var(--graphite-base); }
+  .skill-marketplace-card-heading small { @apply truncate text-[11px]; color: var(--graphite-fade); }
   .skill-marketplace-card-body > p {
-    @apply m-0 line-clamp-2 w-full text-[12px] leading-5;
-    color: var(--za-text-muted);
+    @apply m-0 line-clamp-2 w-full text-[12.5px] leading-5;
+    color: var(--graphite-soft);
   }
   .skill-marketplace-card-copy { @apply flex min-w-0 flex-1 flex-col gap-1; }
-  .skill-marketplace-card-copy strong { @apply truncate text-[14px]; }
-  .skill-marketplace-card-copy small { @apply text-[11px]; color: var(--za-text-muted); }
-  .skill-marketplace-card-copy > span { @apply line-clamp-2 text-[12px] leading-5; color: var(--za-text-muted); }
+  .skill-marketplace-card-copy strong { @apply truncate text-[14px]; color: var(--graphite-base); }
+  .skill-marketplace-card-copy small { @apply text-[11px]; color: var(--graphite-fade); }
+  .skill-marketplace-card-copy > span { @apply line-clamp-2 text-[12px] leading-5; color: var(--graphite-soft); }
+  /* Peer Frost 红线 1：Azure 不上 CTA。卡片安装态常态中性哑光，悬停升格为 G 级键帽 */
   .skill-marketplace-install {
-    @apply shrink-0 px-3 py-1.5 text-[12px] font-semibold;
-    border-radius: var(--ui-radius-pill);
-    color: #fff; background: var(--za-accent); border: 0; cursor: pointer;
-    transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    @apply shrink-0 px-3.5 py-1.5 text-[12px] font-semibold;
+    border-radius: var(--ui-radius-control-compact);
+    color: var(--graphite-base);
+    background: var(--control-fill);
+    border: 1px solid var(--chrome-hairline);
+    cursor: pointer;
+    transition:
+      background var(--za-motion-fast) var(--za-ease-standard),
+      color var(--za-motion-fast) var(--za-ease-standard),
+      border-color var(--za-motion-fast) var(--za-ease-standard),
+      box-shadow var(--za-motion-fast) var(--za-ease-standard),
+      transform var(--za-motion-fast) var(--za-ease-standard);
   }
-  .skill-marketplace-install:hover {
-    filter: brightness(1.08);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--za-accent) 28%, transparent);
+  .skill-marketplace-install:hover:not(:disabled) {
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border-color: var(--chrome-keycap-border);
+    box-shadow: var(--chrome-keycap-shadow);
   }
   .skill-marketplace-install:active { transform: translateY(1px); }
   .skill-marketplace-install:disabled { @apply cursor-wait opacity-60; }
+  .skill-marketplace-toolbar .skill-marketplace-install {
+    min-height: 36px;
+    padding: 0 14px;
+    background: var(--paper-raised);
+    color: var(--graphite-base);
+    border: 1px solid var(--chrome-hairline);
+  }
+  .skill-marketplace-toolbar .skill-marketplace-install:hover:not(:disabled) {
+    background: var(--paper-hover);
+    color: var(--graphite-base);
+    border-color: var(--chrome-hairline-strong);
+    box-shadow: none;
+  }
   .skill-marketplace-install--primary {
-    @apply shrink-0 px-4 py-2 text-[12px];
+    @apply shrink-0 px-4 py-2 text-[12.5px];
     margin-top: 0;
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border-color: var(--chrome-keycap-border);
+    box-shadow: var(--chrome-keycap-shadow);
+  }
+  .skill-marketplace-install--primary:hover:not(:disabled) {
+    opacity: 0.9;
   }
   /* 安装操作区：唯一可点区域，与上方统计明确分层 */
   .skill-marketplace-install-row {
     @apply mt-4 flex flex-wrap items-end justify-between gap-3 pt-4;
-    border-top: 1px solid var(--za-line);
+    border-top: 1px solid var(--chrome-hairline);
   }
   .skill-marketplace-install-actions {
     @apply flex min-w-0 flex-col items-start gap-1.5;
@@ -1284,7 +1343,7 @@
   }
   .skill-marketplace-install-label {
     @apply text-[11px] font-medium tracking-wide;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-install-targets {
     @apply flex min-w-0 max-w-full items-center gap-2;
@@ -1292,15 +1351,15 @@
   .skill-marketplace-install-scope {
     @apply inline-flex max-w-full shrink-0 items-center gap-1 rounded-[var(--ui-radius-pill)] p-1;
     width: fit-content;
-    background: color-mix(in srgb, var(--za-text) 5%, transparent);
-    border: 1px solid var(--za-line);
+    background: var(--paper-sunken);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-marketplace-install-scope button {
     @apply min-w-0 rounded-[var(--ui-radius-pill)] px-3 py-1.5 text-[12px] font-medium transition-colors;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--za-text-muted);
+    color: var(--graphite-soft);
     background: transparent;
     border: 0;
     cursor: pointer;
@@ -1309,11 +1368,12 @@
     max-width: min(320px, 52vw);
   }
   .skill-marketplace-install-scope button:hover:not(:disabled) {
-    color: var(--za-text);
+    color: var(--graphite-base);
   }
   .skill-marketplace-install-scope button.is-active {
-    color: var(--za-text);
-    background: color-mix(in srgb, var(--za-accent, #5b8cff) 18%, transparent);
+    color: var(--chrome-keycap-fg);
+    background: var(--chrome-keycap-bg);
+    box-shadow: var(--chrome-keycap-shadow);
   }
   .skill-marketplace-install-scope button:disabled {
     @apply cursor-not-allowed opacity-45;
@@ -1334,9 +1394,9 @@
   .skill-marketplace-install-error {
     @apply m-0 rounded-[var(--ui-radius-panel)] px-3 py-2 text-[12px] leading-5;
     flex: 1 0 100%;
-    color: var(--za-danger);
-    background: color-mix(in srgb, var(--za-danger) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--za-danger) 22%, transparent);
+    color: var(--state-danger);
+    background: var(--state-danger-soft);
+    border: 1px solid color-mix(in srgb, var(--state-danger) 28%, var(--chrome-hairline));
   }
   /* 市场统计：纯展示，无边框/背景，避免像可点按钮 */
   .skill-marketplace-metrics {
@@ -1346,7 +1406,7 @@
   }
   .skill-marketplace-metric {
     @apply inline-flex items-center gap-1.5 text-[12px];
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     background: transparent;
     border: 0;
     padding: 0;
@@ -1355,20 +1415,20 @@
   .skill-marketplace-metric + .skill-marketplace-metric::before {
     content: '·';
     margin-right: 0.75rem;
-    color: color-mix(in srgb, var(--za-text-muted) 55%, transparent);
+    color: var(--graphite-mute);
   }
   .skill-marketplace-metric svg {
     @apply shrink-0;
     opacity: 0.75;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-metric em {
     @apply not-italic;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-metric strong {
     @apply font-medium tabular-nums;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-detail {
     @apply flex min-h-0 w-full flex-col overflow-hidden rounded-[var(--ui-radius-panel)];
@@ -1390,11 +1450,11 @@
   }
   .skill-marketplace-detail .skill-detail-when h3 {
     @apply mb-1 text-[12px] font-medium;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-detail .skill-detail-when p {
     @apply text-[12px] leading-5;
-    color: var(--za-text-muted);
+    color: var(--graphite-soft);
   }
   .skill-marketplace-detail code { overflow-wrap: anywhere; }
   .skill-marketplace-controls { @apply flex flex-wrap items-center justify-end gap-2; }
@@ -1403,71 +1463,88 @@
     min-width: 148px;
   }
   .skill-marketplace-category-select .pa-dropdown-trigger {
-    @apply px-3 py-2 text-[12px];
+    @apply px-3 py-2 text-[12.5px];
     border-radius: var(--ui-radius-control);
-    min-height: 34px;
-    color: var(--za-text);
-    background: var(--za-surface);
-    border: 1px solid var(--za-line);
+    min-height: 36px;
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
   }
   .skill-marketplace-filters {
     /* 工具栏已 absolute 上提，这里不要再人为垫大空白 */
-    @apply mb-4 mt-0 flex flex-wrap items-center gap-2;
+    @apply mb-3.5 mt-0 flex flex-wrap items-center gap-1.5;
   }
   .skill-marketplace-filters button {
-    @apply rounded-[var(--ui-radius-pill)] px-3.5 py-1.5 text-[12px] font-medium border-0;
-    color: var(--za-text-muted);
+    @apply rounded-[var(--ui-radius-pill)] px-3.5 py-1.5 text-[12px] font-medium;
+    color: var(--graphite-soft);
     background: transparent;
+    border: 1px solid transparent;
     cursor: pointer;
-    transition: color 120ms ease, background 120ms ease;
+    transition: color var(--za-motion-fast) var(--za-ease-standard), background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
   }
   .skill-marketplace-filters button:hover {
-    color: var(--za-text);
-    background: color-mix(in srgb, var(--za-text) 6%, transparent);
+    color: var(--graphite-base);
+    background: var(--paper-hover);
   }
   .skill-marketplace-filters button.is-active {
-    color: var(--za-text);
-    background: color-mix(in srgb, var(--za-text) 8%, transparent);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    border-color: var(--chrome-hairline);
+    font-weight: 600;
   }
-  .skill-marketplace-sync { @apply mb-4 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ui-radius-panel)] px-4 py-3 text-[12px]; color: var(--za-text-muted); background: var(--za-surface-1); border: 1px solid var(--za-line); }
-  .skill-marketplace-error { @apply mb-4 rounded-[var(--ui-radius-panel)] px-4 py-3 text-[12px]; color: var(--za-danger); background: color-mix(in srgb, var(--za-danger) 8%, transparent); }
-  .skill-marketplace-empty { @apply py-8 text-center text-[13px]; color: var(--za-text-muted); }
+  .skill-marketplace-sync {
+    @apply mb-4 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ui-radius-inset)] px-4 py-2.5 text-[12px];
+    color: var(--graphite-soft);
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
+  }
+  .skill-marketplace-error {
+    @apply mb-4 rounded-[var(--ui-radius-inset)] px-4 py-3 text-[12px];
+    color: var(--state-danger);
+    background: var(--state-danger-soft);
+    border: 1px solid color-mix(in srgb, var(--state-danger) 28%, var(--chrome-hairline));
+  }
+  .skill-marketplace-empty { @apply py-8 text-center text-[13px]; color: var(--graphite-fade); }
   .skill-marketplace-card-main {
     @apply flex min-w-0 w-full flex-col items-start gap-2 border-0 bg-transparent p-0 text-left;
     color: inherit; cursor: pointer;
   }
-  .skill-marketplace-card-main > p { @apply m-0 line-clamp-2 w-full text-[12px] leading-5; color: var(--za-text-muted); }
+  .skill-marketplace-card-main > p { @apply m-0 line-clamp-2 w-full text-[12px] leading-5; color: var(--graphite-soft); }
   .skill-marketplace-card-footer {
-    @apply mt-auto flex min-w-0 items-end justify-between gap-3;
+    @apply mt-auto flex min-w-0 items-center justify-between gap-3 pt-1;
   }
-  .skill-marketplace-tags { @apply flex min-w-0 flex-1 flex-wrap gap-1.5; }
-  .skill-marketplace-tags em { @apply rounded-[var(--ui-radius-pill)] px-2 py-1 text-[10px] not-italic; color: var(--za-text-muted); background: var(--za-surface-1); }
+  .skill-marketplace-tags { @apply flex min-w-0 flex-1 flex-wrap items-center gap-1.5; }
+  .skill-marketplace-tags em {
+    @apply rounded-[var(--ui-radius-pill)] px-2 py-0.5 text-[11px] not-italic;
+    color: var(--graphite-fade);
+    background: var(--control-fill);
+  }
   .skill-marketplace-tag-category {
-    color: var(--za-text);
-    background: color-mix(in srgb, var(--za-accent) 10%, var(--za-surface-1));
+    color: var(--graphite-soft);
+    background: var(--control-fill);
   }
   .skill-marketplace-tag-downloads {
     @apply inline-flex items-center gap-1;
   }
   .skill-marketplace-tag-downloads svg {
     @apply shrink-0;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-card-footer .skill-marketplace-install {
     @apply self-end;
   }
-  .skill-marketplace-pagination { @apply mt-5 flex items-center justify-center gap-4 text-[12px]; color: var(--za-text-muted); }
+  .skill-marketplace-pagination { @apply mt-5 flex items-center justify-center gap-4 text-[12px]; color: var(--graphite-fade); }
   .skill-marketplace-pagination button {
     @apply rounded-[var(--ui-radius-control)] px-3 py-2;
-    color: var(--za-text);
-    background: var(--za-surface);
-    border: 1px solid var(--za-line);
+    color: var(--graphite-base);
+    background: var(--paper-raised);
+    border: 1px solid var(--chrome-hairline);
     cursor: pointer;
-    transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+    transition: color var(--za-motion-fast) var(--za-ease-standard), background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
   }
   .skill-marketplace-pagination button:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--za-text) 6%, transparent);
-    border-color: color-mix(in srgb, var(--za-text) 18%, var(--za-line));
+    background: var(--paper-hover);
+    border-color: var(--chrome-hairline-strong);
   }
   .skill-marketplace-pagination button:disabled { @apply cursor-not-allowed opacity-40; }
 
@@ -1481,12 +1558,13 @@
     width: 32px;
     border-radius: var(--ui-radius-control);
     font-size: 15px;
-    border: 1px solid var(--za-line);
-    background: var(--za-surface);
-    color: var(--za-text);
+    border: 1px solid var(--chrome-hairline);
+    background: var(--paper-raised);
+    color: var(--graphite-base);
   }
   .skill-marketplace-pagination--pages .pagination-arrow:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--za-text) 25%, var(--za-line));
+    border-color: var(--chrome-hairline-strong);
+    background: var(--paper-hover);
   }
   .skill-marketplace-pagination--pages .pagination-page {
     display: flex;
@@ -1501,16 +1579,16 @@
     font-variant-numeric: tabular-nums;
     border: 1px solid transparent;
     background: transparent;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
   }
   .skill-marketplace-pagination--pages .pagination-page:hover {
-    background: var(--za-surface-hover, var(--za-surface));
-    color: var(--za-text);
+    background: var(--paper-hover);
+    color: var(--graphite-base);
   }
   .skill-marketplace-pagination--pages .pagination-page.is-active {
-    background: var(--za-primary-control-bg);
-    color: var(--za-primary-control-ink);
-    border-color: transparent;
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
+    border-color: var(--chrome-keycap-border);
   }
   .skill-marketplace-pagination--pages .pagination-ellipsis {
     display: flex;
@@ -1519,7 +1597,7 @@
     height: 32px;
     padding: 0 4px;
     font-size: 12.5px;
-    color: var(--za-text-muted);
+    color: var(--graphite-fade);
     user-select: none;
   }
 
@@ -1537,10 +1615,48 @@
   }
 }
 
-/* 未分层覆盖：全局 .pa-dropdown-trigger 的 --ui-radius-control 不在 @layer 内，
-   会盖掉 components 层里的工具栏规则。搜索 / 分类 / 同步采用 control；分段外框采用 panel。 */
+/* 未分层覆盖：全局 .pa-dropdown-trigger 与 .ui-choice-strip / .ui-button 不在 @layer 内，
+   会盖掉 components 层里的圆角与 A×G 激活态规则。搜索 / 分类 / 同步采用 control；分段外框采用 panel。 */
 .skill-marketplace-toolbar input,
 .skill-marketplace-category-select .pa-dropdown-trigger,
 .skill-marketplace-toolbar .skill-marketplace-install {
   border-radius: var(--ui-radius-control);
+}
+
+.capability-tabs.ui-choice-strip > button {
+  border-radius: var(--ui-radius-control);
+  color: var(--graphite-soft);
+}
+
+.capability-tabs.ui-choice-strip > button:is([aria-selected='true'], .active) {
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
+  box-shadow: var(--chrome-keycap-shadow);
+}
+
+.skill-view-tabs.ui-choice-strip > button {
+  border-radius: var(--ui-radius-control);
+  color: var(--graphite-soft);
+  padding: 6px 14px;
+}
+
+.skill-view-tabs.ui-choice-strip > button:is([aria-selected='true'], .active) {
+  background: var(--paper-raised);
+  color: var(--graphite-base);
+  box-shadow: var(--chrome-glass-row-shadow);
+}
+
+.capability-tabs-row .skill-upload-btn.ui-button {
+  min-block-size: 36px;
+  padding: 0 14px;
+  border-radius: var(--ui-radius-control);
+  background: var(--paper-raised);
+  border: 1px solid var(--chrome-hairline);
+  color: var(--graphite-base);
+  font-weight: 560;
+}
+
+.capability-tabs-row .skill-upload-btn.ui-button:hover:not(:disabled) {
+  background: var(--paper-hover);
+  border-color: var(--chrome-hairline-strong);
 }

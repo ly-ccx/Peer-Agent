@@ -1,0 +1,138 @@
+import { contextAccountingModelKey } from '@peer-agent/protocol';
+import {
+  createContextAccountingCompactionPipeline,
+  fingerprintCanonicalRequest,
+  microcompactMessagesForContext,
+  parseContextOverflowEvidence,
+} from '@peer-agent/runtime-core';
+import { projectSelectionRequestMessages } from '../selection-background-context.mjs';
+import { runProviderRequestWithRecovery } from './provider-request-recovery.mjs';
+import { createVisualRequestScope } from './visual-request-context.mjs';
+
+/**
+ * Shared Desktop single-request execution coordinator for host-owned provider calls
+ * (e.g., independent visual verification) using runtime-core accounting and recovery.
+ */
+export async function executeDesktopProviderRequest({
+  request,
+  send,
+  compactRequest = async () => ({ compacted: false }),
+  getUsage = (response) => response?.streamUsage ?? null,
+  buildCanonicalRequest = ({ messages, systemPrompt, tools, model }) => ({
+    messages,
+    systemPrompt,
+    tools,
+    model,
+  }),
+}) {
+  const sourceMessages = Array.isArray(request?.messages) ? request.messages : [];
+  const sourceSystemPrompt = typeof request?.systemPrompt === 'string'
+    ? request.systemPrompt
+    : '';
+  const visualScope = createVisualRequestScope({
+    messages: sourceMessages,
+    ...request?.visualRequestHost,
+    conversationId: request?.conversationId,
+    streamId: request?.streamId,
+    model: request?.providerConfig?.model,
+    signal: request?.signal,
+  });
+  const pipeline = createContextAccountingCompactionPipeline({
+    identity: request?.accountingIdentity ?? {
+      conversationId: request?.conversationId || request?.streamId || 'desktop',
+      contentRevision: 0,
+      modelKey: contextAccountingModelKey(
+        request?.providerConfig?.providerId ?? request?.providerConfig?.id,
+        request?.providerConfig?.model,
+      ),
+    },
+    contextWindow: request?.contextWindow,
+    countCapability: request?.countCapability ?? { kind: 'observed_usage_only' },
+    initialSnapshot: request?.initialContextAccounting,
+    countRequest: request?.countRequest,
+    onSnapshot: request?.onContextAccounting,
+    buildRequest(state) {
+      const projectedMessages = microcompactMessagesForContext(state.messages, {
+        log: () => {},
+        preserveLatestUserTurn: request?.preserveLatestUserTurn ?? true,
+      }).messages;
+      return buildCanonicalRequest({
+        messages: projectSelectionRequestMessages(projectedMessages, request?.conversationId),
+        systemPrompt: state.systemPrompt,
+        tools: request?.tools ?? null,
+        model: request?.providerConfig?.model ?? null,
+      });
+    },
+    async compact({ state, reason, emergency }) {
+      const result = await compactRequest({
+        ...request,
+        messages: state.messages,
+        systemPrompt: state.systemPrompt,
+        usageSnapshot: null,
+        force: true,
+        emergency: emergency || reason === 'provider_overflow',
+      });
+      if (!result?.compacted) return { compacted: false, state };
+      return {
+        compacted: true,
+        state: {
+          messages: Array.isArray(result.messages) ? result.messages : state.messages,
+          systemPrompt:
+            typeof result.systemPrompt === 'string' && result.systemPrompt.trim()
+              ? result.systemPrompt
+              : state.systemPrompt,
+        },
+      };
+    },
+    send: (canonicalRequest) => {
+      const fingerprint = fingerprintCanonicalRequest(canonicalRequest);
+      let dispatched = false;
+      return visualScope.send(() => runProviderRequestWithRecovery(
+        () => {
+          if (
+            dispatched
+            && fingerprintCanonicalRequest(canonicalRequest, { refresh: true }) !== fingerprint
+          ) {
+            const error = new Error('context_request_fingerprint_mismatch: canonical request changed before retry');
+            error.providerRecovery = { kind: 'invalid_request', phase: 'request', retryable: false };
+            throw error;
+          }
+          dispatched = true;
+          return send(canonicalRequest);
+        }, {
+          signal: request?.signal,
+          budgetGuard: request?.budgetGuard,
+          webContents: request?.webContents,
+          streamId: request?.streamId,
+          provider: request?.providerConfig?.provider,
+          model: request?.providerConfig?.model,
+          ...request?.requestRecoveryOptions,
+        },
+      ));
+    },
+    getUsage,
+    onProviderRequest: request?.onProviderRequest,
+    getOverflow(response) {
+      if (response?.ok !== false) return null;
+      return parseContextOverflowEvidence({
+        status: response.status,
+        errorText: response.errorText ?? '',
+      });
+    },
+  });
+  const accounting = await pipeline.execute({
+    state: {
+      messages: sourceMessages,
+      systemPrompt: sourceSystemPrompt,
+    },
+  });
+  const finalMessages = accounting.state.messages;
+  const projectedMessages = accounting.request.messages;
+  return Object.freeze({
+    ...accounting,
+    response: accounting.response,
+    messages: finalMessages,
+    systemPrompt: accounting.state.systemPrompt,
+    projectedMessages,
+  });
+}

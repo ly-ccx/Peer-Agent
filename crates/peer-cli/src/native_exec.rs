@@ -1,0 +1,216 @@
+use peer_protocol::CliExit;
+use peer_runtime::{
+    CancellationToken,
+    session_host::{LocalPermissionDecision, PermissionInput},
+};
+use serde_json::{Value, json};
+use std::{
+    future::Future,
+    io::{self, IsTerminal, Write},
+    pin::Pin,
+    time::Duration,
+};
+pub(crate) struct TerminalPermission;
+impl PermissionInput for TerminalPermission {
+    fn decide<'a>(
+        &'a mut self,
+        prompt: Value,
+        cancel: &'a CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = LocalPermissionDecision> + 'a>> {
+        Box::pin(async move {
+            if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+                return LocalPermissionDecision::Unavailable;
+            }
+            let details = json!({"arguments":prompt["arguments"],"scopes":prompt["scopes"]});
+            let _ = writeln!(
+                io::stderr(),
+                "需要一次本地授权：{}\n操作与范围：{}\n只允许本次调用？[y/N]；5 分钟内未决定将暂停本轮执行；Ctrl-C 暂停本轮执行。",
+                peer_tui::terminal_text(prompt["tool"].as_str().unwrap_or("tool")),
+                peer_tui::terminal_text(&details.to_string())
+            );
+            #[cfg(unix)]
+            let bytes = {
+                let input = io::stdin();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut b = [0u8; 1];
+                    let wait = tokio::select! {biased;_=cancel.cancelled()=>return LocalPermissionDecision::Cancel,_=tokio::time::sleep(Duration::from_millis(20))=>true};
+                    let mut poll = [rustix::event::PollFd::new(
+                        &input,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    if !wait
+                        || rustix::event::poll(
+                            &mut poll,
+                            Some(&rustix::event::Timespec {
+                                tv_sec: 0,
+                                tv_nsec: 0,
+                            }),
+                        )
+                        .ok()
+                            != Some(1)
+                    {
+                        continue;
+                    }
+                    let r = rustix::io::read(&input, &mut b);
+                    if r.ok() != Some(1) {
+                        return LocalPermissionDecision::Unavailable;
+                    }
+                    if bytes.len() >= 1024 {
+                        return LocalPermissionDecision::Unavailable;
+                    }
+                    if b[0] == b'\n' {
+                        break;
+                    }
+                    bytes.push(b[0]);
+                }
+                bytes
+            };
+            #[cfg(windows)]
+            let bytes = {
+                use std::io::Read;
+                let (tx, rx) = tokio::sync::oneshot::channel::<Option<Vec<u8>>>();
+                std::thread::spawn(move || {
+                    let mut input = io::stdin().lock();
+                    let mut bytes = Vec::new();
+                    let mut b = [0u8; 1];
+                    loop {
+                        match input.read(&mut b) {
+                            Ok(1) => {
+                                if bytes.len() >= 1024 {
+                                    let _ = tx.send(None);
+                                    return;
+                                }
+                                if b[0] == b'\n' {
+                                    let _ = tx.send(Some(bytes));
+                                    return;
+                                }
+                                bytes.push(b[0]);
+                            }
+                            _ => {
+                                let _ = tx.send(None);
+                                return;
+                            }
+                        }
+                    }
+                });
+                match tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return LocalPermissionDecision::Cancel,
+                    res = rx => res,
+                } {
+                    Ok(Some(bytes)) => bytes,
+                    _ => return LocalPermissionDecision::Unavailable,
+                }
+            };
+            if matches!(
+                std::str::from_utf8(&bytes).unwrap_or("").trim(),
+                "y" | "yes"
+            ) {
+                LocalPermissionDecision::Approve
+            } else {
+                LocalPermissionDecision::Deny
+            }
+        })
+    }
+}
+pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
+    let home =
+        peer_protocol::data_home().ok_or_else(|| io::Error::other("data home unavailable"))?;
+    let result = crate::cancellation::run(|cancel| async move {
+        if recover {
+            peer_runtime::native_exec::recover_plan(&home, plan, &cancel)
+                .await
+                .map(|facts| {
+                    (
+                        json!({"status":"recovery_observed","facts":facts}),
+                        CliExit::Ok,
+                    )
+                })
+        } else {
+            peer_runtime::native_exec::execute_plan(
+            &home,
+            plan,
+            &mut TerminalPermission,
+            max_turns,
+            &cancel,
+        )
+        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request,"lifetimeUsage":outcome.lifetime_usage,"contextAccounting":outcome.context_accounting}),code)})
+        }
+    })?;
+    match result {
+        Ok((outcome, code)) => {
+            writeln!(io::stdout(), "{}", outcome)?;
+            Ok(code)
+        }
+        Err(e) => {
+            writeln!(
+                io::stderr(),
+                "peer-native: {} (plan={})",
+                e.0,
+                peer_tui::terminal_text(plan)
+            )?;
+            let hint = match e.0 {
+                "native_usage_snapshot_invalid"
+                | "native_usage_snapshot_changed"
+                | "native_usage_receipt_invalid"
+                | "native_usage_conversation_missing" => Some(
+                    "已观察用量的核对受阻，原始预算和账本已保留。recover --plan 会先核对真实停机，再核对用量；修复来源冲突前不能开始新的模型请求。",
+                ),
+                "native_usage_recovery_required" => Some(
+                    "本批已核对的用量已保存，仍有待核对记录。继续运行 recover --plan 完成后续批次。",
+                ),
+                "USAGE_LEDGER_INVALID"
+                | "USAGE_LEDGER_LIMIT"
+                | "USAGE_LEDGER_CONFLICT"
+                | "USAGE_LEDGER_COMMIT_UNCERTAIN" => Some(
+                    "用量账本校验未完成，原文件已保留。首次准入受阻时，修正账本后可重试同一任务；已停稳的回合使用 recover --plan 核对原提交。",
+                ),
+                "context_settings_invalid"
+                | "context_settings_schema_unsupported"
+                | "context_settings_changed"
+                | "context_settings_unavailable"
+                | "context_settings_limit" => Some(
+                    "无法完整读取当前设置；原文件已保留，此次未调用模型。修正设置后可重新准入同一待执行任务。",
+                ),
+                "native_capability_inventory_unsupported" | "native_nested_context_unsupported" => {
+                    Some("原生候选尚未接通所需的上下文或能力配置来源；配置已保留，此次未调用模型。")
+                }
+                "native_project_instruction_source_unsupported"
+                | "native_project_context_source_unsupported"
+                | "native_execution_context_unsupported"
+                | "native_continuity_context_unsupported" => {
+                    Some("原生候选尚未接通所需的上下文来源；原始内容已保留，此次未调用模型。")
+                }
+                "native_model_channel_unsupported" => Some(
+                    "原生候选尚未支持该渠道、思考强度或请求参数组合；配置已保留，未向模型发送请求。",
+                ),
+                "HOST_LEASE_CONTENDED" => {
+                    Some("项目由另一宿主持有执行权；请沿现有宿主接管流程交接后继续。")
+                }
+                "execution_outcome_unknown" => {
+                    Some("未知效果仍受保护；recover --plan 可记录对账事实，原工具不会重放。")
+                }
+                "native_execution_stop_unproven" => Some(
+                    "尚不能证明原执行及其句柄已结束；需沿现有任务详情的停稳/人工对账流程处理，保护记录保持原样。",
+                ),
+                "native_execution_requires_fresh_admission"
+                | "native_execution_recovery_required" => {
+                    Some("此入口只接受新的执行绑定；先核对既有任务的停稳、恢复和准入事实。")
+                }
+                "execution_resource_busy" => {
+                    Some("目标资源正被其他任务或未知效果保护；请先核对对应任务。")
+                }
+                _ => None,
+            };
+            if let Some(hint) = hint {
+                writeln!(io::stderr(), "{hint}")?;
+            }
+            Ok(if e.0 == "CANCELLED" {
+                CliExit::Cancelled
+            } else {
+                CliExit::Runtime
+            })
+        }
+    }
+}

@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from '
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { disclosureHeightSnapped } from './disclosure-height-sample.mjs';
+import { installMotionCapture } from './motion-capture.mjs';
 
 /** Only disposable fixture history is written; production readers and continuation remain real. */
 export function seedHistoryFixtures({ home, now = new Date() }) {
@@ -194,7 +195,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     errorRecovery: true, continuation: true, animations: true, reducedMotion: true };
 }
 
-async function recordDisclosure(locator, open, reverse = false, observed, attempt = 0) {
+export async function recordDisclosure(locator, open, reverse = false, observed, attempt = 0) {
   // Earlier scenarios can leave this same task open. Start from the opposite
   // state so this capture measures the requested action rather than toggling it away.
   const summary = locator.locator(':scope > summary');
@@ -210,31 +211,11 @@ async function recordDisclosure(locator, open, reverse = false, observed, attemp
   const expectedClicks = reverse ? 2 : 1;
   // Install before input, then sample a complete interval after the last real click.
   // Remote Playwright dispatch time must not consume the closing observation window.
-  await locator.evaluate((node, expectedClicks) => {
-    node.__rcDisclosureCapture = new Promise(resolve => {
-      const samples = []; const start = performance.now(); const summary = node.querySelector(':scope > summary');
-      let lastClick = null, clicks = 0, raf = 0;
-      const mark = () => { lastClick = performance.now(); clicks += 1; };
-      const finish = timedOut => {
-        clearTimeout(timeout); cancelAnimationFrame(raf); summary.removeEventListener('click', mark);
-        resolve({ samples, clicks, timedOut });
-      };
-      const timeout = setTimeout(() => finish(true), 6000);
-      const frame = now => {
-        const style = getComputedStyle(node, '::details-content');
-        samples.push({ at: Math.round(now - start), height: node.getBoundingClientRect().height,
-          opacity: style.opacity, visibility: style.contentVisibility, open: node.open,
-          arrow: getComputedStyle(node.querySelector(':scope > summary > svg:last-child')).transform });
-        if (clicks >= expectedClicks && now - lastClick >= 480) finish(false);
-        else raf = requestAnimationFrame(frame);
-      };
-      summary.addEventListener('click', mark); raf = requestAnimationFrame(frame);
-    });
-  }, expectedClicks);
+  await locator.evaluate(installMotionCapture, { kind: 'disclosure', expectedClicks });
   await summary.click({ force: true });
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await summary.click({ force: true }); }
-  const capture = await locator.evaluate(node => node.__rcDisclosureCapture);
-  await locator.evaluate(node => { delete node.__rcDisclosureCapture; });
+  const capture = await locator.evaluate(node => node.__rcMotionCapture);
+  await locator.evaluate(node => { delete node.__rcMotionCapture; });
   observed?.(capture);
   assert.equal(capture.timedOut, false, 'real disclosure input and observation complete within the bound');
   assert.equal(capture.clicks, expectedClicks, 'each intended native disclosure click occurred');
@@ -251,28 +232,14 @@ async function recordDisclosure(locator, open, reverse = false, observed, attemp
 }
 
 
-async function recordPanelMotion(page, toggle, open, reverse = false) {
+export async function recordPanelMotion(page, toggle, open, reverse = false) {
   await page.waitForFunction(() => document.querySelector('.bot-work-layout').getAnimations({ subtree: true }).every(a =>
     a.playState !== 'running' || !Number.isFinite(a.effect?.getComputedTiming().endTime)), null, { timeout: 5000 });
-  await toggle.evaluate((button, expectedClicks) => {
-    button.__rcPanelCapture = new Promise(resolve => {
-      const samples = [], panel = document.querySelector('.bot-work-panel');
-      let clicks = 0, lastClick = null, raf;
-      const mark = () => { clicks++; lastClick = performance.now(); };
-      const finish = timedOut => { clearTimeout(deadline); cancelAnimationFrame(raf); button.removeEventListener('click', mark); resolve({ samples, clicks, timedOut }); };
-      const deadline = setTimeout(() => finish(true), 6000);
-      const frame = now => {
-        samples.push({ opacity: Number(getComputedStyle(panel).opacity), open: panel.dataset.motionOpen === 'true', inert: panel.inert });
-        if (clicks >= expectedClicks && now - lastClick >= 480) finish(false);
-        else raf = requestAnimationFrame(frame);
-      };
-      button.addEventListener('click', mark); raf = requestAnimationFrame(frame);
-    });
-  }, reverse ? 2 : 1);
+  await toggle.evaluate(installMotionCapture, { kind: 'panel', expectedClicks: reverse ? 2 : 1 });
   await toggle.click();
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await toggle.click(); }
-  const capture = await toggle.evaluate(button => button.__rcPanelCapture);
-  await toggle.evaluate(button => { delete button.__rcPanelCapture; });
+  const capture = await toggle.evaluate(button => button.__rcMotionCapture);
+  await toggle.evaluate(button => { delete button.__rcMotionCapture; });
   assert.equal(capture.timedOut, false); assert.equal(capture.clicks, reverse ? 2 : 1);
   assert.ok(capture.samples.some(row => row.opacity > 0 && row.opacity < 1), 'work panel has actual intermediate frames');
   assert.equal(capture.samples.at(-1).open, reverse ? false : open);

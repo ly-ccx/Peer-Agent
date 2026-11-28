@@ -7,13 +7,13 @@ import {
   remainingPercentFromQuota,
   subscriptionQuotaColor,
   supportsTuiSubscriptionQuota,
+  fetchTuiSubscriptionQuota,
 } from './tui-subscription-quota.ts';
 import { applyThemeScheme, COLOR, DARK_PALETTE } from './tui-theme.ts';
 
 describe('tui subscription quota formatting', () => {
   test('supports only OAuth subscription auth methods', () => {
     expect(supportsTuiSubscriptionQuota('oauth_chatgpt')).toBe(true);
-    expect(supportsTuiSubscriptionQuota('oauth_google')).toBe(true);
     expect(supportsTuiSubscriptionQuota('oauth_grok')).toBe(true);
     expect(supportsTuiSubscriptionQuota('api_key')).toBe(false);
     expect(supportsTuiSubscriptionQuota(undefined)).toBe(false);
@@ -55,4 +55,21 @@ describe('tui subscription quota formatting', () => {
     expect(subscriptionQuotaColor(5)).toBe(COLOR.danger);
     expect(COLOR.success).toBe(DARK_PALETTE.success);
   });
+});
+
+test('pending or changed OAuth credentials stop quota admission instead of using pre-read access', async () => {
+  let fetched = false;
+  const selection = { source: 'desktop-default' as const, providerId: 'fixture', credentialId: 'fixture',
+    displayName: 'Fixture', model: 'test', baseUrl: 'https://fixture.invalid', configFile: '/tmp/fixture',
+    authMethod: 'oauth_chatgpt' as const, credentialStored: true, supportedReasoningEfforts: [],
+    defaultReasoningEffort: 'default' as const, oauthTokens: { access: 'pre-read', expires: 1 },
+    persistOAuthTokens() { throw new Error('unexpected_unconditional_write'); },
+    async refreshOAuthTokens() { throw new Error('credential_oauth_refresh_pending'); },
+  };
+  const result = await fetchTuiSubscriptionQuota({ credentialId: 'fixture',
+    loadSelection: () => selection,
+    loadFetchers: async () => { fetched = true; throw new Error('quota_must_not_dispatch'); },
+  });
+  expect(result).toMatchObject({ success: false, status: 'fetch_failed' });
+  expect(fetched).toBe(false);
 });

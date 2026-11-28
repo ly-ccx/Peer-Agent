@@ -11,6 +11,13 @@ const verdictLabels = {
 const checkLabels = {
   leaves: 'projectAgent.drawer.task.verificationEvidence', leaf_evidence: 'projectAgent.drawer.task.verificationEvidence',
   independent_verifier: 'projectAgent.drawer.task.verificationIndependent',
+  model_review: 'projectAgent.drawer.task.verificationQualityCriteria',
+} as const;
+/** A check is reported by the host's reason first: "not required" and "not reviewed" are facts, not pass or fail. */
+const checkResultLabels = {
+  missing: 'projectAgent.drawer.task.verificationMissing',
+  not_required: 'projectAgent.drawer.task.verificationNotRequired',
+  not_reviewed: 'projectAgent.drawer.task.verificationNotReviewed',
 } as const;
 
 /** Task facts stay here; the main bot owns the explanation delivered to the user. */
@@ -22,7 +29,7 @@ export function TaskVerification({ detail, i18n }: { readonly detail: SessionVer
     <dl aria-label={i18n.t('projectAgent.drawer.task.verificationChecks')}>
       {detail.checks.map((check, index) => <div key={`${check.name}-${index}`}>
         <dt>{i18n.t(checkLabels[check.name as keyof typeof checkLabels] || 'projectAgent.drawer.task.verificationOther')}</dt>
-        <dd>{i18n.t(check.reason === 'missing' ? 'projectAgent.drawer.task.verificationMissing'
+        <dd>{i18n.t(check.reason && check.reason in checkResultLabels ? checkResultLabels[check.reason as keyof typeof checkResultLabels]
           : check.result === 'passed' ? 'projectAgent.drawer.task.verificationPassed' : 'projectAgent.drawer.task.verificationFailed')}</dd>
       </div>)}
     </dl>

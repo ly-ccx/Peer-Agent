@@ -5,16 +5,7 @@ import path from 'node:path';
 export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report, captureDirectory, injectFrameGap = false }) {
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
-  await app.evaluate(({ ipcMain }) => {
-    globalThis.rcUpdateDownloadCalls = 0;
-    ipcMain.removeHandler('updater:download');
-    ipcMain.handle('updater:download', async () => {
-      const call = ++globalThis.rcUpdateDownloadCalls;
-      await new Promise(resolve => setTimeout(resolve, call === 4 ? 20 : 700));
-      return { currentVersion: '0.1.0-rc.9', channel: 'beta', preference: 'auto', enabled: true,
-        phase: call === 4 ? 'downloaded' : 'downloading', availableVersion: '0.1.0-rc.99', percent: call === 4 ? 100 : 42 };
-    });
-  });
+  await emitUpdaterEvent(null, { operation: 'install-download-fixture' });
   const cases = [];
   try {
     for (const [width, appearance, reduced] of [[1280, 'dark', false], [760, 'light', false], [760, 'light', true]]) {
@@ -159,7 +150,8 @@ export async function checkUpdaterMinimize({ page, app, emitUpdaterEvent, report
     assert.equal(completionFrames.at(-1).connected, false, 'fast completion still closes the modal');
     await page.locator('.updater-modal').waitFor({ state: 'detached' });
     await page.locator('.bot-column-top .bot-upgrade.is-install').waitFor();
-    assert.equal(await app.evaluate(() => globalThis.rcUpdateDownloadCalls), 4, 'each update click dispatches once');
+    const finalReceipt = await emitUpdaterEvent(null, { operation: 'download-count' });
+    assert.equal(finalReceipt.downloadCalls, 4, 'each update click dispatches once');
     report.updaterMinimize.fastCompletion = true;
     await emitUpdaterEvent({ type: 'error', message: 'RC synthetic download interrupted' });
     assert.equal(await page.locator('.bot-column-top .bot-upgrade.is-progress').count(), 0);

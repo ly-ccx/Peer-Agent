@@ -31,9 +31,9 @@ export function BotProcess({ activity, rounds = [], narration = [], i18n, disclo
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [running, activity?.turnId]);
-  const publicText = (activity ? activity.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) : narration)
+  const publicText = (activity ? (activity.segments ?? []).flatMap(segment => segment.kind === 'text' ? [segment] : []) : narration)
     .filter(segment => segment.text.trim());
-  const entries = activity ? activity.segments.flatMap(segment => segment.kind === 'tool' ? [{
+  const entries = activity ? (activity.segments ?? []).flatMap(segment => segment.kind === 'tool' ? [{
     ...segment, ...toolPresentation(segment.name), input: segment.input, result: segment.result,
   }] : []) : agentProcessEntries(rounds).filter(entry => entry.name !== 'post_reply').map((entry, index) => ({
     ...entry,
@@ -60,8 +60,8 @@ export function BotProcess({ activity, rounds = [], narration = [], i18n, disclo
       <PeerIcon name="chevronDown" size={12} />
     </summary>
     <div className="bot-turn-process-content">
-      {publicText.map(segment => <p className="bot-process-narration-text" key={segment.id}>{segment.text}</p>)}
-      {!entries.length ? <p className="bot-process-note">{i18n.t('projectAgent.process.awaitingContent')}</p> : null}
+      {!entries.length ? publicText.map(segment => <p className="bot-process-narration-text" key={segment.id}>{segment.text}</p>) : null}
+      {!entries.length && !publicText.length ? <p className="bot-process-note">{i18n.t('projectAgent.process.awaitingContent')}</p> : null}
       {entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => {
         const active = ['preparing', 'running', 'awaiting_permission'].includes(entry.status);
         const time = processSeconds(entry.startedAt, entry.finishedAt, now, !active);

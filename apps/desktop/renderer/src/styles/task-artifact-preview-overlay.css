@@ -26,7 +26,7 @@
   z-index: 0;
   pointer-events: none;
   border-radius: inherit;
-  background: var(--glass-modal-background, color-mix(in srgb, var(--za-surface-0, #1e232c) 78%, transparent));
+  background: var(--glass-modal-background, color-mix(in srgb, var(--paper-raised) 78%, transparent));
   backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
   -webkit-backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
 }
@@ -41,7 +41,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border: 1px solid var(--glass-modal-border, var(--chrome-hairline));
   border-radius: inherit;
   background: transparent;
   box-shadow: none;
@@ -95,7 +95,7 @@
   z-index: 0;
   pointer-events: none;
   border-radius: inherit;
-  background: var(--glass-modal-background, color-mix(in srgb, var(--za-surface-0, #1e232c) 78%, transparent));
+  background: var(--glass-modal-background, color-mix(in srgb, var(--paper-raised) 78%, transparent));
   backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
   -webkit-backdrop-filter: var(--glass-modal-filter, blur(24px) saturate(1.18));
 }
@@ -108,7 +108,7 @@
   box-sizing: border-box;
   max-height: min(22rem, calc(100vh - 1.5rem));
   overflow: hidden;
-  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border: 1px solid var(--glass-modal-border, var(--chrome-hairline));
   border-radius: inherit;
   background: transparent;
 }
@@ -119,7 +119,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--za-line);
+  border-bottom: 1px solid var(--chrome-hairline);
 }
 
 .diff-file-preview-path {
@@ -129,7 +129,7 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--ui-font-caption);
-  color: var(--za-text);
+  color: var(--graphite-base);
 }
 
 .diff-file-preview .workbench-diff-pre {
@@ -143,6 +143,6 @@
 .diff-file-preview-more {
   padding: 6px 10px 8px;
   font-size: var(--ui-font-caption);
-  color: var(--za-text-muted);
+  color: var(--graphite-fade);
 }
 

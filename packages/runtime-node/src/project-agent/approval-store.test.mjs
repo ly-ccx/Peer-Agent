@@ -275,3 +275,24 @@ test('startup interrupts an executing GoalPlan and only marks a session that has
     rmSync(plans, { recursive: true, force: true });
   }
 });
+
+test('approval append participates in the native directory lock and preserves an orphan lock', t => {
+  const root = tempRoot('writer-lock'); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createApprovalStore({ rootDir: root });
+  store.append(openRecord());
+  const file = store.fileFor(null), before = readFileSync(file);
+  fs.mkdirSync(`${file}.lock`);
+  assert.throws(() => store.append(openRecord({ approvalId: 'other' })), { code: 'STORE_LOCK_BUSY' });
+  assert.deepEqual(readFileSync(file), before);
+  assert.equal(fs.statSync(`${file}.lock`).isDirectory(), true);
+});
+
+
+test('approval notifications run after releasing the writer lock', t => {
+  const root = tempRoot('reentrant'); t.after(() => rmSync(root, { recursive: true, force: true }));
+  const store = createApprovalStore({ rootDir: root, onChanged(event) {
+    if (event.approvalId === 'first') store.append(openRecord({ approvalId: 'second' }));
+  } });
+  store.append(openRecord({ approvalId: 'first' }));
+  assert.deepEqual(store.list().map(row => row.approvalId), ['first', 'second']);
+});

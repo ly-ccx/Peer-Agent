@@ -4,7 +4,13 @@ import type { ProjectAgentActivity, TaskOverviewItem } from '@peer-agent/protoco
 import { normalizeBotMessage } from './botConversationState.ts';
 import { indexBotWork } from './botWorkState.ts';
 import { readDrawerSession } from './drawerState.ts';
-import { workPanelActivity, workPanelMaterials, workPanelNeedsUser, workPanelSessions } from './botWorkPanelState.ts';
+import {
+  workPanelActivity,
+  workPanelChildrenByParent,
+  workPanelMaterials,
+  workPanelNeedsUser,
+  workPanelSessions,
+} from './botWorkPanelState.ts';
 
 const session = (sessionId: string, parentSessionId?: string, status = 'running') => readDrawerSession({
   sessionId, planId: `plan-${sessionId}`, title: `Task ${sessionId}`, status,
@@ -20,8 +26,14 @@ test('tasks and returned child Agents retain their explicit parent relation', ()
   const parent = session('parent'), child = session('child', 'parent'), returned = session('returned', 'parent', 'accepted');
   const index = indexBotWork([parent, child, returned, session('unrelated', undefined, 'accepted')], true);
   assert.equal(child.parentSessionId, 'parent');
-  assert.deepEqual(workPanelSessions(index).tasks.map(row => row.sessionId), ['parent']);
-  assert.deepEqual(workPanelSessions(index).agents.map(row => row.sessionId), ['parent', 'child', 'returned']);
+  const sessions = workPanelSessions(index);
+  assert.deepEqual(sessions.tasks.map(row => row.sessionId), ['parent']);
+  assert.deepEqual(sessions.agents.map(row => row.sessionId), ['parent', 'child', 'returned']);
+  const children = workPanelChildrenByParent(sessions);
+  assert.deepEqual(children.get('parent')?.map(row => row.sessionId), ['child', 'returned']);
+  assert.equal(children.has('child'), false);
+  const singleLayer = workPanelSessions(indexBotWork([parent], true));
+  assert.equal(workPanelChildrenByParent(singleLayer).size, 0);
   assert.deepEqual(workPanelSessions({ ...index, available: false }), { tasks: [], agents: [] });
 });
 

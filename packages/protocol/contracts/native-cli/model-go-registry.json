@@ -1,0 +1,428 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "deepseek-v4-flash": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "deepseek-v4-flash-vision-exp": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "deepseek-v4-pro": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "deepseek-v4.1-flash": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "deepseek-flash": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "hy3": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "off",
+        "low",
+        "default",
+        "high"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "off": "none",
+        "low": "low",
+        "default": "high",
+        "high": "high"
+      }
+    },
+    "glm-5.2": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "glm-5.3": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "glm-5.3-flash": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "gpt-5.6-luna": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "off",
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "off": "none",
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max",
+        "medium": "medium"
+      }
+    },
+    "grok-4.5": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "medium": "medium"
+      }
+    },
+    "grok-4.6": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    },
+    "grok-4.7": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    },
+    "hy4-preview": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "off",
+        "default",
+        "high"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "off": "none",
+        "default": "high",
+        "high": "high"
+      }
+    },
+    "kimi-k3": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "high",
+      "effortMap": {
+        "high": "max",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "muse-spark-1.2-contributor": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "off",
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "off": "minimal",
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    },
+    "muse-spark-1.3-contributor": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "off",
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "off": "minimal",
+        "low": "low",
+        "default": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    },
+    "omen-alpha": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high"
+      }
+    },
+    "ox-alpha-free": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "high",
+        "high": "high",
+        "xhigh": "max",
+        "max": "max"
+      }
+    },
+    "qwen3.8-flash": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "medium",
+        "high": "xhigh",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    },
+    "qwen3.8-max": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "medium"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {
+        "low": "low",
+        "default": "medium",
+        "high": "xhigh",
+        "xhigh": "xhigh",
+        "medium": "medium"
+      }
+    }
+  },
+  "defaults": {
+    "openai-chat": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "default"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {}
+    },
+    "openai-responses": {
+      "supported": true,
+      "paramStyle": "openai-effort",
+      "effortLevels": [
+        "default"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {}
+    },
+    "anthropic-messages": {
+      "supported": true,
+      "paramStyle": "anthropic-enabled-budget",
+      "effortLevels": [
+        "off",
+        "default"
+      ],
+      "defaultEffort": "default",
+      "effortMap": {}
+    }
+  },
+  "anthropicHeaders": {
+    "User-Agent": "claude-cli/2.1.178 (external, cli)",
+    "x-app": "cli",
+    "anthropic-beta": "claude-code-20250219"
+  },
+  "sessionHeader": "x-opencode-session"
+}

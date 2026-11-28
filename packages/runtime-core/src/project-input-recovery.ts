@@ -8,6 +8,31 @@ export interface InputRecoveryView extends ProjectInputDraftSnapshot {
   readonly sending: readonly string[];
   readonly received: readonly UnconfirmedProjectInput[];
 }
+const DRAFT_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+function estimateUploadBytes(item: import('@peer-agent/protocol').ProjectInputAttachment): number {
+  const body = item.kind === 'image' ? item.dataUrl.length : item.kind === 'text' ? item.text.length : 0;
+  return body + 512;
+}
+function partitionUploadChunks(uploads: readonly import('@peer-agent/protocol').ProjectInputAttachment[]): readonly (readonly import('@peer-agent/protocol').ProjectInputAttachment[])[] {
+  if (uploads.length <= 1) return [uploads];
+  const chunks: import('@peer-agent/protocol').ProjectInputAttachment[][] = [];
+  let current: import('@peer-agent/protocol').ProjectInputAttachment[] = [];
+  let currentBytes = 0;
+  for (const item of uploads) {
+    const bytes = estimateUploadBytes(item);
+    if (current.length > 0 && currentBytes + bytes > DRAFT_UPLOAD_CHUNK_BYTES) {
+      chunks.push(current);
+      current = [item];
+      currentBytes = bytes;
+    } else {
+      current.push(item);
+      currentBytes += bytes;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 /** Presentation continuity only; ports own storage and the existing governed input queue. */
 export function createProjectInputRecovery({ workspaceId, surface, port, createId, now = () => new Date().toISOString(), receiptTimeoutMs = 30_000 }: {
   workspaceId: string; surface: LocalInputSurface; port: ProjectInputRecoveryPort; createId: () => string; now?: () => string; receiptTimeoutMs?: number;
@@ -43,15 +68,40 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
         const all = [...state.draft.attachments, ...state.pending.flatMap(item => item.attachments)];
         const uploads = [...new Map(all.filter(item => storedAttachments.get(item.id) !== item).map(item => [item.id, item])).values()];
         const { attachments, ...draft } = state.draft;
+        const chunks = partitionUploadChunks(uploads);
+        let revision = state.revision;
+        const available = new Set(storedAttachments.keys());
         try {
-          const result = await port.write({ ...address, revision: state.revision,
-            draft: { ...draft, attachmentIds: attachments.map(item => item.id) },
-            pending: state.pending.map(({ attachments, ...input }) => ({ ...input, attachmentIds: attachments.map(item => item.id) })), uploads });
-          if (!result.ok) { publish({ error: result.code }); return false; }
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i]!;
+            for (const item of chunk) available.add(item.id);
+            const isFinal = i === chunks.length - 1;
+            const result = await port.write({
+              ...address,
+              revision,
+              draft: {
+                ...draft,
+                attachmentIds: isFinal
+                  ? attachments.map(item => item.id)
+                  : attachments.filter(item => available.has(item.id)).map(item => item.id),
+              },
+              pending: state.pending.map(({ attachments: pendingAttachments, ...input }) => ({
+                ...input,
+                attachmentIds: isFinal
+                  ? pendingAttachments.map(item => item.id)
+                  : pendingAttachments.filter(item => available.has(item.id)).map(item => item.id),
+              })),
+              uploads: chunk,
+            });
+            if (!result.ok) { publish({ error: result.code }); return false; }
+            revision = result.revision;
+            for (const item of chunk) storedAttachments.set(item.id, item);
+            if (!isFinal) publish({ revision, error: null });
+          }
           saved = version;
           storedAttachments.clear();
           for (const item of all) storedAttachments.set(item.id, item);
-          publish({ revision: result.revision, error: null });
+          publish({ revision, error: null });
         } catch { publish({ error: 'DRAFT_SAVE_FAILED' }); return false; }
       }
       return true;
@@ -97,14 +147,15 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     })();
     active.set(input.inputId, job); return job;
   }
-  async function send(options: { text?: string; quoteRefs?: readonly string[]; answerTo?: string; useDraft?: boolean } = {}): Promise<ProjectAgentSubmitInputResult> {
+  async function send(options: { text?: string; quoteRefs?: readonly string[]; taskRefs?: readonly import('@peer-agent/protocol').InputDraftTaskRef[]; answerTo?: string; useDraft?: boolean } = {}): Promise<ProjectAgentSubmitInputResult> {
     if (!view.ready && !await load()) return { ok: false, code: view.error || 'DRAFT_UNAVAILABLE' };
     const useDraft = options.useDraft !== false, draft = view.draft;
     const text = (options.text ?? draft.text).trim(), attachments = useDraft ? draft.attachments : [];
+    const taskRefs = options.taskRefs ?? (useDraft ? (draft.taskRefs ?? []) : []);
     if (useDraft && options.text !== undefined && text !== draft.text.trim()) return { ok: false, code: 'INPUT_CHANGED' };
     const resourceFeedback = useDraft ? normalizeResourceFeedbackList(draft.resourceFeedback) : [];
     if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
-    if (!text && !attachments.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
+    if (!text && !attachments.length && !taskRefs.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
     if (!useDraft && options.answerTo) {
       const existing = view.pending.find(item => item.answerTo === options.answerTo);
       if (existing) return existing.text === text ? dispatch(existing) : { ok: false, code: 'INPUT_PENDING_ANSWER' };
@@ -113,7 +164,7 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     if (resourceFeedback.some(item => item.recipient.workspaceId !== workspaceId)) return { ok: false, code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' };
     try { encodeResourceFeedbackTransport(resourceFeedback, attachments); }
     catch (error) { return { ok: false, code: (error as { code?: string }).code ?? 'INVALID_RESOURCE_FEEDBACK' }; }
-    const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
+    const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), ...(taskRefs.length ? { taskRefs } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
       ...(options.answerTo ? { answerTo: options.answerTo } : {}) };
     changed++; publish({ pending: [...view.pending, input], ...(useDraft ? { draft: emptyInputDraft() } : {}) });
     return dispatch(input);

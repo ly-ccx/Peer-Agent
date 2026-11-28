@@ -36,26 +36,24 @@ test('Automation CSS uses only declared Peer Frost semantic color tokens', async
 test('Automation surfaces, controls, states and focus use semantic token roles', async () => {
   const { automationCss } = await readThemeSources();
   const requiredTokens = [
-    '--za-thread-bg',
+    '--paper-base',
     '--paper-sheet',
-    '--za-surface-1',
-    '--za-control-fill',
-    '--za-text',
-    '--za-text-muted',
-    '--za-text-faint',
-    '--za-line',
-    '--za-line-strong',
-    '--za-primary-control-bg',
-    '--za-primary-control-ink',
-    '--za-focus',
-    '--za-good',
-    '--za-good-soft',
-    '--za-warn',
-    '--za-warn-soft',
-    '--za-danger',
-    '--za-danger-soft',
-    '--za-accent',
-    '--za-accent-soft',
+    '--control-fill',
+    '--graphite-base',
+    '--graphite-fade',
+    '--graphite-mute',
+    '--chrome-hairline',
+    '--chrome-hairline-strong',
+    '--chrome-keycap-bg',
+    '--chrome-keycap-fg',
+    '--ui-focus-glow',
+    '--state-success',
+    '--state-success-soft',
+    '--state-warn',
+    '--state-warn-soft',
+    '--state-danger',
+    '--state-danger-soft',
+    '--azure-seal',
     '--ui-surface-hover',
     '--ui-surface-selected',
     '--ui-selected-border',
@@ -70,13 +68,13 @@ test('Automation surfaces, controls, states and focus use semantic token roles',
   );
   assert.match(
     automationCss,
-    /\.automation-advanced\{border:1px solid var\(--za-line\);border-radius:var\(--ui-radius-panel\);background:var\(--paper-sheet\)/,
+    /\.automation-advanced\{border:1px solid var\(--chrome-hairline\);border-radius:var\(--ui-radius-panel\);background:var\(--paper-sheet\)/,
   );
   assert.match(
     automationCss,
     /\.automation-bound-workspace,\.automation-bound-timezone\{[^}]*background:var\(--paper-sheet\)/,
   );
-  assert.match(automationCss, /background:var\(--za-control-fill\)/);
-  assert.match(automationCss, /:focus-visible\{[^}]*var\(--za-focus\)/);
-  assert.match(automationCss, /::placeholder\{color:var\(--za-text-faint\)\}/);
+  assert.match(automationCss, /background:var\(--control-fill\)/);
+  assert.match(automationCss, /:focus-visible\{[^}]*var\(--ui-focus-glow\)/);
+  assert.match(automationCss, /::placeholder\{color:var\(--graphite-mute\)\}/);
 });

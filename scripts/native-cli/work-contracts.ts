@@ -1,0 +1,47 @@
+import { strict as assert } from 'node:assert';
+import { readFileSync,writeFileSync } from 'node:fs';
+import { reduceCoordination } from '../../packages/runtime-node/src/project-agent/work-coordination.mjs';
+const file=new URL('../../packages/protocol/contracts/native-cli/work-coordination.json',import.meta.url);
+const cases:any[]=[];let state:any={revision:0,events:{},works:{},deliveries:{},future:{keep:true}};
+function step(name:string,payload:any,expectError?:string,previous=state){
+ const entry={...payload,schemaVersion:1,revision:previous.revision+1};
+ let expected:any,error:string|undefined;
+ try{expected=reduceCoordination(previous,entry);}catch(e){error=(e as Error).message;}
+ if(expectError)assert.equal(error,expectError,name);else assert.equal(error,undefined,name);
+ cases.push({name,previous:structuredClone(previous),entry,...(error?{error}:{expected})});
+ if(!error&&previous===state)state=expected;
+ return expected;
+}
+step('transfer',{kind:'transfer',events:[{eventId:'e1',sessionId:'s',payload:{future:'retained'}}]});
+step('duplicate transfer is immutable',{kind:'transfer',events:[{eventId:'e1',sessionId:'foreign'}]});
+step('handle transfer',{kind:'handled',eventIds:['e1']});
+step('missing event',{kind:'handled',eventIds:['missing']},'event_not_transferred');
+step('create work',{kind:'work',work:{workId:'w',state:'active',progressFacts:['a'],budget:{tokens:0,costUsd:0,observations:{old:true}},future:{keep:true}}});
+step('delta preserves observations',{kind:'work_updated',workId:'w',work:{state:'running',opaque:1},removed:['absent'],budget:{tokens:5,costUsd:0.25},observations:['fresh'],progress:{add:['b','b'],remove:['a']}});
+step('invalid delta identity',{kind:'work_updated',workId:'w',work:{workId:'foreign'}},'coordination_work_update_invalid');
+step('invalid delta fields',{kind:'work_updated',workId:'w',work:{budget:{}}},'coordination_work_update_invalid');
+step('usage additive',{kind:'usage_observed',workId:'w',observationId:'u',tokens:3,costUsd:0.5});
+step('usage exact once',{kind:'usage_observed',workId:'w',observationId:'u',tokens:999,costUsd:999});
+step('unknown usage',{kind:'usage_observed',workId:'w',observationId:'unknown'});
+step('usage requires work',{kind:'usage_observed',workId:'missing',observationId:'u'},'coordination_usage_invalid');
+step('coalesce continuation',{kind:'continuations_coalesced',owner:{workId:'w',state:'queued'},retired:[{workId:'retired',state:'coalesced',continuationOwnerWorkId:'w'}]});
+step('invalid continuation custody',{kind:'continuations_coalesced',owner:{workId:'w'},retired:[{workId:'w',state:'coalesced',continuationOwnerWorkId:'w'}]},'invalid_continuation_custody');
+step('prepare reply',{kind:'reply_prepared',message:{id:'reply',content:'answer',meta:{digestReplyIds:['deferred']}}});
+step('commit reply',{kind:'reply_committed',messageId:'reply',at:'2026-11-14T00:00:00.000Z'});
+step('cannot deliver unsettled',{kind:'reply_delivered',messageId:'reply'},'coordination_delivery_unsettled');
+step('settlement attempt CAS',{kind:'reply_settlement_started',messageId:'reply',attempt:2},'coordination_delivery_attempt_conflict');
+step('start settlement',{kind:'reply_settlement_started',messageId:'reply',attempt:1,at:'2026-11-14T00:00:01.000Z'});
+step('failed settlement',{kind:'reply_settlement_failed',messageId:'reply',attempt:1,error:'interrupted',phase:'evidence',retryAt:'2026-11-14T00:00:03.000Z',at:'2026-11-14T00:00:02.000Z'});
+step('retry settlement',{kind:'reply_settlement_started',messageId:'reply',attempt:2,at:'2026-11-14T00:00:03.000Z'});
+step('settle reply',{kind:'reply_settled',messageId:'reply',attempt:2,at:'2026-11-14T00:00:04.000Z'});
+step('deliver reply',{kind:'reply_delivered',messageId:'reply'});
+step('defer reply',{kind:'reply_deferred',message:{id:'deferred',content:'answer'}});
+step('hold reply',{kind:'reply_held',messageId:'deferred',at:'2026-11-14T00:00:05.000Z'});
+step('aggregate reply',{kind:'reply_aggregated',messageId:'deferred',aggregateId:'reply'});
+step('missing preparation',{kind:'reply_delivered',messageId:'missing'},'reply_not_prepared');
+step('invalidation',{kind:'reply_invalidated',messageId:'reply',reason:'stale'});
+step('record recovery',{kind:'journal_recovered',at:'2026-11-14T00:00:06.000Z',backup:'coordination-v2/segments/backup.jsonl'});
+const fixture={schemaVersion:1,source:'packages/runtime-node/src/project-agent/work-coordination.mjs',cases};
+if(process.argv.includes('--update'))writeFileSync(file,JSON.stringify(fixture,null,2)+'\n');
+else assert.deepEqual(JSON.parse(readFileSync(file,'utf8')),fixture);
+console.log(`${cases.length} TS work/event/delivery transitions match.`);

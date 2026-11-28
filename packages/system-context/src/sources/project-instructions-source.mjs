@@ -15,22 +15,7 @@ function isPlainFile(filePath) {
 }
 
 function readProjectInstructionFile(filePath, maxChars) {
-  const raw = fs.readFileSync(filePath, 'utf8');
-  if (raw.length <= maxChars) {
-    return {
-      content: raw.trim(),
-      truncated: false,
-      originalChars: raw.length,
-      includedChars: raw.length,
-    };
-  }
-
-  return {
-    content: raw.slice(0, maxChars).trimEnd(),
-    truncated: true,
-    originalChars: raw.length,
-    includedChars: maxChars,
-  };
+  return trimInstructionContent(fs.readFileSync(filePath, 'utf8'), maxChars);
 }
 
 function trimInstructionContent(raw, maxChars) {
@@ -44,11 +29,15 @@ function trimInstructionContent(raw, maxChars) {
     };
   }
 
+  let includedChars = maxChars;
+  const last = value.charCodeAt(includedChars - 1);
+  const next = value.charCodeAt(includedChars);
+  if (last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) includedChars--;
   return {
-    content: value.slice(0, maxChars).trimEnd(),
+    content: value.slice(0, includedChars).trimEnd(),
     truncated: true,
     originalChars: value.length,
-    includedChars: maxChars,
+    includedChars,
   };
 }
 

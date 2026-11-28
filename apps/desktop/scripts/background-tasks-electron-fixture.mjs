@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { executeProjectedModelTool } from '../electron/main/chat-runtime/projected-tool-executor.mjs';
 import { createLocalToolHost } from '../electron/main/runtime-gateway/local-tool-host.mjs';
 import { getApplicationShellTasks, disposeApplicationShellTasks } from '../electron/main/runtime-gateway/application-shell-tasks.mjs';
 import { disposeApplicationShellConversation, disposeApplicationShellSessions } from '../electron/main/runtime-gateway/application-shell-sessions.mjs';
@@ -45,13 +44,45 @@ ipcMain.on('settings:get-sync', (event) => { event.returnValue = {}; });
 
 let callIndex = 0;
 async function exec(command, source, runInBackground = false) {
-  return executeProjectedModelTool({
-    name: 'bash', args: { command, runInBackground }, workspacePath: home,
-    toolCallId: `smoke-call-${++callIndex}`, toolContext: { conversationId: source, mode: 'chat' },
-    goalPlanStore: { listPlansByConversation: () => [{ status: 'executing' }] },
-    requestPermission: async () => ({ granted: true }),
-    shellApprovalDecider: async () => ({ granted: true, reason: 'isolated_test' }), locale: 'en-US',
-  });
+  const toolCallId = `smoke-call-${++callIndex}`;
+  const grant = {
+    grantId: toolCallId,
+    toolCallId,
+    granted: true,
+    duration: 'once',
+    scope: 'local.shell.exec',
+    reason: 'isolated_test',
+    decidedAt: new Date().toISOString(),
+  };
+  const execution = await host.execute(
+    {
+      call: {
+        id: toolCallId,
+        toolCallId,
+        name: 'bash',
+        capabilityId: 'local.shell.exec',
+        arguments: { command, runInBackground },
+      },
+    },
+    {
+      conversationId: source,
+      workspaceRoot: home,
+      toolContext: { conversationId: source, workspacePath: home, mode: 'chat' },
+      goalPlanStore: { listPlansByConversation: () => [{ status: 'executing' }] },
+      localApproval: grant,
+      requestPermission: async () => ({ granted: true, grant, reason: 'isolated_test' }),
+      shellApprovalDecider: async () => ({ granted: true, reason: 'isolated_test' }),
+      locale: 'en-US',
+    },
+  );
+  const ok = execution?.result?.status === 'success' || execution?.result?.status === 'completed';
+  return {
+    success: ok,
+    output: typeof execution?.result?.output === 'string'
+      ? execution.result.output
+      : JSON.stringify(execution?.result?.output ?? execution?.result?.error ?? ''),
+    execution,
+  };
 }
 globalThis.peerBackgroundSmoke = {
   async launch(source) {

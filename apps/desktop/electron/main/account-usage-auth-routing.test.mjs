@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAccountUsageService } from './account-usage-service.mjs';
 
-const pairs = [['oauth_chatgpt', 'openai'], ['oauth_google', 'google-ai'], ['oauth_grok', 'grok'], ['qoder_local_auth', 'qoder'], ['local_cli', 'qoder']];
+const pairs = [['oauth_chatgpt', 'openai'], ['oauth_grok', 'grok']];
 for (const [authMethod, expected] of pairs) {
   for (const channelId of [expected, undefined, 'openai-compatible', 'deepseek']) {
     test(`auth-routing/${authMethod}/${channelId ?? 'legacy-no-channel'}`, async () => {

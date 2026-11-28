@@ -3,7 +3,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, writeF
 import path from "node:path";
 
 /** Owns durable change events, incremental subscriptions and callback lifetime through the existing store commit boundary. */
-export function createGoalPlanEvents({ storeDir, onChange }) {
+export function createGoalPlanEvents({ storeDir, onChange, afterCommit = callback => callback() }) {
 
   const changeFile = path.join(storeDir, '.changes.jsonl');
   // onChange 可变引用：Desktop 在构造时注入；TUI 需在建好 store 之后再挂
@@ -46,12 +46,11 @@ export function createGoalPlanEvents({ storeDir, onChange }) {
       console.warn('[goal-plan-store] change event write failed:', err);
     }
     if (options.notifyLocal === false || typeof onChangeCallback !== 'function') return;
-    try {
-      onChangeCallback(payload);
-    } catch (err) {
-      // 广播失败不影响写盘结果，但显式打印以便排查（不要静默吞）。
-      console.warn('[goal-plan-store] onChange broadcast failed:', err);
-    }
+    const callback = onChangeCallback;
+    afterCommit(() => {
+      try { callback(payload); }
+      catch (err) { console.warn('[goal-plan-store] onChange broadcast failed:', err); }
+    });
   }
 
   function notifyChanged(reason, planId, options = {}) {

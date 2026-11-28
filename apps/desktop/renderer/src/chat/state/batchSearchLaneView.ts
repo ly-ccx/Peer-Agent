@@ -79,6 +79,78 @@ function parseMaybeJson(value: unknown): unknown {
   return undefined;
 }
 
+/**
+ * 从 Rust `local_tool_result_ref.preview` 截断的 JSON 头部中无回溯恢复
+ * 顶层 status、已完整的 lanes 对象以及（若存在）aggregated.totalUniqueMatches。
+ */
+function extractTruncatedBatchSearchPreview(
+  preview: string,
+  envelopeStatus?: unknown,
+): Record<string, unknown> {
+  const full = parseMaybeJson(preview);
+  if (isRecord(full)) return full;
+
+  const statusMatch = preview.match(/"status"\s*:\s*"(success|partial|failed|cancelled|blocked|completed)"/);
+  const status = statusMatch?.[1]
+    ?? (typeof envelopeStatus === 'string' && envelopeStatus ? envelopeStatus : 'success');
+
+  const lanes: Record<string, unknown>[] = [];
+  const lanesKey = preview.indexOf('"lanes"');
+  if (lanesKey >= 0) {
+    const arrStart = preview.indexOf('[', lanesKey);
+    if (arrStart >= 0) {
+      let i = arrStart + 1;
+      let inString = false;
+      let escaped = false;
+      let depth = 0;
+      let objStart = -1;
+      while (i < preview.length) {
+        const ch = preview[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          if (depth === 0) objStart = i;
+          depth += 1;
+        } else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0 && objStart >= 0) {
+            const parsedObj = parseMaybeJson(preview.slice(objStart, i + 1));
+            if (isRecord(parsedObj)) lanes.push(parsedObj);
+            objStart = -1;
+          }
+        } else if (ch === ']' && depth === 0) {
+          break;
+        }
+        i += 1;
+      }
+    }
+  }
+
+  const totalMatch = preview.match(/"totalUniqueMatches"\s*:\s*(\d+)/);
+  const aggregated = totalMatch
+    ? { totalUniqueMatches: Number(totalMatch[1]), truncated: true, matches: [] }
+    : lanes.length > 0 && lanes.some((l) => typeof l.matchCount === 'number')
+      ? {
+          totalUniqueMatches: lanes.reduce(
+            (sum, l) => sum + (typeof l.matchCount === 'number' ? l.matchCount : 0),
+            0,
+          ),
+          truncated: true,
+          matches: [],
+        }
+      : undefined;
+
+  return {
+    status,
+    lanes,
+    ...(aggregated ? { aggregated } : {}),
+  };
+}
+
 function normalizeAggregate(raw: unknown): BatchSearchAggregateView | undefined {
   if (!isRecord(raw)) return undefined;
   const matchesRaw = Array.isArray(raw.matches) ? raw.matches : [];
@@ -124,14 +196,18 @@ export function buildBatchSearchView(
   const parsed = parseMaybeJson(result);
   const resultRecord = isRecord(parsed) ? parsed : undefined;
 
-  // 后端会把聚合 Provider 结果包裹成 local_capability_result_ref：
-  // { kind, tool, status: 'completed', outputPreview: { status, lanes, aggregated } }。
-  // 真实的 lanes/aggregated/status 位于 outputPreview 内层；此处下钻一层，
-  // 同时兼容历史「裸结构」（直接是 { status, lanes, aggregated }）。
-  const innerRecord =
-    resultRecord && isRecord(resultRecord.outputPreview)
-      ? resultRecord.outputPreview
-      : resultRecord;
+  // 后端会把聚合 Provider 结果包裹成：
+  // 1) local_capability_result_ref：{ kind, tool, status: 'completed', outputPreview: { status, lanes, aggregated } }
+  // 2) Rust local_tool_result_ref（大结果卸载）：{ kind: 'local_tool_result_ref', preview: '{"status":"success","lanes":[...<truncated>' }
+  // 此处统一解包，同时兼容历史「裸结构」（直接是 { status, lanes, aggregated }）。
+  const innerRecord = (() => {
+    if (!resultRecord) return undefined;
+    if (isRecord(resultRecord.outputPreview)) return resultRecord.outputPreview;
+    if (resultRecord.kind === 'local_tool_result_ref' && typeof resultRecord.preview === 'string') {
+      return extractTruncatedBatchSearchPreview(resultRecord.preview, resultRecord.envelopeStatus);
+    }
+    return resultRecord;
+  })();
 
   // blocked / 无结果（运行中）处理。
   const status = ((): BatchSearchView['status'] => {
@@ -173,6 +249,34 @@ export function buildBatchSearchView(
     for (const id of order) {
       const lane = baseLanes.get(id);
       if (lane) baseLanes.set(id, { ...lane, phase: 'running' });
+    }
+  } else if (status !== 'running') {
+    // 终态（含大结果截断预览或整轮失败/拦截）时，未出现在截断片段里的剩余 lane 不应卡在 pending。
+    const fallbackPhase: BatchLanePhase =
+      status === 'failed' || status === 'blocked'
+        ? 'failed'
+        : status === 'cancelled'
+          ? 'cancelled'
+          : 'completed';
+    const fallbackError =
+      (status === 'failed' || status === 'blocked')
+        && typeof innerRecord?.errorMessage === 'string'
+        && innerRecord.errorMessage
+        ? innerRecord.errorMessage
+        : (status === 'failed' || status === 'blocked')
+            && typeof innerRecord?.reason === 'string'
+            && innerRecord.reason
+          ? innerRecord.reason
+          : undefined;
+    for (const id of order) {
+      const lane = baseLanes.get(id);
+      if (lane && lane.phase === 'pending') {
+        baseLanes.set(id, {
+          ...lane,
+          phase: fallbackPhase,
+          ...(fallbackError && !lane.errorMessage ? { errorMessage: fallbackError } : {}),
+        });
+      }
     }
   }
 

@@ -326,19 +326,13 @@ test('event loop, plan write, and slow console lines keep only durations', () =>
   removeOwner();
 });
 
-test('stream send keeps its return value and exception when segment logging fails', async () => {
-  const { wrapWebContentsForRuntimeEvents } = await import('./chat-runtime/stream-event-projection.mjs');
+test('recordMainSegment ignores sink failures without throwing', () => {
   const secret = 'super-secret-plan-body';
   setMainSegmentSink(() => { throw new Error('segment-failed'); }, { thresholdMs: 0, now: 0 });
   try {
-    const sink = wrapWebContentsForRuntimeEvents({
-      send(_channel, payload) { return payload.content; },
-    }, { streamId: 's', segments: [], accumulatedText: '' });
-    assert.equal(sink.send('chat:stream:delta', { content: secret }), secret);
-    const failing = wrapWebContentsForRuntimeEvents({
-      send() { throw new Error('send-failed'); },
-    }, { streamId: 's', segments: [], accumulatedText: '' });
-    assert.throws(() => failing.send('chat:stream:delta', { content: secret }), /send-failed/);
+    assert.doesNotThrow(() => recordMainSegment(diagnosticStreamSegment('chat:stream:delta'), 10, 0));
+    assert.doesNotThrow(() => flushMainSegments(2000));
+    assert.equal(secret, 'super-secret-plan-body');
   } finally {
     setMainSegmentSink(null);
   }

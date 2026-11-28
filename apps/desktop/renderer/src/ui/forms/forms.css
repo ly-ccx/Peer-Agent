@@ -19,9 +19,67 @@ textarea.ui-input { resize: vertical; min-block-size: 8lh; }
 .ui-settings-copy p { margin: var(--space-1) 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: 1.55; }
 .ui-settings-control { min-inline-size: 0; }
 .ui-editor-body { padding: var(--space-4); display: grid; gap: var(--space-3); }
-.ui-leave-dialog { max-inline-size: min(30rem, calc(100vw - var(--space-8))); }
-.ui-leave-dialog h2 { font-size: var(--ui-font-heading-md); }
-.ui-leave-dialog p { color: var(--graphite-soft); line-height: var(--ui-line-body); }
+.pa-overlay-backdrop:has(> .ui-leave-dialog) {
+  background: color-mix(in srgb, var(--glass-modal-scrim) 72%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ui-leave-dialog {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  inline-size: min(27rem, 100%);
+  max-block-size: calc(100dvh - var(--space-8) * 2);
+  overflow: auto;
+  padding: var(--space-6);
+  border-radius: var(--ui-radius-modal);
+  background: var(--chrome-raised);
+  box-shadow: var(--shadow-popover);
+  overflow-wrap: anywhere;
+}
+
+.ui-leave-dialog::before { display: none; }
+.ui-leave-dialog h2 {
+  margin: 0;
+  color: var(--graphite-base);
+  font-size: var(--ui-font-heading-sm);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ui-leave-dialog p {
+  margin: 0;
+  color: var(--graphite-soft);
+  font-size: var(--ui-font-body);
+  line-height: var(--ui-line-body);
+}
+
+.ui-leave-dialog p[role="alert"] { color: var(--state-danger); }
+
+.ui-leave-dialog .ui-form-actions {
+  margin-block-start: var(--space-3);
+  padding-block: 0;
+}
+
+.ui-leave-dialog .ui-form-actions > :not([data-stay], .is-primary) {
+  border-color: var(--chrome-hairline);
+  background: transparent;
+}
+
+.ui-leave-dialog .ui-form-actions > :not([data-stay], .is-primary):hover:not(:disabled) {
+  background: var(--control-fill-hover);
+}
+
+.ui-leave-dialog .ui-form-actions:not(:has(> .is-primary)) > [data-stay] {
+  background: var(--graphite-base);
+  color: var(--paper-sheet);
+}
+
+.ui-leave-dialog .ui-form-actions:not(:has(> .is-primary)) > [data-stay]:hover:not(:disabled) {
+  background: var(--graphite-base-hover);
+}
 @container settings (max-width: 560px) { .ui-settings-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); } }
 @media (max-width: 600px) { .ui-settings-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); } }
 @media (forced-colors: active) { :is(.ui-button, .ui-input) { border-color: ButtonText; } .ui-button:disabled { color: GrayText; } }

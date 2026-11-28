@@ -55,19 +55,28 @@ export function BatchSearchToolCard({
         ? `${laneCount} 路`
         : `${laneCount} lane(s)`;
 
-  const matchPart =
-    view.aggregate != null
-      ? isZh
-        ? `共 ${view.aggregate.totalUniqueMatches} 条${view.aggregate.truncated ? '（截断）' : ''}`
-        : `${view.aggregate.totalUniqueMatches} match(es)${view.aggregate.truncated ? ' (truncated)' : ''}`
-      : isZh
-        ? '检索中…'
-        : 'searching…';
+  const matchPart = isRunning
+    ? (isZh ? '检索中…' : 'searching…')
+    : view.status === 'failed'
+      ? (isZh ? '检索失败' : 'failed')
+      : view.status === 'blocked'
+        ? (isZh ? '已拦截' : 'blocked')
+        : view.status === 'cancelled'
+          ? (isZh ? '已取消' : 'cancelled')
+          : view.aggregate != null
+            ? isZh
+              ? `共 ${view.aggregate.totalUniqueMatches} 条${view.aggregate.truncated ? '（截断）' : ''}`
+              : `${view.aggregate.totalUniqueMatches} match(es)${view.aggregate.truncated ? ' (truncated)' : ''}`
+            : (isZh ? '已完成' : 'done');
 
   const lead = isZh ? '批量检索' : 'Batch search';
   const summary = `${lead} · ${lanePart} · ${matchPart}`;
 
-  const phaseState = isRunning ? 'running' : view.status === 'failed' ? 'error' : 'done';
+  const phaseState = isRunning
+    ? 'running'
+    : view.status === 'failed' || view.status === 'blocked' || view.status === 'cancelled'
+      ? 'error'
+      : 'done';
   const hasResults = view.aggregate != null && view.aggregate.matches.length > 0;
   const expandable = laneCount > 0 || hasResults;
 

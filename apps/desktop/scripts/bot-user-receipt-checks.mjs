@@ -1,23 +1,42 @@
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { openReplyDetails, closeReplyDetails, selectBotByName, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, openBotListSearch, selectBotByName, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 
 /** One canonical reply referencing three tasks must remain one input acknowledgement. */
 export async function checkBotUserReceipt({ page, until, report, captureDirectory, home, bot, commandFile }) {
-  const previousSearch = await page.locator('.bot-search').inputValue();
+  const search = await openBotListSearch(page);
+  const previousSearch = await search.inputValue();
+  await search.press('Escape');
   await selectBotByName(page, 'project-000');
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await page.locator('.bot-thread').focus();
   await page.keyboard.press('Home');
   const latest = page.locator('.bot-thread-latest');
   await latest.waitFor();
-  assert.equal(await latest.evaluate(button => {
-    const thread = button.closest('.bot-thread-shell').querySelector('.bot-thread');
-    return button.getBoundingClientRect().top >= thread.getBoundingClientRect().bottom;
-  }), true, 'the return-to-latest action does not cover the reading viewport');
+  assert.deepEqual(await latest.evaluate(button => {
+    const shell = button.closest('.bot-thread-shell');
+    const thread = shell.querySelector('.bot-thread');
+    const composer = button.closest('.bot-convo')?.querySelector('.bot-composer');
+    const buttonRect = button.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    const threadRect = thread.getBoundingClientRect();
+    const composerRect = composer?.getBoundingClientRect();
+    return {
+      position: getComputedStyle(button).position,
+      shellMatchesThreadBottom: Math.abs(threadRect.bottom - shellRect.bottom) <= 1,
+      insideShellHorizontally: buttonRect.left >= shellRect.left && buttonRect.right <= shellRect.right,
+      insideThreadBottom: buttonRect.top >= threadRect.top && buttonRect.bottom <= threadRect.bottom,
+      aboveComposer: !composerRect || buttonRect.bottom <= composerRect.top,
+    };
+  }), {
+    position: 'absolute',
+    shellMatchesThreadBottom: true,
+    insideShellHorizontally: true,
+    insideThreadBottom: true,
+    aboveComposer: true,
+  }, 'the return-to-latest button floats inside the thread shell without reserving a strip below the viewport');
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const titles = ['入口样式收尾', '中断原因核查收尾', '设置按钮记录核对'];
   const sessions = titles.map((title, index) => ({ ...initial.sessions[0], sessionId: `receipt-task-${index}`,
@@ -33,7 +52,7 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   change({ ...initial, seq: initial.seq + 1, sessions });
   // The fixture writes outside the running host, so it emits no conversation
   // update event. A real navigation must reload it even if this Bot is already selected.
-  await page.locator('.bot-search').fill('project-001');
+  await (await openBotListSearch(page)).fill('project-001');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
   await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text?.includes('project-001'));
   await page.locator('.bot-search').fill('project-000');
@@ -73,13 +92,14 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     const action = work.first().getByRole('button', { name: '查看任务详情', exact: true });
     await action.waitFor({ state: 'visible' });
     await action.focus(); await action.press('Enter');
-    const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail'); await detail.waitFor();
-    assert.match(await detail.innerText(), /入口样式收尾/);
-    assert.equal(await detail.evaluate(node => Boolean(node.closest('.bot-drawer-dock'))), true);
-    await until(() => page.locator('.bot-drawer-dock:not([inert])').evaluate(node => node.contains(document.activeElement)), Boolean);
+    const detail = page.locator('.bot-task-workspace');
+    const heading = detail.getByRole('heading', { name: titles[0], exact: true });
+    await heading.waitFor();
+    await until(() => heading.evaluate(node => node === document.activeElement), Boolean);
     if (width === 760) assert.equal(await page.locator('.bot-resource-layout').getAttribute('data-resource-focus'), 'primary');
-    await page.locator(BOT_DETAIL_CLOSE).click();
-    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
+    const parent = page.locator('.bot-crumb-parent');
+    await parent.focus(); await parent.press('Enter');
+    await detail.waitFor({ state: 'hidden' });
     await openReplyDetails(page, reply);
     assert.equal(await page.locator('.bot-reply-details .bot-work-row').first().evaluate(node => node.open), true,
       'reopening reply details preserves the task disclosure state');
@@ -89,6 +109,6 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   const savedReply = store.getPersistedConversationHistory(bot.conversationId).messages.find(message => message.id === 'receipt-reply');
   assert.deepEqual(savedReply.sources, sessions.map(session => session.sessionId));
   change({ ...initial, seq: initial.seq + 2 });
-  await page.locator('.bot-search').fill(previousSearch);
+  await (await openBotListSearch(page)).fill(previousSearch);
   report.userReceipt = { singleReceipt: true, noTaskDuplicates: true, sourcesRetained: true, keyboard: true, cases };
 }

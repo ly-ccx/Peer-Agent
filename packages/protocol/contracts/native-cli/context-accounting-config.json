@@ -1,0 +1,5 @@
+{
+  "triggerRatio": 0.8,
+  "hardRatio": 0.92,
+  "driftToleranceRatio": 0.02
+}

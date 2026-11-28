@@ -1,0 +1,593 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "authMethod": "oauth_chatgpt",
+      "channelId": "openai",
+      "wire": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "tokenUrl": "https://auth.openai.com/oauth/token",
+      "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "login": {
+        "authorizationUrl": "https://auth.openai.com/oauth/authorize",
+        "redirectUri": "http://localhost:1455/auth/callback",
+        "scope": "openid profile email offline_access",
+        "parameters": {
+          "id_token_add_organizations": "true"
+        }
+      },
+      "headers": {
+        "originator": "peer-agent"
+      },
+      "accountHeader": "chatgpt-account-id"
+    },
+    {
+      "authMethod": "oauth_grok",
+      "channelId": "grok",
+      "wire": "openai-responses",
+      "baseUrl": "https://cli-chat-proxy.grok.com/v1",
+      "tokenUrl": "https://auth.x.ai/oauth2/token",
+      "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+      "issuer": "https://auth.x.ai",
+      "headers": {
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-grok-client-surface": "grok-build",
+        "originator": "peer-agent"
+      },
+      "login": {
+        "kind": "device",
+        "deviceUrl": "https://auth.x.ai/oauth2/device/code",
+        "userinfoUrl": "https://auth.x.ai/oauth2/userinfo",
+        "scope": "openid profile email offline_access grok-cli:access api:access",
+        "verificationOrigins": [
+          "https://auth.x.ai",
+          "https://accounts.x.ai",
+          "https://grok.com",
+          "https://x.ai"
+        ]
+      },
+      "compatibility": {
+        "releaseUrl": "https://x.ai/cli/stable",
+        "timeoutMs": 4000,
+        "cacheTtlMs": 21600000,
+        "maxStaleMs": 86400000,
+        "bodyBytes": 64,
+        "supportedMajor": "1"
+      }
+    }
+  ],
+  "subscriptionCatalog": [
+    {
+      "id": "gpt-6.2-astra",
+      "label": "GPT-6.2 Astra",
+      "maxOutputTokens": 128000,
+      "inputPrice": 8,
+      "outputPrice": 40,
+      "cacheReadPrice": 0.4,
+      "longContextInputThreshold": 272000,
+      "longContextInputPrice": 16,
+      "longContextCacheReadPrice": 0.8,
+      "longContextOutputPrice": 60,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "contextWindow": 400000,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "label": "GPT-6.2 Sol",
+      "maxOutputTokens": 128000,
+      "inputPrice": 2,
+      "outputPrice": 10,
+      "cacheReadPrice": 0.1,
+      "longContextInputThreshold": 272000,
+      "longContextInputPrice": 4,
+      "longContextCacheReadPrice": 0.2,
+      "longContextOutputPrice": 15,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "contextWindow": 400000,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "label": "GPT-6 Astra",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 10,
+      "outputPrice": 50,
+      "cacheReadPrice": 1,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "label": "GPT-6.1 Sol",
+      "maxOutputTokens": 128000,
+      "inputPrice": 2,
+      "outputPrice": 10,
+      "cacheReadPrice": 0.1,
+      "longContextInputThreshold": 272000,
+      "longContextInputPrice": 4,
+      "longContextCacheReadPrice": 0.2,
+      "longContextOutputPrice": 15,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "contextWindow": 400000,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "label": "GPT-6.1 Terra",
+      "maxOutputTokens": 128000,
+      "inputPrice": 1,
+      "outputPrice": 5,
+      "cacheReadPrice": 0.05,
+      "longContextInputThreshold": 272000,
+      "longContextInputPrice": 2,
+      "longContextCacheReadPrice": 0.1,
+      "longContextOutputPrice": 7.5,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "contextWindow": 400000,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6-sol",
+      "label": "GPT-6 Sol",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 2,
+      "outputPrice": 10,
+      "cacheReadPrice": 0.2,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-6-luna",
+      "label": "GPT-6 Luna",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 0.1,
+      "outputPrice": 0.5,
+      "cacheReadPrice": 0.01,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "label": "GPT-5.6 Sol",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 5,
+      "outputPrice": 30,
+      "cacheReadPrice": 0.5,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "label": "GPT-5.6 Terra",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 2.5,
+      "outputPrice": 15,
+      "cacheReadPrice": 0.25,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "label": "GPT-5.6 Luna",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 1,
+      "outputPrice": 6,
+      "cacheReadPrice": 0.1,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsPromptCaching": true,
+      "reasoningEffortLevels": [
+        "low",
+        "default",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.4",
+      "label": "GPT-5.4",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 2.5,
+      "outputPrice": 15,
+      "cacheReadPrice": 0.25,
+      "longContextInputThreshold": 272000,
+      "longContextInputPrice": 5,
+      "longContextCacheReadPrice": 0.5,
+      "longContextOutputPrice": 22.5,
+      "standardPricing": {
+        "shortContext": {
+          "inputPrice": 2.5,
+          "cacheReadPrice": 0.25,
+          "outputPrice": 15
+        },
+        "longContext": {
+          "inputPrice": 5,
+          "cacheReadPrice": 0.5,
+          "outputPrice": 22.5
+        },
+        "longContextInputThreshold": 272000
+      },
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "label": "GPT-5.4-Mini",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "inputPrice": 0.75,
+      "outputPrice": 4.5,
+      "cacheReadPrice": 0.075,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gpt-5.3-codex-spark",
+      "label": "GPT-5.3-Codex-Spark",
+      "contextWindow": 400000,
+      "modelOptions": [
+        {
+          "id": "contextTier",
+          "label": "上下文",
+          "kind": "select",
+          "defaultValue": 400000,
+          "choices": [
+            {
+              "value": 400000,
+              "label": "400K",
+              "contextWindow": 400000,
+              "inputTokenLimit": 400000
+            },
+            {
+              "value": 1000000,
+              "label": "1M",
+              "contextWindow": 1000000,
+              "inputTokenLimit": 1000000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

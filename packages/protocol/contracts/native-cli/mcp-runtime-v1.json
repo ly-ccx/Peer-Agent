@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "maxConnections": 8,
+  "maxFrameBytes": 1048576,
+  "maxRequestBytes": 262144,
+  "maxRpcBytes": 8388608,
+  "maxRpcFrames": 128,
+  "channelEntries": 1,
+  "timeoutMs": 30000,
+  "protocolVersion": "2025-11-25",
+  "clientInfo": {
+    "name": "peer-agent",
+    "version": "1.0.0"
+  },
+  "maxResultBytes": 262144
+}

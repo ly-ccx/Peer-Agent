@@ -1,0 +1,458 @@
+/* ─────────────────────────────────────────────────────────────
+ * Conversation-First Subtask Workspace & On-Demand Inspector
+ * Renders the worker's native ChatSurface directly as the main stage,
+ * framed by a minimal single-line status strip and bottom Touch Bar.
+ * ───────────────────────────────────────────────────────────── */
+
+.bot-task-workspace {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--paper-base);
+  overflow: hidden;
+}
+
+.bot-task-stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Compact Single-Line Status Strip */
+.bot-task-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--chrome-hairline);
+  background: var(--paper-base);
+}
+
+.bot-task-strip-leading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bot-task-strip-title {
+  margin: 0;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--graphite-base);
+}
+
+.bot-task-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.bot-task-strip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 520;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--za-motion-fast, 120ms) ease, color var(--za-motion-fast, 120ms) ease;
+}
+
+.bot-task-strip-btn:hover:not(:disabled) {
+  background: var(--paper-hover);
+  color: var(--graphite-base);
+}
+
+.bot-task-strip-btn[data-tone="good"] {
+  color: var(--state-success);
+  border-color: color-mix(in srgb, var(--state-success) 30%, transparent);
+}
+
+.bot-task-strip-btn[data-tone="danger"] {
+  color: var(--state-danger);
+  border-color: color-mix(in srgb, var(--state-danger) 30%, transparent);
+}
+
+.bot-task-status-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--ui-radius-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--control-fill);
+  color: var(--graphite-soft);
+}
+
+.bot-task-status-pill[data-tone="azure"] {
+  background: color-mix(in srgb, var(--azure-seal) 14%, transparent);
+  color: var(--azure-seal);
+}
+.bot-task-status-pill[data-tone="good"] {
+  background: var(--state-success-soft);
+  color: var(--state-success);
+}
+.bot-task-status-pill[data-tone="warn"] {
+  background: var(--state-warn-soft);
+  color: var(--state-confirm);
+}
+.bot-task-status-pill[data-tone="danger"] {
+  background: var(--state-danger-soft);
+  color: var(--state-danger);
+}
+
+.bot-task-meta-text {
+  flex: none;
+  font-size: 12px;
+  color: var(--graphite-fade);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Contextual 1-Line Notice Bar (failure / approval / question / feedback) */
+.bot-task-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.bot-task-notice[data-tone="danger"] {
+  color: var(--state-danger);
+  background: color-mix(in srgb, var(--state-danger) 6%, var(--paper-base));
+  border-bottom-color: color-mix(in srgb, var(--state-danger) 20%, transparent);
+}
+
+.bot-task-notice[data-tone="warn"] {
+  color: var(--state-confirm);
+  background: color-mix(in srgb, var(--state-confirm) 7%, var(--paper-base));
+  border-bottom-color: color-mix(in srgb, var(--state-confirm) 20%, transparent);
+}
+
+.bot-task-notice-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--graphite-base);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Main Worker Conversation Stage (fills remaining height cleanly) */
+.bot-task-conversation-stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bot-inline-scene--seamless {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.bot-inline-scene--seamless > .conversation-chat-drawer-shell {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.bot-inline-scene--seamless .conversation-chat-drawer__body {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.bot-task-empty-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 24px;
+  color: var(--graphite-fade);
+  text-align: center;
+}
+
+.bot-task-empty-copy {
+  margin: 0;
+  max-width: 480px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--graphite-soft);
+  white-space: pre-wrap;
+}
+
+.bot-task-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control-compact);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.bot-task-btn:hover:not(:disabled) {
+  background: var(--paper-hover);
+}
+
+/* Task Follow-up Composer */
+.bot-task-followup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 10px 14px;
+}
+
+.bot-task-followup-form textarea {
+  width: 100%;
+  min-height: 26px;
+  max-height: 112px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--graphite-base);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.bot-task-followup-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bot-task-followup-leading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bot-task-followup-hint {
+  font-size: 12px;
+  color: var(--graphite-fade);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-task-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--ui-radius-control);
+  background: var(--chrome-keycap-bg);
+  color: var(--chrome-keycap-fg);
+  cursor: pointer;
+}
+
+.bot-task-send-btn:disabled {
+  background: var(--control-fill);
+  color: var(--graphite-mute);
+  cursor: default;
+}
+
+/* On-Demand Right Task Inspector */
+.bot-task-inspector {
+  width: 356px;
+  flex: 0 0 356px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--chrome-hairline);
+  background: var(--control-composer);
+  z-index: 22;
+}
+
+.bot-task-inspector.is-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 88%);
+  box-shadow: var(--shadow-popover);
+}
+
+.bot-inspector-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--chrome-hairline);
+}
+
+.bot-inspector-title {
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--graphite-base);
+}
+
+.bot-inspector-tabs {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--chrome-hairline);
+}
+
+.bot-inspector-tab {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-soft);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.bot-inspector-tab:hover {
+  background: var(--paper-hover);
+  color: var(--graphite-base);
+}
+
+.bot-inspector-tab.is-active {
+  background: var(--control-fill);
+  color: var(--graphite-base);
+}
+
+.bot-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bot-inspector-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bot-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bot-inspector-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--graphite-fade);
+}
+
+.bot-inspector-brief-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--graphite-base);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bot-inspector-code {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border-radius: var(--ui-radius-detail);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--state-danger);
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
+}
+
+.bot-inspector-empty {
+  margin: 24px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--graphite-fade);
+}
+
+.bot-inspector-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: var(--ui-radius-control);
+  background: var(--paper-base);
+  border: 1px solid var(--chrome-hairline);
+  font-size: 12px;
+}
+
+.bot-inspector-meta dt {
+  color: var(--graphite-fade);
+  margin-bottom: 2px;
+}
+
+.bot-inspector-meta dd {
+  margin: 0;
+  color: var(--graphite-base);
+  word-break: break-all;
+}
+
+.bot-inspector-meta code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

@@ -9,27 +9,29 @@ const stateKeys: Readonly<Record<string, TranslationKey>> = {
   expired: 'projectAgent.chat.approvalReceipt.expired',
 };
 
-export function ApprovalReceipt({ card, i18n, notice }: {
+export function ApprovalReceipt({ card, i18n, notice, planTitle }: {
   readonly card: BotChatCard;
   readonly i18n: I18nRuntime;
   readonly notice?: TranslationKey;
+  readonly planTitle?: string;
 }) {
   const state = stateKeys[card.resolution?.state ?? ''] ?? 'projectAgent.chat.approvalReceipt.closed';
+  const description = planTitle ?? card.content;
+  const heading = <>
+    <PeerIcon name="history" size={14} />
+    <span className="bot-approval-receipt-copy">
+      <strong>{i18n.t(card.kind === 'plan_approval' ? 'projectAgent.chat.planDecisionRecord' : 'projectAgent.chat.approvalReceipt.title')}</strong>
+      {description ? <span className="bot-approval-receipt-excerpt">{description}</span> : null}
+    </span>
+    <span className="bot-approval-receipt-state">{i18n.t(state)}</span>
+  </>;
   return <section className="bot-card bot-approval-receipt is-resolved" data-card-id={card.cardId}>
-    <details>
-      <summary>
-        <PeerIcon name="history" size={14} />
-        <span className="bot-approval-receipt-copy">
-          <strong>{i18n.t(card.kind === 'plan_approval' ? 'projectAgent.chat.planDecisionRecord' : 'projectAgent.chat.approvalReceipt.title')}</strong>
-          <span className="bot-approval-receipt-excerpt">{card.content}</span>
-        </span>
-        <span className="bot-approval-receipt-state">{i18n.t(state)}</span>
-        <PeerIcon name="chevronRight" size={13} />
-      </summary>
+    {description || notice ? <details>
+      <summary>{heading}<PeerIcon name="chevronRight" size={13} /></summary>
       <div className="bot-approval-receipt-content">
         {notice ? <p>{i18n.t(notice)}</p> : null}
-        <pre>{card.content}</pre>
+        {description ? <pre>{description}</pre> : null}
       </div>
-    </details>
+    </details> : <div className="bot-approval-receipt-summary">{heading}</div>}
   </section>;
 }

@@ -38,8 +38,8 @@ test('compact header shell mask and divider share one height source', async () =
     css,
     /\.task-overview-scroll-region\s*\{[\s\S]*?padding-bottom:\s*calc\(var\(--ui-radius-panel\) \+ 3\.25rem\);/,
   );
-  assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::before\s*\{[\s\S]*?height:\s*var\(--task-overview-compact-height\);[\s\S]*?background:\s*var\(--za-app-bg\);/);
-  assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::after\s*\{[\s\S]*?top:\s*calc\(var\(--task-overview-compact-height\) - 1px\);[\s\S]*?background:\s*var\(--za-line\);/);
+  assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::before\s*\{[\s\S]*?height:\s*var\(--task-overview-compact-height\);[\s\S]*?background:\s*var\(--chrome-canvas\);/);
+  assert.match(css, /\.task-overview-page-layer:has\(\.task-overview-compact-header\.is-visible\)::after\s*\{[\s\S]*?top:\s*calc\(var\(--task-overview-compact-height\) - 1px\);[\s\S]*?background:\s*var\(--chrome-hairline\);/);
   assert.match(css, /\.task-overview-compact-header\s*\{[\s\S]*?height:\s*var\(--task-overview-compact-height\);/);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*?--task-overview-compact-height:\s*5\.5rem;/);
   assert.doesNotMatch(css, /top:\s*59px|min-height:\s*3\.75rem/);

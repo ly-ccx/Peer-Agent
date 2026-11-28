@@ -1,11 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { createExecutionScheduler, createGoalPlanStore, createSessionSupervisor, createHostLease, createDelegationProvider } from '@peer-agent/runtime-node';
+import { createExecutionScheduler, createGoalPlanStore, createSessionSupervisor, createHostLease, createDelegationProvider, createProjectGoalRunnerHost } from '@peer-agent/runtime-node';
 import { createScriptedTurnExecutor } from '@peer-agent/runtime-node/testing';
 import { createProjectAgentHost } from '../project-agent-host.mjs';
-import { createDesktopGoalRunnerHost } from '../../agent-host/goal-runner-host.mjs';
-import { createAgentTurnExecutor } from '../../agent-host/agent-turn-executor.mjs';
 
 const [root, killedPhase = ''] = process.argv.slice(2);
 const setup = JSON.parse(readFileSync(path.join(root, 'fixture.json'), 'utf8'));
@@ -24,10 +22,22 @@ let host;
 const scheduler = createExecutionScheduler({ rootDir: runtimeRoot });
 scheduler.configure({ isWorkspaceReady: id => host?.isReady(id) === true });
 let workerCalls = 0;
-const executor = createAgentTurnExecutor({ executionScheduler: scheduler, llmChatService: {
-  async sendMessage() { workerCalls++; return { requestedUserInput: true, terminalStatus: 'done' }; },
-} });
-const goalHost = createDesktopGoalRunnerHost({ goalPlanStore: plans, conversationStore: conversations,
+const executor = {
+  executionScheduler: scheduler,
+  async runTurn(input) {
+    return scheduler.withTurn(
+      { planId: input?.turnProfile?.planId, workspaceId: input?.turnProfile?.workspaceId || workspaceId, lane: 'work', signal: input?.signal },
+      async () => {
+        // Yield as the original executor did so the parent can crash at
+        // task_created before this worker dispatches its first model request.
+        await new Promise(resolve => setImmediate(resolve));
+        workerCalls++;
+        return { requestedUserInput: true, terminalStatus: 'done' };
+      },
+    );
+  },
+};
+const goalHost = createProjectGoalRunnerHost({ goalPlanStore: plans, conversationStore: conversations,
   agentTurnExecutor: executor, hostLeases: lease, broadcast() {}, llmChatService: {},
   resolveConversationModelProviderId: () => 'worker', toDesktopProviderMessages: messages => messages,
   desktopContinuityContextFromProjection: () => [], workspaceRoot: setup.workspacePath, getMainWindows: () => [],

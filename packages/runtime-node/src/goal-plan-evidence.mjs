@@ -1,3 +1,4 @@
+import { withStoreFileLock } from './store-file-lock.mjs';
 import { goalFileVersion as fileVersion } from "./goal-plan-files.mjs";
 import { appendJsonl, mergeEvidenceIndexRecords, normalizeEvidenceIndexRecord, readEvidenceRecordsFromTail, readJsonl, retainInteractiveEvidence, syncJsonl } from "./goal-plan-files.mjs";
 import { normalizeConversationId, normalizeEvidenceRefList, normalizeOptionalString } from "./goal-plan-domain.mjs";
@@ -12,6 +13,14 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
   const evidenceRecordCache = new Map();
   const missingEvidenceRefCache = new Set();
   let evidenceCacheVersion = null;
+  function readNormalizedEvidenceRecords() {
+    return retainInteractiveEvidence(
+      readJsonl(evidenceIndexFile)
+        .map(normalizeEvidenceIndexRecord)
+        .filter(Boolean),
+    );
+  }
+  /** @type {{ version: string, records: ReturnType<typeof readNormalizedEvidenceRecords>, byPlanId: Map<string, number[]>, byConversationId: Map<string, number[]> } | null} */
   let evidenceIndexReadCache = null;
   function refreshEvidenceCache() {
     const version = fileVersion(evidenceIndexFile);
@@ -25,21 +34,93 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
   // 缓存按 mtime+size 失效，本进程 append 时按写入字节数增量更新。
   let desktopPreviewPlanCache = null;
 
-  function readEvidenceIndex() {
+  /** @template {ReturnType<typeof readNormalizedEvidenceRecords>[number]} T @param {T} record @returns {T} */
+  function cloneEvidenceRecord(record) {
+    const copy = { ...record };
+    if (record.artifactRefs) copy.artifactRefs = record.artifactRefs.slice();
+    if (record.bodyPreview) copy.bodyPreview = { ...record.bodyPreview };
+    if (record.interactiveInspection) copy.interactiveInspection = structuredClone(record.interactiveInspection);
+    if (record.userArtifacts) {
+      copy.userArtifacts = record.userArtifacts.map((artifact) => {
+        if (artifact.kind === 'interactive') return structuredClone(artifact);
+        if (!artifact.preview) return { ...artifact };
+        const preview = artifact.preview.diffLines
+          ? { ...artifact.preview, diffLines: artifact.preview.diffLines.slice() }
+          : { ...artifact.preview };
+        return { ...artifact, preview };
+      });
+    }
+    return copy;
+  }
+
+  function loadEvidenceIndexCache() {
     // Completion and artifact projections can read the same large index many times
-    // in one refresh. Reuse parsing only while the durable file identity is unchanged;
-    // normalization returns fresh nested records, so callers cannot mutate this cache.
+    // in one refresh. Normalize and index once per durable file identity, then
+    // return fresh cloned records so callers cannot mutate cached state.
     const version = fileVersion(evidenceIndexFile);
     if (version === null) {
       evidenceIndexReadCache = null;
-      return [];
+      return null;
     }
-    if (evidenceIndexReadCache?.version !== version) {
-      evidenceIndexReadCache = { version, records: readJsonl(evidenceIndexFile) };
+    if (evidenceIndexReadCache?.version === version) return evidenceIndexReadCache;
+    const records = readNormalizedEvidenceRecords();
+    const byPlanId = new Map();
+    const byConversationId = new Map();
+    for (let i = 0; i < records.length; i += 1) {
+      const record = records[i];
+      if (record.planId) {
+        let bucket = byPlanId.get(record.planId);
+        if (!bucket) { bucket = []; byPlanId.set(record.planId, bucket); }
+        bucket.push(i);
+      }
+      if (record.conversationId) {
+        let bucket = byConversationId.get(record.conversationId);
+        if (!bucket) { bucket = []; byConversationId.set(record.conversationId, bucket); }
+        bucket.push(i);
+      }
     }
-    return retainInteractiveEvidence(evidenceIndexReadCache.records
-      .map(normalizeEvidenceIndexRecord)
-      .filter(Boolean));
+    evidenceIndexReadCache = { version, records, byPlanId, byConversationId };
+    return evidenceIndexReadCache;
+  }
+
+  function readEvidenceIndex() {
+    const cached = loadEvidenceIndexCache();
+    if (!cached) return [];
+    return cached.records.map(cloneEvidenceRecord);
+  }
+
+  function listEvidenceIndexForPlan(plan) {
+    if (!plan) return [];
+    const cached = loadEvidenceIndexCache();
+    if (!cached) return [];
+    const planId = normalizeOptionalString(plan.planId);
+    const conversationId = normalizeConversationId(plan.conversationId);
+    const planIndices = planId ? cached.byPlanId.get(planId) : undefined;
+    const convIndices = conversationId ? cached.byConversationId.get(conversationId) : undefined;
+    if (!planIndices?.length && !convIndices?.length) return [];
+    if (!planIndices?.length) return convIndices.map((idx) => cloneEvidenceRecord(cached.records[idx]));
+    if (!convIndices?.length) return planIndices.map((idx) => cloneEvidenceRecord(cached.records[idx]));
+    const merged = [];
+    let i = 0;
+    let j = 0;
+    while (i < planIndices.length && j < convIndices.length) {
+      const a = planIndices[i];
+      const b = convIndices[j];
+      if (a === b) {
+        merged.push(cloneEvidenceRecord(cached.records[a]));
+        i += 1;
+        j += 1;
+      } else if (a < b) {
+        merged.push(cloneEvidenceRecord(cached.records[a]));
+        i += 1;
+      } else {
+        merged.push(cloneEvidenceRecord(cached.records[b]));
+        j += 1;
+      }
+    }
+    while (i < planIndices.length) { merged.push(cloneEvidenceRecord(cached.records[planIndices[i]])); i += 1; }
+    while (j < convIndices.length) { merged.push(cloneEvidenceRecord(cached.records[convIndices[j]])); j += 1; }
+    return merged;
   }
 
   function recordHasDesktopPreviewArtifact(record) {
@@ -135,7 +216,12 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     return getActivePlanByConversation(normalizedConversationId)?.planId ?? null;
   }
 
-  function recordEvidenceRefs(entry = {}, { durable = false } = {}) {
+  function recordEvidenceRefs(entry = {}, { durable = false, protectToolOrigin = false } = {}) {
+    if (!normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef).length) return [];
+    return withStoreFileLock(evidenceIndexFile, () => recordEvidenceRefsLocked(entry, { durable, protectToolOrigin }));
+  }
+
+  function recordEvidenceRefsLocked(entry = {}, { durable = false, protectToolOrigin = false } = {}) {
     refreshEvidenceCache();
     const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
     if (refs.length === 0) return [];
@@ -162,8 +248,12 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     const mergedRecords = [];
     for (const record of records) {
       const previous = findEvidenceIndexRecords([record.evidenceRef])[0];
+      const canonical = protectToolOrigin && record.evidenceRef === `tool-result://${record.toolCallId}`;
+      if (canonical && previous && ['conversationId', 'streamId', 'toolCallId', 'capabilityId'].some(
+        field => record[field] !== previous[field],
+      )) throw Object.assign(new Error('conversation_execution_evidence_conflict'), { code: 'conversation_execution_evidence_conflict' });
       const merged = mergeEvidenceIndexRecords(previous, record);
-      if (previous && (merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
+      if (previous && (canonical || merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
         if (durable) syncJsonl(evidenceIndexFile);
         mergedRecords.push(merged);
         continue;
@@ -198,7 +288,7 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     const wanted = new Set(normalizeEvidenceRefList(refs));
     if (!plan || wanted.size === 0) return new Set();
     const found = new Set();
-    for (const record of readEvidenceIndex()) {
+    for (const record of listEvidenceIndexForPlan(plan)) {
       if (!wanted.has(record.evidenceRef)) continue;
       if (evidenceRecordMatchesPlan(record, plan)) found.add(record.evidenceRef);
     }
@@ -236,5 +326,5 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     }
     return true;
   }
-  return { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible };
+  return { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, listEvidenceIndexForPlan, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible };
 }

@@ -45,7 +45,7 @@ test('automation and plugins use the same clipped primary page shell as workbenc
   const shell = ruleBody(css, '.primary-page-shell');
   assert.match(shell, /height:\s*100%/);
   assert.match(shell, /overflow:\s*hidden/);
-  assert.match(shell, /background:\s*var\(--za-app-bg\)/);
+  assert.match(shell, /background:\s*var\(--chrome-canvas\)/);
   assert.match(shell, /border-radius:\s*var\(--ui-radius-panel\)/);
 
   // 共享壳直接约束 capability-workbench，而不是中间 tools-page。
@@ -65,6 +65,6 @@ test('plugin workbench paints only through the shared shell background', async (
 
   const detailPanel = ruleBody(css, '.capability-detail-panel');
   assert.match(detailPanel, /background:\s*transparent/);
-  assert.match(detailPanel, /border-left:\s*1px solid var\(--za-line\)/);
+  assert.match(detailPanel, /border-left:\s*1px solid var\(--chrome-hairline\)/);
   assert.doesNotMatch(css, /background:[^;]*--za-sidebar-bg/);
 });

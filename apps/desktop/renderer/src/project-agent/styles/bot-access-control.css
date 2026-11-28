@@ -1,17 +1,24 @@
 .bot-access-control { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.bot-access-picker.pa-dropdown { min-width: 0; }
 .bot-composer-bar .bot-access-picker > button { width: auto; min-width: 0; height: 32px; padding: 5px 6px; color: var(--graphite-soft); background: transparent; border: 0; border-radius: var(--ui-radius-control); font-size: 12px; }
 .bot-access-picker .dropdown-trigger-label { overflow: hidden; text-overflow: ellipsis; }
 .bot-access-picker .pa-dropdown-prefix { display: inline-flex; align-items: center; flex-shrink: 0; }
 .bot-composer-bar .bot-access-picker.pa-dropdown-danger > button { color: var(--state-danger); }
 
-.pa-dropdown-menu.bot-access-picker {
+.pa-dropdown-menu.bot-access-picker,
+.pa-dropdown-menu.composer-dropdown.bot-access-picker {
   width: min(380px, calc(100vw - 2 * var(--space-2)));
   min-width: 0;
   max-width: calc(100vw - 2 * var(--space-2));
   max-height: min(360px, calc(100dvh - 2 * var(--space-2)));
   padding: var(--space-2);
-  border-radius: var(--ui-radius-panel);
-  background: var(--paper-sheet);
+  border-radius: var(--ui-radius-modal);
+  background: var(--paper-raised);
+}
+
+.pa-dropdown-menu.composer-dropdown.bot-access-picker .pa-dropdown-item,
+.pa-dropdown-menu.bot-access-picker .pa-dropdown-item {
+  border-radius: var(--ui-radius-control);
 }
 
 .bot-access-picker .pa-dropdown-heading {

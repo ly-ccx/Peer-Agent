@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "capabilityId": "local.web.search",
+    "displayName": "Web search",
+    "description": "Search the public web for up-to-date documentation, repositories, news, or facts and return ranked titles, URLs, and text highlights. Follow up with web_fetch when full page details are needed.",
+    "riskLevel": "L3_sensitive",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal"
+    ],
+    "metadata": {
+      "modelToolName": "web_search"
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Natural-language search query describing the topic, documentation, repository, or facts to find."
+        },
+        "maxResults": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum number of search results to return (default 5, maximum 10)."
+        },
+        "objective": {
+          "type": "string",
+          "description": "Optional research goal specifying which sources should rank first or what concrete facts to focus on."
+        },
+        "includeDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional list of domains to focus search results on (e.g. [\"github.com\", \"agentclientprotocol.com\"])."
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "Search timeout in milliseconds (default 20000, maximum 60000)."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "limits": {
+    "queryChars": 1000,
+    "objectiveChars": 1000,
+    "maxResults": 10,
+    "maxDomains": 8,
+    "responseBytes": 2000000,
+    "snippetUnits": 1200
+  }
+}

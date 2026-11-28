@@ -5,6 +5,7 @@ import { conversationRows, normalizeBotMessage, type BotChatMessage, type Conver
 import { attachBotProcesses, visibleBotActivity } from './botActivityState.ts';
 import { awaitingInputAnswered, continuousReplyRows, conversationRowShowsAuthor, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
 import { replyReferencesForRows } from './replyReferenceState.ts';
+import { indexBotWork, threadTaskReferences } from './botWorkState.ts';
 const at = '2026-10-22T00:00:00Z';
 function message(id: string, kind: string, extra: Record<string, unknown> = {}) {
   return normalizeBotMessage({ id, kind, role: kind === 'user_input' ? 'user' : 'assistant', createdAt: at, ...extra })!;
@@ -16,6 +17,22 @@ function activity(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivi
     phase: 'thinking', replyTo: [user.id], segments: [], replyText: '', ...extra };
 }
 const replies = (rows: ReturnType<typeof continuousReplyRows>) => rows.filter((r): r is BotReplyRow => r.type === 'reply');
+test('dispatch, completion and follow-up share the original inline task row', () => {
+  const makeReply = (id: string, sources: string[]) => {
+    const reply = message(id, 'agent_reply', { content: id, sources });
+    return { type: 'reply', id, aliases: [id], replyTo: [], paragraphs: [], message: reply, messages: [reply] } satisfies BotReplyRow;
+  };
+  const dispatch = makeReply('dispatch', ['work']);
+  const completion = makeReply('completion', ['work']);
+  const followup = makeReply('followup', ['work', 'separate-work']);
+  const resumed = { sessionId: 'work', status: 'running', followUpEpoch: 1, anchorMessageId: '', title: '原任务',
+    statusLabel: '', spawnedAt: '', conversationId: '', modelLabel: '', summary: '', evidenceRefs: [], progress: '' };
+  const owners = threadTaskReferences([dispatch, completion, followup], indexBotWork([resumed], true));
+  assert.equal(owners.get(dispatch)?.[0]?.session, resumed);
+  assert.equal(owners.has(completion), false);
+  assert.deepEqual(owners.get(followup)?.map(task => task.id), ['separate-work']);
+});
+
 test('pending, public stream and final retain one carrier and original anchors', () => {
   const cache = new Map<string, string>();
   const waiting = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at }], [], cache))[0]!;
@@ -229,4 +246,61 @@ test('a delivered reply clears the awaited input whichever anchor spelling was s
   const delivered = message('final', 'agent_reply', { replyTo: ['u'], content: '好' });
   assert.equal(awaitingInputAnswered([user, delivered], 'u'), true);
   assert.equal(awaitingInputAnswered([user], 'u'), false);
+});
+
+test('a historical input before a later agent_reply is never resurrected as an unconfirmed ghost row', () => {
+  const older = message('input-old', 'user_input', { inputId: 'old', content: '跑检查' });
+  const proactiveWake = message('reply-wake', 'agent_reply', { proactive: true, replyTo: [], content: '检查跑完了。' });
+  const newer = message('input-new', 'user_input', { inputId: 'new', content: '咋样了？' });
+  const liveForNewer = activity({ turnId: 'turn-new', replyTo: [newer.id], phase: 'thinking' });
+  const all = [older, proactiveWake, newer];
+  const rows = continuousReplyRows(
+    [row(older), row(proactiveWake), row(newer), { type: 'activity', activity: liveForNewer }],
+    all,
+    [{ inputId: 'new', createdAt: at }],
+    [{ inputId: 'new', text: '咋样了？', quoteRefs: [], attachments: [], createdAt: at, state: 'received' }],
+  );
+  const replyRows = replies(rows);
+  assert.equal(replyRows.length, 2, 'only the delivered wake reply and the live reply for the new message should exist');
+  assert.ok(replyRows.every(item => !item.pending?.restored), 'older input before a delivered reply must not spawn an unconfirmed ghost row');
+  const settled = replies(continuousReplyRows([row(older), row(proactiveWake)], [older, proactiveWake], [], []));
+  assert.equal(settled.length, 1);
+  assert.equal(settled[0]!.message?.id, proactiveWake.id);
+});
+
+test('running activity for an earlier queued input suppresses duplicate unconfirmed restored row', () => {
+  const older = message('input-old', 'user_input', { inputId: 'old', content: '写方案' });
+  const prevFailure = message('turn-fail-card', 'system_card', {
+    turnId: 'turn-fail',
+    replyTo: [older.id],
+    cards: [{ cardId: 'card:agent_unavailable:turn-fail', kind: 'agent_unavailable', content: '失败', resolvedState: 'resolved' }],
+  });
+  const newer = message('input-new', 'user_input', { inputId: 'new', content: '？' });
+  const liveForOlder = activity({ turnId: 'turn-older-retry', replyTo: [older.id], phase: 'thinking' });
+  const all = [older, prevFailure, newer];
+  const runningRows = continuousReplyRows(
+    [row(older), row(prevFailure), row(newer), { type: 'activity', activity: liveForOlder }],
+    all,
+    [],
+    [],
+  );
+  const runningReplies = replies(runningRows);
+  assert.equal(runningReplies.length, 1, 'should not stack a second restored unconfirmed row while Bot is actively running');
+  assert.equal(runningReplies[0]!.activity?.turnId, 'turn-older-retry');
+  assert.equal(runningReplies[0]!.pending, undefined);
+
+  // Smooth avatar mood stays on `thinking` when showToolMood is false (transient local tool).
+  const transientToolReply: BotReplyRow = {
+    ...runningReplies[0]!,
+    activity: { ...liveForOlder, phase: 'tool' },
+  };
+  assert.equal(replyRowMood(transientToolReply, { showToolMood: false }), 'thinking');
+  assert.equal(replyRowMood(transientToolReply, { showToolMood: true }), 'working');
+
+  // Once no live activity is running, the unanswered restored input surfaces truthfully.
+  const idleRows = continuousReplyRows([row(older), row(prevFailure), row(newer)], all, [], []);
+  const idleReplies = replies(idleRows);
+  assert.equal(idleReplies.length, 1);
+  assert.equal(idleReplies[0]!.pending?.restored, true);
+  assert.deepEqual(idleReplies[0]!.replyTo, [newer.id]);
 });

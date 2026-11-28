@@ -1,0 +1,744 @@
+{
+  "schemaVersion": 1,
+  "descriptors": [
+    {
+      "id": "openai",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat",
+        "openai-responses"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        },
+        "oauth_chatgpt": {
+          "wire": "openai-responses"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "anthropic",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-20250514"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "deepseek",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.deepseek.com/anthropic",
+        "model": "deepseek-chat"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-output-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultEffort": "high",
+          "effortMap": {
+            "off": "disabled",
+            "low": "low",
+            "medium": "high",
+            "default": "high",
+            "high": "high",
+            "xhigh": "high",
+            "max": "max"
+          }
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "glm-coding-plan-cn",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://open.bigmodel.cn/api/anthropic",
+        "model": "glm-4.7"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "glm-coding-plan-global",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.z.ai/api/anthropic",
+        "model": "glm-4.7"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "kimi-coding-plan",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.kimi.com/coding/v1",
+        "model": "k3"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "max"
+          ],
+          "defaultEffort": "default",
+          "effortMap": {
+            "off": "none",
+            "low": "low",
+            "medium": "high",
+            "default": "high",
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          }
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "moonshot",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.moonshot.cn/v1",
+        "model": "kimi-k3"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "max"
+          ],
+          "defaultEffort": "default",
+          "effortMap": {
+            "off": "none",
+            "low": "low",
+            "medium": "high",
+            "default": "high",
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          }
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "minimax-cn",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.minimaxi.com/anthropic",
+        "model": "MiniMax-M3"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "minimax-global",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.minimax.io/anthropic",
+        "model": "MiniMax-M3"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "volcengine-ark",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-seed-1-6"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "none",
+          "effortLevels": [
+            "off",
+            "default"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "xiaomi-mimo",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.xiaomimimo.com/v1",
+        "model": "mimo-v2.5-pro"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "none",
+          "effortLevels": [
+            "off",
+            "default"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "xiaomi-mimo-token-plan",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+        "model": "mimo-v2.5-pro"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "none",
+          "effortLevels": [
+            "off",
+            "default"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "aliyun-bailian",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+        "model": "qwen3-coder-plus"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "none",
+          "effortLevels": [
+            "off",
+            "default"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "opencode-go",
+      "defaultWire": "openai-responses",
+      "allowedWires": [
+        "openai-responses",
+        "openai-chat",
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://opencode.ai/zen/go/v1",
+        "model": "gpt-5.6-luna"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-responses"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "openrouter",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat"
+      ],
+      "defaults": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "model": "openai/gpt-4o"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {
+        "HTTP-Referer": "https://github.com/ly-ccx/Peer-Agent",
+        "X-Title": "Peer Agent"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "max"
+          ],
+          "defaultEffort": "default",
+          "effortMap": {
+            "off": "none",
+            "low": "low",
+            "medium": "high",
+            "default": "high",
+            "high": "high",
+            "xhigh": "max",
+            "max": "max"
+          }
+        },
+        "promptCache": true,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "openai-compatible",
+      "defaultWire": "openai-chat",
+      "allowedWires": [
+        "openai-chat",
+        "openai-responses"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "openai-chat"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": false,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": false,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "anthropic-compatible",
+      "defaultWire": "anthropic-messages",
+      "allowedWires": [
+        "anthropic-messages"
+      ],
+      "defaults": {
+        "baseUrl": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-20250514"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "anthropic-messages"
+        }
+      },
+      "headers": {
+        "User-Agent": "claude-cli/2.1.178 (external, cli)",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": false,
+          "paramStyle": "anthropic-enabled-budget",
+          "effortLevels": [
+            "off",
+            "low",
+            "default",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "default"
+        },
+        "promptCache": false,
+        "vision": false,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "google-ai",
+      "defaultWire": "gemini",
+      "allowedWires": [
+        "gemini"
+      ],
+      "defaults": {
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "model": "gemini-2.5-pro"
+      },
+      "authMethods": {
+        "api_key": {
+          "wire": "gemini"
+        }
+      },
+      "headers": {},
+      "capabilities": {
+        "reasoning": {
+          "supported": false,
+          "paramStyle": "none",
+          "effortLevels": [
+            "off",
+            "default"
+          ],
+          "defaultEffort": "off"
+        },
+        "promptCache": false,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    },
+    {
+      "id": "grok",
+      "defaultWire": "openai-responses",
+      "allowedWires": [
+        "openai-responses"
+      ],
+      "defaults": {
+        "baseUrl": "https://cli-chat-proxy.grok.com/v1",
+        "model": "grok-4.5"
+      },
+      "authMethods": {
+        "oauth_grok": {
+          "wire": "openai-responses"
+        }
+      },
+      "headers": {
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-grok-client-surface": "grok-build"
+      },
+      "capabilities": {
+        "reasoning": {
+          "supported": true,
+          "paramStyle": "openai-effort",
+          "effortLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "defaultEffort": "high",
+          "effortMap": {
+            "off": "high",
+            "low": "low",
+            "medium": "medium",
+            "default": "high",
+            "high": "high",
+            "xhigh": "xhigh"
+          }
+        },
+        "promptCache": false,
+        "vision": true,
+        "toolUse": true,
+        "temperature": true
+      }
+    }
+  ],
+  "protectedHeaders": [
+    "authorization",
+    "x-api-key",
+    "content-type",
+    "anthropic-version",
+    "openai-beta",
+    "x-goog-api-key",
+    "x-goog-user-project",
+    "chatgpt-account-id",
+    "x-xai-token-auth",
+    "x-grok-client-surface",
+    "x-grok-client-version"
+  ]
+}

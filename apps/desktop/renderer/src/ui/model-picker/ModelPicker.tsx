@@ -1,5 +1,5 @@
 import './model-selection.css';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { MotionSurface } from '../../app/components/MotionSurface';
 import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
@@ -9,6 +9,7 @@ import { effortShortLabel, isEffortLevel, type EffortLevel } from '../../chat/st
 import { PeerIcon } from '../icons/PeerIcon';
 import { useModelSelectionPosition } from './useModelSelectionPosition';
 import { useModelSelectionTransition } from './useModelSelectionTransition';
+import { positionProviderMenu, type ProviderMenuPlacement } from './providerMenuPosition';
 import { EffortRange, RequestChannelToggle } from './ModelParameters';
 import { findSelectionModel, modelEffortLevels, supportsComposerFastMode, type SelectionProviderGroup } from './modelSelection';
 
@@ -58,11 +59,12 @@ export function ModelSelectionPanel({
   const checkedIds = new Set(selectedModelIds ?? [modelId]);
   const [browsedId, setBrowsedId] = useState(selected?.group.id ?? groups[0]?.id ?? '');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
-  const [menuBelow, setMenuBelow] = useState(embedded);
+  const [providerMenuPlacement, setProviderMenuPlacement] = useState<ProviderMenuPlacement>(() => ({ below: embedded, alignBottom: false }));
   const [activeModelIndex, setActiveModelIndex] = useState(-1);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const providerButtonRef = useRef<HTMLButtonElement | null>(null);
+  const providerMenuRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
 
   useEffect(() => {
@@ -88,12 +90,48 @@ export function ModelSelectionPanel({
 
   useLayoutEffect(() => {
     if (!providerMenuOpen || embedded) {
-      setMenuBelow(embedded);
+      setProviderMenuPlacement({ below: embedded, alignBottom: false });
       return;
     }
-    const rect = panelRef.current?.getBoundingClientRect();
-    setMenuBelow(Boolean(rect && rect.left < 200));
-  }, [embedded, providerMenuOpen]);
+    const updatePlacement = () => {
+      const panel = panelRef.current;
+      const menu = providerMenuRef.current;
+      if (!panel || !menu) return;
+      const rect = panel.getBoundingClientRect();
+      const borderHeight = Math.max(0, menu.offsetHeight - menu.clientHeight);
+      const next = positionProviderMenu(
+        { left: rect.left, top: rect.top, bottom: rect.bottom, height: rect.height },
+        { width: menu.offsetWidth, height: menu.scrollHeight + borderHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      setProviderMenuPlacement((current) => (
+        current.below === next.below
+        && current.alignBottom === next.alignBottom
+        && current.top === next.top
+        && current.maxHeight === next.maxHeight
+          ? current
+          : next
+      ));
+    };
+    updatePlacement();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePlacement);
+    if (panelRef.current) observer?.observe(panelRef.current);
+    if (providerMenuRef.current) observer?.observe(providerMenuRef.current);
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updatePlacement);
+      window.removeEventListener('scroll', updatePlacement, true);
+    };
+  }, [embedded, groups.length, onManageModels, providerMenuOpen]);
+
+  const providerMenuStyle: CSSProperties | undefined = !embedded && (providerMenuPlacement.top !== undefined || providerMenuPlacement.maxHeight !== undefined)
+    ? {
+      ...(providerMenuPlacement.top !== undefined ? { top: `${providerMenuPlacement.top}px` } : {}),
+      ...(providerMenuPlacement.maxHeight !== undefined ? { maxHeight: `${providerMenuPlacement.maxHeight}px` } : {}),
+    }
+    : undefined;
 
   const chooseProvider = (group: SelectionProviderGroup) => {
     if (group.disabled || disabled) return;
@@ -170,8 +208,10 @@ export function ModelSelectionPanel({
       </button>
       <MotionSurface kind="fade">{providerMenuOpen ? (
         <div
+          ref={providerMenuRef}
           id={listId}
-          className={`model-selection-provider-menu motion-enter-fade${menuBelow ? ' is-below' : ''}`}
+          className={`model-selection-provider-menu motion-enter-fade${providerMenuPlacement.below ? ' is-below' : ''}${providerMenuPlacement.alignBottom ? ' is-align-bottom' : ''}`}
+          style={providerMenuStyle}
           role="listbox"
           aria-label={isZh ? '提供商' : 'Provider'}
         >
@@ -372,7 +412,12 @@ export function ModelPicker({
             <PeerIcon name="bolt" size={12} className="model-selection-fast-mark" fill="currentColor" stroke="none" />
           ) : null}
           <span className="model-selection-trigger-label">{label}</span>
-          {shortEffort ? <span className="model-selection-trigger-effort">{shortEffort}</span> : null}
+          {shortEffort ? (
+            <span className="model-selection-trigger-effort">
+              {effortLevels.map(level => <span key={level} aria-hidden="true">{effortShortLabel(level, isZh)}</span>)}
+              <span>{shortEffort}</span>
+            </span>
+          ) : null}
         </span>
         {disabled ? null : busy ? <PeerIcon name="loader" size={12} className="pa-cascading-caret motion-spin" /> : statusLabel
           ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />

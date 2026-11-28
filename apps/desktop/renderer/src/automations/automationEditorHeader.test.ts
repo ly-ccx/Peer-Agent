@@ -28,7 +28,7 @@ test('Automation editor header is a restrained title + lede, not stacked eyebrow
 
   assert.match(css, /\.automation-editor \.automation-page-heading\{display:grid;gap:8px;max-width:40rem\}/);
   assert.match(css, /\.automation-editor \.automation-page-header\.compact h1\{font-size:26px;line-height:1\.15/);
-  assert.match(css, /\.automation-editor \.automation-page-lede\{color:var\(--za-text-muted\);font-size:13\.5px;line-height:1\.55/);
+  assert.match(css, /\.automation-editor \.automation-page-lede\{color:var\(--graphite-fade\);font-size:13\.5px;line-height:1\.55/);
   assert.match(css, /\.automation-editor \.automation-page-header\.compact\{margin:4px 0 22px;max-width:760px\}/);
 
   assert.match(i18n, /editorSubtitle: 'Describe the recurring work\. Name and schedule are generated after detection\.'/);

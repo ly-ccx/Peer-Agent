@@ -26,9 +26,12 @@ test('getAll returns {} when file is absent', () => {
 test('runtime policy rereads external changes and admits neither identity nor credentials', () => {
   const store=createSettingsStore({settingsFile});
   writeFileSync(settingsFile,JSON.stringify({schemaVersion:3,workspaces:[{id:'private-id',path:'/private/path'}],remoteAccess:{token:'secret'},apiKey:'secret',
+    modelRouting:{tiers:{strong:{primary:'model-strong',fallbacks:[],secret:'secret'}},roles:{project_agent:{mode:'tier',tier:'strong',apiKey:'secret'}},secret:'secret'},
     projectAgent:{shell:'bots',concurrency:2,interactiveResults:true,managedRoot:'/private',quietHours:{enabled:true,start:'23:00',end:'06:00',apiKey:'secret'}},memory:{enabled:true,learnPreferences:true,secret:'secret'}}));
   const first=store.getRuntimePolicy();assert.equal(first.projectAgent.shell,'bots');assert.equal(first.memory.enabled,true);
   assert.equal(first.projectAgent.interactiveResults, true);
+  assert.equal(first.modelRouting.tiers.strong.primary, 'model-strong');
+  assert.equal(first.modelRouting.roles.project_agent.tier, 'strong');
   assert.equal(JSON.stringify(first).includes('private'),false);assert.equal(JSON.stringify(first).includes('secret'),false);
   writeFileSync(settingsFile,JSON.stringify({schemaVersion:3,projectAgent:{shell:'classic',concurrency:1},memory:{enabled:false,learnPreferences:false}}));
   const next=store.getRuntimePolicy();assert.equal(next.projectAgent.shell,'classic');assert.equal(next.projectAgent.concurrency,1);assert.deepEqual(next.memory,{enabled:false,learnPreferences:false});
@@ -109,4 +112,22 @@ test('R5-03 reading metadata round-trips in existing workbench settings without 
   assert.equal(restored.workbench.browserSessions.A.tabs[0].visited, true);
   assert.equal(restored.localAccessLevel, 'ask'); assert.equal(restored.memory.enabled, false);
   assert.equal(restored.workbench.open, false);
+});
+
+test('merge invokes onChange with partial and next settings and isolates listener errors', () => {
+  const seen = [];
+  const store = createSettingsStore({
+    settingsFile,
+    onChange: (partial, next) => {
+      seen.push({ partial, shell: next.projectAgent?.shell });
+      if (partial.throwMe) throw new Error('boom');
+    },
+  });
+  store.merge({ schemaVersion: 3, projectAgent: { shell: 'classic' } });
+  const res = store.merge({ throwMe: true, appMode: 'work' });
+  assert.equal(res.appMode, 'work');
+  assert.deepEqual(seen, [
+    { partial: { schemaVersion: 3, projectAgent: { shell: 'classic' } }, shell: 'classic' },
+    { partial: { throwMe: true, appMode: 'work' }, shell: 'classic' },
+  ]);
 });

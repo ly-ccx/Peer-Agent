@@ -44,6 +44,10 @@ export function TaskCancellationProvider({ workspaceId, onRefresh, children }: {
   return <TaskCancellation.Provider value={{ workspaceId, states, cancel }}>{children}</TaskCancellation.Provider>;
 }
 
+export function useTaskCancellation() {
+  return useContext(TaskCancellation);
+}
+
 export function TaskCancelButton({ sessionId, status, cancelable, title, i18n }: {
   readonly sessionId: string; readonly status: string | null; readonly cancelable?: boolean;
   readonly title: string; readonly i18n: I18nRuntime;

@@ -1,12 +1,19 @@
 import type { ResourceFeedback } from './resource-feedback.ts';
-import type { ProjectInputAttachment, ProjectAgentSubmitInputResult } from './delegation.ts';
+import type { ProjectInputAttachment, ProjectAgentSubmitInputResult, WorkSessionStatus } from './delegation.ts';
 
 export type LocalInputSurface = 'desktop' | 'quick_chat' | 'tui';
 export interface InputDraftQuote { readonly messageId: string; readonly text: string }
+export interface InputDraftTaskRef {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly status: WorkSessionStatus | string;
+  readonly anchorMessageId?: string;
+}
 export interface InputDraftValue {
   readonly text: string;
   readonly quote: InputDraftQuote | null;
   readonly attachments: readonly ProjectInputAttachment[];
+  readonly taskRefs?: readonly InputDraftTaskRef[];
   readonly resourceFeedback?: readonly ResourceFeedback[];
 }
 /** User intent only. Presence here never means the input was received or executed. */
@@ -14,6 +21,7 @@ export interface UnconfirmedProjectInput {
   readonly inputId: string;
   readonly text: string;
   readonly quoteRefs: readonly string[];
+  readonly taskRefs?: readonly InputDraftTaskRef[];
   readonly answerTo?: string;
   readonly attachments: readonly ProjectInputAttachment[];
   readonly resourceFeedback?: readonly ResourceFeedback[];

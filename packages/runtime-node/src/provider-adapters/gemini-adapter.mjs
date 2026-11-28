@@ -16,25 +16,19 @@ function extractGeminiStreamError(parsed) {
 function normalizeGeminiUsage(usage) {
   if (!usage) return null;
   return {
-    inputTokens: usage.promptTokenCount ?? 0,
-    outputTokens: usage.candidatesTokenCount ?? 0,
+    // promptTokenCount already includes cached input. ADR 56 dimensions are disjoint.
+    inputTokens: Math.max(0, (usage.promptTokenCount ?? 0) - (usage.cachedContentTokenCount ?? 0))
+      + (usage.toolUsePromptTokenCount ?? 0),
+    outputTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
     cacheReadTokens: usage.cachedContentTokenCount ?? 0,
     // Gemini usageMetadata 不提供 cache write 计数；留空（区别于「真 0」），显示层渲染「—」。
   };
 }
 
-function unwrapGeminiPayload(parsed) {
-  // Code Assist SSE 外层是 { response: GenerateContentResponse }；API key 路径则是裸 GenerateContentResponse。
-  if (parsed && typeof parsed === 'object' && parsed.response && typeof parsed.response === 'object') {
-    return parsed.response;
-  }
-  return parsed;
-}
-
 function consumeGeminiPayload(parsed, state, webContents, streamId, trace = null) {
-  const payload = unwrapGeminiPayload(parsed);
+  const payload = parsed;
   trace?.recordSsePayload?.(JSON.stringify(parsed), payload);
-  const streamError = extractGeminiStreamError(payload) || extractGeminiStreamError(parsed);
+  const streamError = extractGeminiStreamError(payload);
   if (streamError) {
     state.streamError = streamError;
     return;
@@ -142,10 +136,6 @@ export async function sendGeminiStream({
   effort,
   supportsReasoning,
   maxOutputTokens,
-  authMethod,
-  projectId,
-  userPromptId,
-  sessionId,
   signal,
   webContents,
   eventSink = null,
@@ -161,11 +151,6 @@ export async function sendGeminiStream({
     messages,
     tools,
     maxOutputTokens,
-    model,
-    projectId,
-    authMethod,
-    userPromptId,
-    sessionId,
   });
   const trace = createProviderStreamTrace({
     provider: 'gemini',

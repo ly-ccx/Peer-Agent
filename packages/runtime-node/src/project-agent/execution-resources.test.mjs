@@ -54,6 +54,17 @@ test('independent connections and workspace IDs arbitrate the same physical dire
   assert.equal(second.reserve(b, 'host-b').allowed, true);
 });
 
+test('an already reserved file claim activates and recovers with its own file identity', t => {
+  const { directory, first } = fixture(t), p = plan('file-owner', directory), file = path.join(directory, 'new.txt');
+  assert.equal(first.reserve(p, 'host', [{ kind: 'file', path: file }]).allowed, true);
+  const before = first.claimsFor(p);
+  assert.equal(before.filter(claim => claim.resourceRef.startsWith('file:')).length, 1);
+  assert.equal(first.activate(p, 'host'), true);
+  assert.equal(first.claimsFor(p).every(claim => claim.state === 'active'), true);
+  assert.equal(first.claimsFor(p).find(claim => claim.resourceRef.startsWith('file:')).identity, 'missing');
+  assert.equal(first.activate(p, 'host'), true, 'repeated activation does not invent a new execution');
+});
+
 test('symlink aliases and a child directory do not bypass an existing write claim', t => {
   const { root, directory, first, second } = fixture(t), alias = path.join(root, 'alias'), child = path.join(directory, 'child');
   symlinkSync(directory, alias); mkdirSync(child);

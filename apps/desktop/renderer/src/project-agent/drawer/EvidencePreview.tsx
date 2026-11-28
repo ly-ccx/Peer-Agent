@@ -26,7 +26,7 @@ export function EvidencePreview({ refs, i18n, inline: requestedInline, workspace
       triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected(ref);
     }} /></div>
     {selected ? <section aria-label={i18n.t('resources.evidence')}>
-      <button ref={closeRef} type="button" className="ui-button" onClick={() => setSelected(null)}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.back')}</button>
+      <button ref={closeRef} type="button" className="ui-button" onClick={() => setSelected(null)}><PeerIcon name="back" size={14} />{i18n.locale?.startsWith('zh') ? '返回列表' : 'Back'}</button>
       <EvidenceView key={selected} evidence={{ evidenceRef: selected }} i18n={i18n} workspaceId={workspaceId} task={task} />
     </section> : null}
   </div>;

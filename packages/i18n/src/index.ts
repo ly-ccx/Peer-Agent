@@ -243,6 +243,8 @@ export type TranslationKey =
   | 'projectAgent.chat.reply.deliveryIssue'
   | 'projectAgent.chat.activity.preparing'
   | 'projectAgent.chat.activity.thinking'
+  | 'projectAgent.chat.activity.thinkingWithOneStep'
+  | 'projectAgent.chat.activity.thinkingWithSteps'
   | 'projectAgent.chat.activity.responding'
   | 'projectAgent.chat.activity.settling'
   | 'projectAgent.chat.activity.advancing'
@@ -255,12 +257,18 @@ export type TranslationKey =
   | 'projectAgent.chat.activity.edit'
   | 'projectAgent.chat.activity.verification'
   | 'projectAgent.chat.activity.delegating'
+  | 'projectAgent.chat.activity.waitingSessions'
   | 'projectAgent.chat.activity.work'
   | 'projectAgent.chat.activity.memory'
   | 'projectAgent.chat.activity.memoryUpdate'
   | 'projectAgent.chat.activity.directory'
+  | 'projectAgent.chat.activity.git'
+  | 'projectAgent.chat.activity.webSearch'
+  | 'projectAgent.chat.activity.webFetch'
   | 'projectAgent.chat.toolLabel.read'
   | 'projectAgent.chat.toolLabel.search'
+  | 'projectAgent.chat.toolLabel.webSearch'
+  | 'projectAgent.chat.toolLabel.webFetch'
   | 'projectAgent.chat.toolLabel.edit'
   | 'projectAgent.chat.toolLabel.command'
   | 'projectAgent.chat.toolRunning'
@@ -343,6 +351,7 @@ export type TranslationKey =
   | 'projectAgent.chat.disposition.outOfScope'
   | 'projectAgent.chat.quote'
   | 'projectAgent.chat.quoteRemove'
+  | 'projectAgent.chat.protocolLeakFallback'
   | 'projectAgent.chat.placeholder'
   | 'projectAgent.chat.attach'
   | 'projectAgent.chat.previewAttachment'
@@ -434,6 +443,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
   | 'projectAgent.chat.work.resultSettling'
+  | 'projectAgent.chat.work.verificationFailed'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
@@ -485,6 +495,8 @@ export type TranslationKey =
   | 'projectAgent.chat.surfacing.digest'
   | 'projectAgent.chat.surfacing.silent'
   | 'projectAgent.chat.approve'
+  | 'projectAgent.chat.approvePlan'
+  | 'projectAgent.chat.planApprovalPending'
   | 'projectAgent.chat.allowOnce'
   | 'projectAgent.chat.allowTask'
   | 'projectAgent.chat.allowImage'
@@ -567,9 +579,52 @@ export type TranslationKey =
   | 'projectAgent.drawer.tab.overview'
   | 'projectAgent.drawer.tab.tasks'
   | 'projectAgent.drawer.tab.objectives'
+  | 'projectAgent.drawer.tab.capabilities'
   | 'projectAgent.drawer.tab.memory'
   | 'projectAgent.drawer.tab.settings'
+  | 'projectAgent.capabilities.trigger'
+  | 'projectAgent.capabilities.triggerCount'
+  | 'projectAgent.capabilities.inheritedTrigger'
+  | 'projectAgent.capabilities.title'
+  | 'projectAgent.capabilities.subtitle'
+  | 'projectAgent.capabilities.inheritedTitle'
+  | 'projectAgent.capabilities.inheritedSubtitle'
+  | 'projectAgent.capabilities.inheritedReadOnlyHint'
+  | 'projectAgent.capabilities.adjustOnBot'
+  | 'projectAgent.capabilities.resetGlobal'
+  | 'projectAgent.capabilities.manageGlobal'
+  | 'projectAgent.capabilities.openInDrawer'
+  | 'projectAgent.capabilities.group.skills'
+  | 'projectAgent.capabilities.group.mcp'
+  | 'projectAgent.capabilities.group.builtin'
+  | 'projectAgent.capabilities.builtinHint'
+  | 'projectAgent.capabilities.builtin.files'
+  | 'projectAgent.capabilities.builtin.shell'
+  | 'projectAgent.capabilities.builtin.web'
+  | 'projectAgent.capabilities.empty.skills'
+  | 'projectAgent.capabilities.empty.mcp'
+  | 'projectAgent.capabilities.empty.inherited'
+  | 'projectAgent.capabilities.badge.workspace'
+  | 'projectAgent.capabilities.badge.overrideOn'
+  | 'projectAgent.capabilities.badge.overrideOff'
+  | 'projectAgent.capabilities.badge.globalOff'
+  | 'projectAgent.capabilities.badge.unhealthy'
+  | 'projectAgent.capabilities.badge.untrusted'
+  | 'projectAgent.capabilities.toolsCount'
+  | 'projectAgent.capabilities.overviewLabel'
+  | 'projectAgent.capabilities.overviewSummary'
+  | 'projectAgent.capabilities.overviewEmpty'
+  | 'projectAgent.capabilities.saveFailed'
+  | 'projectAgent.capabilities.loading'
   | 'projectAgent.drawer.folder'
+  | 'projectAgent.drawer.folderMissing'
+  | 'projectAgent.drawer.rebindFolder'
+  | 'projectAgent.drawer.changeFolder'
+  | 'projectAgent.drawer.rebinding'
+  | 'projectAgent.drawer.rebindSuccess'
+  | 'projectAgent.drawer.rebindError.pathTaken'
+  | 'projectAgent.drawer.rebindError.notFound'
+  | 'projectAgent.drawer.rebindError.failed'
   | 'projectAgent.drawer.noPath'
   | 'projectAgent.drawer.reveal'
   | 'projectAgent.drawer.brief'
@@ -653,6 +708,9 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.verificationPassed'
   | 'projectAgent.drawer.task.verificationFailed'
   | 'projectAgent.drawer.task.verificationMissing'
+  | 'projectAgent.drawer.task.verificationNotRequired'
+  | 'projectAgent.drawer.task.verificationNotReviewed'
+  | 'projectAgent.drawer.task.verificationQualityCriteria'
   | 'projectAgent.drawer.task.verificationOther'
   | 'projectAgent.drawer.task.hint.confirm'
   | 'projectAgent.drawer.task.hint.failed'
@@ -754,6 +812,33 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
   | 'projectAgent.drawer.settings.avatarColor'
+  | 'projectAgent.drawer.settings.avatarColorSyncHint'
+  | 'projectAgent.drawer.settings.avatarBackdrop'
+  | 'projectAgent.drawer.settings.avatarTab.coat'
+  | 'projectAgent.drawer.settings.avatarTab.head'
+  | 'projectAgent.drawer.settings.avatarTab.neck'
+  | 'projectAgent.drawer.settings.avatarCoat.circle'
+  | 'projectAgent.drawer.settings.avatarCoat.square'
+  | 'projectAgent.drawer.settings.avatarCoat.pill'
+  | 'projectAgent.drawer.settings.avatarCoat.arch'
+  | 'projectAgent.drawer.settings.avatarCoat.hex'
+  | 'projectAgent.drawer.settings.avatarCoat.diamond'
+  | 'projectAgent.drawer.settings.avatarCoat.triangle'
+  | 'projectAgent.drawer.settings.avatarCoat.star'
+  | 'projectAgent.drawer.settings.avatarHead.none'
+  | 'projectAgent.drawer.settings.avatarHead.beret'
+  | 'projectAgent.drawer.settings.avatarHead.glasses'
+  | 'projectAgent.drawer.settings.avatarHead.beanie'
+  | 'projectAgent.drawer.settings.avatarHead.vermeer'
+  | 'projectAgent.drawer.settings.avatarHead.straw'
+  | 'projectAgent.drawer.settings.avatarHead.headphones'
+  | 'projectAgent.drawer.settings.avatarHead.crown'
+  | 'projectAgent.drawer.settings.avatarNeck.bowtie'
+  | 'projectAgent.drawer.settings.avatarNeck.scarf'
+  | 'projectAgent.drawer.settings.avatarNeck.sweater'
+  | 'projectAgent.drawer.settings.avatarNeck.moon'
+  | 'projectAgent.drawer.settings.avatarNeck.sailor'
+  | 'projectAgent.drawer.settings.avatarNeck.cape'
   | 'projectAgent.drawer.settings.avatarColorImageHint'
   | 'projectAgent.drawer.settings.avatarColor.0'
   | 'projectAgent.drawer.settings.avatarColor.1'
@@ -799,6 +884,13 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.proactivity.standard'
   | 'projectAgent.drawer.settings.proactivity.high'
   | 'projectAgent.drawer.settings.proactivity.muted'
+  | 'projectAgent.drawer.settings.communicationStyle'
+  | 'projectAgent.drawer.settings.communicationStyle.inherit'
+  | 'projectAgent.drawer.settings.communicationStyle.natural'
+  | 'projectAgent.drawer.settings.communicationStyle.concise'
+  | 'projectAgent.drawer.settings.communicationStyle.detailed'
+  | 'projectAgent.drawer.settings.communicationStyle.technical'
+  | 'projectAgent.drawer.settings.communicationStyleHint'
   | 'appearance.title'
   | 'appearance.subtitle'
   | 'appearance.mode'
@@ -888,6 +980,8 @@ export type TranslationKey =
   | 'settings.bots.quietUntil'
   | 'settings.bots.digestTime'
   | 'settings.bots.digestTime.description'
+  | 'settings.bots.interactiveResults'
+  | 'settings.bots.interactiveResults.description'
   | 'settings.replyLanguage.description'
   | 'settings.replyLanguage.followInterface'
   | 'settings.replyLanguage.auto'
@@ -1503,7 +1597,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.quick.workspace": "选择工作区",
     "projectAgent.quick.attach": "添加附件",
     "projectAgent.quick.attachmentLimit": "最多只能添加 {count} 个附件",
-    "projectAgent.quick.imageLimit": "图片 {name} 超过 8 MB",
+    "projectAgent.quick.imageLimit": "图片 {name} 超过 32 MB",
     "projectAgent.quick.fileLimit": "文件 {name} 超过 512 KB",
     "projectAgent.quick.sending": "正在发送",
     "projectAgent.quick.failed": "发送失败",
@@ -1641,6 +1735,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': '结束',
     'settings.bots.digestTime': '今日小结',
     'settings.bots.digestTime.description': '到这个时间，把暂存的消息收成一条。',
+    'settings.bots.interactiveResults': '交互结果预览（OpenUI）',
+    'settings.bots.interactiveResults.description': '允许工作会话在桌面端发布可筛选、可试算的本地交互卡片（终端仍以文本摘要展示）。',
     'settings.replyLanguage.description': '机器人与你交流时使用的语言。',
     'settings.replyLanguage.followInterface': '跟随界面语言',
     'settings.replyLanguage.auto': '自动（跟随提问语言）',
@@ -1979,6 +2075,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.deliveryIssue': '消息已保存，后续处理尚未完成',
     'projectAgent.chat.activity.preparing': '正在准备下一步',
     'projectAgent.chat.activity.thinking': '正在整理思路',
+    'projectAgent.chat.activity.thinkingWithOneStep': '正在整理思路 · 已推进 1 步',
+    'projectAgent.chat.activity.thinkingWithSteps': '正在整理思路 · 已推进 {count} 步',
     'projectAgent.chat.activity.responding': '正在整理回复',
     'projectAgent.chat.activity.settling': '正在整理结果',
     'projectAgent.chat.activity.advancing': '正在一点一点推进',
@@ -1991,12 +2089,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.edit': '正在调整内容',
     'projectAgent.chat.activity.verification': '正在核对结果',
     'projectAgent.chat.activity.delegating': '正在安排执行',
+    'projectAgent.chat.activity.waitingSessions': '等待子任务完成',
     'projectAgent.chat.activity.work': '正在查看工作进展',
     'projectAgent.chat.activity.memory': '正在查阅项目记忆',
     'projectAgent.chat.activity.memoryUpdate': '正在更新项目记忆',
     'projectAgent.chat.activity.directory': '正在查看文件目录',
+    'projectAgent.chat.activity.git': '正在查看仓库状态',
+    'projectAgent.chat.activity.webSearch': '正在联网搜索',
+    'projectAgent.chat.activity.webFetch': '正在查阅网页',
     'projectAgent.chat.toolLabel.read': '读取文件',
     'projectAgent.chat.toolLabel.search': '项目搜索',
+    'projectAgent.chat.toolLabel.webSearch': '联网搜索',
+    'projectAgent.chat.toolLabel.webFetch': '网页读取',
     'projectAgent.chat.toolLabel.edit': '编辑文件',
     'projectAgent.chat.toolLabel.command': '执行命令',
     'projectAgent.chat.toolRunning': '正在进行{tool}',
@@ -2079,6 +2183,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': '这句话针对的是『{title}』，没有影响其他任务',
     'projectAgent.chat.quote': '引用',
     'projectAgent.chat.quoteRemove': '取消引用',
+    'projectAgent.chat.protocolLeakFallback': '该回复仅包含无效的工具调用格式，已自动隐藏。请重试或继续追问。',
     'projectAgent.chat.placeholder': '给 {name} 发消息',
     'projectAgent.chat.attach': '添加文件或图片',
     'projectAgent.chat.previewAttachment': '预览图片',
@@ -2170,6 +2275,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
     'projectAgent.chat.work.resultSettling': '正在核对结果',
+    'projectAgent.chat.work.verificationFailed': '核验未通过',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
@@ -2221,6 +2327,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': '收进小结',
     'projectAgent.chat.surfacing.silent': '不打扰',
     'projectAgent.chat.approve': '批准',
+    'projectAgent.chat.approvePlan': '批准计划',
+    'projectAgent.chat.planApprovalPending': '待批准计划',
     'projectAgent.chat.allowOnce': '仅这一次',
     'projectAgent.chat.allowTask': '本任务重复此操作',
     'projectAgent.chat.allowImage': '本轮允许此图片',
@@ -2303,9 +2411,52 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.overview': '概况',
     'projectAgent.drawer.tab.tasks': '任务',
     'projectAgent.drawer.tab.objectives': '目标',
+    'projectAgent.drawer.tab.capabilities': '能力',
     'projectAgent.drawer.tab.memory': '记忆',
     'projectAgent.drawer.tab.settings': '设置',
+    'projectAgent.capabilities.trigger': '机器人能力挂载',
+    'projectAgent.capabilities.triggerCount': '已挂载 {count} 项能力',
+    'projectAgent.capabilities.inheritedTrigger': '查看从「{bot}」继承的共享能力',
+    'projectAgent.capabilities.title': '挂载能力',
+    'projectAgent.capabilities.subtitle': '该机器人派生的所有子任务自动共用这套能力。',
+    'projectAgent.capabilities.inheritedTitle': '继承自「{bot}」',
+    'projectAgent.capabilities.inheritedSubtitle': '当前子任务共享所属机器人的能力配置，不单独挂载。',
+    'projectAgent.capabilities.inheritedReadOnlyHint': '当前为只读任务，自动过滤非只读 MCP 工具。',
+    'projectAgent.capabilities.adjustOnBot': '前往机器人调整',
+    'projectAgent.capabilities.resetGlobal': '恢复跟随全局',
+    'projectAgent.capabilities.manageGlobal': '管理全局插件库',
+    'projectAgent.capabilities.openInDrawer': '在抽屉中展开',
+    'projectAgent.capabilities.group.skills': 'Skills',
+    'projectAgent.capabilities.group.mcp': 'MCP 服务',
+    'projectAgent.capabilities.group.builtin': '内置基础能力（只读）',
+    'projectAgent.capabilities.builtinHint': '由机器人权限档位与任务只读策略统一控制。',
+    'projectAgent.capabilities.builtin.files': '文件与代码读写',
+    'projectAgent.capabilities.builtin.shell': '本地终端执行',
+    'projectAgent.capabilities.builtin.web': '联网检索与抓取',
+    'projectAgent.capabilities.empty.skills': '暂未安装 Skill，可前往全局插件库安装。',
+    'projectAgent.capabilities.empty.mcp': '暂未配置 MCP 服务，可前往全局插件库添加。',
+    'projectAgent.capabilities.empty.inherited': '当前机器人未挂载任何 Skill 或 MCP，子任务仅使用内置基础能力。',
+    'projectAgent.capabilities.badge.workspace': '项目',
+    'projectAgent.capabilities.badge.overrideOn': '单独开启',
+    'projectAgent.capabilities.badge.overrideOff': '单独关闭',
+    'projectAgent.capabilities.badge.globalOff': '全局关闭',
+    'projectAgent.capabilities.badge.unhealthy': '连接异常',
+    'projectAgent.capabilities.badge.untrusted': '未信任',
+    'projectAgent.capabilities.toolsCount': '{count} 个工具',
+    'projectAgent.capabilities.overviewLabel': '挂载能力',
+    'projectAgent.capabilities.overviewSummary': '{skills} 个 Skill · {mcps} 个 MCP',
+    'projectAgent.capabilities.overviewEmpty': '仅内置基础能力',
+    'projectAgent.capabilities.saveFailed': '能力配置保存失败，请稍后重试。',
+    'projectAgent.capabilities.loading': '正在读取能力列表…',
     'projectAgent.drawer.folder': '绑定文件夹',
+    'projectAgent.drawer.folderMissing': '文件夹不存在或已移动，重新绑定后会保留当前对话与记忆。',
+    'projectAgent.drawer.rebindFolder': '重新绑定文件夹',
+    'projectAgent.drawer.changeFolder': '更换文件夹',
+    'projectAgent.drawer.rebinding': '正在绑定…',
+    'projectAgent.drawer.rebindSuccess': '已绑定到新文件夹',
+    'projectAgent.drawer.rebindError.pathTaken': '这个文件夹已经绑定给另一个机器人了。',
+    'projectAgent.drawer.rebindError.notFound': '所选文件夹不存在或无法访问。',
+    'projectAgent.drawer.rebindError.failed': '重新绑定失败，请稍后重试。',
     'projectAgent.drawer.noPath': '还没有文件夹',
     'projectAgent.drawer.reveal': '在访达中显示',
     'projectAgent.drawer.brief': '项目简报',
@@ -2389,6 +2540,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.verificationPassed': '通过',
     'projectAgent.drawer.task.verificationFailed': '未通过',
     'projectAgent.drawer.task.verificationMissing': '尚未核验',
+    'projectAgent.drawer.task.verificationNotRequired': '无需独立核验',
+    'projectAgent.drawer.task.verificationNotReviewed': '未经独立核验',
+    'projectAgent.drawer.task.verificationQualityCriteria': '质量标准',
     'projectAgent.drawer.task.verificationOther': '其他检查',
     'projectAgent.drawer.task.hint.confirm': '{name} 在主对话中跟进这项工作。',
     'projectAgent.drawer.task.hint.failed': '任务未能完成。后续安排由 {name} 在主对话中说明。',
@@ -2488,17 +2642,44 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.advancedModels': '更多角色与模型限制',
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
-    'projectAgent.drawer.settings.avatarNew': '重新生成',
-    'projectAgent.drawer.settings.avatarColor': '颜色',
-    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
-    'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
-    'projectAgent.drawer.settings.avatarColor.1': '珊瑚红',
-    'projectAgent.drawer.settings.avatarColor.2': '琥珀橙',
-    'projectAgent.drawer.settings.avatarColor.3': '薄荷绿',
-    'projectAgent.drawer.settings.avatarColor.4': '丁香紫',
-    'projectAgent.drawer.settings.avatarColor.5': '玫瑰粉',
-    'projectAgent.drawer.settings.avatarColor.6': '湖水蓝',
-    'projectAgent.drawer.settings.avatarColor.7': '暖灰色',
+    'projectAgent.drawer.settings.avatarNew': '随机混搭',
+    'projectAgent.drawer.settings.avatarColor': '主题色',
+    'projectAgent.drawer.settings.avatarColorSyncHint': '同步穿搭、底盘与气泡',
+    'projectAgent.drawer.settings.avatarBackdrop': '柔彩底盘',
+    'projectAgent.drawer.settings.avatarTab.coat': '毛色花纹',
+    'projectAgent.drawer.settings.avatarTab.head': '头饰 / 眼镜',
+    'projectAgent.drawer.settings.avatarTab.neck': '领饰穿搭',
+    'projectAgent.drawer.settings.avatarCoat.circle': '黑猫',
+    'projectAgent.drawer.settings.avatarCoat.square': '三花猫',
+    'projectAgent.drawer.settings.avatarCoat.pill': '暖橘猫',
+    'projectAgent.drawer.settings.avatarCoat.arch': '拿铁暹罗',
+    'projectAgent.drawer.settings.avatarCoat.hex': '英短蓝猫',
+    'projectAgent.drawer.settings.avatarCoat.diamond': '奶牛猫',
+    'projectAgent.drawer.settings.avatarCoat.triangle': '奶油白猫',
+    'projectAgent.drawer.settings.avatarCoat.star': '暖棕狸花',
+    'projectAgent.drawer.settings.avatarHead.none': '无头饰',
+    'projectAgent.drawer.settings.avatarHead.beret': '贝雷帽',
+    'projectAgent.drawer.settings.avatarHead.glasses': '圆眼镜',
+    'projectAgent.drawer.settings.avatarHead.beanie': '针织帽',
+    'projectAgent.drawer.settings.avatarHead.vermeer': '珍珠巾',
+    'projectAgent.drawer.settings.avatarHead.straw': '麦田草帽',
+    'projectAgent.drawer.settings.avatarHead.headphones': '复古耳机',
+    'projectAgent.drawer.settings.avatarHead.crown': '星月小冠',
+    'projectAgent.drawer.settings.avatarNeck.bowtie': '绅士领结',
+    'projectAgent.drawer.settings.avatarNeck.scarf': '暖织围巾',
+    'projectAgent.drawer.settings.avatarNeck.sweater': '圆领毛衣',
+    'projectAgent.drawer.settings.avatarNeck.moon': '新月项圈',
+    'projectAgent.drawer.settings.avatarNeck.sailor': '水手领巾',
+    'projectAgent.drawer.settings.avatarNeck.cape': '极简披肩',
+    'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色或配件会切换回生成头像。',
+    'projectAgent.drawer.settings.avatarColor.0': '鸢尾蓝',
+    'projectAgent.drawer.settings.avatarColor.1': '暖赤陶',
+    'projectAgent.drawer.settings.avatarColor.2': '杏子金',
+    'projectAgent.drawer.settings.avatarColor.3': '鼠尾草',
+    'projectAgent.drawer.settings.avatarColor.4': '雾薰衣草',
+    'projectAgent.drawer.settings.avatarColor.5': '干枯玫瑰',
+    'projectAgent.drawer.settings.avatarColor.6': '松石青',
+    'projectAgent.drawer.settings.avatarColor.7': '暖燕麦',
     'projectAgent.drawer.settings.delete': '删除机器人',
     'projectAgent.drawer.settings.deleteManaged': '删除受管文件夹',
     'projectAgent.drawer.settings.deleteConfirm': '再点一次，确认删除',
@@ -2535,6 +2716,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.standard': '标准',
     'projectAgent.drawer.settings.proactivity.high': '多',
     'projectAgent.drawer.settings.proactivity.muted': '静音',
+    'projectAgent.drawer.settings.communicationStyle': '沟通风格',
+    'projectAgent.drawer.settings.communicationStyle.inherit': '跟随全局默认',
+    'projectAgent.drawer.settings.communicationStyle.natural': '自然搭档',
+    'projectAgent.drawer.settings.communicationStyle.concise': '干练直给',
+    'projectAgent.drawer.settings.communicationStyle.detailed': '温和详尽',
+    'projectAgent.drawer.settings.communicationStyle.technical': '专业深度',
+    'projectAgent.drawer.settings.communicationStyleHint': '覆盖此机器人的默认沟通风格；选「跟随全局默认」时自动沿用设置 → 个性化中的配置。',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': '连接中',
     'session.cloud_only': '仅云端',
@@ -2979,7 +3167,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.quick.workspace": "Choose workspace",
     "projectAgent.quick.attach": "Add attachment",
     "projectAgent.quick.attachmentLimit": "Add up to {count} attachments",
-    "projectAgent.quick.imageLimit": "Image {name} exceeds 8 MB",
+    "projectAgent.quick.imageLimit": "Image {name} exceeds 32 MB",
     "projectAgent.quick.fileLimit": "File {name} exceeds 512 KB",
     "projectAgent.quick.sending": "Sending",
     "projectAgent.quick.failed": "Send failed",
@@ -3117,6 +3305,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'settings.bots.quietUntil': 'Until',
     'settings.bots.digestTime': 'Daily summary',
     'settings.bots.digestTime.description': 'At this time, held notes become one message.',
+    'settings.bots.interactiveResults': 'Interactive results preview (OpenUI)',
+    'settings.bots.interactiveResults.description': 'Allow delegated work sessions to publish local filterable tables, charts, and calculators in Desktop (terminal still renders text fallback).',
     'settings.replyLanguage.description': 'The language bots use when talking with you.',
     'settings.replyLanguage.followInterface': 'Follow interface language',
     'settings.replyLanguage.auto': 'Auto (match the question)',
@@ -3455,6 +3645,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.deliveryIssue': 'The message was saved, but follow-up processing did not finish',
     'projectAgent.chat.activity.preparing': 'Getting ready for the next step',
     'projectAgent.chat.activity.thinking': 'Thinking it through',
+    'projectAgent.chat.activity.thinkingWithOneStep': 'Thinking it through · 1 step',
+    'projectAgent.chat.activity.thinkingWithSteps': 'Thinking it through · {count} steps',
     'projectAgent.chat.activity.responding': 'Putting the reply together',
     'projectAgent.chat.activity.settling': 'Putting the results together',
     'projectAgent.chat.activity.advancing': 'Working through the next step',
@@ -3467,12 +3659,18 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.activity.edit': 'Making changes',
     'projectAgent.chat.activity.verification': 'Checking the results',
     'projectAgent.chat.activity.delegating': 'Arranging the work',
+    'projectAgent.chat.activity.waitingSessions': 'Waiting for delegated work',
     'projectAgent.chat.activity.work': 'Checking on the work',
     'projectAgent.chat.activity.memory': 'Looking through project memory',
     'projectAgent.chat.activity.memoryUpdate': 'Updating project memory',
     'projectAgent.chat.activity.directory': 'Looking through the folder',
+    'projectAgent.chat.activity.git': 'Checking repository status',
+    'projectAgent.chat.activity.webSearch': 'Searching the web',
+    'projectAgent.chat.activity.webFetch': 'Reading web page',
     'projectAgent.chat.toolLabel.read': 'file reading',
     'projectAgent.chat.toolLabel.search': 'project search',
+    'projectAgent.chat.toolLabel.webSearch': 'web search',
+    'projectAgent.chat.toolLabel.webFetch': 'web fetch',
     'projectAgent.chat.toolLabel.edit': 'file editing',
     'projectAgent.chat.toolLabel.command': 'command execution',
     'projectAgent.chat.toolRunning': 'Running {tool}',
@@ -3555,6 +3753,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.disposition.outOfScope': 'This message was about “{title}” and did not affect the others',
     'projectAgent.chat.quote': 'Quote',
     'projectAgent.chat.quoteRemove': 'Remove quote',
+    'projectAgent.chat.protocolLeakFallback': 'This reply contained only invalid tool-call markup and was hidden. Please retry or ask again.',
     'projectAgent.chat.placeholder': 'Message {name}',
     'projectAgent.chat.attach': 'Attach files or images',
     'projectAgent.chat.previewAttachment': 'Preview image',
@@ -3646,6 +3845,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
     'projectAgent.chat.work.resultSettling': 'Reviewing the result',
+    'projectAgent.chat.work.verificationFailed': 'Verification failed',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
@@ -3697,6 +3897,8 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.surfacing.digest': 'Keep for the digest',
     'projectAgent.chat.surfacing.silent': 'Stay quiet',
     'projectAgent.chat.approve': 'Approve',
+    'projectAgent.chat.approvePlan': 'Approve plan',
+    'projectAgent.chat.planApprovalPending': 'Plan approval required',
     'projectAgent.chat.allowOnce': 'Allow once',
     'projectAgent.chat.allowTask': 'Repeat this operation for this task',
     'projectAgent.chat.allowImage': 'Allow this image for this session',
@@ -3779,9 +3981,52 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.tab.overview': 'Overview',
     'projectAgent.drawer.tab.tasks': 'Tasks',
     'projectAgent.drawer.tab.objectives': 'Objectives',
+    'projectAgent.drawer.tab.capabilities': 'Tools',
     'projectAgent.drawer.tab.memory': 'Memory',
     'projectAgent.drawer.tab.settings': 'Settings',
+    'projectAgent.capabilities.trigger': 'Bot mounted capabilities',
+    'projectAgent.capabilities.triggerCount': '{count} mounted capabilities',
+    'projectAgent.capabilities.inheritedTrigger': 'View shared capabilities inherited from "{bot}"',
+    'projectAgent.capabilities.title': 'Mounted Capabilities',
+    'projectAgent.capabilities.subtitle': 'All child tasks spawned by this bot automatically share this capability set.',
+    'projectAgent.capabilities.inheritedTitle': 'Inherited from "{bot}"',
+    'projectAgent.capabilities.inheritedSubtitle': 'Child tasks share their parent bot’s capabilities and do not mount separately.',
+    'projectAgent.capabilities.inheritedReadOnlyHint': 'Read-only task: write/external MCP tools are filtered automatically.',
+    'projectAgent.capabilities.adjustOnBot': 'Adjust on bot',
+    'projectAgent.capabilities.resetGlobal': 'Reset to global',
+    'projectAgent.capabilities.manageGlobal': 'Manage global plugins',
+    'projectAgent.capabilities.openInDrawer': 'Open in drawer',
+    'projectAgent.capabilities.group.skills': 'Skills',
+    'projectAgent.capabilities.group.mcp': 'MCP Services',
+    'projectAgent.capabilities.group.builtin': 'Built-in capabilities (read-only)',
+    'projectAgent.capabilities.builtinHint': 'Governed by the bot’s access level and task read-only policy.',
+    'projectAgent.capabilities.builtin.files': 'Files & workspace inspection',
+    'projectAgent.capabilities.builtin.shell': 'Local shell execution',
+    'projectAgent.capabilities.builtin.web': 'Web fetch & research',
+    'projectAgent.capabilities.empty.skills': 'No skills installed yet. Install them in the global plugins library.',
+    'projectAgent.capabilities.empty.mcp': 'No MCP servers configured yet. Add them in the global plugins library.',
+    'projectAgent.capabilities.empty.inherited': 'No Skills or MCP servers are mounted on this bot; this task uses built-in capabilities only.',
+    'projectAgent.capabilities.badge.workspace': 'Project',
+    'projectAgent.capabilities.badge.overrideOn': 'Bot on',
+    'projectAgent.capabilities.badge.overrideOff': 'Bot off',
+    'projectAgent.capabilities.badge.globalOff': 'Global off',
+    'projectAgent.capabilities.badge.unhealthy': 'Unhealthy',
+    'projectAgent.capabilities.badge.untrusted': 'Untrusted',
+    'projectAgent.capabilities.toolsCount': '{count} tools',
+    'projectAgent.capabilities.overviewLabel': 'Mounted capabilities',
+    'projectAgent.capabilities.overviewSummary': '{skills} Skills · {mcps} MCP',
+    'projectAgent.capabilities.overviewEmpty': 'Built-ins only',
+    'projectAgent.capabilities.saveFailed': 'Failed to save capability changes. Please retry.',
+    'projectAgent.capabilities.loading': 'Loading capabilities…',
     'projectAgent.drawer.folder': 'Bound folder',
+    'projectAgent.drawer.folderMissing': 'Folder not found or moved. Rebinding keeps this conversation and memory.',
+    'projectAgent.drawer.rebindFolder': 'Rebind folder',
+    'projectAgent.drawer.changeFolder': 'Change folder',
+    'projectAgent.drawer.rebinding': 'Binding…',
+    'projectAgent.drawer.rebindSuccess': 'Bound to the new folder',
+    'projectAgent.drawer.rebindError.pathTaken': 'This folder is already bound to another bot.',
+    'projectAgent.drawer.rebindError.notFound': 'The selected folder does not exist or cannot be accessed.',
+    'projectAgent.drawer.rebindError.failed': 'Could not rebind the folder. Please try again.',
     'projectAgent.drawer.noPath': 'No folder yet',
     'projectAgent.drawer.reveal': 'Show in Finder',
     'projectAgent.drawer.brief': 'Project brief',
@@ -3865,6 +4110,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.verificationPassed': 'Passed',
     'projectAgent.drawer.task.verificationFailed': 'Failed',
     'projectAgent.drawer.task.verificationMissing': 'Not reviewed',
+    'projectAgent.drawer.task.verificationNotRequired': 'Not required',
+    'projectAgent.drawer.task.verificationNotReviewed': 'Not independently reviewed',
+    'projectAgent.drawer.task.verificationQualityCriteria': 'Quality criteria',
     'projectAgent.drawer.task.verificationOther': 'Other check',
     'projectAgent.drawer.task.hint.confirm': '{name} follows up on this task in the main conversation.',
     'projectAgent.drawer.task.hint.failed': 'The task could not finish. {name} explains the next steps in the main conversation.',
@@ -3964,17 +4212,44 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.advancedModels': 'More roles and model limits',
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
-    'projectAgent.drawer.settings.avatarNew': 'Generate another',
-    'projectAgent.drawer.settings.avatarColor': 'Color',
-    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
+    'projectAgent.drawer.settings.avatarNew': 'Shuffle look',
+    'projectAgent.drawer.settings.avatarColor': 'Theme color',
+    'projectAgent.drawer.settings.avatarColorSyncHint': 'Syncs outfit, backdrop & chat tint',
+    'projectAgent.drawer.settings.avatarBackdrop': 'Soft backdrop',
+    'projectAgent.drawer.settings.avatarTab.coat': 'Coat',
+    'projectAgent.drawer.settings.avatarTab.head': 'Headwear',
+    'projectAgent.drawer.settings.avatarTab.neck': 'Neckwear',
+    'projectAgent.drawer.settings.avatarCoat.circle': 'Midnight',
+    'projectAgent.drawer.settings.avatarCoat.square': 'Calico',
+    'projectAgent.drawer.settings.avatarCoat.pill': 'Ginger',
+    'projectAgent.drawer.settings.avatarCoat.arch': 'Siamese',
+    'projectAgent.drawer.settings.avatarCoat.hex': 'British Blue',
+    'projectAgent.drawer.settings.avatarCoat.diamond': 'Tuxedo',
+    'projectAgent.drawer.settings.avatarCoat.triangle': 'Cream',
+    'projectAgent.drawer.settings.avatarCoat.star': 'Tabby',
+    'projectAgent.drawer.settings.avatarHead.none': 'None',
+    'projectAgent.drawer.settings.avatarHead.beret': 'Beret',
+    'projectAgent.drawer.settings.avatarHead.glasses': 'Glasses',
+    'projectAgent.drawer.settings.avatarHead.beanie': 'Beanie',
+    'projectAgent.drawer.settings.avatarHead.vermeer': 'Pearl scarf',
+    'projectAgent.drawer.settings.avatarHead.straw': 'Straw hat',
+    'projectAgent.drawer.settings.avatarHead.headphones': 'Headphones',
+    'projectAgent.drawer.settings.avatarHead.crown': 'Crown',
+    'projectAgent.drawer.settings.avatarNeck.bowtie': 'Bow tie',
+    'projectAgent.drawer.settings.avatarNeck.scarf': 'Scarf',
+    'projectAgent.drawer.settings.avatarNeck.sweater': 'Sweater',
+    'projectAgent.drawer.settings.avatarNeck.moon': 'Moon collar',
+    'projectAgent.drawer.settings.avatarNeck.sailor': 'Sailor',
+    'projectAgent.drawer.settings.avatarNeck.cape': 'Cape',
+    'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color or accessory switches back to a generated avatar.',
     'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
-    'projectAgent.drawer.settings.avatarColor.1': 'Coral',
-    'projectAgent.drawer.settings.avatarColor.2': 'Amber',
-    'projectAgent.drawer.settings.avatarColor.3': 'Mint',
-    'projectAgent.drawer.settings.avatarColor.4': 'Lilac',
-    'projectAgent.drawer.settings.avatarColor.5': 'Rose',
+    'projectAgent.drawer.settings.avatarColor.1': 'Terracotta',
+    'projectAgent.drawer.settings.avatarColor.2': 'Apricot',
+    'projectAgent.drawer.settings.avatarColor.3': 'Sage',
+    'projectAgent.drawer.settings.avatarColor.4': 'Lavender',
+    'projectAgent.drawer.settings.avatarColor.5': 'Dusty rose',
     'projectAgent.drawer.settings.avatarColor.6': 'Lagoon',
-    'projectAgent.drawer.settings.avatarColor.7': 'Warm gray',
+    'projectAgent.drawer.settings.avatarColor.7': 'Warm oat',
     'projectAgent.drawer.settings.delete': 'Delete bot',
     'projectAgent.drawer.settings.deleteManaged': 'Delete the managed folder',
     'projectAgent.drawer.settings.deleteConfirm': 'Click again to confirm deletion',
@@ -4011,6 +4286,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.proactivity.standard': 'Standard',
     'projectAgent.drawer.settings.proactivity.high': 'High',
     'projectAgent.drawer.settings.proactivity.muted': 'Muted',
+    'projectAgent.drawer.settings.communicationStyle': 'Communication style',
+    'projectAgent.drawer.settings.communicationStyle.inherit': 'Follow global default',
+    'projectAgent.drawer.settings.communicationStyle.natural': 'Natural partner',
+    'projectAgent.drawer.settings.communicationStyle.concise': 'Direct & concise',
+    'projectAgent.drawer.settings.communicationStyle.detailed': 'Warm & thorough',
+    'projectAgent.drawer.settings.communicationStyle.technical': 'Technical peer',
+    'projectAgent.drawer.settings.communicationStyleHint': 'Overrides the global style for this bot. Choose "Follow global default" to inherit Settings → Personalization.',
     'header.subtitle': 'Electron Shell + Local Capability Runtime',
     'status.connecting': 'connecting',
     'session.cloud_only': 'cloud only',

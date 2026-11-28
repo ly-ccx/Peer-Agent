@@ -21,14 +21,14 @@
     font-size: 15px;
     font-weight: 600;
     line-height: 1.4;
-    color: var(--pa-text-primary);
+    color: var(--graphite-base);
   }
 
   .pa-confirm-message {
     margin: 0;
     font-size: 13px;
     line-height: 1.6;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
     word-break: break-word;
   }
 
@@ -40,9 +40,9 @@
     box-sizing: border-box;
     padding: 8px 10px;
     border-radius: var(--ui-radius-control);
-    border: 1px solid var(--pa-border-subtle, rgba(15, 23, 42, 0.12));
-    background: var(--za-control-fill);
-    color: var(--pa-text-primary);
+    border: 1px solid var(--chrome-hairline);
+    background: var(--control-fill);
+    color: var(--graphite-base);
     font-size: 13px;
     line-height: 1.4;
     outline: none;
@@ -50,11 +50,11 @@
   }
 
   .pa-confirm-input:focus {
-    border-color: var(--za-focus);
+    border-color: var(--ui-focus-glow);
   }
 
   .pa-confirm-input::placeholder {
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   /* Create-branch dialog: push-to-remote checkbox under the branch name input. */
@@ -64,13 +64,13 @@
     gap: 8px;
     margin-top: 10px;
     font-size: 12.5px;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
     cursor: pointer;
     user-select: none;
   }
 
   .pa-confirm-check input {
-    accent-color: var(--za-focus);
+    accent-color: var(--azure-seal);
     width: 14px;
     height: 14px;
     cursor: pointer;
@@ -85,7 +85,7 @@
   .pa-confirm-field-label {
     display: block;
     font-size: 12.5px;
-    color: var(--pa-text-secondary);
+    color: var(--graphite-soft);
   }
 
   .pa-confirm-field .pa-confirm-input {
@@ -124,28 +124,28 @@
 
   .pa-confirm-btn.ghost {
     background: transparent;
-    border-color: var(--za-line);
-    color: var(--pa-text-secondary);
+    border-color: var(--chrome-hairline);
+    color: var(--graphite-soft);
   }
 
   .pa-confirm-btn.ghost:hover:not(:disabled) {
-    background: var(--surface-vellum-active);
-    color: var(--pa-text-primary);
+    background: var(--paper-active);
+    color: var(--graphite-base);
   }
 
   .pa-confirm-btn.primary {
-    background: var(--za-primary-control-bg);
-    color: var(--za-primary-control-ink);
+    background: var(--chrome-keycap-bg);
+    color: var(--chrome-keycap-fg);
   }
 
   .pa-confirm-btn.primary:hover:not(:disabled) {
     opacity: 0.88;
   }
 
-  /* 危险态：朱砂红实心，用于删除等不可撤销操作。 */
+  /* 危险态：冷梅红实心，用于删除等不可撤销操作。 */
   .pa-confirm-btn.danger {
-    background: var(--cinnabar-seal, #c8503c);
-    color: #fff;
+    background: var(--state-danger);
+    color: var(--paper-raised);
   }
 
   .pa-confirm-btn.danger:hover:not(:disabled) {
@@ -158,7 +158,7 @@
   }
 
   .pa-confirm-btn:focus-visible {
-    outline: 2px solid var(--za-focus);
+    outline: 2px solid var(--ui-focus-glow);
     outline-offset: 2px;
   }
 }

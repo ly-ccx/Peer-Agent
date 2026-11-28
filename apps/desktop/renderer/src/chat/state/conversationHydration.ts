@@ -1,7 +1,13 @@
 import type { AutomationCreateContext, ContextAccountingSnapshot } from "@peer-agent/protocol";
 import { clientApi } from "../../clientApi";
 import { isEffortLevel, normalizeChatMode, type EffortLevel, type ChatMode } from "./preferences";
-import { isEmptyAssistantPlaceholder, isEmptyUserMessage, migrateToSegments, parseSerializedToolSegments } from "./streamSegments";
+import {
+  foldCliToolMessagesForDesktop,
+  isEmptyAssistantPlaceholder,
+  isEmptyUserMessage,
+  migrateToSegments,
+  parseSerializedToolSegments,
+} from "./streamSegments";
 import type { ChatAttachment, ContentSegment, ToolCallLegacy, CompactionMeta, ChatMsg } from "./types";
 import { mapInChunks } from "./yieldToMain";
 
@@ -40,11 +46,27 @@ export async function loadConversationMessages(conversationId: string, options?:
   cursor: string | null;
   hasMore: boolean;
 }> {
-  const page = await clientApi.conversationsGet({
+  let page = await clientApi.conversationsGet({
     id: conversationId,
     ...(options?.before ? { before: options.before } : {}),
   });
-  const rows = page?.window ?? [];
+  // Rust 原生委派会话按单步落盘（同一 streamId 可超过默认 80 行窗口）；
+  // 若首页被截断在单个流中间，按上限窗口 200 补拉一次（不突破分页上限），避免把单轮执行过程腰斩。
+  if (
+    page
+    && page.hasMore === true
+    && !options?.before
+    && Array.isArray(page.window)
+    && page.window.length > 0
+  ) {
+    const firstRow = page.window[0] as Record<string, unknown> | undefined;
+    const firstStreamId = typeof firstRow?.streamId === 'string' ? firstRow.streamId.trim() : '';
+    if (firstRow?.role === 'assistant' && firstStreamId) {
+      const widerPage = await clientApi.conversationsGet({ id: conversationId, limit: 200 });
+      if (widerPage?.meta) page = widerPage;
+    }
+  }
+  const rows = foldCliToolMessagesForDesktop((page?.window ?? []) as readonly Record<string, unknown>[]);
   const meta = page?.meta;
   if (!page || !meta) return {
     messages: [],
@@ -75,11 +97,22 @@ export async function loadConversationMessages(conversationId: string, options?:
   const mapped = await mapInChunks(
     rows,
     (m) => {
+    const roleRaw = String(m.role ?? 'user');
+    const role: ChatMsg['role'] = roleRaw === 'assistant' || roleRaw === 'system'
+      ? roleRaw
+      : roleRaw === 'tool'
+        ? 'assistant'
+        : 'user';
+    const rawTs = typeof m.timestamp === 'number' && Number.isFinite(m.timestamp)
+      ? m.timestamp
+      : typeof m.createdAt === 'string'
+        ? Date.parse(m.createdAt)
+        : NaN;
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
-      role: (m.role as ChatMsg['role']) || 'user',
+      role,
       content: (m.content as string) || '',
-      timestamp: m.timestamp as number | undefined,
+      timestamp: Number.isFinite(rawTs) ? rawTs : undefined,
     };
     if (m.segments) {
       msg.segments = m.segments as ContentSegment[];

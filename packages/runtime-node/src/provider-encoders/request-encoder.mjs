@@ -9,6 +9,8 @@ import { admitDeepSeekChatHistory } from './reasoning-replay.mjs';
 // Peer Agent 的 off 不发 reasoning_effort；其余档位按 provider wire 契约透传。
 // medium 是 Grok 4.5 等渠道的原生档位，必须直通，不能被 default→medium 逻辑吞掉。
 const OPENAI_REASONING_EFFORT = {
+  none: 'none',
+  minimal: 'minimal',
   low: 'low',
   medium: 'medium',
   default: 'medium',
@@ -129,6 +131,8 @@ export function encodeOpenAIChatRequest({
   // off 不发 reasoning_effort; 其余档位映射到 OpenAI 原生 low/medium/high/xhigh。
   if (supportsReasoning && reasoningParamStyle === 'openai-effort' && effort && effort !== 'off') {
     body.reasoning_effort = mappedEffortValue(effort, reasoningEffortMap, OPENAI_REASONING_EFFORT, 'default') ?? 'medium';
+  } else if (supportsReasoning && reasoningParamStyle === 'qwen-enable' && effort === 'none') {
+    body.enable_thinking = false;
   } else if (supportsReasoning && reasoningParamStyle === 'qwen-enable' && effort && effort !== 'off') {
     body.enable_thinking = true;
     body.thinking_budget = mappedNumericEffort(effort, reasoningEffortMap, QWEN_THINKING_BUDGET) ?? QWEN_THINKING_BUDGET.default;

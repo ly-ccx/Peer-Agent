@@ -11,7 +11,7 @@ import { resolveWorkSessionProfile } from '../project-agent/work-session-profile
 import { createInteractiveRuntime } from './runtime.mjs';
 import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
 import { createLocalToolHost } from '../../../../apps/desktop/electron/main/runtime-gateway/local-tool-host.mjs';
-import { normalizeTurnProfile } from '../../../../apps/desktop/electron/main/chat-runtime/turn-context.mjs';
+import { normalizeTurnProfile } from './test-turn-profile.mjs';
 import { createEvidenceReader } from '../../../../apps/desktop/electron/main/project-agent/evidence-reader.mjs';
 import { createEvidenceDeliveryProjection } from '../../../../apps/desktop/electron/main/project-agent/evidence-deliveries.mjs';
 import { installDeliveryFacts } from '../../../../apps/desktop/electron/main/project-agent/delivery-facts-port.mjs';

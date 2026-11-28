@@ -1,0 +1,558 @@
+//! Existing goal-plans/evidence-index.jsonl registration seam.
+//! Registration records a Host tool result; it does not prove goal acceptance.
+use crate::{DirectoryLock, StoreError, durable_jsonl as log, files};
+use peer_protocol::{
+    JsonDecodeError, JsonLimits, collect_tool_result_evidence_refs, decode_json_bounded,
+    javascript_json_string, javascript_trim,
+};
+use serde_json::{Value, json};
+use std::{
+    collections::{HashMap, HashSet},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock, atomic::AtomicBool},
+    time::Duration,
+};
+
+#[derive(Clone)]
+struct CachedEvidenceRefs {
+    identity: files::FileIdentity,
+    by_plan: HashMap<String, HashSet<String>>,
+    by_conv: HashMap<String, HashSet<String>>,
+}
+
+static EVIDENCE_REFS_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedEvidenceRefs>>> = OnceLock::new();
+
+fn evidence_refs_cache() -> &'static Mutex<HashMap<PathBuf, CachedEvidenceRefs>> {
+    EVIDENCE_REFS_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn collect_matching_refs(
+    cached: &CachedEvidenceRefs,
+    plan_id: Option<&str>,
+    conversation_ids: &[&str],
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if let Some(pid) = plan_id
+        && let Some(refs) = cached.by_plan.get(pid)
+    {
+        out.extend(refs.iter().cloned());
+    }
+    for &cid in conversation_ids {
+        if let Some(refs) = cached.by_conv.get(cid) {
+            out.extend(refs.iter().cloned());
+        }
+    }
+    out
+}
+
+const MAX_RECORD_BYTES: usize = log::MAX_BYTES;
+/// Host-owned execution report, never accepted from a renderer/model endpoint.
+/// Deliberately not Deserialize. Tool output and assistant prose are not reports.
+pub struct HostToolEvidence<'a> {
+    pub conversation_id: &'a str,
+    pub plan_id: Option<&'a str>,
+    pub stream_id: Option<&'a str>,
+    pub tool_name: &'a str,
+    pub capability_id: &'a str,
+    pub tool_call_id: &'a str,
+    pub grant: &'a Value,
+    pub result: &'a Value,
+}
+pub struct EvidenceIndexStore {
+    file: PathBuf,
+}
+fn text(v: &str, max: usize) -> bool {
+    !javascript_trim(v).is_empty() && v.len() <= max
+}
+fn validate_report(report: &HostToolEvidence<'_>) -> Result<(), StoreError> {
+    let bad = StoreError::EvidenceInvalid;
+    let result = report.result;
+    let grant = report.grant;
+    if !text(report.conversation_id, 200)
+        || !text(report.tool_name, 200)
+        || !text(report.capability_id, 200)
+        || !text(report.tool_call_id, 200)
+        || report.plan_id.is_some_and(|s| !text(s, 200))
+        || report.stream_id.is_some_and(|s| !text(s, 200))
+        || result["toolCallId"].as_str() != Some(report.tool_call_id)
+        || grant["toolCallId"].as_str() != Some(report.tool_call_id)
+        || !grant["grantId"].as_str().is_some_and(|s| text(s, 200))
+        || !grant["granted"].is_boolean()
+        || !result["outputPreview"].is_object()
+        || !["success", "failed", "denied", "cancelled"]
+            .contains(&result["status"].as_str().unwrap_or(""))
+        || result["status"] == "success" && grant["granted"] != true
+        || result["evidence"]["toolCallId"].as_str() != Some(report.tool_call_id)
+        || !result["evidence"]["evidenceId"]
+            .as_str()
+            .is_some_and(|s| text(s, 200))
+        || !result["evidence"]["summary"].is_string()
+        || !result["evidence"]["artifactRefs"].is_array()
+    {
+        return Err(bad);
+    }
+    for at in [&result["completedAt"], &grant["decidedAt"]] {
+        if !at.as_str().is_some_and(|s| {
+            s.len() <= 64
+                && time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339)
+                    .is_ok()
+        }) {
+            return Err(bad);
+        }
+    }
+    if !["once", "task", "session", "scope", "persistent", "denied"]
+        .contains(&grant["duration"].as_str().unwrap_or(""))
+        || grant["granted"] == false && grant["duration"] != "denied"
+        || grant["granted"] == true && grant["duration"] == "denied"
+    {
+        return Err(bad);
+    }
+    Ok(())
+}
+fn validate_record(row: &Value) -> Result<(), StoreError> {
+    if !row["evidenceRef"].as_str().is_some_and(|s| text(s, 8192))
+        || !row["createdAt"].as_str().is_some_and(|s| text(s, 200))
+    {
+        return Err(StoreError::EvidenceInvalid);
+    }
+    for key in [
+        "planId",
+        "conversationId",
+        "streamId",
+        "toolCallId",
+        "capabilityId",
+        "toolName",
+    ] {
+        if let Some(v) = row.get(key)
+            && !v.as_str().is_some_and(|s| text(s, 200))
+        {
+            return Err(StoreError::EvidenceInvalid);
+        }
+    }
+    Ok(())
+}
+fn trim_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
+    while let Some(first) = bytes.first()
+        && first.is_ascii_whitespace()
+    {
+        bytes = &bytes[1..];
+    }
+    while let Some(last) = bytes.last()
+        && last.is_ascii_whitespace()
+    {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
+}
+fn json_escaped_inner(s: &str) -> Result<String, StoreError> {
+    let encoded = javascript_json_string(&json!(s)).map_err(|_| StoreError::HistoryLimit)?;
+    Ok(encoded
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(encoded.as_str())
+        .to_owned())
+}
+fn scan_records(
+    path: &Path,
+    cancel: Option<&AtomicBool>,
+    needles: &[String],
+    mut on_record: impl FnMut(Value) -> Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    log::check_cancel(cancel)?;
+    let Some((mut file, before)) = files::open(path, u64::MAX)? else {
+        return Ok(());
+    };
+    if before.size == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))
+        .map_err(|_| StoreError::ReadFailed)?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)
+        .map_err(|_| StoreError::ReadFailed)?;
+    if last[0] != b'\n' {
+        return Err(StoreError::HistoryCorrupt);
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| StoreError::ReadFailed)?;
+
+    let strict_all = before.size <= log::MAX_BYTES as u64;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut line = Vec::with_capacity(1024);
+    let mut offset: u64 = 0;
+    let mut row_idx: usize = 0;
+    loop {
+        line.clear();
+        loop {
+            let buf = reader.fill_buf().map_err(|_| StoreError::ReadFailed)?;
+            if buf.is_empty() {
+                break;
+            }
+            if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let take = pos + 1;
+                if line.len().saturating_add(take) > MAX_RECORD_BYTES {
+                    return Err(StoreError::HistoryLimit);
+                }
+                line.extend_from_slice(&buf[..take]);
+                reader.consume(take);
+                break;
+            }
+            if line.len().saturating_add(buf.len()) > MAX_RECORD_BYTES {
+                return Err(StoreError::HistoryLimit);
+            }
+            line.extend_from_slice(buf);
+            let len = buf.len();
+            reader.consume(len);
+        }
+        if line.is_empty() {
+            break;
+        }
+        offset = offset.saturating_add(line.len() as u64);
+        row_idx += 1;
+        if row_idx.is_multiple_of(256) {
+            log::check_cancel(cancel)?;
+        }
+        let trimmed = trim_ascii_whitespace(&line);
+        if trimmed.is_empty() {
+            continue;
+        }
+        let text = std::str::from_utf8(trimmed).map_err(|_| StoreError::HistoryCorrupt)?;
+        let is_last_line = offset >= before.size;
+        if !(strict_all
+            || is_last_line
+            || needles.is_empty()
+            || needles.iter().any(|n| text.contains(n.as_str())))
+        {
+            continue;
+        }
+        let decoded = decode_json_bounded(
+            trimmed,
+            JsonLimits {
+                bytes: MAX_RECORD_BYTES,
+                nodes: 65_536,
+                depth: 64,
+                string_bytes: MAX_RECORD_BYTES,
+            },
+        )
+        .map_err(|e| match e {
+            JsonDecodeError::LimitExceeded => StoreError::HistoryLimit,
+            _ => StoreError::HistoryCorrupt,
+        })?;
+        if !decoded.value.is_object() {
+            return Err(StoreError::HistoryCorrupt);
+        }
+        validate_record(&decoded.value)?;
+        on_record(decoded.value)?;
+    }
+    log::check_cancel(cancel)?;
+    if offset != before.size || files::identity(path)?.as_ref() != Some(&before) {
+        return Err(StoreError::VersionChanged);
+    }
+    Ok(())
+}
+impl EvidenceIndexStore {
+    pub fn new(data_home: impl AsRef<Path>) -> Self {
+        Self {
+            file: data_home.as_ref().join("goal-plans/evidence-index.jsonl"),
+        }
+    }
+    /// Bounded read of indexed Evidence refs for `plan_id` and `conversation_ids` in one cached scan.
+    pub fn refs_for_plan_and_conversations(
+        &self,
+        plan_id: Option<&str>,
+        conversation_ids: &[&str],
+        cancel: Option<&AtomicBool>,
+    ) -> Result<HashSet<String>, StoreError> {
+        log::check_cancel(cancel)?;
+        if let Some(pid) = plan_id
+            && !text(pid, 200)
+        {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        for &cid in conversation_ids {
+            if !text(cid, 200) {
+                return Err(StoreError::EvidenceInvalid);
+            }
+        }
+        if plan_id.is_none() && conversation_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let Some(current_id) = files::identity(&self.file)? else {
+            if let Ok(mut guard) = evidence_refs_cache().lock() {
+                guard.remove(&self.file);
+            }
+            return Ok(HashSet::new());
+        };
+        if let Ok(guard) = evidence_refs_cache().lock()
+            && let Some(cached) = guard.get(&self.file)
+            && cached.identity == current_id
+        {
+            return Ok(collect_matching_refs(cached, plan_id, conversation_ids));
+        }
+
+        let mut by_plan: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut by_conv: HashMap<String, HashSet<String>> = HashMap::new();
+        scan_records(&self.file, cancel, &[], |row| {
+            let Some(ev_ref) = row["evidenceRef"].as_str() else {
+                return Ok(());
+            };
+            if let Some(pid) = row["planId"].as_str() {
+                by_plan
+                    .entry(pid.to_owned())
+                    .or_default()
+                    .insert(ev_ref.to_owned());
+            }
+            if let Some(cid) = row["conversationId"].as_str() {
+                by_conv
+                    .entry(cid.to_owned())
+                    .or_default()
+                    .insert(ev_ref.to_owned());
+            }
+            Ok(())
+        })?;
+
+        let cached = CachedEvidenceRefs {
+            identity: current_id.clone(),
+            by_plan,
+            by_conv,
+        };
+        let result = collect_matching_refs(&cached, plan_id, conversation_ids);
+        if files::identity(&self.file)?.as_ref() == Some(&current_id)
+            && let Ok(mut guard) = evidence_refs_cache().lock()
+        {
+            if guard.len() >= 8
+                && !guard.contains_key(&self.file)
+                && let Some(evict_key) = guard.keys().next().cloned()
+            {
+                guard.remove(&evict_key);
+            }
+            guard.insert(self.file.clone(), cached);
+        }
+        Ok(result)
+    }
+    /// Bounded read of all indexed Evidence rows belonging to `plan_id`.
+    pub fn list_for_plan(
+        &self,
+        plan_id: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        if !text(plan_id, 200) {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        let needles = [json_escaped_inner(plan_id)?];
+        let mut out = Vec::new();
+        scan_records(&self.file, cancel, &needles, |row| {
+            if row["planId"].as_str() == Some(plan_id) {
+                out.push(row);
+            }
+            Ok(())
+        })?;
+        Ok(out)
+    }
+    /// List all indexed Evidence records associated with `conversation_id` (read-only).
+    pub fn list_for_conversation(
+        &self,
+        conversation_id: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        if !text(conversation_id, 200) {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        let needles = [json_escaped_inner(conversation_id)?];
+        let mut out = Vec::new();
+        scan_records(&self.file, cancel, &needles, |row| {
+            if row["conversationId"].as_str() == Some(conversation_id) {
+                out.push(row);
+            }
+            Ok(())
+        })?;
+        Ok(out)
+    }
+    /// Bounded, strict source facts. Missing refs remain missing, never success.
+    pub fn find(
+        &self,
+        refs: &[String],
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        if refs.len() > 1024 || refs.iter().any(|r| !text(r, 8192)) {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        if refs.is_empty() {
+            log::check_cancel(cancel)?;
+            return Ok(Vec::new());
+        }
+        let wanted: HashSet<_> = refs.iter().map(String::as_str).collect();
+        let needles = wanted
+            .iter()
+            .map(|r| json_escaped_inner(r))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut found = HashMap::new();
+        scan_records(&self.file, cancel, &needles, |row| {
+            let id = row["evidenceRef"].as_str().unwrap();
+            if wanted.contains(id) {
+                // Generic facts use the existing merge order. Complex interactive receipts
+                // must be reconciled by their canonical adapter before native mutation.
+                let merged = match found.remove(id) {
+                    Some(old) => merge(old, &row)?,
+                    None => row,
+                };
+                found.insert(merged["evidenceRef"].as_str().unwrap().to_owned(), merged);
+            }
+            Ok(())
+        })?;
+        Ok(refs.iter().filter_map(|r| found.get(r).cloned()).collect())
+    }
+    pub fn register(
+        &self,
+        report: &HostToolEvidence<'_>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        log::check_cancel(cancel)?;
+        validate_report(report)?;
+        let refs = collect_tool_result_evidence_refs(Some(report.tool_call_id), report.result)
+            .map_err(|_| StoreError::HistoryLimit)?;
+        if report.result["evidence"]["artifactRefs"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 1024
+        {
+            return Err(StoreError::HistoryLimit);
+        }
+        let artifacts: Vec<_> = report.result["evidence"]["artifactRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(javascript_trim)
+                    .filter(|s| text(s, 8192))
+                    .ok_or(StoreError::EvidenceInvalid)
+            })
+            .collect::<Result<_, _>>()?;
+        let parent = log::directory(self.file.parent().unwrap())?;
+        let file = parent.join("evidence-index.jsonl");
+        let _lock = DirectoryLock::acquire(&file, Duration::from_millis(100), cancel)?;
+        let mut existing = HashMap::<String, Value>::new();
+        let wanted: HashSet<_> = refs.iter().map(String::as_str).collect();
+        let needles = wanted
+            .iter()
+            .map(|r| json_escaped_inner(r))
+            .collect::<Result<Vec<_>, _>>()?;
+        scan_records(&file, cancel, &needles, |old| {
+            let key = old["evidenceRef"].as_str().unwrap().to_owned();
+            if wanted.contains(key.as_str()) {
+                let row = match existing.remove(&key) {
+                    Some(previous) => merge(previous, &old)?,
+                    None => old,
+                };
+                existing.insert(key, row);
+            }
+            Ok(())
+        })?;
+        let mut saved = Vec::new();
+        let mut changes = Vec::new();
+        for evidence_ref in refs {
+            let mut row = json!({"evidenceRef":evidence_ref,"createdAt":report.result["completedAt"],"conversationId":report.conversation_id,"toolCallId":report.tool_call_id,"capabilityId":report.capability_id,"toolName":report.tool_name});
+            if let Some(plan) = report.plan_id {
+                row["planId"] = json!(plan)
+            }
+            if let Some(stream) = report.stream_id {
+                row["streamId"] = json!(stream)
+            }
+            if !artifacts.is_empty() {
+                row["artifactRefs"] = json!(artifacts)
+            }
+            let previous = existing.remove(&evidence_ref);
+            let merged = if let Some(old) = previous.as_ref() {
+                merge(old.clone(), &row)?
+            } else {
+                row
+            };
+            if previous.as_ref() != Some(&merged) {
+                changes.push(merged.clone());
+            }
+            saved.push(merged);
+        }
+        if !changes.is_empty() {
+            let encoded = log::encode(&changes)?;
+            log::append_to_limit(&file, &encoded, u64::MAX, cancel)?;
+        }
+        Ok(saved)
+    }
+}
+fn interactive(row: &Value) -> bool {
+    row.get("interactiveInspection").is_some()
+        || row["userArtifacts"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|r| r["kind"] == "interactive"))
+}
+fn merge(mut current: Value, incoming: &Value) -> Result<Value, StoreError> {
+    if interactive(&current) || interactive(incoming) {
+        return Err(StoreError::EvidenceUnsupported);
+    }
+    // Same generic record merge as goal-plan-files.mjs; unknown source fields stay.
+    if current.get("bodyPreview").is_none()
+        && incoming.get("bodyPreview").is_some()
+        && incoming["toolName"] != "goal_update_task"
+    {
+        current["bodyPreview"] = incoming["bodyPreview"].clone()
+    }
+    for key in ["planId", "conversationId", "streamId"] {
+        if let Some(v) = incoming.get(key) {
+            current[key] = v.clone()
+        }
+    }
+    if current["toolName"].as_str().is_none_or(str::is_empty)
+        || current["toolName"] == "goal_update_task" && incoming["toolName"] != "goal_update_task"
+    {
+        for key in ["toolCallId", "capabilityId", "toolName", "createdAt"] {
+            if let Some(v) = incoming.get(key) {
+                current[key] = v.clone()
+            }
+        }
+    } else if incoming["toolName"] != "goal_update_task" {
+        for key in ["toolCallId", "capabilityId", "toolName"] {
+            if current.get(key).is_none()
+                && let Some(v) = incoming.get(key)
+            {
+                current[key] = v.clone()
+            }
+        }
+    }
+    let mut refs = Vec::new();
+    let mut seen = HashSet::new();
+    for row in [&current, incoming] {
+        if let Some(items) = row["artifactRefs"].as_array() {
+            for item in items {
+                let r = item.as_str().ok_or(StoreError::EvidenceInvalid)?;
+                let r = javascript_trim(r);
+                if text(r, 8192) && seen.insert(r) {
+                    refs.push(json!(r))
+                }
+            }
+        }
+    }
+    if !refs.is_empty() {
+        current["artifactRefs"] = json!(refs)
+    }
+    let mut users = Vec::<Value>::new();
+    for row in [&current, incoming] {
+        if let Some(items) = row["userArtifacts"].as_array() {
+            for artifact in items {
+                if let Some(reference) = artifact["ref"].as_str() {
+                    if let Some(old) = users.iter_mut().find(|r| r["ref"] == reference) {
+                        *old = artifact.clone()
+                    } else {
+                        users.push(artifact.clone())
+                    }
+                }
+            }
+        }
+    }
+    if !users.is_empty() {
+        current["userArtifacts"] = json!(users)
+    }
+    Ok(current)
+}

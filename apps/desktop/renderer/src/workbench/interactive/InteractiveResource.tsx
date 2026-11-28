@@ -55,8 +55,8 @@ function failureText(code: string | null, isZh: boolean) {
   return isZh ? '此设备暂时无法打开结果。没有重新取数或执行工作，可以重试。' : 'This device cannot open the result. No data or work was rerun. Retry opening.';
 }
 
-export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata, onOpenReference, onOwnerAbandoned }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
-  readonly active: boolean; readonly isZh: boolean; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean>;
+export function InteractiveResource({ reference, api, active, isZh, inline = false, headerExtra, onReady, onUnavailable, onRecoverView, onMetadata, onOpenReference, onOwnerAbandoned }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
+  readonly active: boolean; readonly isZh: boolean; readonly inline?: boolean; readonly headerExtra?: ReactNode; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean>;
   readonly onOwnerAbandoned?: () => void;
   readonly onMetadata?: (reference: InteractiveResultReference, title: string) => void;
   readonly onOpenReference?: (reference: InteractiveResultReference) => boolean | Promise<boolean> }) {
@@ -88,19 +88,26 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
   if (session && ownerReplaced) return <InteractiveOwnerRecovery session={session} isZh={isZh}
     onAbandoned={onOwnerAbandoned ?? (async () => { await abandonInteractiveLayout(reference.owner); await registry?.close(reference); })} />;
   const failure = openingError ?? entry?.error;
-  return <div className="interactive-resource">
-    {(!entry || entry.phase === 'opening') && !failure ? <div role="status"><p>{isZh ? '正在打开固定版本…' : 'Opening the fixed version…'}</p>
-      {registry && entry ? <button type="button" className="ui-button" onClick={() => { void registry.close(reference).then(ok => { if (ok) setOpeningError('interactive_open_cancelled'); }); }}>{isZh ? '取消打开' : 'Cancel opening'}</button> : null}</div> : null}
-    {failure && cleaned ? <p role="status">{failureText(failure, isZh)}</p> : null}
-    {failure && !cleaned ? <div role="alert"><p>{failureText(failure, isZh)}</p><button type="button" className="ui-button" onClick={open}>{isZh ? '重试打开' : 'Retry opening'}</button></div> : null}
-    {entry?.phase === 'ready' && entry.opened && api ? <InteractiveVersions reference={reference} handle={entry.opened.handle} api={api} isZh={isZh} openReference={onOpenReference} /> : null}
-    {entry?.phase === 'ready' && session && entry.opened ? <Surface session={session} provenance={entry.opened.result.provenance} sourceIssues={entry.opened.sourceIssues} isZh={isZh} onReady={onReady}
-      onUnavailable={onUnavailable} recoverView={onRecoverView ?? (async () => !!(await window.peerAgent?.resourceWindowOpen?.({ resource: { kind: 'interactive', reference } }))?.ok)} />
-      : entry?.summary ? <SavedSummary title={entry.summary.title} text={entry.summary.textFallback} isZh={isZh} /> : null}
-    {cleaned?.truncated ? <p className="resource-source-label">{isZh ? '摘要已截断。' : 'Summary truncated.'}</p> : null}
-    {entry?.opened ? <MotionDetails className="interactive-resource-program"><summary><PeerIcon name="chevronRight" size={12} />{isZh ? '查看保存的程序' : 'View saved program'}</summary>
-      <SourceViewer content={entry.opened.result.content.program} isZh={isZh} emptyLabel={isZh ? '程序为空。' : 'Empty program.'} />
-    </MotionDetails> : null}
+  const showVersions = !inline && entry?.phase === 'ready' && !!entry.opened && !!api;
+  const showPanelBar = !inline && (showVersions || !!headerExtra);
+  return <div className={`interactive-resource${inline ? ' is-inline' : ''}`}>
+    {showPanelBar ? <div className="interactive-panel-bar">
+      {showVersions ? <InteractiveVersions reference={reference} handle={entry.opened!.handle} api={api!} isZh={isZh} openReference={onOpenReference} /> : <span className="interactive-panel-bar-spacer" />}
+      {headerExtra ? <div className="interactive-panel-bar-extra">{headerExtra}</div> : null}
+    </div> : null}
+    <div className="interactive-resource-content">
+      {(!entry || entry.phase === 'opening') && !failure ? <div role="status"><p>{isZh ? '正在打开固定版本…' : 'Opening the fixed version…'}</p>
+        {registry && entry ? <button type="button" className="ui-button is-compact" onClick={() => { void registry.close(reference).then(ok => { if (ok) setOpeningError('interactive_open_cancelled'); }); }}>{isZh ? '取消打开' : 'Cancel opening'}</button> : null}</div> : null}
+      {failure && cleaned ? <p role="status">{failureText(failure, isZh)}</p> : null}
+      {failure && !cleaned ? <div role="alert"><p>{failureText(failure, isZh)}</p><button type="button" className="ui-button is-compact" onClick={open}>{isZh ? '重试打开' : 'Retry opening'}</button></div> : null}
+      {entry?.phase === 'ready' && session && entry.opened ? <Surface session={session} provenance={entry.opened.result.provenance} sourceIssues={entry.opened.sourceIssues} isZh={isZh} inline={inline} onReady={onReady}
+        onUnavailable={onUnavailable} recoverView={onRecoverView ?? (async () => !!(await window.peerAgent?.resourceWindowOpen?.({ resource: { kind: 'interactive', reference } }))?.ok)} />
+        : entry?.summary ? <SavedSummary title={entry.summary.title} text={entry.summary.textFallback} isZh={isZh} /> : null}
+      {cleaned?.truncated ? <p className="resource-source-label">{isZh ? '摘要已截断。' : 'Summary truncated.'}</p> : null}
+      {!inline && entry?.opened ? <MotionDetails className="interactive-resource-program"><summary><PeerIcon name="chevronRight" size={12} />{isZh ? '查看保存的程序' : 'View saved program'}</summary>
+        <SourceViewer content={entry.opened.result.content.program} isZh={isZh} emptyLabel={isZh ? '程序为空。' : 'Empty program.'} />
+      </MotionDetails> : null}
+    </div>
   </div>;
 }
 

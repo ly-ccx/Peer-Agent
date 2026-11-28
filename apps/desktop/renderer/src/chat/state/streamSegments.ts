@@ -521,10 +521,228 @@ export function markDanglingToolCallsInterrupted(
   return changed ? next : (list as ContentSegment[]);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
 /**
- * 兼容 CLI/TUI 落盘的 role=tool 消息：Desktop 表达层只渲染 user/assistant/system，
- * 因此把 tool 消息折叠进前一条 assistant 的 tool-call segments。
- * 这是历史回放适配，不是把 tool 文本提升为可执行指令。
+ * 把 Rust 原生运行时落盘的结构化 tool-call result 对象规整为 Desktop 可直接渲染的字符串。
+ * - `undefined` / `null` 保留为 `undefined`（代表工具仍在执行中，展示转圈态）。
+ * - `error` 对象规整为 `[code] message`。
+ * - `output.lanes`（batch_search）保持 JSON 字符串，供 BatchSearchToolCard 还原分路检索视图。
+ * - 其余对象优先提取 preview / content / stdout+stderr，缺省序列化为缩进 JSON，避免 React 直接渲染对象崩溃。
+ */
+export function normalizeToolCallResultForDesktop(
+  rawResult: unknown,
+  toolName?: string,
+): string | undefined {
+  if (rawResult === undefined || rawResult === null) return undefined;
+  if (typeof rawResult === 'string') return rawResult;
+  if (!isPlainObject(rawResult)) return String(rawResult);
+
+  const errorText = ((): string => {
+    if (isPlainObject(rawResult.error)) {
+      const code = typeof rawResult.error.code === 'string' ? rawResult.error.code.trim() : '';
+      const message = typeof rawResult.error.message === 'string' ? rawResult.error.message.trim() : '';
+      if (message) return code && code !== message ? `[${code}] ${message}` : message;
+      if (code) return code;
+    } else if (typeof rawResult.error === 'string' && rawResult.error.trim()) {
+      return rawResult.error.trim();
+    }
+    return '';
+  })();
+
+  const output = rawResult.output;
+  if (isPlainObject(output)) {
+    // batch_search 结构化输出优先保留（包含 all_search_lanes_failed 时每个子路的 errorMessage），
+    // 让 BatchSearchToolCard 能还原真实分路状态而非掉进「检索中…」。
+    if (Array.isArray(output.lanes)) {
+      const allFailed = rawResult.status === 'failed'
+        && (output.completedCount === 0 || output.status === 'failed');
+      const enriched = allFailed || errorText
+        ? {
+            ...output,
+            ...(allFailed ? { status: 'failed' } : {}),
+            ...(errorText ? { errorMessage: errorText } : {}),
+          }
+        : output;
+      return JSON.stringify(enriched, null, 2);
+    }
+    // Rust 落盘的大结果卸载引用（local_tool_result_ref）：
+    // 若为 batch_search 截断 JSON 预览，保留外壳供 buildBatchSearchView 解析已落盘的 lanes/status；
+    // 其余工具（如 web_search/read_file）直接展平为可读 preview。
+    if (output.kind === 'local_tool_result_ref' && typeof output.preview === 'string') {
+      const isBatchSearch = toolName === 'batch_search'
+        || rawResult.capabilityId === 'local.file.batch_search'
+        || (output.preview.trimStart().startsWith('{') && output.preview.includes('"lanes"'));
+      if (isBatchSearch) {
+        return JSON.stringify({
+          ...output,
+          ...(typeof rawResult.status === 'string' ? { envelopeStatus: rawResult.status } : {}),
+          ...(errorText ? { errorMessage: errorText } : {}),
+        });
+      }
+      return output.preview;
+    }
+  }
+
+  if (errorText) {
+    if (toolName === 'batch_search' || rawResult.capabilityId === 'local.file.batch_search') {
+      return JSON.stringify({
+        status: rawResult.status === 'denied' ? 'blocked' : 'failed',
+        reason: errorText,
+        errorMessage: errorText,
+      });
+    }
+    return errorText;
+  }
+
+  if (typeof output === 'string') return output;
+  if (isPlainObject(output)) {
+    if (output.kind === 'text' && typeof output.preview === 'string') {
+      return output.preview;
+    }
+    if (typeof output.content === 'string' && output.content.trim()) {
+      return output.content;
+    }
+    const stdout = typeof output.stdout === 'string' ? output.stdout : '';
+    const stderr = typeof output.stderr === 'string' ? output.stderr : '';
+    if (stdout || stderr) {
+      return [stdout, stderr].filter(Boolean).join('\n');
+    }
+    if (Object.keys(output).length > 0) {
+      return JSON.stringify(output, null, 2);
+    }
+  }
+
+  if (typeof rawResult.detail === 'string' && rawResult.detail.trim()) {
+    return rawResult.detail;
+  }
+  if (isPlainObject(rawResult.outputPreview) && typeof rawResult.outputPreview.preview === 'string') {
+    return rawResult.outputPreview.preview;
+  }
+  return JSON.stringify(rawResult, null, 2);
+}
+
+function normalizeRawSegmentForDesktop(rawSeg: unknown): Record<string, unknown> | null {
+  if (!isPlainObject(rawSeg) || typeof rawSeg.type !== 'string') return null;
+  if (rawSeg.type !== 'tool-call') {
+    return { ...rawSeg };
+  }
+  const toolName = typeof rawSeg.tool === 'string' ? rawSeg.tool : undefined;
+  const normalizedResult = normalizeToolCallResultForDesktop(rawSeg.result, toolName);
+  const startedAtMs = typeof rawSeg.startedAtMs === 'number' && Number.isFinite(rawSeg.startedAtMs)
+    ? rawSeg.startedAtMs
+    : undefined;
+  let endedAtMs = typeof rawSeg.endedAtMs === 'number' && Number.isFinite(rawSeg.endedAtMs)
+    ? rawSeg.endedAtMs
+    : undefined;
+  if (endedAtMs === undefined && isPlainObject(rawSeg.result) && typeof rawSeg.result.completedAt === 'string') {
+    const parsed = Date.parse(rawSeg.result.completedAt);
+    if (Number.isFinite(parsed)) endedAtMs = parsed;
+  }
+  let durationMs = typeof rawSeg.durationMs === 'number' && Number.isFinite(rawSeg.durationMs)
+    ? rawSeg.durationMs
+    : undefined;
+  if (durationMs === undefined && startedAtMs !== undefined && endedAtMs !== undefined && endedAtMs >= startedAtMs) {
+    durationMs = endedAtMs - startedAtMs;
+  }
+  const next: Record<string, unknown> = {
+    ...rawSeg,
+    args: isPlainObject(rawSeg.args) ? rawSeg.args : {},
+  };
+  if (normalizedResult !== undefined) {
+    next.result = normalizedResult;
+  } else {
+    delete next.result;
+  }
+  if (startedAtMs !== undefined) next.startedAtMs = startedAtMs;
+  if (endedAtMs !== undefined) next.endedAtMs = endedAtMs;
+  if (durationMs !== undefined) next.durationMs = durationMs;
+  return next;
+}
+
+function extractRawAssistantSegments(raw: Record<string, unknown>): Record<string, unknown>[] {
+  if (Array.isArray(raw.segments) && raw.segments.length > 0) {
+    const normalized: Record<string, unknown>[] = [];
+    for (const seg of raw.segments) {
+      const item = normalizeRawSegmentForDesktop(seg);
+      if (item) normalized.push(item);
+    }
+    return normalized;
+  }
+  const out: Record<string, unknown>[] = [];
+  if (typeof raw.thinkingContent === 'string' && raw.thinkingContent.trim()) {
+    out.push({ type: 'thinking', content: raw.thinkingContent });
+  }
+  if (Array.isArray(raw.toolCalls) && raw.toolCalls.length > 0) {
+    const migrated = migrateToSegments(
+      typeof raw.content === 'string' ? raw.content : '',
+      raw.toolCalls as ToolCallLegacy[],
+    );
+    if (migrated) {
+      for (const seg of migrated) {
+        const item = normalizeRawSegmentForDesktop(seg);
+        if (item) out.push(item);
+      }
+      return out;
+    }
+  }
+  if (typeof raw.content === 'string' && raw.content.trim()) {
+    const parsed = parseSerializedToolSegments(raw.content);
+    if (parsed && parsed.length > 0) {
+      for (const seg of parsed) {
+        const item = normalizeRawSegmentForDesktop(seg);
+        if (item) out.push(item);
+      }
+    } else {
+      out.push({ type: 'text', content: raw.content });
+    }
+  }
+  return out;
+}
+
+function appendOrMergeRawSegment(
+  targetSegments: Record<string, unknown>[],
+  segment: Record<string, unknown>,
+): void {
+  const callId = segment.type === 'tool-call' && typeof segment.toolCallId === 'string'
+    ? segment.toolCallId.trim()
+    : '';
+  if (callId) {
+    for (let i = targetSegments.length - 1; i >= 0; i -= 1) {
+      const existing = targetSegments[i];
+      if (existing && existing.type === 'tool-call' && existing.toolCallId === callId) {
+        const mergedArgs = isPlainObject(segment.args) && Object.keys(segment.args).length > 0
+          ? segment.args
+          : existing.args;
+        targetSegments[i] = {
+          ...existing,
+          ...segment,
+          ...(mergedArgs ? { args: mergedArgs } : {}),
+          result: segment.result !== undefined ? segment.result : existing.result,
+        };
+        return;
+      }
+    }
+  }
+  targetSegments.push(segment);
+}
+
+function isFoldableAssistantStreamRow(raw: Record<string, unknown>): boolean {
+  if (String(raw.role ?? '') !== 'assistant') return false;
+  if (raw._compaction && typeof raw._compaction === 'object') return false;
+  if (typeof raw.kind === 'string' && raw.kind !== 'assistant' && raw.kind !== '') return false;
+  return typeof raw.streamId === 'string' && raw.streamId.trim().length > 0;
+}
+
+/**
+ * 兼容 CLI/TUI 与 Rust 原生委派会话的多行落盘形态：
+ * 1. 把 `role=tool` 消息折叠进前一条 `assistant` 的 `tool-call` segments；
+ * 2. 把共享同一 `streamId` 的连续 `role=assistant` 行（每步思考/工具/文本各自落盘）
+ *    按原始时间顺序合并回单条 `assistant` 消息，恢复 Desktop 0.18.0 的单轮统一过程渲染；
+ * 3. 把 Rust 落盘的结构化 `tool-call.result` 对象规整为安全可展示字符串。
+ * 这是历史回放适配，不改变持久化真值，也不把工具文本提升为可执行指令。
  */
 export function foldCliToolMessagesForDesktop(
   rawMessages: readonly Record<string, unknown>[],
@@ -532,6 +750,61 @@ export function foldCliToolMessagesForDesktop(
   const out: Record<string, unknown>[] = [];
   for (const raw of rawMessages) {
     const role = String(raw.role ?? '');
+    if (role === 'assistant') {
+      const normalizedRow: Record<string, unknown> = { ...raw };
+      if (Array.isArray(raw.segments) && raw.segments.length > 0) {
+        normalizedRow.segments = raw.segments
+          .map((seg) => normalizeRawSegmentForDesktop(seg))
+          .filter((seg): seg is Record<string, unknown> => seg !== null);
+      }
+
+      const prev = out[out.length - 1];
+      if (
+        prev
+        && isFoldableAssistantStreamRow(prev)
+        && isFoldableAssistantStreamRow(normalizedRow)
+        && String(prev.streamId).trim() === String(normalizedRow.streamId).trim()
+      ) {
+        const mergedTarget: Record<string, unknown> = { ...prev };
+        const mergedSegments = extractRawAssistantSegments(prev);
+        for (const seg of extractRawAssistantSegments(normalizedRow)) {
+          appendOrMergeRawSegment(mergedSegments, seg);
+        }
+        mergedTarget.segments = mergedSegments;
+        if (typeof normalizedRow.content === 'string' && normalizedRow.content.trim()) {
+          mergedTarget.content = normalizedRow.content;
+        }
+        if (normalizedRow.interrupted === true) {
+          mergedTarget.interrupted = true;
+          if (normalizedRow.streamFailure !== undefined) {
+            mergedTarget.streamFailure = normalizedRow.streamFailure;
+          }
+        }
+        if (typeof normalizedRow.durationMs === 'number' && Number.isFinite(normalizedRow.durationMs)) {
+          mergedTarget.durationMs = normalizedRow.durationMs;
+        }
+        if (isPlainObject(normalizedRow.usage)) {
+          if (isPlainObject(mergedTarget.usage)) {
+            const pu = mergedTarget.usage;
+            const nu = normalizedRow.usage;
+            mergedTarget.usage = {
+              input: (Number(pu.input) || 0) + (Number(nu.input) || 0),
+              output: (Number(pu.output) || 0) + (Number(nu.output) || 0),
+              cacheWrite: (Number(pu.cacheWrite) || 0) + (Number(nu.cacheWrite) || 0),
+              cacheRead: (Number(pu.cacheRead) || 0) + (Number(nu.cacheRead) || 0),
+            };
+          } else {
+            mergedTarget.usage = normalizedRow.usage;
+          }
+        }
+        out[out.length - 1] = mergedTarget;
+        continue;
+      }
+
+      out.push(normalizedRow);
+      continue;
+    }
+
     if (role !== 'tool') {
       out.push({ ...raw });
       continue;
@@ -559,7 +832,9 @@ export function foldCliToolMessagesForDesktop(
             ? { toolCallId: tool.toolCallId }
             : {}),
         }
-      : existingSegments.find((segment) => segment?.type === 'tool-call')
+      : normalizeRawSegmentForDesktop(
+          existingSegments.find((segment) => segment?.type === 'tool-call'),
+        )
         ?? {
           type: 'tool-call',
           tool: 'tool',
@@ -585,26 +860,8 @@ export function foldCliToolMessagesForDesktop(
     }
 
     const target = { ...out[targetIndex] } as Record<string, unknown>;
-    const prevSegments = Array.isArray(target.segments)
-      ? [...(target.segments as Record<string, unknown>[])]
-      : [];
-    const callId = typeof segmentFromTool.toolCallId === 'string' ? segmentFromTool.toolCallId : '';
-    let merged = false;
-    if (callId) {
-      for (let i = prevSegments.length - 1; i >= 0; i -= 1) {
-        const seg = prevSegments[i];
-        if (seg && seg.type === 'tool-call' && seg.toolCallId === callId) {
-          prevSegments[i] = {
-            ...seg,
-            ...segmentFromTool,
-            result: segmentFromTool.result ?? seg.result,
-          };
-          merged = true;
-          break;
-        }
-      }
-    }
-    if (!merged) prevSegments.push(segmentFromTool);
+    const prevSegments = extractRawAssistantSegments(target);
+    appendOrMergeRawSegment(prevSegments, segmentFromTool);
     target.segments = prevSegments;
     out[targetIndex] = target;
   }

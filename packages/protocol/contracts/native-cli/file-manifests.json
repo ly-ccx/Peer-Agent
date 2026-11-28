@@ -1,0 +1,169 @@
+[
+  {
+    "capabilityId": "local.file.read",
+    "displayName": "Read File",
+    "description": "Read a UTF-8 file from an absolute or workspace-relative path. Optional start_line/end_line return a numbered slice; omit both for the full file without line numbers.",
+    "sideEffectLevel": "L1",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path."
+        },
+        "start_line": {
+          "type": "number",
+          "description": "Optional 1-based inclusive start line. When set, content is a numbered slice."
+        },
+        "end_line": {
+          "type": "number",
+          "description": "Optional 1-based inclusive end line. When set with start_line, both ends are included."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "capabilityId": "local.file.list",
+    "displayName": "List Files",
+    "description": "List direct children of an absolute or workspace-relative directory.",
+    "sideEffectLevel": "L1",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative directory path."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "capabilityId": "local.file.write",
+    "displayName": "Write File",
+    "description": "Create or replace a UTF-8 file after governed approval and freshness checks.",
+    "sideEffectLevel": "L2",
+    "modeScopes": [
+      "chat",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path."
+        },
+        "content": {
+          "type": "string",
+          "description": "The complete file content to write."
+        },
+        "allow_overwrite": {
+          "type": "boolean",
+          "description": "Set true only when intentionally replacing an existing file after reading it."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "capabilityId": "local.file.edit",
+    "displayName": "Edit File",
+    "description": "Replace exact text in a previously read UTF-8 file with conflict protection.",
+    "sideEffectLevel": "L2",
+    "modeScopes": [
+      "chat",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path."
+        },
+        "old_string": {
+          "type": "string",
+          "description": "Exact current file content to replace."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "Replacement content."
+        },
+        "replace_all": {
+          "type": "boolean",
+          "description": "Set true only when every old_string occurrence should be replaced."
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "capabilityId": "local.file.search",
+    "displayName": "Search Files",
+    "description": "Search UTF-8 file contents under an absolute or workspace-relative path.",
+    "sideEffectLevel": "L1",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Non-empty substring to search for."
+        },
+        "path": {
+          "type": "string",
+          "description": "Optional absolute or workspace-relative file or directory. Defaults to the workspace root."
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "description": "Use case-sensitive matching. Defaults to false."
+        },
+        "max_results": {
+          "type": "number",
+          "description": "Maximum matching lines to return (1-200, default 50)."
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

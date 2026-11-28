@@ -1,0 +1,2714 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name": "anthropic-messages/history-0/generation-0",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "model": "deepseek-v4",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "anthropic-messages/history-0/generation-7",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "max"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-0/generation-14",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "enabled"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-0/generation-19",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-0/generation-23",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "stable core"
+          },
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "anthropic-messages/history-1/generation-0",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "model": "deepseek-v4",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "anthropic-messages/history-1/generation-7",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "max"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-1/generation-14",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "enabled"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-1/generation-19",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-1/generation-23",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "stable core"
+          },
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "anthropic-messages/history-3/generation-0",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "model": "deepseek-v4",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "checking",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "local.file.read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "actual result"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "anthropic-messages/history-3/generation-7",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "checking",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "local.file.read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "actual result"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "max"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-3/generation-14",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "checking",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "local.file.read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "actual result"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "enabled"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-3/generation-19",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "checking"
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "local.file.read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "actual result"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "thinking": {
+          "type": "adaptive",
+          "display": "summarized"
+        },
+        "output_config": {
+          "effort": "high"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/history-3/generation-23",
+      "wire": "anthropic-messages",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "model": "model",
+        "system": [
+          {
+            "type": "text",
+            "text": "stable core"
+          },
+          {
+            "type": "text",
+            "text": "shared system",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "checking",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              },
+              {
+                "type": "tool_use",
+                "id": "call-1",
+                "name": "local.file.read",
+                "input": {
+                  "path": "a"
+                }
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "call-1",
+                "content": "actual result"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "gemini/history-0/generation-0",
+      "wire": "gemini",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/deepseek-v4",
+          "contents": [],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-0/generation-7",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-0/generation-14",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-0/generation-19",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "generationConfig": {
+            "maxOutputTokens": 1024
+          },
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-0/generation-23",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-1/generation-0",
+      "wire": "gemini",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/deepseek-v4",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "中文🙂\nhello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-1/generation-7",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "中文🙂\nhello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-1/generation-14",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "中文🙂\nhello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-1/generation-19",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "中文🙂\nhello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "generationConfig": {
+            "maxOutputTokens": 1024
+          },
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-1/generation-23",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "中文🙂\nhello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "中文🙂\nhello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-3/generation-0",
+      "wire": "gemini",
+      "input": {
+        "model": "deepseek-v4",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/deepseek-v4",
+          "contents": [
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "checking"
+                },
+                {
+                  "functionCall": {
+                    "name": "local.file.read",
+                    "args": {
+                      "path": "a"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "local.file.read",
+                    "response": {
+                      "result": "actual result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "continue"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-3/generation-7",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "effort": "max",
+        "supportsReasoning": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "checking"
+                },
+                {
+                  "functionCall": {
+                    "name": "local.file.read",
+                    "args": {
+                      "path": "a"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "local.file.read",
+                    "response": {
+                      "result": "actual result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "continue"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-3/generation-14",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "high",
+        "reasoningParamStyle": "anthropic-enabled-output-effort"
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "checking"
+                },
+                {
+                  "functionCall": {
+                    "name": "local.file.read",
+                    "args": {
+                      "path": "a"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "local.file.read",
+                    "response": {
+                      "result": "actual result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "continue"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-3/generation-19",
+      "wire": "gemini",
+      "input": {
+        "model": "claude-opus-4.8",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "supportsReasoning": true,
+        "effort": "default",
+        "reasoningEffortMap": {
+          "default": "high",
+          "medium": "low"
+        },
+        "maxOutputTokens": 1024,
+        "promptCaching": false
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/claude-opus-4.8",
+          "contents": [
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "checking"
+                },
+                {
+                  "functionCall": {
+                    "name": "local.file.read",
+                    "args": {
+                      "path": "a"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "local.file.read",
+                    "response": {
+                      "result": "actual result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "continue"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "generationConfig": {
+            "maxOutputTokens": 1024
+          },
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gemini/history-3/generation-23",
+      "wire": "gemini",
+      "input": {
+        "model": "model",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+              {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                  "name": "local.file.read",
+                  "arguments": "{\"path\":\"a\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call-1",
+            "name": "local.file.read",
+            "content": "actual result"
+          },
+          {
+            "role": "user",
+            "content": "continue"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "stableSystem": "stable core",
+        "promptCaching": true
+      },
+      "expected": {
+        "generateContentRequest": {
+          "model": "models/model",
+          "contents": [
+            {
+              "role": "model",
+              "parts": [
+                {
+                  "text": "checking"
+                },
+                {
+                  "functionCall": {
+                    "name": "local.file.read",
+                    "args": {
+                      "path": "a"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "local.file.read",
+                    "response": {
+                      "result": "actual result"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "parts": [
+                {
+                  "text": "continue"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "name": "read_file",
+                  "description": "Read a file",
+                  "parameters": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "shared system"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

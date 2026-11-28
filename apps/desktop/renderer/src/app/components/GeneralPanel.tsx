@@ -56,6 +56,7 @@ function readBots(settings: Record<string, unknown> | null | undefined) {
     quietStart: typeof hours.start === 'string' && hours.start ? hours.start : '22:00',
     quietEnd: typeof hours.end === 'string' && hours.end ? hours.end : '08:00',
     digestTime: typeof source.digestTime === 'string' && source.digestTime ? source.digestTime : '09:00',
+    interactiveResults: source.interactiveResults === true,
   };
 }
 
@@ -80,6 +81,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
       if (draft.proactivity !== saved.proactivity) projectAgent.proactivity = draft.proactivity;
       if (draft.quietEnabled !== saved.quietEnabled || draft.quietStart !== saved.quietStart || draft.quietEnd !== saved.quietEnd) projectAgent.quietHours = { enabled: draft.quietEnabled, start: draft.quietStart, end: draft.quietEnd };
       if (draft.digestTime !== saved.digestTime) projectAgent.digestTime = draft.digestTime;
+      if (draft.interactiveResults !== saved.interactiveResults) projectAgent.interactiveResults = draft.interactiveResults;
       const patch = { ...(Object.keys(projectAgent).length ? { projectAgent } : {}), ...(draft.replyLanguage !== saved.replyLanguage ? { replyLanguage: draft.replyLanguage === 'follow' ? i18n.locale : draft.replyLanguage } : {}) };
       const receipt = readGeneral(await clientApi.updateSettings(patch));
       if (receipt.replyLanguage !== saved.replyLanguage) onReplyLanguageChanged?.(receipt.replyLanguage);
@@ -88,7 +90,7 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
     },
   });
   useUnsavedChanges({ dirty: form.dirty, busy: form.saving || localeAction.busy, save: form.save, discard: form.reset });
-  const { replyLanguage, proactivity, quietEnabled, quietStart, quietEnd, digestTime, shell } = form.draft;
+  const { replyLanguage, proactivity, quietEnabled, quietStart, quietEnd, digestTime, interactiveResults, shell } = form.draft;
   const controlsDisabled = !form.loaded || form.saving || localeAction.busy;
   async function change(next: Partial<ReturnType<typeof readGeneral>>) {
     if (controlsDisabled) return;
@@ -222,6 +224,14 @@ export function GeneralPanel({ availableLocales, i18n, onLocaleChanged, onReplyL
             </div>
             <BotTimeField value={digestTime} disabled={controlsDisabled} i18n={i18n} label={i18n.t('settings.bots.digestTime')}
               onChange={value => { void saveBots({ digestTime: value }); }} />
+          </div>
+          <div className="general-setting-row">
+            <div className="general-setting-copy">
+              <h3>{i18n.t('settings.bots.interactiveResults')}</h3>
+              <p>{i18n.t('settings.bots.interactiveResults.description')}</p>
+            </div>
+            <Switch checked={interactiveResults} disabled={controlsDisabled} aria-label={i18n.t('settings.bots.interactiveResults')}
+              onCheckedChange={value => { void saveBots({ interactiveResults: value }); }} />
           </div>
       </SettingsGroup>
       <InputPredictionPanel i18n={i18n} />

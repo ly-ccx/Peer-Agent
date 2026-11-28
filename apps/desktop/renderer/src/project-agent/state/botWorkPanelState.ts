@@ -36,6 +36,23 @@ export function workPanelSessions(index: BotWorkIndex) {
   return { tasks: roots, agents };
 }
 
+/** Group nested child/sub-agent sessions under their parent root task without duplicating root tasks. */
+export function workPanelChildrenByParent(sessions: {
+  readonly tasks: readonly DrawerSession[];
+  readonly agents: readonly DrawerSession[];
+}): ReadonlyMap<string, readonly DrawerSession[]> {
+  const rootIds = new Set(sessions.tasks.map(task => task.sessionId));
+  const byParent = new Map<string, DrawerSession[]>();
+  for (const agent of sessions.agents) {
+    const parentId = agent.parentSessionId;
+    if (!parentId || agent.sessionId === parentId || !rootIds.has(parentId)) continue;
+    const list = byParent.get(parentId);
+    if (list) list.push(agent);
+    else byParent.set(parentId, [agent]);
+  }
+  return byParent;
+}
+
 export function workPanelNeedsUser(session: DrawerSession): boolean {
   return session.followUp ? session.followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
 }

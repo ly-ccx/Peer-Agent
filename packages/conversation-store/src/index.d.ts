@@ -189,9 +189,9 @@ export interface ConversationStore {
    * immutableInput opts a pure callback into deeply frozen shared input.
    * immutableOutput shares deeply frozen plain derived facts; default results remain isolated copies. */
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
+    options: { maxEntries?: number; maxBytes?: number; tailLimit?: number; headLimit?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
+    options?: { maxEntries?: number; maxBytes?: number; tailLimit?: number; headLimit?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
   /** Internal canonical message guard. The host attests Bot ownership and releases after commit. */
@@ -203,6 +203,8 @@ export interface ConversationStore {
     release(): void;
   };
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  /** Checks the currently persisted owner. Does not reserve a turn. */
+  assertExecutionAvailable(id: string): void;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];
   scheduleMessageCountMigration?(ids?: readonly string[] | null): void;
@@ -282,6 +284,7 @@ export interface ConversationStore {
         at?: string;
         streamId?: string | null;
         modelProviderId?: string | null;
+        groupId?: string | null;
         model?: string | null;
         providerName?: string | null;
         estimatedCostUsd?: number | null;
@@ -384,3 +387,6 @@ export function rankConversationMatch(
   options?: { includeWorkspaceNameMatch?: boolean },
 ): number;
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+
+/** Host-owned auxiliary usage append; participates in the canonical ledger lock. */
+export function appendAuxiliaryUsageRecord(file: string, row: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;

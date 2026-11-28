@@ -1,0 +1,131 @@
+//! Own signal registrations, cancellation watcher and runtime for native commands.
+use peer_runtime::CancellationToken;
+use std::{
+    future::Future,
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
+#[cfg(unix)]
+mod imp {
+    use super::*;
+
+    struct Signals(Vec<signal_hook::SigId>);
+    impl Drop for Signals {
+        fn drop(&mut self) {
+            for id in self.0.drain(..) {
+                signal_hook::low_level::unregister(id);
+            }
+        }
+    }
+
+    fn listen(flag: &Arc<AtomicBool>) -> io::Result<Signals> {
+        let mut signals = Signals(Vec::new());
+        for signal in [
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGTERM,
+            signal_hook::consts::SIGHUP,
+        ] {
+            signals
+                .0
+                .push(signal_hook::flag::register(signal, flag.clone())?);
+        }
+        Ok(signals)
+    }
+
+    pub(crate) fn run_blocking<T>(operation: impl FnOnce(Arc<AtomicBool>) -> T) -> io::Result<T> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let _signals = listen(&flag)?;
+        Ok(operation(flag))
+    }
+
+    pub(crate) fn run<T, F: Future<Output = T>>(
+        operation: impl FnOnce(CancellationToken) -> F,
+    ) -> io::Result<T> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let flag = Arc::new(AtomicBool::new(false));
+        let _signals = listen(&flag)?;
+        let result = runtime.block_on(async {
+            let cancel = CancellationToken::new();
+            let stop = cancel.clone();
+            let watcher = tokio::spawn(async move {
+                loop {
+                    if flag.load(Ordering::Relaxed) {
+                        stop.cancel();
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            });
+            let result = operation(cancel).await;
+            watcher.abort();
+            let _ = watcher.await;
+            result
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
+        Ok(result)
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use super::*;
+
+    pub(crate) fn run_blocking<T>(operation: impl FnOnce(Arc<AtomicBool>) -> T) -> io::Result<T> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let stop_flag = flag.clone();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let watcher = std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                rt.block_on(async move {
+                    tokio::select! {
+                        res = tokio::signal::ctrl_c() => {
+                            if res.is_ok() {
+                                stop_flag.store(true, Ordering::Release);
+                            }
+                        }
+                        _ = done_rx => {}
+                    }
+                });
+            }
+        });
+        let result = operation(flag);
+        let _ = done_tx.send(());
+        let _ = watcher.join();
+        Ok(result)
+    }
+
+    pub(crate) fn run<T, F: Future<Output = T>>(
+        operation: impl FnOnce(CancellationToken) -> F,
+    ) -> io::Result<T> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let result = runtime.block_on(async {
+            let cancel = CancellationToken::new();
+            let stop = cancel.clone();
+            let watcher = tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    stop.cancel();
+                }
+            });
+            let result = operation(cancel).await;
+            watcher.abort();
+            let _ = watcher.await;
+            result
+        });
+        runtime.shutdown_timeout(Duration::from_secs(2));
+        Ok(result)
+    }
+}
+
+pub(crate) use imp::{run, run_blocking};

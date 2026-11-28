@@ -1,3 +1,4 @@
+import { withStoreFileLock } from '../store-file-lock.mjs';
 /**
  * 待批准项的持久记录。
  *
@@ -52,6 +53,7 @@ const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const UNSCOPED_DIR = '_unscoped';
 const DEFAULT_COMPACT_BYTES = 5 * 1024 * 1024;
 const SUMMARY_LIMIT = 240;
+
 
 function redactSummary(value) {
   const text = typeof value === 'string' ? value : '';
@@ -222,13 +224,19 @@ export function createApprovalStore({
     const record = normalize(input);
     if (!record) return null;
     const file = fileFor(record.workspaceId);
-    const current = latestInFile(file, record.approvalId);
-    if (current && current.state === record.state) return current;
     mkdirSync(path.dirname(file), { recursive: true });
-    appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
-    maybeCompact(file);
-    try { onChanged?.({ workspaceId: record.workspaceId, approvalId: record.approvalId, state: record.state, record: { ...record } }); } catch {}
-    return record;
+    const saved = withStoreFileLock(file, () => {
+      const current = latestInFile(file, record.approvalId);
+      if (current && current.state === record.state) return { record: current, changed: false };
+      appendFileSync(file, `${JSON.stringify(record)}\n`, { encoding: 'utf8', flush: true, mode: 0o600 });
+      maybeCompact(file);
+      return { record, changed: true };
+    });
+    // Release before callbacks: subscribers may append another approval.
+    if (saved.changed) {
+      try { onChanged?.({ workspaceId: record.workspaceId, approvalId: record.approvalId, state: record.state, record: { ...record } }); } catch {}
+    }
+    return saved.record;
   }
 
   function list(filter = {}) {

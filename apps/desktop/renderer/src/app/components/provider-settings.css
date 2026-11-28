@@ -68,13 +68,14 @@
 }
 .settings-content .settings-provider-page .llm-group-actions .pa-overflow-trigger:hover { background: var(--chrome-hover); color: var(--graphite-base); }
 
-/* ── Disclosed body: sunken connection details strip + model manager ── */
+/* ── Disclosed body: connection details + model manager ── */
 .settings-content .settings-provider-page .llm-group-body {
-  padding: 2px var(--settings-group-inset) 18px; border: 0;
+  padding: 12px var(--settings-group-inset) 18px; border: 0;
 }
+/* Connection details: plain text row */
 .settings-content .settings-provider-page .llm-service-connection-details {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
-  padding: 10px 14px; border-radius: var(--ui-radius-control); background: var(--chrome-sunken);
+  padding: 0; border-radius: 0; background: none;
   font-size: .75rem; color: var(--graphite-soft); overflow-wrap: anywhere;
 }
 .settings-content .settings-provider-page .llm-group-section-head,

@@ -85,8 +85,8 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
         answered: messages.some(answer => answer.answerTo === `card:question:${row.sessionId}:${question.questionId}`) }];
     });
   }
-  function questionCards(workspaceId) {
-    const rows = sessions(workspaceId).filter(row => row.status === 'waiting_user');
+  function questionCards(workspaceId, knownSessions = null) {
+    const rows = (Array.isArray(knownSessions) ? knownSessions : sessions(workspaceId)).filter(row => row.status === 'waiting_user');
     if (!rows.length) return [];
     const profile = profileStore.read(workspaceId);
     const messages = messageFacts(profile?.agentConversationId) || [];
@@ -149,7 +149,7 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
   }
   const query = read => typeof supervisor.readQuery === 'function' ? supervisor.readQuery(read) : read();
   return { delivery: id => query(() => delivery(id)), cards: id => query(() => cards(id)),
-    questionCards: id => query(() => questionCards(id)),
+    questionCards: (id, knownSessions) => (Array.isArray(knownSessions) ? questionCards(id, knownSessions) : query(() => questionCards(id))),
     resolve: (workspaceId, cardId) => projection.resolve(workspaceId, cardId, { resolution: 'retried' }) };
 }
 

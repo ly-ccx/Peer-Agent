@@ -47,6 +47,14 @@ pub struct CredentialVault<'a> {
     data_home: PathBuf,
     key_store: &'a dyn KeyStore,
 }
+pub struct CredentialSnapshot {
+    pub secret: Zeroizing<String>,
+    pub revision: String,
+}
+pub struct ConditionalCommit {
+    pub applied: bool,
+    pub revision: Option<String>,
+}
 
 impl<'a> CredentialVault<'a> {
     pub fn new(data_home: impl Into<PathBuf>, key_store: &'a dyn KeyStore) -> Self {
@@ -88,6 +96,73 @@ impl<'a> CredentialVault<'a> {
                 .records
                 .insert(key.to_owned(), encrypt_record(&master_key, key, secret)?);
             write_vault_atomic(&self.data_home, &vault_path, &vault)
+        })
+    }
+
+    pub fn get_snapshot(&self, key: &str) -> Result<Option<CredentialSnapshot>> {
+        self.with_lock(false, || {
+            let path = self.path();
+            if !path.exists() {
+                return Ok(None);
+            }
+            let vault = read_vault(&path)?;
+            let Some(record) = vault.records.get(key) else {
+                return Ok(None);
+            };
+            let master = load_or_create_master_key(self.key_store, true)?;
+            Ok(Some(CredentialSnapshot {
+                secret: decrypt_record(&master, key, record)?,
+                revision: record.nonce.clone(),
+            }))
+        })
+    }
+
+    pub fn compare_set(
+        &self,
+        key: &str,
+        expected_revision: Option<&str>,
+        secret: Option<&str>,
+    ) -> Result<ConditionalCommit> {
+        self.with_lock(true, || {
+            let path = self.path();
+            let mut vault = if path.exists() {
+                read_vault(&path)?
+            } else {
+                VaultFile::default()
+            };
+            let current = vault.records.get(key);
+            if current.map(|r| r.nonce.as_str()) != expected_revision {
+                return Ok(ConditionalCommit {
+                    applied: false,
+                    revision: None,
+                });
+            }
+            if current.is_none() && secret.is_none() {
+                return Ok(ConditionalCommit {
+                    applied: true,
+                    revision: None,
+                });
+            }
+            let master = load_or_create_master_key(self.key_store, path.exists())?;
+            // Matching an opaque generation does not authenticate a record.
+            // Corrupt encrypted state must never be overwritten as recovery.
+            if let Some(record) = current {
+                drop(decrypt_record(&master, key, record)?);
+            }
+            let revision = if let Some(secret) = secret {
+                let record = encrypt_record(&master, key, secret)?;
+                let revision = record.nonce.clone();
+                vault.records.insert(key.into(), record);
+                Some(revision)
+            } else {
+                vault.records.remove(key);
+                None
+            };
+            write_vault_atomic(&self.data_home, &path, &vault)?;
+            Ok(ConditionalCommit {
+                applied: true,
+                revision,
+            })
         })
     }
 
@@ -209,6 +284,9 @@ fn read_vault(path: &Path) -> Result<VaultFile> {
 fn write_vault_atomic(data_home: &Path, path: &Path, vault: &VaultFile) -> Result<()> {
     ensure_private_directory(data_home)?;
     let encoded = serde_json::to_vec(vault).map_err(|_| HelperError::VaultInvalid)?;
+    if encoded.len() as u64 > MAX_VAULT_BYTES {
+        return Err(HelperError::VaultInvalid);
+    }
     let temp_path = data_home.join(format!(".{VAULT_FILENAME}.{}.tmp", std::process::id()));
     let write_result = (|| -> Result<()> {
         let mut file = OpenOptions::new()
@@ -297,6 +375,54 @@ mod tests {
     }
 
     #[test]
+    fn mcp_slots_are_encrypted_under_the_same_vault_and_bound_to_their_key() {
+        let directory = tempdir().unwrap();
+        let protector = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &protector);
+        let key = format!(
+            "mcp/{}/12345678-1234-4123-8123-123456789abc",
+            "a".repeat(64)
+        );
+        vault.set(&key, "synthetic-mcp-envelope").unwrap();
+        assert_eq!(
+            vault.get(&key).unwrap().unwrap().as_str(),
+            "synthetic-mcp-envelope"
+        );
+        let raw = fs::read_to_string(vault.path()).unwrap();
+        assert!(!raw.contains("synthetic-mcp-envelope"));
+        fs::write(
+            vault.path(),
+            raw.replace(&key, &key.replace("8123", "9123")),
+        )
+        .unwrap();
+        assert!(vault.get(&key.replace("8123", "9123")).is_err());
+    }
+
+    #[test]
+    fn capacity_rejection_preserves_existing_readable_credentials() {
+        let directory = tempdir().unwrap();
+        let protector = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &protector);
+        vault
+            .set("model/fixture/api-key", "original-value")
+            .unwrap();
+        let before = fs::read(vault.path()).unwrap();
+        let mut candidate = read_vault(&vault.path()).unwrap();
+        let row = candidate.records.get_mut("model/fixture/api-key").unwrap();
+        row.ciphertext = "x".repeat(MAX_VAULT_BYTES as usize);
+        assert!(write_vault_atomic(directory.path(), &vault.path(), &candidate).is_err());
+        assert_eq!(fs::read(vault.path()).unwrap(), before);
+        assert_eq!(
+            vault
+                .get("model/fixture/api-key")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "original-value"
+        );
+    }
+
+    #[test]
     fn uses_a_fresh_nonce_for_every_write() {
         let directory = tempdir().expect("tempdir");
         let key_store = MemoryKeyStore::default();
@@ -307,6 +433,76 @@ mod tests {
         vault.set("model/openai/api-key", "same").expect("second");
         let second = fs::read_to_string(vault.path()).expect("second raw");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn conditional_updates_are_serialized_per_key_and_preserve_other_keys() {
+        let directory = tempdir().unwrap();
+        let store = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &store);
+        let key = "model/channel/oauth-tokens";
+        vault.set(key, "initial").unwrap();
+        let revision = vault.get_snapshot(key).unwrap().unwrap().revision;
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let vault = &vault;
+                    let revision = &revision;
+                    scope.spawn(move || {
+                        vault
+                            .compare_set(key, Some(revision), Some(&format!("candidate-{i}")))
+                            .unwrap()
+                            .applied
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|r| **r).count(), 1);
+        let snapshot = vault.get_snapshot(key).unwrap().unwrap();
+        vault.set("model/other/oauth-tokens", "unrelated").unwrap();
+        assert!(
+            vault
+                .compare_set(key, Some(&snapshot.revision), None)
+                .unwrap()
+                .applied
+        );
+        assert!(vault.get_snapshot(key).unwrap().is_none());
+        assert_eq!(
+            vault
+                .get("model/other/oauth-tokens")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "unrelated"
+        );
+    }
+
+    #[test]
+    fn matching_revision_does_not_allow_overwriting_authenticated_corruption() {
+        let directory = tempdir().unwrap();
+        let store = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &store);
+        let key = "model/channel/oauth-tokens";
+        vault.set(key, "first").unwrap();
+        let revision = vault.get_snapshot(key).unwrap().unwrap().revision;
+        let mut data: serde_json::Value =
+            serde_json::from_slice(&fs::read(vault.path()).unwrap()).unwrap();
+        let mut bytes = BASE64
+            .decode(data["records"][key]["ciphertext"].as_str().unwrap())
+            .unwrap();
+        bytes[0] ^= 1;
+        data["records"][key]["ciphertext"] = BASE64.encode(bytes).into();
+        fs::write(vault.path(), serde_json::to_vec(&data).unwrap()).unwrap();
+        let before = fs::read(vault.path()).unwrap();
+        assert!(matches!(
+            vault.compare_set(key, Some(&revision), Some("replacement")),
+            Err(HelperError::VaultAuthenticationFailed)
+        ));
+        assert_eq!(fs::read(vault.path()).unwrap(), before);
     }
 
     #[test]
@@ -321,7 +517,13 @@ mod tests {
         let ciphertext = json["records"]["model/openai/api-key"]["ciphertext"]
             .as_str()
             .expect("ciphertext");
-        let replacement = format!("A{}", &ciphertext[1..]);
+        let mut bytes = BASE64.decode(ciphertext).expect("valid ciphertext");
+        bytes[0] ^= 1;
+        let replacement = BASE64.encode(bytes);
+        assert_ne!(
+            replacement, ciphertext,
+            "tamper must change authenticated bytes"
+        );
         json["records"]["model/openai/api-key"]["ciphertext"] = replacement.into();
         fs::write(vault.path(), serde_json::to_vec(&json).expect("encode")).expect("tamper");
 

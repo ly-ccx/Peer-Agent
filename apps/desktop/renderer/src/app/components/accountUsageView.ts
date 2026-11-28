@@ -31,8 +31,7 @@ export function accountUsageLines(quota: LlmSubscriptionQuota | undefined, zh: b
     lines.push(`${w.label ?? w.id}: ${values.join(' · ') || (zh ? '数值不可用' : 'No value')} · ${w.scope ?? 'subscription'} / ${w.source ?? quota.authMethod ?? '—'}`);
   }
   for (const s of quota.spend ?? []) lines.push(`${s.period}: ${s.currency} ${s.amount} · ${s.scope} / ${s.source}`);
-  // Preserve Qoder points and legacy top-level quota values.
-  if (quota.success && (quota.availableCredits !== undefined || quota.remainingPercent !== undefined || quota.planCreditsTotal !== undefined || (!(quota.windows?.length) && !quota.balances?.length && !quota.spend?.length))) {
+  if (quota.success && (quota.remainingPercent !== undefined || (!(quota.windows?.length) && !quota.balances?.length && !quota.spend?.length))) {
     const legacy = formatQuotaLine(quota, zh);
     if (legacy) lines.push(legacy);
   }

@@ -87,7 +87,7 @@ export function createMcpApplicationService({
     const server = requireServer(serverId);
     const probe = await ports.probeConnection(server);
     const view = persistProbe(server.id, probe);
-    ports.disconnectServer(ports.getServer(server.id));
+    await ports.disconnectServer(ports.getServer(server.id));
     return probeResponse(probe, view);
   }
 
@@ -106,23 +106,23 @@ export function createMcpApplicationService({
       ports.closeOAuthCallback();
       const probe = await ports.probeConnection(server);
       const view = persistProbe(server.id, probe);
-      ports.disconnectServer(ports.getServer(server.id));
+      await ports.disconnectServer(ports.getServer(server.id));
       return { ...probeResponse(probe, view), oauth: 'authorized' };
     }
 
     const code = await callbackPromise;
     await ports.finishOAuth(server, code);
-    ports.disconnectServer(ports.getServer(server.id));
+    await ports.disconnectServer(ports.getServer(server.id));
     const probe = await ports.probeConnection(server);
     const view = persistProbe(server.id, probe);
-    ports.disconnectServer(ports.getServer(server.id));
+    await ports.disconnectServer(ports.getServer(server.id));
     return { ...probeResponse(probe, view), oauth: 'connected' };
   }
 
   async function completeOAuth(serverId, authorizationCode) {
     const server = requireServer(serverId);
     const result = await ports.finishOAuth(server, authorizationCode);
-    ports.disconnectServer(server);
+    await ports.disconnectServer(server);
     return result;
   }
 
@@ -140,7 +140,7 @@ export function createMcpApplicationService({
     const server = ports.getServer(view.id);
     const probe = await ports.probeConnection(server);
     const refreshed = persistProbe(view.id, probe);
-    ports.disconnectServer(ports.getServer(view.id));
+    await ports.disconnectServer(ports.getServer(view.id));
     return probeResponse(probe, refreshed);
   }
 

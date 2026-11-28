@@ -19,14 +19,14 @@ body:has(.quick-chat-shell) {
   /* Opaque control fills kill macOS vibrancy — use translucent glass fills. */
   --quick-control: var(--glass-control, hsla(218, 18%, 96%, 0.42));
   --quick-control-hover: var(--glass-chrome-hover, hsla(215, 16%, 96%, 0.55));
-  --quick-border: color-mix(in srgb, var(--za-line) 70%, transparent);
-  --quick-border-strong: color-mix(in srgb, var(--za-line-strong) 78%, transparent);
+  --quick-border: color-mix(in srgb, var(--chrome-hairline) 70%, transparent);
+  --quick-border-strong: color-mix(in srgb, var(--chrome-hairline-strong) 78%, transparent);
   --quick-text: var(--graphite-base);
   --quick-muted: var(--graphite-fade);
   --quick-button: var(--graphite-base);
   --quick-button-text: var(--chrome-canvas);
   --quick-shadow: var(--shadow-card);
-  --quick-edge-highlight: color-mix(in srgb, #fff 40%, transparent);
+  --quick-edge-highlight: color-mix(in srgb, rgb(255 255 255) 40%, transparent);
   display: flex;
   width: 720px;
   min-width: 720px;
@@ -43,7 +43,7 @@ body:has(.quick-chat-shell) {
 [data-theme="dark"] .quick-chat-shell {
   color-scheme: dark;
   /* Dark glass tokens already come from tokens.css; only retune edge light. */
-  --quick-edge-highlight: color-mix(in srgb, #fff 10%, transparent);
+  --quick-edge-highlight: color-mix(in srgb, rgb(255 255 255) 10%, transparent);
 }
 
 .quick-chat-bar {
@@ -67,7 +67,7 @@ body:has(.quick-chat-shell) {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   box-shadow:
-    0 12px 36px color-mix(in srgb, #000 18%, transparent),
+    0 12px 36px color-mix(in srgb, rgb(0 0 0) 18%, transparent),
     0 1px 0 var(--quick-edge-highlight);
   -webkit-app-region: drag;
   transition: border-color 120ms ease, box-shadow 160ms ease;
@@ -465,7 +465,7 @@ select.quick-chat-workspace-name {
   background: var(--glass-popover, var(--quick-surface));
   backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
   -webkit-backdrop-filter: blur(var(--blur-popover, 24px)) saturate(var(--blur-saturate, 1.6));
-  box-shadow: var(--shadow-popover, 0 8px 20px color-mix(in srgb, var(--quick-text) 12%, transparent)), var(--glass-edge-highlight, inset 0 1px 0 hsla(210, 30%, 100%, 0.14));
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   outline: 0;
   -webkit-app-region: no-drag;
@@ -581,10 +581,10 @@ select.quick-chat-workspace-name {
   flex-direction: column;
   padding: 6px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--za-line, #c9cdd4) 74%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chrome-hairline) 74%, transparent);
   border-radius: var(--ui-radius-modal);
-  background: color-mix(in srgb, var(--chrome-canvas, #fff) 94%, transparent);
-  box-shadow: var(--shadow-card, 0 12px 30px rgb(0 0 0 / 16%));
+  background: color-mix(in srgb, var(--chrome-canvas) 94%, transparent);
+  box-shadow: var(--shadow-card);
 }
 
 .quick-chat-model-providers {
@@ -622,15 +622,15 @@ select.quick-chat-workspace-name {
 
 .quick-chat-model-provider:hover,
 .quick-chat-model-provider.is-active {
-  background: color-mix(in srgb, var(--accent-main, #1677ff) 10%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 10%, transparent);
 }
 
 .quick-chat-model-provider.is-selected {
-  color: var(--accent-main, #1677ff);
+  color: var(--azure-seal);
 }
 
 .quick-chat-model-arrow {
-  color: var(--graphite-fade, #7b8494);
+  color: var(--graphite-fade);
   font-size: 24px;
   font-weight: 300;
   line-height: 1;
@@ -657,7 +657,7 @@ select.quick-chat-workspace-name {
   align-items: center;
   gap: 12px;
   margin: 0;
-  color: var(--graphite-fade, #6b7280);
+  color: var(--graphite-fade);
   font-size: 11px;
   line-height: 1.2;
   opacity: 1;
@@ -665,7 +665,7 @@ select.quick-chat-workspace-name {
 }
 
 .quick-chat-effort-heading strong {
-  color: var(--graphite-base, #1f2937);
+  color: var(--graphite-base);
   font-weight: 600;
 }
 
@@ -675,8 +675,8 @@ select.quick-chat-workspace-name {
   --effort-track-h: 12px;
   --effort-thumb: 20px;
   --effort-tick: 4px;
-  --effort-fill: #6ea8ff;
-  --effort-rest: color-mix(in srgb, #9aa4b2 28%, transparent);
+  --effort-fill: var(--azure-seal);
+  --effort-rest: var(--control-fill);
   position: relative;
   display: block;
   width: 100%;
@@ -692,7 +692,7 @@ select.quick-chat-workspace-name {
   transform: translateY(-50%);
   border-radius: var(--ui-radius-pill);
   background: var(--effort-rest);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--paper-sheet) 6%, transparent);
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
@@ -754,7 +754,7 @@ select.quick-chat-workspace-name {
   appearance: none;
   border: 0;
   border-radius: var(--ui-radius-circle);
-  background: #ffffff;
+  background: var(--paper-sheet);
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.08),
     0 1px 3px rgba(15, 23, 42, 0.18);
@@ -777,14 +777,14 @@ select.quick-chat-workspace-name {
   height: var(--effort-thumb);
   border: 0;
   border-radius: var(--ui-radius-circle);
-  background: #ffffff;
+  background: var(--paper-sheet);
   box-shadow:
     0 0 0 1px rgba(15, 23, 42, 0.08),
     0 1px 3px rgba(15, 23, 42, 0.18);
 }
 
 .quick-chat-task-card {
-  --workspace-accent: #5b6fd8;
+  --workspace-accent: var(--azure-seal);
   position: relative;
   margin: 10px 16px 14px;
   padding: 13px 14px 12px;
@@ -804,11 +804,11 @@ select.quick-chat-workspace-name {
   content: '';
 }
 
-.quick-chat-task-card[data-workspace-accent='1'] { --workspace-accent: #9b5fc0; }
-.quick-chat-task-card[data-workspace-accent='2'] { --workspace-accent: #268a72; }
-.quick-chat-task-card[data-workspace-accent='3'] { --workspace-accent: #c06a38; }
-.quick-chat-task-card[data-workspace-accent='4'] { --workspace-accent: #4d83b8; }
-.quick-chat-task-card[data-workspace-accent='5'] { --workspace-accent: #a44f6f; }
+.quick-chat-task-card[data-workspace-accent='1'] { --workspace-accent: var(--bot-tone-violet); }
+.quick-chat-task-card[data-workspace-accent='2'] { --workspace-accent: var(--state-success); }
+.quick-chat-task-card[data-workspace-accent='3'] { --workspace-accent: var(--bot-tone-amber); }
+.quick-chat-task-card[data-workspace-accent='4'] { --workspace-accent: var(--azure-seal); }
+.quick-chat-task-card[data-workspace-accent='5'] { --workspace-accent: var(--bot-tone-rose); }
 
 .quick-chat-task-workspace {
   display: flex;
@@ -872,7 +872,7 @@ select.quick-chat-workspace-name {
 }
 
 .quick-chat-task-title { min-width: 0; gap: 6px; font-size: 11px; font-weight: 650; }
-.quick-chat-task-dot { width: 7px; height: 7px; border-radius: var(--ui-radius-circle); background: var(--state-warning); }
+.quick-chat-task-dot { width: 7px; height: 7px; border-radius: var(--ui-radius-circle); background: var(--state-warn); }
 .quick-chat-task-conversation { overflow: hidden; color: var(--quick-muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .quick-chat-task-question { margin: 9px 0; font-size: 13px; line-height: 1.45; }
 .quick-chat-task-options { flex-wrap: wrap; gap: 6px; }
@@ -934,7 +934,7 @@ html.quick-chat-popover-window #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  color: var(--graphite-base, #1f2937);
+  color: var(--graphite-base);
   background: transparent;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
@@ -952,5 +952,5 @@ html.quick-chat-popover-window #root {
   min-height: 0;
   overflow: hidden;
   /* Ensure text tokens resolve even if theme vars are late/missing. */
-  color: var(--graphite-base, #1f2937);
+  color: var(--graphite-base);
 }

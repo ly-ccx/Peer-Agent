@@ -45,7 +45,7 @@ test('a user-context projection deduplicates only valid carriers and leaves ordi
   const before = JSON.stringify(original), projected = projectResourceFeedbackTransport(undefined, original);
   assert.deepEqual(projected.resourceFeedback, [feedback]); assert.deepEqual(projected.attachments, [document]);
   assert.equal(projected.invalid, false); assert.equal(JSON.stringify(original), before);
-  const all = Array.from({ length: 8 }, (_, i) => ({ ...document, id: `file-${i}`, name: 'a.txt', mimeType: 'text/plain', size: 3, sourceKind: 'user_upload' as const, kind: 'text' as const }));
+  const all = Array.from({ length: 100 }, (_, i) => ({ ...document, id: `file-${i}`, name: 'a.txt', mimeType: 'text/plain', size: 3, sourceKind: 'user_upload' as const, kind: 'text' as const }));
   assert.throws(() => encodeResourceFeedbackTransport([feedback], all), /ATTACHMENT_LIMIT/);
   assert.throws(() => restoreResourceFeedbackTransport(Array(9).fill(feedback) as ResourceFeedback[]), /INVALID_RESOURCE_FEEDBACK/);
 });

@@ -1,3 +1,4 @@
+import { automaticAccessDecision } from './tui-automatic-access.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,6 @@ import {
   createNodeProviderBundle,
   createNodeShellSessionManager,
   createNodeShellTaskManager,
-  NODE_SHELL_RISK_ORDER,
   evaluateProjectAgentTurn,
   evaluateWorkSessionWrite,
   createApprovalStore,
@@ -127,36 +127,14 @@ export interface CreateTuiHostOptions {
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
   readonly captureExecution?: (execution: RuntimeSdkProviderExecution, toolContext: Record<string, unknown>) => RuntimeSdkProviderExecution;
+  readonly ownedTool?: {
+    beforeFileEffect(call: import('@peer-agent/runtime-sdk').RuntimeSdkToolCall, grant: import('@peer-agent/runtime-core').PermissionGrant): void;
+    ownForeground: NonNullable<import('@peer-agent/runtime-node').NodeShellProviderOptions['ownForeground']>;
+    checkScope(): void;
+    deferEvidence(): boolean;
+  };
 }
 
-function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
-  return typeof value === 'string'
-    && Object.prototype.hasOwnProperty.call(NODE_SHELL_RISK_ORDER, value);
-}
-
-function automaticAccessDecision(
-  accessLevel: LocalAccessLevel,
-  prompt: NodeRuntimePermissionPrompt,
-  botPolicy = false,
-): { readonly granted: true; readonly reason: string } | null {
-  if (accessLevel === 'full_local') {
-    return { granted: true, reason: 'local_access_level_full' };
-  }
-  if (accessLevel !== 'session_local' || prompt.confirmation.kind !== 'capability-approval') {
-    return null;
-  }
-  if (prompt.confirmation.approvalKind === 'file-write' && !botPolicy) {
-    return { granted: true, reason: 'local_access_level_session' };
-  }
-  if (
-    prompt.confirmation.approvalKind === 'shell-exec'
-    && isNodeShellRiskLevel(prompt.riskLevel)
-    && NODE_SHELL_RISK_ORDER[prompt.riskLevel] <= NODE_SHELL_RISK_ORDER.L3_external_write
-  ) {
-    return { granted: true, reason: 'local_access_level_session' };
-  }
-  return null;
-}
 
 export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const resolvedOptions = typeof options === 'string' ? { workspaceRoot: options } : options;
@@ -364,11 +342,17 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       hookRunner,
       requestPermission,
       git: { artifactRoot: path.join(userDataPath, 'artifacts') },
-      executionGate: (call, scopes) => projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes),
+      executionGate: (call, scopes) => {
+        const reason = projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes);
+        if (!reason && scopes) resolvedOptions.ownedTool?.checkScope();
+        return reason;
+      },
+      ...(resolvedOptions.ownedTool ? { file: { beforeFileEffect: resolvedOptions.ownedTool.beforeFileEffect } } : {}),
       shell: {
         taskManager: shellTaskManager,
         sessionManager: shellSessionManager,
         artifactRoot,
+        ownForeground: resolvedOptions.ownedTool?.ownForeground,
       },
     }));
   }
@@ -461,6 +445,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       conversationId: options.conversationId, workspaceId: localContext?.project?.workspaceId,
       streamId: options.streamId, resolveAccessPolicy: () => accessFor(localContext).resolution,
       checkAccessPolicy: () => projectAuthorityReason(localContext, options.capabilityId) }) ?? execution;
+    if (resolvedOptions.ownedTool?.deferEvidence()) return execution;
     const evidenceRefs = collectToolEvidenceRefs({
       toolCallId: options.toolCallId,
       execution,

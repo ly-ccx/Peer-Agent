@@ -30,6 +30,10 @@ export function BotComposer({
   onDraftPrepared,
   resourceRecipientConversationId,
   predictionContext,
+  touchBar,
+  touchBarTray,
+  trayOpen = false,
+  onOpenTaskRef,
 }: {
   readonly predictionContext?: { readonly workspaceId: string; readonly conversationId: string; readonly version: string; readonly eligible: boolean; readonly quoteMessageId?: string };
   readonly i18n: I18nRuntime;
@@ -51,6 +55,10 @@ export function BotComposer({
   readonly modelUpdating?: boolean;
   readonly draftRequest?: { readonly id: number; readonly text: string } | null;
   readonly onDraftPrepared?: (id: number) => void;
+  readonly touchBar?: ReactNode;
+  readonly touchBarTray?: ReactNode;
+  readonly trayOpen?: boolean;
+  readonly onOpenTaskRef?: (sessionId: string) => void;
 }) {
   const text = draft.text;
   const setText = (text: string) => onDraftChange({ text });
@@ -60,8 +68,9 @@ export function BotComposer({
   const uploads = useComposerAttachments(i18n.locale.startsWith('zh'), { attachments: draft.attachments, onChange: attachments => onDraftChange({ attachments }) });
   const fileInput = useRef<HTMLInputElement>(null);
   const trimmed = text.trim();
+  const taskRefs = draft.taskRefs ?? [];
   const resourceRecipientChanged = !!resourceRecipientConversationId && !!draft.resourceFeedback?.some(row => row.recipient.conversationId !== resourceRecipientConversationId);
-  const hasContent = Boolean(trimmed) || uploads.attachments.length > 0 || !!draft.resourceFeedback?.some(row => row.resource.kind === 'interactive');
+  const hasContent = Boolean(trimmed) || uploads.attachments.length > 0 || taskRefs.length > 0 || !!draft.resourceFeedback?.some(row => row.resource.kind === 'interactive');
   const tooLong = trimmed.length > 100_000;
   const prompt = i18n.t('projectAgent.chat.placeholder', { name: botName });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -86,7 +95,7 @@ export function BotComposer({
     onSend();
   }
 
-  return (
+  const form = (
     <form
       className={`bot-composer${dragging ? ' is-file-drop' : ''}`}
       onDragOver={event => {
@@ -113,6 +122,33 @@ export function BotComposer({
     >
       <ResourceFeedbackCards rows={draft.resourceFeedback ?? []} botName={botName} conversationId={resourceRecipientConversationId} isZh={i18n.locale.startsWith('zh')}
         onRemove={id => onDraftChange({ resourceFeedback: (draft.resourceFeedback ?? []).filter(row => row.id !== id) })} />
+      {taskRefs.length > 0 ? (
+        <div className="bot-composer-task-refs" aria-label={i18n.locale.startsWith('zh') ? '已引用的任务' : 'Referenced tasks'}>
+          {taskRefs.map((ref) => (
+            <span key={ref.sessionId} className="bot-task-ref-chip">
+              <button
+                type="button"
+                className="bot-task-ref-label"
+                onClick={() => onOpenTaskRef?.(ref.sessionId)}
+                title={ref.title}
+              >
+                @ {ref.title}
+              </button>
+              <button
+                type="button"
+                className="bot-task-ref-remove"
+                aria-label={i18n.locale.startsWith('zh') ? `移除引用 ${ref.title}` : `Remove ${ref.title}`}
+                onClick={() => {
+                  onDraftChange({ taskRefs: taskRefs.filter((item) => item.sessionId !== ref.sessionId) });
+                  textareaRef.current?.focus({ preventScroll: true });
+                }}
+              >
+                <PeerIcon name="close" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
       {quote ? (
         <QuoteChip text={quote} source={quoteSource || i18n.t('projectAgent.chat.quote')}
           removeLabel={i18n.t('projectAgent.chat.quoteRemove')} onRemove={() => { onQuoteRemove(); textareaRef.current?.focus({ preventScroll: true }); }}
@@ -173,5 +209,16 @@ export function BotComposer({
         </div>
       </div>
     </form>
+  );
+
+  if (!touchBar) return form;
+  return (
+    <div className="bot-composer-shell">
+      <div className={`bot-composer-unit${trayOpen ? ' is-tray-open' : ''}`}>
+        {touchBarTray}
+        {touchBar}
+        {form}
+      </div>
+    </div>
   );
 }

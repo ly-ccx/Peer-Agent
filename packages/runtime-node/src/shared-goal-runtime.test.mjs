@@ -124,9 +124,14 @@ test('runtime-node source has no Desktop dependency and Desktop files are compat
     'goal-intake-convergence.mjs',
   ]) {
     const sharedSource = readFileSync(path.join(packageSourceDir, file), 'utf8');
-    const desktopSource = readFileSync(path.join(desktopCompatDir, file), 'utf8');
-
     assert.doesNotMatch(sharedSource, /apps\/desktop|desktop\/electron\/main/);
+  }
+  for (const file of [
+    'data-store.mjs',
+    'goal-plan-store.mjs',
+    'goal-intake-convergence.mjs',
+  ]) {
+    const desktopSource = readFileSync(path.join(desktopCompatDir, file), 'utf8');
     assert.match(desktopSource, ['data-store.mjs', 'goal-plan-store.mjs'].includes(file)
       ? /from ['"]@peer-agent\/runtime-node\/storage['"]/
       : /from ['"]@peer-agent\/runtime-node\/project-agent['"]/);

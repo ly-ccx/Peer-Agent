@@ -10,7 +10,8 @@
  * - 不回填历史 null 绑定
  */
 
-import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync, statSync } from 'node:fs';
+import { appendAuxiliaryUsageRecord } from '@peer-agent/conversation-store';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
 import { estimateUsageCostUsd } from './usage-pricing.mjs';
@@ -41,6 +42,7 @@ export function createUsageRequestLog({
   logFile = pathOf('usageRequests'),
   estimateCost = estimateUsageCostUsd,
 } = {}) {
+  let budgetCache = null;
   function ensureParent() {
     const dir = path.dirname(logFile);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -89,7 +91,8 @@ export function createUsageRequestLog({
     };
 
     ensureParent();
-    appendFileSync(logFile, `${JSON.stringify(record)}\n`, 'utf8');
+    budgetCache = null;
+    appendAuxiliaryUsageRecord(logFile, record);
     return record;
   }
 
@@ -109,12 +112,27 @@ export function createUsageRequestLog({
   }
 
   function readForBudget(sinceMs) {
-    if (!existsSync(logFile)) return { complete: true, rows: [] };
+    let stat;
+    try {
+      stat = statSync(logFile);
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        budgetCache = null;
+        return { complete: true, rows: [] };
+      }
+      throw error;
+    }
+    const version = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${sinceMs}`;
+    if (budgetCache && budgetCache.version === version) {
+      return budgetCache.value;
+    }
     const lines = readUsageTail(logFile, 50_000);
     const parsed = lines.map(line => { try { return JSON.parse(line); } catch { return null; } });
     // Missing/corrupt records cannot be interpreted as zero spend.
     const complete = parsed.every(Boolean) && (lines.complete || parsed.some(row => Date.parse(row?.at) < sinceMs));
-    return { complete, rows: foldPredictionUsage(parsed.filter(Boolean)).filter(row => Date.parse(row.at) >= sinceMs) };
+    const value = { complete, rows: foldPredictionUsage(parsed.filter(Boolean)).filter(row => Date.parse(row.at) >= sinceMs) };
+    budgetCache = { version, value };
+    return value;
   }
 
   return {

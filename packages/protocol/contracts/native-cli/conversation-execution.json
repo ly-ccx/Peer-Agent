@@ -1,0 +1,5805 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "active",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "ts-owner",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-ts",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "stopped",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": true,
+      "permits": true
+    },
+    {
+      "name": "unknown-keeps-owner",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "recovery_required",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "known-usage",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 2,
+          "inputTokens": 12,
+          "outputTokens": 3,
+          "cacheReadTokens": 4,
+          "cacheWriteTokens": 1,
+          "totalTokens": 20
+        },
+        "unknownUsage": true,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": false,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "actual-billing-attribution",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream",
+          "streamId": "stream",
+          "at": "2026-11-18T00:00:00.000Z",
+          "modelProviderId": "group::provider",
+          "role": "chat"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "command-not-started",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "command-running",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "optional-null",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": null
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": null
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "ended-handle",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "h",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {}
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": true,
+      "permits": true
+    },
+    {
+      "name": "hook-pre-can-own-a-prepared-call",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "hook-running-owns-actual-child",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "hook-observation-awaits-original-publication",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owned_completion"
+                },
+                "observation": {
+                  "id": "review",
+                  "hookId": "review",
+                  "event": "PreToolUse",
+                  "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "handleId": "hook-handle",
+                  "decision": "ask",
+                  "outcome": "ok",
+                  "reason": null,
+                  "exitCode": 0,
+                  "durationMs": 16
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "hook-stopped-group-with-unknown-result",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopping",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owner_dead_group_absent"
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "hook-post-requires-provider-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PostToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-must-match-original-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "foreign",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-owner-must-match",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 103,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-observed-end-requires-a-receipt",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owned_completion"
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-recovery-cannot-invent-observed-decision",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owner_dead_group_absent"
+                },
+                "observation": {
+                  "id": "review",
+                  "hookId": "review",
+                  "event": "PreToolUse",
+                  "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "handleId": "hook-handle",
+                  "decision": "ask",
+                  "outcome": "ok",
+                  "reason": null,
+                  "exitCode": 0,
+                  "durationMs": 16
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-observation-must-match-rule",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owned_completion"
+                },
+                "observation": {
+                  "id": "review",
+                  "hookId": "review",
+                  "event": "PreToolUse",
+                  "ruleDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+                  "handleId": "hook-handle",
+                  "decision": "ask",
+                  "outcome": "ok",
+                  "reason": null,
+                  "exitCode": 0,
+                  "durationMs": 16
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "hook-cannot-retain-raw-stdout",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "hook-handle",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "hook",
+              "nativeHook": {
+                "schemaVersion": 1,
+                "event": "PreToolUse",
+                "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "hook-handle",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owned_completion"
+                },
+                "observation": {
+                  "id": "review",
+                  "hookId": "review",
+                  "event": "PreToolUse",
+                  "ruleDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "handleId": "hook-handle",
+                  "decision": "ask",
+                  "outcome": "ok",
+                  "reason": null,
+                  "exitCode": 0,
+                  "durationMs": 16,
+                  "stdout": "unexpected"
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-registered-before-spawn",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-starting-keeps-the-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "starting",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-running-keeps-exact-child",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-can-coexist-with-other-original-dispatches",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          },
+          {
+            "toolCallId": "background-second-call",
+            "dispatchId": "background-second-dispatch",
+            "messageId": "background-second-message",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789013",
+              "toolCallId": "background-second-call",
+              "dispatchId": "background-second-dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 103,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          },
+          {
+            "toolCallId": "new-tool-call",
+            "dispatchId": "new-tool-dispatch",
+            "messageId": "new-tool-message",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789013",
+            "toolCallId": "background-second-call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789013",
+                  "toolCallId": "background-second-call",
+                  "dispatchId": "background-second-dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 103,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-null-optional-process-fields-roundtrip",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "starting",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "stopObservation": null
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": null
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-group-ended-retains-unknown",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "recovery_required",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "outcome_unknown",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "ended",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "stopObservation": "owner_dead_group_absent"
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owner_dead_group_absent"
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "background-shell-rejects-foreign-run",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "other"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-rejects-unrelated-claim",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "starting",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-requires-original-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-rejects-own-host-as-child",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-mirror-must-advance-with-process",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 103,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "background-shell-future-version-blocks",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 1,
+              "state": "running",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "child": {
+                "bootId": "boot",
+                "pid": 102,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_background",
+              "nativeShell": {
+                "schemaVersion": 2,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-spawn-matches-first-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 0,
+                  "state": "not_started",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-starting-keeps-original-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-idle-outlives-its-first-call",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-binds-separate-command",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 1
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "legacy-persistent-shell-starting",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-ts",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "legacy-persistent-shell-idle",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-ts",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "legacy-persistent-shell-bound-command",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-ts",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 1
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "legacy-persistent-shell-rejects-stale-command-generation",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-ts",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 0
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-ended-keeps-unknown-command",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "recovery_required",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "outcome_unknown",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "ended",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "ended",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "stopObservation": "owner_dead_group_absent"
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 1
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": true,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-missing-command-shape",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-process-on-host-pid",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-unknown-owner-fact",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z",
+                    "future": true
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-unknown-child-fact",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z",
+                    "future": true
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-stale-command-generation",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 0
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-unprepared-command",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "session-dispatch",
+                  "generation": 1
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-foreign-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "session-command",
+            "dispatchId": "session-dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.shell.exec",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": {
+                  "toolCallId": "session-command",
+                  "dispatchId": "foreign",
+                  "generation": 1
+                }
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-no-first-dispatch-while-starting",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "starting",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "persistent-shell-rejects-two-session-processes",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789012",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          },
+          {
+            "handleId": "shell-session_12345678-1234-4abc-8def-123456789013",
+            "toolCallId": "call",
+            "state": "active",
+            "metadata": {
+              "kind": "shell_session",
+              "nativeShellSession": {
+                "schemaVersion": 1,
+                "process": {
+                  "schemaVersion": 1,
+                  "kind": "command",
+                  "handleId": "shell-session_12345678-1234-4abc-8def-123456789013",
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "execution": {
+                    "kind": "conversation",
+                    "conversationId": "conversation",
+                    "streamId": "stream"
+                  },
+                  "generation": 1,
+                  "state": "running",
+                  "owner": {
+                    "bootId": "boot",
+                    "pid": 101,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  },
+                  "child": {
+                    "bootId": "boot",
+                    "pid": 102,
+                    "pidStart": "start",
+                    "hostId": "host",
+                    "acquiredAt": "2026-11-18T00:00:00.000Z"
+                  }
+                },
+                "command": null
+              }
+            }
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "future-schema",
+      "input": {
+        "schemaVersion": 2,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "extra-root",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "extra": true
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "fake-goal",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "e",
+          "generation": "g",
+          "goalRevision": 1
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "missing-kind",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "identity-extra",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream",
+          "future": true
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "invalid-id",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "../escape",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "owner-extra",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z",
+          "extra": true
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "pid-zero",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 0,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "missing-owner-start",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "revision-fraction",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1.5,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "revision-unsafe",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 9007199254740992,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "unknown-phase",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "done",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "array-engine",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": [
+          "peer-native"
+        ],
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "foreign-billing-id",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "other"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "foreign-billing-stream",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream",
+          "streamId": "other"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "bot-role",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream",
+          "role": "bot"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "cost-negative",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream",
+          "estimatedCostUsd": -1
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-scope",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "conversation_lifetime",
+          "providerRequestCount": 2,
+          "inputTokens": 12,
+          "outputTokens": 3,
+          "cacheReadTokens": 4,
+          "cacheWriteTokens": 1,
+          "totalTokens": 20
+        },
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-total",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 2,
+          "inputTokens": 12,
+          "outputTokens": 3,
+          "cacheReadTokens": 4,
+          "cacheWriteTokens": 1,
+          "totalTokens": 21
+        },
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-extra",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 2,
+          "inputTokens": 12,
+          "outputTokens": 3,
+          "cacheReadTokens": 4,
+          "cacheWriteTokens": 1,
+          "totalTokens": 20,
+          "extra": true
+        },
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-missing",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-partial",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 1,
+          "totalTokens": 0
+        },
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "usage-no-request",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": {
+          "usageScope": "runtime_turn",
+          "providerRequestCount": 0,
+          "inputTokens": 12,
+          "outputTokens": 3,
+          "cacheReadTokens": 4,
+          "cacheWriteTokens": 1,
+          "totalTokens": 20
+        },
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stop-owner-extra",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z",
+            "extra": true
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stop-foreign-owner",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 102,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stop-false",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": false,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "active-stopped",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stopped-without-stop",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stopped-unpaid",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": false,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stopped-pending",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "duplicate-pending",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          },
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "bad-digest",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "phase": "dispatching",
+            "declaredScopes": []
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "unknown-scope",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [
+              {
+                "kind": "automatic"
+              }
+            ]
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "prepared-process",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "prepared",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "process-foreign-execution",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "foreign"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              }
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "process-owner-extra",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z",
+                "extra": true
+              }
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "process-future",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [
+          {
+            "toolCallId": "call",
+            "dispatchId": "dispatch",
+            "messageId": "answer",
+            "capabilityId": "local.file.read",
+            "argsDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+            "phase": "dispatching",
+            "declaredScopes": [],
+            "nativeProcess": {
+              "schemaVersion": 1,
+              "kind": "command",
+              "handleId": "handle",
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "execution": {
+                "kind": "conversation",
+                "conversationId": "conversation",
+                "streamId": "stream"
+              },
+              "generation": 0,
+              "state": "not_started",
+              "owner": {
+                "bootId": "boot",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "host",
+                "acquiredAt": "2026-11-18T00:00:00.000Z"
+              },
+              "extra": true
+            }
+          }
+        ],
+        "handles": [],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "duplicate-handle",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "active",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "h",
+            "toolCallId": "c",
+            "state": "active",
+            "metadata": {}
+          },
+          {
+            "handleId": "h",
+            "toolCallId": "c",
+            "state": "active",
+            "metadata": {}
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z"
+      },
+      "valid": false,
+      "permits": false
+    },
+    {
+      "name": "stopped-live-handle",
+      "input": {
+        "schemaVersion": 1,
+        "identity": {
+          "kind": "conversation",
+          "conversationId": "conversation",
+          "streamId": "stream"
+        },
+        "engine": "peer-native",
+        "owner": {
+          "bootId": "boot",
+          "pid": 101,
+          "pidStart": "start",
+          "hostId": "host",
+          "acquiredAt": "2026-11-18T00:00:00.000Z"
+        },
+        "revision": 1,
+        "phase": "stopped",
+        "pendingTools": [],
+        "handles": [
+          {
+            "handleId": "h",
+            "toolCallId": "c",
+            "state": "active",
+            "metadata": {}
+          }
+        ],
+        "usage": null,
+        "unknownUsage": false,
+        "attribution": {
+          "id": "stream"
+        },
+        "usageCommitted": true,
+        "updatedAt": "2026-11-18T00:00:00.000Z",
+        "stop": {
+          "owner": {
+            "bootId": "boot",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "host",
+            "acquiredAt": "2026-11-18T00:00:00.000Z"
+          },
+          "observedAt": "2026-11-18T00:00:00.000Z",
+          "runnerIdle": true,
+          "admissionClosed": true,
+          "handlesEnded": true
+        }
+      },
+      "valid": false,
+      "permits": false
+    }
+  ]
+}

@@ -1,0 +1,3629 @@
+{
+  "schemaVersion": 1,
+  "source": "actual TS coordination/intent pure admission; canonical Host fact input seam",
+  "cases": [
+    {
+      "name": "mandate recorded",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "kind": "coordination_decision",
+          "mandate": {
+            "schemaVersion": 1,
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722",
+            "workId": "g",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "rootInputIds": [
+              "i"
+            ],
+            "revisionInputIds": [
+              "i"
+            ],
+            "goalRevision": 1,
+            "allowedActions": [
+              "parallel",
+              "augment",
+              "revise",
+              "query",
+              "answer",
+              "cancel",
+              "replace",
+              "handoff",
+              "resume"
+            ],
+            "sessionIds": [],
+            "materialRefs": [],
+            "policyRevision": "existing-project-policy",
+            "executionBindings": {},
+            "revokedSessionIds": [],
+            "lifecycle": "active"
+          },
+          "receipt": {
+            "operationId": "op",
+            "workId": "g",
+            "expectedRevision": 0,
+            "action": "parallel",
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "reason": "synthetic task",
+            "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+            "goalRevision": 1,
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+          },
+          "transition": {
+            "schemaVersion": 1,
+            "operationId": "op",
+            "workId": "g",
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722",
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "initiator": "project_agent",
+            "decisionSource": "user_revision",
+            "action": "parallel",
+            "reason": "synthetic task",
+            "executionEpoch": "execution-4b8340ad7708bf537cac4c55eaadb829cd9a37e055c0dd1f98857bd06ca0fef1",
+            "phase": "recorded",
+            "minimumExecutorVersion": 1,
+            "updatedAt": "2026-11-14T04:00:00.000Z"
+          }
+        },
+        "receipt": {
+          "operationId": "op",
+          "workId": "g",
+          "expectedRevision": 0,
+          "action": "parallel",
+          "sourceInputIds": [
+            "i"
+          ],
+          "sourceEventIds": [],
+          "reason": "synthetic task",
+          "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+          "goalRevision": 1,
+          "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+        }
+      }
+    },
+    {
+      "name": "mandate recorded: lost lease",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "mandate recorded: foreign workspace",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "kind": "coordination_decision",
+          "mandate": {
+            "schemaVersion": 1,
+            "mandateId": "mandate-66bf344625def94e465f444014ee47371df5da8818545823b5de1f85b27a5144",
+            "workId": "g",
+            "workspaceId": "foreign",
+            "parentConversationId": "bot",
+            "rootInputIds": [
+              "i"
+            ],
+            "revisionInputIds": [
+              "i"
+            ],
+            "goalRevision": 1,
+            "allowedActions": [
+              "parallel",
+              "augment",
+              "revise",
+              "query",
+              "answer",
+              "cancel",
+              "replace",
+              "handoff",
+              "resume"
+            ],
+            "sessionIds": [],
+            "materialRefs": [],
+            "policyRevision": "existing-project-policy",
+            "executionBindings": {},
+            "revokedSessionIds": [],
+            "lifecycle": "active"
+          },
+          "receipt": {
+            "operationId": "op",
+            "workId": "g",
+            "expectedRevision": 0,
+            "action": "parallel",
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "reason": "synthetic task",
+            "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+            "goalRevision": 1,
+            "mandateId": "mandate-66bf344625def94e465f444014ee47371df5da8818545823b5de1f85b27a5144"
+          },
+          "transition": {
+            "schemaVersion": 1,
+            "operationId": "op",
+            "workId": "g",
+            "mandateId": "mandate-66bf344625def94e465f444014ee47371df5da8818545823b5de1f85b27a5144",
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "initiator": "project_agent",
+            "decisionSource": "user_revision",
+            "action": "parallel",
+            "reason": "synthetic task",
+            "executionEpoch": "execution-4b8340ad7708bf537cac4c55eaadb829cd9a37e055c0dd1f98857bd06ca0fef1",
+            "phase": "recorded",
+            "minimumExecutorVersion": 1,
+            "updatedAt": "2026-11-14T04:00:00.000Z"
+          }
+        },
+        "receipt": {
+          "operationId": "op",
+          "workId": "g",
+          "expectedRevision": 0,
+          "action": "parallel",
+          "sourceInputIds": [
+            "i"
+          ],
+          "sourceEventIds": [],
+          "reason": "synthetic task",
+          "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+          "goalRevision": 1,
+          "mandateId": "mandate-66bf344625def94e465f444014ee47371df5da8818545823b5de1f85b27a5144"
+        }
+      }
+    },
+    {
+      "name": "mandate recorded: conflicting operation",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "kind": "coordination_decision",
+          "mandate": {
+            "schemaVersion": 1,
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722",
+            "workId": "g",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "rootInputIds": [
+              "i"
+            ],
+            "revisionInputIds": [
+              "i"
+            ],
+            "goalRevision": 1,
+            "allowedActions": [
+              "parallel",
+              "augment",
+              "revise",
+              "query",
+              "answer",
+              "cancel",
+              "replace",
+              "handoff",
+              "resume"
+            ],
+            "sessionIds": [],
+            "materialRefs": [],
+            "policyRevision": "existing-project-policy",
+            "executionBindings": {},
+            "revokedSessionIds": [],
+            "lifecycle": "active"
+          },
+          "receipt": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "expectedRevision": 0,
+            "action": "parallel",
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "reason": "synthetic task",
+            "digest": "79b16e429d2e06aa03799c00b9e0b5f1fd274bc2af70f38e50c99f1302b9149d",
+            "goalRevision": 1,
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+          },
+          "transition": {
+            "schemaVersion": 1,
+            "operationId": "another-operation",
+            "workId": "g",
+            "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722",
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "initiator": "project_agent",
+            "decisionSource": "user_revision",
+            "action": "parallel",
+            "reason": "synthetic task",
+            "executionEpoch": "execution-613067b6d1933ba6b73c0447065fa38675680cd6980870a346f573c37b09fde0",
+            "phase": "recorded",
+            "minimumExecutorVersion": 1,
+            "updatedAt": "2026-11-14T04:00:00.000Z"
+          }
+        },
+        "receipt": {
+          "operationId": "another-operation",
+          "workId": "g",
+          "expectedRevision": 0,
+          "action": "parallel",
+          "sourceInputIds": [
+            "i"
+          ],
+          "sourceEventIds": [],
+          "reason": "synthetic task",
+          "digest": "79b16e429d2e06aa03799c00b9e0b5f1fd274bc2af70f38e50c99f1302b9149d",
+          "goalRevision": 1,
+          "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+        }
+      }
+    },
+    {
+      "name": "mandate recorded: forged host authority",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task",
+        "holdsLease": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "untrusted_coordination_authority"
+      }
+    },
+    {
+      "name": "mandate recorded: no admitted source",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "source_not_admitted"
+      }
+    },
+    {
+      "name": "mandate recorded: stale goal revision",
+      "stateCase": 0,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 1,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_revision_conflict"
+      }
+    },
+    {
+      "name": "duplicate decision rejected",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "op",
+          "workId": "g",
+          "expectedRevision": 0,
+          "action": "parallel",
+          "sourceInputIds": [
+            "i"
+          ],
+          "sourceEventIds": [],
+          "reason": "synthetic task",
+          "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+          "goalRevision": 1,
+          "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+        }
+      }
+    },
+    {
+      "name": "duplicate decision rejected: lost lease",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "duplicate decision rejected: foreign workspace",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "duplicate decision rejected: conflicting operation",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_revision_conflict"
+      }
+    },
+    {
+      "name": "duplicate decision rejected: forged host authority",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task",
+        "holdsLease": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "untrusted_coordination_authority"
+      }
+    },
+    {
+      "name": "duplicate decision rejected: no admitted source",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 0,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "op",
+          "workId": "g",
+          "expectedRevision": 0,
+          "action": "parallel",
+          "sourceInputIds": [
+            "i"
+          ],
+          "sourceEventIds": [],
+          "reason": "synthetic task",
+          "digest": "923d1663b0ebb316fa93a842d9f8c8d66ba82b4387f70a6214c5de402236d9bc",
+          "goalRevision": 1,
+          "mandateId": "mandate-5791405f128e2d9db6ec5d24f46743449287639310a635ecea727a04ef539722"
+        }
+      }
+    },
+    {
+      "name": "duplicate decision rejected: stale goal revision",
+      "stateCase": 1,
+      "method": "decision",
+      "input": {
+        "operationId": "op",
+        "workId": "g",
+        "expectedRevision": 1,
+        "action": "parallel",
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "reason": "synthetic task"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "operation_identity_conflict"
+      }
+    },
+    {
+      "name": "intent assessment",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "assess",
+          "workId": "g",
+          "digest": "a18f4dae324a84fe4fdc3279b4883ddd6c9ce9cfdd906c1897c7735618029e04",
+          "workRevision": 1,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": true
+        },
+        "entry": {
+          "kind": "intent_assessed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "assessment": {
+            "operationId": "assess",
+            "workId": "g",
+            "expectedWorkRevision": 0,
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "inputs": [
+              {
+                "inputId": "i",
+                "kind": "delegate",
+                "reason": "Implement"
+              }
+            ],
+            "interpretation": {
+              "outcome": "Implement change",
+              "constraints": [],
+              "nonGoals": [],
+              "openQuestions": [],
+              "requirements": [
+                {
+                  "requirementId": "impl",
+                  "text": "Implementation",
+                  "sourceInputIds": [
+                    "i"
+                  ]
+                }
+              ]
+            },
+            "coverage": [
+              {
+                "requirementId": "impl",
+                "status": "remaining",
+                "explanation": "Pending",
+                "sources": []
+              }
+            ],
+            "disposition": {
+              "kind": "continue",
+              "operationRefs": [
+                "op"
+              ]
+            },
+            "reason": "Work remains"
+          },
+          "receipt": {
+            "operationId": "assess",
+            "workId": "g",
+            "digest": "a18f4dae324a84fe4fdc3279b4883ddd6c9ce9cfdd906c1897c7735618029e04",
+            "workRevision": 1,
+            "goalRevision": 1,
+            "at": "2026-11-14T04:00:00.000Z",
+            "continuation": true
+          }
+        }
+      }
+    },
+    {
+      "name": "intent assessment: lost lease",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "intent assessment: foreign workspace",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "intent assessment: conflicting operation",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "another-operation",
+          "workId": "g",
+          "digest": "23da94c2982ff1cd6955932798317eeac74211c6abd5f6c762ef0860d91c97b9",
+          "workRevision": 1,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": true
+        },
+        "entry": {
+          "kind": "intent_assessed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "assessment": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "expectedWorkRevision": 0,
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "inputs": [
+              {
+                "inputId": "i",
+                "kind": "delegate",
+                "reason": "Implement"
+              }
+            ],
+            "interpretation": {
+              "outcome": "Implement change",
+              "constraints": [],
+              "nonGoals": [],
+              "openQuestions": [],
+              "requirements": [
+                {
+                  "requirementId": "impl",
+                  "text": "Implementation",
+                  "sourceInputIds": [
+                    "i"
+                  ]
+                }
+              ]
+            },
+            "coverage": [
+              {
+                "requirementId": "impl",
+                "status": "remaining",
+                "explanation": "Pending",
+                "sources": []
+              }
+            ],
+            "disposition": {
+              "kind": "continue",
+              "operationRefs": [
+                "op"
+              ]
+            },
+            "reason": "Work remains"
+          },
+          "receipt": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "digest": "23da94c2982ff1cd6955932798317eeac74211c6abd5f6c762ef0860d91c97b9",
+            "workRevision": 1,
+            "goalRevision": 1,
+            "at": "2026-11-14T04:00:00.000Z",
+            "continuation": true
+          }
+        }
+      }
+    },
+    {
+      "name": "intent assessment: incomplete coverage",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_coverage_incomplete"
+      }
+    },
+    {
+      "name": "intent assessment: stale work revision",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "work_revision_conflict"
+      }
+    },
+    {
+      "name": "intent assessment: missing source",
+      "stateCase": 47,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "source_not_admitted"
+      }
+    },
+    {
+      "name": "stale intent revision",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "assess",
+          "workId": "g",
+          "digest": "a18f4dae324a84fe4fdc3279b4883ddd6c9ce9cfdd906c1897c7735618029e04",
+          "workRevision": 1,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": true
+        }
+      }
+    },
+    {
+      "name": "stale intent revision: lost lease",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "stale intent revision: foreign workspace",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "stale intent revision: conflicting operation",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "work_revision_conflict"
+      }
+    },
+    {
+      "name": "stale intent revision: incomplete coverage",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "operation_identity_conflict"
+      }
+    },
+    {
+      "name": "stale intent revision: stale work revision",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "operation_identity_conflict"
+      }
+    },
+    {
+      "name": "stale intent revision: missing source",
+      "stateCase": 48,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "assess",
+          "workId": "g",
+          "digest": "a18f4dae324a84fe4fdc3279b4883ddd6c9ce9cfdd906c1897c7735618029e04",
+          "workRevision": 1,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": true
+        }
+      }
+    },
+    {
+      "name": "untrusted assessment keys",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: lost lease",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: foreign workspace",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: conflicting operation",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: incomplete coverage",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: stale work revision",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "untrusted assessment keys: missing source",
+      "stateCase": 49,
+      "method": "assessment",
+      "input": {
+        "operationId": "assess",
+        "workId": "g",
+        "expectedWorkRevision": 0,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "remaining",
+            "explanation": "Pending",
+            "sources": []
+          }
+        ],
+        "disposition": {
+          "kind": "continue",
+          "operationRefs": [
+            "op"
+          ]
+        },
+        "reason": "Work remains",
+        "permissionGrant": true
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "invalid_intent_assessment"
+      }
+    },
+    {
+      "name": "intent return assessment",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "return",
+          "workId": "g",
+          "digest": "4051cab81b2690db97d1429e9c9e1c168d9a270dc9a424f12a0f9cf85df2c78b",
+          "workRevision": 2,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": false
+        },
+        "entry": {
+          "kind": "intent_assessed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "assessment": {
+            "operationId": "return",
+            "workId": "g",
+            "expectedWorkRevision": 1,
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "inputs": [
+              {
+                "inputId": "i",
+                "kind": "delegate",
+                "reason": "Implement"
+              }
+            ],
+            "interpretation": {
+              "outcome": "Implement change",
+              "constraints": [],
+              "nonGoals": [],
+              "openQuestions": [],
+              "requirements": [
+                {
+                  "requirementId": "impl",
+                  "text": "Implementation",
+                  "sourceInputIds": [
+                    "i"
+                  ]
+                }
+              ]
+            },
+            "coverage": [
+              {
+                "requirementId": "impl",
+                "status": "covered",
+                "explanation": "Verified",
+                "sources": [
+                  {
+                    "sessionId": "worker",
+                    "sourceRevision": "source:1",
+                    "evidenceRefs": [
+                      "evidence://actual"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "disposition": {
+              "kind": "return",
+              "replyRef": "reply"
+            },
+            "reason": "Work remains"
+          },
+          "receipt": {
+            "operationId": "return",
+            "workId": "g",
+            "digest": "4051cab81b2690db97d1429e9c9e1c168d9a270dc9a424f12a0f9cf85df2c78b",
+            "workRevision": 2,
+            "goalRevision": 1,
+            "at": "2026-11-14T04:00:00.000Z",
+            "continuation": false
+          }
+        }
+      }
+    },
+    {
+      "name": "intent return assessment: lost lease",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "intent return assessment: foreign workspace",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "intent return assessment: conflicting operation",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "another-operation",
+          "workId": "g",
+          "digest": "ba07975b8136911333d6ef1915b21a262849413d6466882896beb5438250877f",
+          "workRevision": 2,
+          "goalRevision": 1,
+          "at": "2026-11-14T04:00:00.000Z",
+          "continuation": false
+        },
+        "entry": {
+          "kind": "intent_assessed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "assessment": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "expectedWorkRevision": 1,
+            "expectedGoalRevision": 1,
+            "sourceInputIds": [
+              "i"
+            ],
+            "sourceEventIds": [],
+            "inputs": [
+              {
+                "inputId": "i",
+                "kind": "delegate",
+                "reason": "Implement"
+              }
+            ],
+            "interpretation": {
+              "outcome": "Implement change",
+              "constraints": [],
+              "nonGoals": [],
+              "openQuestions": [],
+              "requirements": [
+                {
+                  "requirementId": "impl",
+                  "text": "Implementation",
+                  "sourceInputIds": [
+                    "i"
+                  ]
+                }
+              ]
+            },
+            "coverage": [
+              {
+                "requirementId": "impl",
+                "status": "covered",
+                "explanation": "Verified",
+                "sources": [
+                  {
+                    "sessionId": "worker",
+                    "sourceRevision": "source:1",
+                    "evidenceRefs": [
+                      "evidence://actual"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "disposition": {
+              "kind": "return",
+              "replyRef": "reply"
+            },
+            "reason": "Work remains"
+          },
+          "receipt": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "digest": "ba07975b8136911333d6ef1915b21a262849413d6466882896beb5438250877f",
+            "workRevision": 2,
+            "goalRevision": 1,
+            "at": "2026-11-14T04:00:00.000Z",
+            "continuation": false
+          }
+        }
+      }
+    },
+    {
+      "name": "intent return assessment: incomplete coverage",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_coverage_incomplete"
+      }
+    },
+    {
+      "name": "intent return assessment: stale work revision",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [
+          "i"
+        ],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "work_revision_conflict"
+      }
+    },
+    {
+      "name": "intent return assessment: missing source",
+      "stateCase": 50,
+      "method": "assessment",
+      "input": {
+        "operationId": "return",
+        "workId": "g",
+        "expectedWorkRevision": 1,
+        "expectedGoalRevision": 1,
+        "sourceInputIds": [
+          "i"
+        ],
+        "sourceEventIds": [],
+        "inputs": [
+          {
+            "inputId": "i",
+            "kind": "delegate",
+            "reason": "Implement"
+          }
+        ],
+        "interpretation": {
+          "outcome": "Implement change",
+          "constraints": [],
+          "nonGoals": [],
+          "openQuestions": [],
+          "requirements": [
+            {
+              "requirementId": "impl",
+              "text": "Implementation",
+              "sourceInputIds": [
+                "i"
+              ]
+            }
+          ]
+        },
+        "coverage": [
+          {
+            "requirementId": "impl",
+            "status": "covered",
+            "explanation": "Verified",
+            "sources": [
+              {
+                "sessionId": "worker",
+                "sourceRevision": "source:1",
+                "evidenceRefs": [
+                  "evidence://actual"
+                ]
+              }
+            ]
+          }
+        ],
+        "disposition": {
+          "kind": "return",
+          "replyRef": "reply"
+        },
+        "reason": "Work remains"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "source_not_admitted"
+      }
+    },
+    {
+      "name": "cannot close undelivered",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_delivery_pending"
+      }
+    },
+    {
+      "name": "cannot close undelivered: lost lease",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "cannot close undelivered: foreign workspace",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "cannot close undelivered: conflicting operation",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_delivery_pending"
+      }
+    },
+    {
+      "name": "cannot close undelivered: review pending",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": true,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_delivery_pending"
+      }
+    },
+    {
+      "name": "cannot close undelivered: wrong review",
+      "stateCase": 53,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "other-review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_delivery_pending"
+      }
+    },
+    {
+      "name": "intent fulfilled",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "close",
+          "workId": "g",
+          "workRevision": 3,
+          "goalRevision": 1,
+          "lifecycle": "fulfilled",
+          "at": "2026-11-14T04:00:00.000Z",
+          "replyRef": "reply",
+          "replyRefs": [
+            "reply"
+          ],
+          "intentReplyRef": "reply",
+          "reviewRef": "review"
+        },
+        "entry": {
+          "kind": "intent_closed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "receipt": {
+            "operationId": "close",
+            "workId": "g",
+            "workRevision": 3,
+            "goalRevision": 1,
+            "lifecycle": "fulfilled",
+            "at": "2026-11-14T04:00:00.000Z",
+            "replyRef": "reply",
+            "replyRefs": [
+              "reply"
+            ],
+            "intentReplyRef": "reply",
+            "reviewRef": "review"
+          }
+        }
+      }
+    },
+    {
+      "name": "intent fulfilled: lost lease",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "intent fulfilled: foreign workspace",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "intent fulfilled: conflicting operation",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "receipt": {
+          "operationId": "another-operation",
+          "workId": "g",
+          "workRevision": 3,
+          "goalRevision": 1,
+          "lifecycle": "fulfilled",
+          "at": "2026-11-14T04:00:00.000Z",
+          "replyRef": "reply",
+          "replyRefs": [
+            "reply"
+          ],
+          "intentReplyRef": "reply",
+          "reviewRef": "review"
+        },
+        "entry": {
+          "kind": "intent_closed",
+          "minimumExecutorVersion": 9,
+          "workId": "g",
+          "receipt": {
+            "operationId": "another-operation",
+            "workId": "g",
+            "workRevision": 3,
+            "goalRevision": 1,
+            "lifecycle": "fulfilled",
+            "at": "2026-11-14T04:00:00.000Z",
+            "replyRef": "reply",
+            "replyRefs": [
+              "reply"
+            ],
+            "intentReplyRef": "reply",
+            "reviewRef": "review"
+          }
+        }
+      }
+    },
+    {
+      "name": "intent fulfilled: review pending",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": true,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_review_required"
+      }
+    },
+    {
+      "name": "intent fulfilled: wrong review",
+      "stateCase": 56,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "other-review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "goal_review_required"
+      }
+    },
+    {
+      "name": "closed intent not reapplied",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "close",
+          "workId": "g",
+          "workRevision": 3,
+          "goalRevision": 1,
+          "lifecycle": "fulfilled",
+          "at": "2026-11-14T04:00:00.000Z",
+          "replyRef": "reply",
+          "replyRefs": [
+            "reply"
+          ],
+          "intentReplyRef": "reply",
+          "reviewRef": "review"
+        }
+      }
+    },
+    {
+      "name": "closed intent not reapplied: lost lease",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": false,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "coordination_lease_lost"
+      }
+    },
+    {
+      "name": "closed intent not reapplied: foreign workspace",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "foreign",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "out_of_scope"
+      }
+    },
+    {
+      "name": "closed intent not reapplied: conflicting operation",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "another-operation",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": false,
+        "error": "intent_closure_conflict"
+      }
+    },
+    {
+      "name": "closed intent not reapplied: review pending",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": true,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "close",
+          "workId": "g",
+          "workRevision": 3,
+          "goalRevision": 1,
+          "lifecycle": "fulfilled",
+          "at": "2026-11-14T04:00:00.000Z",
+          "replyRef": "reply",
+          "replyRefs": [
+            "reply"
+          ],
+          "intentReplyRef": "reply",
+          "reviewRef": "review"
+        }
+      }
+    },
+    {
+      "name": "closed intent not reapplied: wrong review",
+      "stateCase": 57,
+      "method": "closure",
+      "input": {
+        "operationId": "close",
+        "workId": "g",
+        "expectedWorkRevision": 2,
+        "expectedGoalRevision": 1,
+        "lifecycle": "fulfilled"
+      },
+      "host": {
+        "holdsLease": true,
+        "workspaceId": "w",
+        "parentConversationId": "bot",
+        "currentInputIds": [],
+        "eventIds": [],
+        "now": "2026-11-14T04:00:00.000Z",
+        "pendingObligations": false,
+        "verifiedGoalRevision": 1,
+        "reviewRef": "other-review",
+        "pendingManagedSessions": false
+      },
+      "expected": {
+        "ok": true,
+        "replayed": true,
+        "receipt": {
+          "operationId": "close",
+          "workId": "g",
+          "workRevision": 3,
+          "goalRevision": 1,
+          "lifecycle": "fulfilled",
+          "at": "2026-11-14T04:00:00.000Z",
+          "replyRef": "reply",
+          "replyRefs": [
+            "reply"
+          ],
+          "intentReplyRef": "reply",
+          "reviewRef": "review"
+        }
+      }
+    }
+  ]
+}

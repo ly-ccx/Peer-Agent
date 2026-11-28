@@ -1,4 +1,5 @@
 import { SESSION_CONTROL_BUCKETS } from './session-control-kernel.mjs';
+import { nativeProcessesInWork, nativeWorkHasHookFacts, WORK_HOOK_SEMANTIC_FLOOR } from '@peer-agent/protocol';
 import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { openSync, closeSync, fstatSync, readSync, readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, copyFileSync } from 'node:fs';
@@ -222,12 +223,15 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
     const s = lstatSync(path.join(candidate, 'baseline.jsonl'), { bigint: true }), legacyVersion = stamp(s);
     const closure = Object.values(plan.state.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
       || Object.values(plan.state.agentCommands || {}).some(row => row.completionRecorded === true);
-    const semanticFloor = SESSION_CONTROL_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length)
+    const works = Object.values(plan.state.works || {});
+    const semanticFloor = works.some(nativeWorkHasHookFacts) ? WORK_HOOK_SEMANTIC_FLOOR
+      : works.some(work => nativeProcessesInWork(work).length) ? 13
+      : SESSION_CONTROL_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length)
       || Object.keys(plan.state.intentDecisions || {}).length || Object.values(plan.state.works || {}).some(work => work.intentCoordination)
       ? 9 : closure ? 6 : SUPERVISION_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length) ? 5 : 3;
     const sourceFloors = ['manifest.json', 'head.json'].map(file => JSON.parse(readFileSync(containedTree(directory, 'coordination-v2/' + file))).minimumWriterVersion || 2);
     const minimumVersion = Math.max(semanticFloor, ...sourceFloors);
-    if (![2,3,4,5,6,7,8,9,11].includes(minimumVersion)) throw failure('coordination_schema_unsupported');
+    if (![2,3,4,5,6,7,8,9,11,12,13,WORK_HOOK_SEMANTIC_FLOOR].includes(minimumVersion)) throw failure('coordination_schema_unsupported');
     durable(path.join(candidate, 'head.json'), JSON.stringify({ generation, legacyVersion, revision: 1, hash: '', minimumWriterVersion: minimumVersion }));
     durable(path.join(candidate, 'manifest.json'), JSON.stringify({ schemaVersion: 2, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion,
       generation, legacyFile: 'coordination.jsonl', frozenLegacyFile: 'baseline.jsonl', legacyVersion }));

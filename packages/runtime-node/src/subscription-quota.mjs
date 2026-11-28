@@ -1,10 +1,8 @@
-// 订阅额度查询（GPT / Gemini / Grok / Qoder）。
+// 订阅额度查询（GPT / Grok）。
 // 数据源对齐 CodexBar：
 // - GPT: ChatGPT backend wham/usage
-// - Gemini: cloudcode-pa retrieveUserQuota
 // - Grok: grok.com GrokBuildBilling GetGrokCreditsConfig
-// - Qoder: qoder-agent-sdk session.getUsageInfo()
-// 只在 main 进程运行；复用已有 OAuth / 本机登录态，不引入第三方依赖。
+// 只在 main 进程运行；复用已有 OAuth 登录态，不引入第三方依赖。
 
 const QUOTA_TTL_MS = 60_000;
 
@@ -22,8 +20,7 @@ const quotaCache = new Map(); // cacheKey -> { expiresAt, result }
  */
 const lastSuccessByKey = new Map(); // cacheKey -> result
 
-const OAUTH_METHODS = new Set(['oauth_chatgpt', 'oauth_google', 'oauth_grok']);
-const LOCAL_CLI_METHODS = new Set(['qoder_local_auth', 'local_cli']);
+const OAUTH_METHODS = new Set(['oauth_chatgpt', 'oauth_grok']);
 
 function nowIso() {
   return new Date().toISOString();
@@ -90,6 +87,7 @@ async function readJsonResponse(response) {
 
 // ── GPT / ChatGPT subscription (wham/usage) ─────────────────────────────
 
+/** @returns {Promise<import('@peer-agent/protocol').LlmSubscriptionQuota>} */
 export async function fetchChatGptUsage({ accessToken, accountId, fetchImpl } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
   const fetchHost = requireHostPort('fetchImpl', fetchImpl);
@@ -161,267 +159,6 @@ export async function fetchChatGptUsage({ accessToken, accountId, fetchImpl } = 
   };
 }
 
-
-// ── Gemini Code Assist project resolution ──────────────────────────────
-// 对齐 gemini-cli packages/core/src/code_assist/setup.ts：
-// 1) loadCodeAssist 取 cloudaicompanionProject
-// 2) 若尚未 onboard，则 onboardUser（free tier 不传 project）并轮询 LRO
-
-const GEMINI_CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com/v1internal';
-const GEMINI_CODE_ASSIST_METADATA = {
-  ideType: 'IDE_UNSPECIFIED',
-  platform: 'PLATFORM_UNSPECIFIED',
-  pluginType: 'GEMINI',
-};
-
-function extractCloudAiCompanionProjectId(value) {
-  if (!value) return null;
-  if (typeof value === 'string' && value.trim()) return value.trim();
-  if (typeof value === 'object') {
-    const nested = value.id || value.projectId || value.name || null;
-    if (typeof nested === 'string' && nested.trim()) return nested.trim();
-  }
-  return null;
-}
-
-async function postCodeAssistJson(fetchImpl, accessToken, method, body) {
-  const response = await fetchImpl(`${GEMINI_CODE_ASSIST_BASE}:${method}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'User-Agent': 'PeerAgent/1.0',
-    },
-    body: JSON.stringify(body || {}),
-  });
-  const payload = await readJsonResponse(response);
-  return { response, payload };
-}
-
-function pickDefaultOnboardTier(loadRes) {
-  const tiers = Array.isArray(loadRes?.allowedTiers) ? loadRes.allowedTiers : [];
-  const preferred = tiers.find((tier) => tier?.isDefault) || tiers[0] || null;
-  return preferred;
-}
-
-export async function resolveGeminiCodeAssistProjectId({
-  accessToken,
-  projectId,
-  fetchImpl,
-  pollIntervalMs = 1000,
-  maxPolls = 30,
-} = {}) {
-  if (!accessToken) throw new Error('oauth_not_logged_in');
-  const fetchHost = requireHostPort('fetchImpl', fetchImpl);
-  let resolvedProjectId = typeof projectId === 'string' && projectId.trim()
-    ? projectId.trim()
-    : null;
-
-  const metadata = {
-    ...GEMINI_CODE_ASSIST_METADATA,
-    ...(resolvedProjectId ? { duetProject: resolvedProjectId } : {}),
-  };
-
-  let loadResponse;
-  let loadRes;
-  try {
-    ({ response: loadResponse, payload: loadRes } = await postCodeAssistJson(
-      fetchHost,
-      accessToken,
-      'loadCodeAssist',
-      {
-        ...(resolvedProjectId ? { cloudaicompanionProject: resolvedProjectId } : {}),
-        metadata,
-      },
-    ));
-  } catch (error) {
-    // 网络/代理失败时不要吞成“缺少 project”，否则用户会误判为账号未开通。
-    const detail = error?.cause?.message || error?.message || String(error);
-    throw new Error(`Gemini Code Assist loadCodeAssist 网络请求失败：${detail}`);
-  }
-
-  if (!loadResponse?.ok) {
-    const status = loadResponse?.status || 'unknown';
-    const message = loadRes?.error?.message
-      || loadRes?.message
-      || (typeof loadRes === 'string' ? loadRes : JSON.stringify(loadRes || {}));
-    throw new Error(`Gemini Code Assist loadCodeAssist 失败（HTTP ${status}）：${message}`);
-  }
-
-  if (loadRes) {
-    const fromLoad = extractCloudAiCompanionProjectId(
-      loadRes.cloudaicompanionProject
-        || loadRes.cloudAiCompanionProject
-        || loadRes.projectId,
-    );
-    if (fromLoad) return fromLoad;
-
-    // 已有 currentTier 但仍无 project：若调用方给了 projectId 可直接用。
-    if (loadRes.currentTier && resolvedProjectId) return resolvedProjectId;
-
-    // 未 onboard 时，尝试自动 onboard（个人免费档 / 默认档）。
-    if (!loadRes.currentTier) {
-      const tier = pickDefaultOnboardTier(loadRes);
-      const tierId = tier?.id || 'free-tier';
-      const isFreeTier = tierId === 'free-tier' || tierId === 'FREE';
-      const onboardReq = isFreeTier
-        ? {
-            tierId,
-            cloudaicompanionProject: undefined,
-            metadata: GEMINI_CODE_ASSIST_METADATA,
-          }
-        : {
-            tierId,
-            cloudaicompanionProject: resolvedProjectId || undefined,
-            metadata: {
-              ...GEMINI_CODE_ASSIST_METADATA,
-              ...(resolvedProjectId ? { duetProject: resolvedProjectId } : {}),
-            },
-          };
-
-      let onboardResponse;
-      let lroRes;
-      try {
-        ({ response: onboardResponse, payload: lroRes } = await postCodeAssistJson(
-          fetchHost,
-          accessToken,
-          'onboardUser',
-          onboardReq,
-        ));
-      } catch (error) {
-        const detail = error?.cause?.message || error?.message || String(error);
-        throw new Error(`Gemini Code Assist onboardUser 网络请求失败：${detail}`);
-      }
-      if (!onboardResponse.ok) {
-        const status = onboardResponse.status || 'unknown';
-        const message = lroRes?.error?.message
-          || lroRes?.message
-          || JSON.stringify(lroRes || {});
-        throw new Error(`Gemini Code Assist onboardUser 失败（HTTP ${status}）：${message}`);
-      }
-
-      let polls = 0;
-      while (lroRes && !lroRes.done && lroRes.name && polls < maxPolls) {
-        polls += 1;
-        if (pollIntervalMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-        }
-        // 对齐 gemini-cli：GET {base}/{operationName}
-        const opUrl = lroRes.name.startsWith('http')
-          ? lroRes.name
-          : `${GEMINI_CODE_ASSIST_BASE}/${String(lroRes.name).replace(/^\/+/, '')}`;
-        let opResponse;
-        try {
-          opResponse = await fetchHost(opUrl, {
-            method: 'GET',
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              Accept: 'application/json',
-              'User-Agent': 'PeerAgent/1.0',
-            },
-          });
-        } catch (error) {
-          const detail = error?.cause?.message || error?.message || String(error);
-          throw new Error(`Gemini Code Assist getOperation 网络请求失败：${detail}`);
-        }
-        if (!opResponse.ok) {
-          throw new Error(`Gemini Code Assist getOperation 失败（HTTP ${opResponse.status}）`);
-        }
-        lroRes = await readJsonResponse(opResponse);
-      }
-
-      const fromOnboard = extractCloudAiCompanionProjectId(
-        lroRes?.response?.cloudaicompanionProject
-          || lroRes?.cloudaicompanionProject,
-      );
-      if (fromOnboard) return fromOnboard;
-      if (resolvedProjectId) return resolvedProjectId;
-    }
-  }
-
-  return resolvedProjectId;
-}
-
-// ── Gemini Code Assist (retrieveUserQuota) ──────────────────────────────
-
-export async function fetchGeminiQuota({ accessToken, projectId, fetchImpl } = {}) {
-  if (!accessToken) throw new Error('oauth_not_logged_in');
-  const fetchHost = requireHostPort('fetchImpl', fetchImpl);
-
-  // CodexBar：先 loadCodeAssist 拿 cloudaicompanionProject，再 retrieveUserQuota。
-  const resolvedProjectId = await resolveGeminiCodeAssistProjectId({ accessToken, projectId, fetchImpl: fetchHost });
-
-  const body = resolvedProjectId
-    ? { project: resolvedProjectId }
-    : {};
-
-  const response = await fetchHost('https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'User-Agent': 'PeerAgent/1.0',
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    throw Object.assign(new Error('oauth_session_expired'), { code: 'oauth_session_expired' });
-  }
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw Object.assign(new Error(`quota_http_${response.status}:${text.slice(0, 160)}`), {
-      code: 'quota_fetch_failed',
-    });
-  }
-
-  const payload = await readJsonResponse(response);
-  const buckets = Array.isArray(payload?.buckets) ? payload.buckets : [];
-  if (buckets.length === 0) {
-    throw Object.assign(new Error('quota_parse_failed'), { code: 'quota_parse_failed' });
-  }
-
-  // 按模型取最低 remainingFraction（输入额度通常更紧）。
-  const byModel = new Map();
-  for (const bucket of buckets) {
-    const modelId = bucket?.modelId || bucket?.model_id || 'default';
-    const remainingFraction = Number(bucket?.remainingFraction ?? bucket?.remaining_fraction);
-    if (!Number.isFinite(remainingFraction)) continue;
-    const remainingPercent = clampPercent(remainingFraction <= 1.5 ? remainingFraction * 100 : remainingFraction);
-    if (remainingPercent == null) continue;
-    const resetsAt = isoFromMaybeDate(bucket?.resetTime || bucket?.reset_time);
-    const prev = byModel.get(modelId);
-    if (!prev || remainingPercent < prev.remainingPercent) {
-      byModel.set(modelId, {
-        id: modelId,
-        label: modelId,
-        remainingPercent,
-        usedPercent: clampPercent(100 - remainingPercent) ?? undefined,
-        resetsAt,
-      });
-    }
-  }
-
-  const windows = [...byModel.values()].sort((a, b) => a.remainingPercent - b.remainingPercent);
-  if (windows.length === 0) {
-    throw Object.assign(new Error('quota_parse_failed'), { code: 'quota_parse_failed' });
-  }
-
-  const worst = windows[0];
-  return {
-    success: true,
-    status: 'ok',
-    provider: 'gemini',
-    remainingPercent: worst.remainingPercent,
-    usedPercent: worst.usedPercent,
-    resetsAt: worst.resetsAt,
-    windows,
-    fetchedAt: nowIso(),
-    projectId: resolvedProjectId || undefined,
-  };
-}
 
 // ── Grok web billing (GetGrokCreditsConfig, grpc-web) ───────────────────
 
@@ -561,6 +298,7 @@ function parseGrokGrpcWeb(body) {
   };
 }
 
+/** @returns {Promise<import('@peer-agent/protocol').LlmSubscriptionQuota>} */
 export async function fetchGrokQuota({ accessToken, fetchImpl } = {}) {
   if (!accessToken) throw new Error('oauth_not_logged_in');
   const fetchHost = requireHostPort('fetchImpl', fetchImpl);
@@ -599,139 +337,7 @@ export async function fetchGrokQuota({ accessToken, fetchImpl } = {}) {
 // ── Facade ──────────────────────────────────────────────────────────────
 
 export function supportsSubscriptionQuota(authMethod) {
-  return OAUTH_METHODS.has(authMethod) || LOCAL_CLI_METHODS.has(authMethod);
-}
-
-function finiteNumber(value) {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function bucketRemainingPercent(bucket) {
-  if (!bucket || typeof bucket !== 'object') return null;
-  const percentage = finiteNumber(bucket.percentage);
-  if (percentage != null) return clampPercent(100 - percentage);
-  const remaining = finiteNumber(bucket.remaining);
-  const total = finiteNumber(bucket.total ?? bucket.cap);
-  if (remaining != null && total != null && total > 0) {
-    return clampPercent((remaining / total) * 100);
-  }
-  const used = finiteNumber(bucket.used);
-  if (used != null && total != null && total > 0) {
-    return clampPercent(((total - used) / total) * 100);
-  }
-  return null;
-}
-
-/**
- * 将 Qoder SDK UsageInfo 映射为统一订阅额度快照。
- * 对齐 CLI /status：Plan Credits、Add-on Credits、Org Resource Package、Available Credits。
- */
-export function mapQoderUsageToQuota(usage) {
-  if (!usage || typeof usage !== 'object') {
-    throw Object.assign(new Error('usage_parse_failed'), { code: 'quota_parse_failed' });
-  }
-
-  const userQuota = usage.userQuota && typeof usage.userQuota === 'object' ? usage.userQuota : null;
-  const addOnQuota = usage.addOnQuota && typeof usage.addOnQuota === 'object' ? usage.addOnQuota : null;
-  const orgPackage = usage.orgResourcePackage && typeof usage.orgResourcePackage === 'object'
-    ? usage.orgResourcePackage
-    : null;
-
-  const planUsed = finiteNumber(userQuota?.used);
-  const planTotal = finiteNumber(userQuota?.total);
-  const planRemaining = finiteNumber(userQuota?.remaining)
-    ?? (planUsed != null && planTotal != null ? Math.max(0, planTotal - planUsed) : null);
-
-  const addOnUsed = finiteNumber(addOnQuota?.used);
-  const addOnTotal = finiteNumber(addOnQuota?.total);
-  const addOnRemaining = finiteNumber(addOnQuota?.remaining)
-    ?? (addOnUsed != null && addOnTotal != null ? Math.max(0, addOnTotal - addOnUsed) : null);
-
-  const orgUsed = finiteNumber(orgPackage?.used);
-  const orgCap = finiteNumber(orgPackage?.cap ?? orgPackage?.total);
-  const orgRemaining = finiteNumber(orgPackage?.remaining)
-    ?? (orgUsed != null && orgCap != null ? Math.max(0, orgCap - orgUsed) : null);
-
-  const availableCredits = [planRemaining, addOnRemaining, orgRemaining]
-    .filter((value) => value != null)
-    .reduce((sum, value) => sum + value, 0);
-
-  const windows = [];
-  if (userQuota) {
-    windows.push({
-      id: 'plan_credits',
-      label: 'Plan Credits',
-      remainingPercent: bucketRemainingPercent(userQuota) ?? undefined,
-      usedPercent: clampPercent(finiteNumber(userQuota.percentage) ?? (
-        planUsed != null && planTotal != null && planTotal > 0 ? (planUsed / planTotal) * 100 : null
-      )) ?? undefined,
-      resetsAt: typeof usage.expiresAt === 'string' ? usage.expiresAt : undefined,
-    });
-  }
-  if (addOnQuota) {
-    windows.push({
-      id: 'addon_credits',
-      label: 'Add-on Credits',
-      remainingPercent: bucketRemainingPercent(addOnQuota) ?? undefined,
-      usedPercent: clampPercent(finiteNumber(addOnQuota.percentage) ?? (
-        addOnUsed != null && addOnTotal != null && addOnTotal > 0 ? (addOnUsed / addOnTotal) * 100 : null
-      )) ?? undefined,
-    });
-  }
-  if (orgPackage) {
-    windows.push({
-      id: 'org_resource_package',
-      label: 'Org Resource Package',
-      remainingPercent: bucketRemainingPercent({
-        ...orgPackage,
-        total: orgCap ?? orgPackage.total,
-      }) ?? undefined,
-      usedPercent: clampPercent(finiteNumber(orgPackage.percentage) ?? (
-        orgUsed != null && orgCap != null && orgCap > 0 ? (orgUsed / orgCap) * 100 : null
-      )) ?? undefined,
-    });
-  }
-
-  const totalCap = [planTotal, addOnTotal, orgCap]
-    .filter((value) => value != null)
-    .reduce((sum, value) => sum + value, 0);
-  const remainingPercent = totalCap > 0
-    ? clampPercent((availableCredits / totalCap) * 100)
-    : (bucketRemainingPercent(userQuota) ?? bucketRemainingPercent(orgPackage));
-  const usedPercent = remainingPercent == null ? null : clampPercent(100 - remainingPercent);
-
-  if (windows.length === 0 && availableCredits <= 0 && remainingPercent == null) {
-    throw Object.assign(new Error('usage_parse_failed'), { code: 'quota_parse_failed' });
-  }
-
-  return {
-    success: true,
-    status: 'ok',
-    provider: 'qoder',
-    planLabel: typeof usage.userType === 'string' && usage.userType.trim()
-      ? usage.userType.trim()
-      : undefined,
-    remainingPercent: remainingPercent ?? undefined,
-    usedPercent: usedPercent ?? undefined,
-    resetsAt: typeof usage.expiresAt === 'string' ? usage.expiresAt : undefined,
-    windows: windows.length ? windows : undefined,
-    fetchedAt: nowIso(),
-    availableCredits: availableCredits > 0 || planRemaining != null || orgRemaining != null
-      ? availableCredits
-      : undefined,
-    planCreditsUsed: planUsed ?? undefined,
-    planCreditsTotal: planTotal ?? undefined,
-    orgPackageUsed: orgUsed ?? undefined,
-    orgPackageCap: orgCap ?? undefined,
-    accountId: typeof usage.userId === 'string' ? usage.userId : undefined,
-  };
-}
-
-export async function fetchQoderQuota({ usageLoader, ...options } = {}) {
-  const loadUsage = requireHostPort('usageLoader', usageLoader);
-  const usage = await loadUsage(options);
-  return mapQoderUsageToQuota(usage);
+  return OAUTH_METHODS.has(authMethod);
 }
 
 export async function fetchProviderSubscriptionQuota({
@@ -741,7 +347,6 @@ export async function fetchProviderSubscriptionQuota({
   fetchImpl,
   resolveCredential,
   getCredentialErrorCode,
-  qoderUsageLoader,
 } = {}) {
   if (!providerId) return failure('invalid_request', 'provider id required');
   const providers = llmConfigStore.listProviders() || [];
@@ -750,11 +355,10 @@ export async function fetchProviderSubscriptionQuota({
 
   const authMethod = provider.authMethod || 'api_key';
   if (!supportsSubscriptionQuota(authMethod)) {
-    return failure('unsupported', 'Subscription quota is only available for ChatGPT / Gemini / Grok OAuth or Qoder CLI login');
+    return failure('unsupported', 'Subscription quota is only available for ChatGPT or Grok OAuth');
   }
 
-  const isLocalCli = LOCAL_CLI_METHODS.has(authMethod);
-  if (!isLocalCli && provider.oauthStatus?.status === 'disconnected') {
+  if (provider.oauthStatus?.status === 'disconnected') {
     return failure('not_logged_in', 'Not logged in');
   }
 
@@ -774,30 +378,13 @@ export async function fetchProviderSubscriptionQuota({
   }
 
   try {
-    let result;
-    let accountId = provider.oauthStatus?.accountId || null;
-
-    if (isLocalCli) {
-      result = await fetchQoderQuota({ usageLoader: qoderUsageLoader });
-      accountId = result.accountId || accountId;
-    } else {
-      const resolveCredentialHost = requireHostPort('resolveCredential', resolveCredential);
-      const credential = await resolveCredentialHost({ provider, llmConfigStore });
-      const accessToken = credential.apiKey;
-      accountId = credential.accountId || accountId;
-      const stored = llmConfigStore.getCredential?.(credentialId) || null;
-      const projectId = stored?.oauthProjectId || null;
-
-      if (authMethod === 'oauth_chatgpt') {
-        result = await fetchChatGptUsage({ accessToken, accountId, fetchImpl });
-      } else if (authMethod === 'oauth_google') {
-        result = await fetchGeminiQuota({ accessToken, projectId, fetchImpl });
-      } else if (authMethod === 'oauth_grok') {
-        result = await fetchGrokQuota({ accessToken, fetchImpl });
-      } else {
-        return failure('unsupported', 'Unsupported auth method');
-      }
-    }
+    const resolveCredentialHost = requireHostPort('resolveCredential', resolveCredential);
+    const credential = await resolveCredentialHost({ provider, llmConfigStore });
+    const accessToken = credential.apiKey;
+    const accountId = credential.accountId || provider.oauthStatus?.accountId;
+    let result = authMethod === 'oauth_chatgpt'
+      ? await fetchChatGptUsage({ accessToken, accountId, fetchImpl })
+      : await fetchGrokQuota({ accessToken, fetchImpl });
 
     result = {
       ...result,
@@ -815,7 +402,7 @@ export async function fetchProviderSubscriptionQuota({
       ? getCredentialErrorCode(error)
       : null;
     const code = error?.code || credentialErrorCode || 'quota_fetch_failed';
-    if (code === 'oauth_not_logged_in' || code === 'qoder_cli_not_found') {
+    if (code === 'oauth_not_logged_in') {
       return failure('not_logged_in', error.message || 'Not logged in');
     }
     if (code === 'oauth_session_expired' || code === 'oauth_token_refresh_failed') {

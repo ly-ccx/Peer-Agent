@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { INPUT_PREDICTION_LIMITS } from '@peer-agent/protocol';
 import { startOfLocalDayMs, sumRoleSpendUsd } from '../usage-stats.mjs';
 import { estimateUsageCostUsd } from '../usage-pricing.mjs';
 
@@ -19,7 +20,8 @@ export function createInputPredictionBudget({ log, now = Date.now }) {
       const consumed = rows.reduce((sum, row) => sum + row.inputTokens + row.outputTokens + (row.cacheReadTokens || 0) + (row.cacheWriteTokens || 0), 0);
       if (rows.length >= settings.dailyRequestLimit || consumed + tokens > settings.dailyTokenLimit) return null;
       const provider = route.provider;
-      const usage = { inputTokens: tokens - 128, outputTokens: 128 };
+      const reservedOutput = Math.min(INPUT_PREDICTION_LIMITS.outputTokens, Math.max(0, tokens));
+      const usage = { inputTokens: Math.max(0, tokens - reservedOutput), outputTokens: reservedOutput };
       const cost = estimateUsageCostUsd(usage, provider).estimatedCostUsd;
       for (const [role, cap] of [[null, route.routing?.dailySpendCapUsd], ['input_predictor', route.routing?.roleSpendCaps?.input_predictor]]) {
         if (typeof cap === 'number' && (sumRoleSpendUsd(day.rows, { role }) + (cost ?? 0) >= cap || cost == null)) return null;

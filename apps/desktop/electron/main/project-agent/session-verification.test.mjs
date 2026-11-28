@@ -340,3 +340,39 @@ test('the production reconciliation port checks host ownership and liveness with
     assert.notEqual(store.getPlan(plan.planId).hostVerification?.independentVerifier, 'passed');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('verification.facts never hydrates non-delegated historical plans and accepts a known plan directly', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'verify-no-full-scan-'));
+  const store = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
+  try {
+    for (let i = 0; i < 60; i += 1) {
+      store.createPlan({ conversationId: `legacy-${i}`, title: `Legacy ${i}`, goal: 'Legacy', tasks: [] });
+    }
+    const target = store.createPlan({
+      conversationId: 'child-target',
+      title: 'Target',
+      goal: 'Target',
+      tasks: [{ taskId: 'leaf', title: 'leaf', status: 'completed', evidenceRefs: ['tool-result://ok'] }],
+      delegationOrigin: origin({ sessionId: 'session-target' }),
+    });
+    store.recordEvidenceRefs({ planId: target.planId, conversationId: 'child-target', evidenceRef: 'tool-result://ok', toolName: 'read_file' });
+
+    const hydrated = [];
+    const trackedStore = {
+      ...store,
+      getPlan: (planId) => { hydrated.push(planId); return store.getPlan(planId); },
+    };
+    const verification = createSessionVerification({ goalPlanStore: trackedStore, readReport: () => 'summary' });
+
+    const byId = verification.facts('session-target');
+    assert.equal(byId?.plan?.planId, target.planId);
+    assert.deepEqual(hydrated, [target.planId], 'findPlan must not call getPlan on non-delegated historical plans');
+
+    hydrated.length = 0;
+    const loaded = store.getPlan(target.planId);
+    const byKnownPlan = verification.facts('session-target', loaded);
+    assert.equal(byKnownPlan?.plan?.planId, target.planId);
+    assert.deepEqual(byKnownPlan?.evidenceIndex, byId?.evidenceIndex);
+    assert.deepEqual(hydrated, [], 'passing knownPlan avoids redundant catalog lookup and getPlan');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

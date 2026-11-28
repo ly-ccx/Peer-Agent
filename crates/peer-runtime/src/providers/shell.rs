@@ -1,0 +1,777 @@
+use super::*;
+use crate::recorder::stop_owned_group;
+use peer_store::ShellArtifacts;
+use std::{process::Stdio, time::Duration};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+const MAX_TIMEOUT_MS: u64 = 600_000;
+pub(crate) const INVALID_TIMEOUT: &str = "invalid_timeout";
+pub(crate) const TIMEOUT_DETAIL: &str = "`timeoutMs` must be an integer from 1 to 600000 milliseconds; omit it or use null for the 120000 ms default.";
+
+fn shell_timeout(args: &Value) -> Result<Duration, HostError> {
+    let Some(value) = args.get("timeoutMs").filter(|value| !value.is_null()) else {
+        return Ok(Duration::from_millis(DEFAULT_TIMEOUT_MS));
+    };
+    // JSON Schema integer includes integral JSON numbers written as 1.0 or 1e0.
+    let millis = value
+        .as_f64()
+        .filter(|n| (1.0..=MAX_TIMEOUT_MS as f64).contains(n) && n.fract() == 0.0)
+        .ok_or(HostError(INVALID_TIMEOUT))?;
+    Ok(Duration::from_millis(millis as u64))
+}
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod foreground;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod session;
+pub(super) struct ShellProvider {
+    background: bool,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    foreground: Option<foreground::ForegroundShell>,
+}
+impl ShellProvider {
+    pub(super) fn new(mode: ShellHostMode) -> Self {
+        Self {
+            background: matches!(mode, ShellHostMode::Conversation | ShellHostMode::Work),
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            foreground: (!matches!(mode, ShellHostMode::OneShot))
+                .then(foreground::ForegroundShell::new),
+        }
+    }
+}
+struct ShellEffect {
+    args: Value,
+    cwd: PathBuf,
+    command: String,
+    background: bool,
+    timeout: Duration,
+    handle: String,
+    home: PathBuf,
+    risk: HostShellRisk,
+    port: Option<EffectAdmission>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    foreground: Option<(foreground::ForegroundShell, foreground::ShellScope)>,
+}
+impl CapabilityProvider for ShellProvider {
+    fn manifests(&self) -> Vec<(String, Value)> {
+        let description = if self.background {
+            "Run a bounded foreground or background shell command with governed approval. Use shell_stop with the returned task ID to stop a background command."
+        } else {
+            "Run a bounded foreground shell command in the active workspace with governed approval."
+        };
+        let mut manifests = vec![(
+            "bash".into(),
+            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":description,"riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":["string","null"],"description":"Omit or use null for the current session directory, or the workspace root if unset."},"timeoutMs":{"type":["integer","null"],"minimum":1,"maximum":MAX_TIMEOUT_MS,"default":DEFAULT_TIMEOUT_MS,"description":TIMEOUT_DETAIL},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
+        )];
+        if self.background {
+            manifests.push((
+                "shell_stop".into(),
+                json!({"capabilityId":"local.shell.stop","displayName":"Stop shell task","description":"Stop a background shell task owned by this execution using its opaque task ID.","riskLevel":"L2_low_write","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","minLength":43,"maxLength":43},"reason":{"type":"string"}},"required":["taskId"],"additionalProperties":false}}),
+            ));
+        }
+        manifests
+    }
+    fn prepare(
+        &mut self,
+        capability: &str,
+        args: Value,
+        workspace: &Path,
+        home: &Path,
+    ) -> Result<Box<dyn PreparedEffect>, HostError> {
+        if self.background && capability == "local.shell.stop" {
+            return ShellStop::prepare(args, workspace);
+        }
+        if capability != "local.shell.exec" {
+            return Err(HostError("tool_not_projected"));
+        }
+        validate_shape(&args, &["command", "cwd", "timeoutMs", "background"])?;
+        let timeout = shell_timeout(&args)?;
+        let background = args
+            .get("background")
+            .map(|value| value.as_bool().ok_or(HostError("invalid_background")))
+            .transpose()?
+            .unwrap_or(false);
+        if background && !self.background {
+            return Err(HostError("native_background_shell_unsupported"));
+        }
+        let command = string(&args, "command")?.trim().to_owned();
+        if command.is_empty() || command.len() > 16384 || command.contains('\0') {
+            return Err(HostError("invalid_command"));
+        }
+        let risk = shell_risk::classify(&command).map_err(HostError)?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let foreground = if background {
+            None
+        } else {
+            self.foreground
+                .as_ref()
+                .filter(|shell| !shell.is_retired())
+                .cloned()
+        };
+        let cwd = if let Some(c) = args.get("cwd").filter(|value| !value.is_null()) {
+            resolve(workspace, c.as_str().ok_or(HostError("invalid_cwd"))?)?
+        } else {
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            let remembered = self
+                .foreground
+                .as_ref()
+                .and_then(foreground::ForegroundShell::cwd);
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            let remembered: Option<PathBuf> = None;
+            remembered.unwrap_or_else(|| workspace.to_owned())
+        };
+        if !cwd.is_dir() {
+            return Err(HostError("invalid_cwd"));
+        }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let cwd = if foreground.is_some() {
+            std::fs::canonicalize(cwd).map_err(|_| HostError("invalid_cwd"))?
+        } else {
+            cwd
+        };
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let foreground = foreground
+            .map(|actor| foreground::ShellScope::observe(&cwd).map(|scope| (actor, scope)))
+            .transpose()?;
+        Ok(Box::new(ShellEffect {
+            args,
+            cwd,
+            command,
+            background,
+            timeout,
+            handle: format!("shell_{}", uuid::Uuid::new_v4()),
+            home: home.into(),
+            risk,
+            port: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            foreground,
+        }))
+    }
+}
+impl PreparedEffect for ShellEffect {
+    fn admission(&mut self, port: EffectAdmission) {
+        self.port = Some(port);
+    }
+    fn args(&self) -> &Value {
+        &self.args
+    }
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::Shell
+    }
+    fn risk(&self) -> Option<HostShellRisk> {
+        Some(self.risk)
+    }
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some((_, scope)) = &self.foreground {
+            return Ok(scope.declared().to_vec());
+        }
+        peer_store::provider_execution_scopes(&self.cwd).map_err(Into::into)
+    }
+    fn handle(&self) -> Option<&str> {
+        (!self.foreground_shell()).then_some(&self.handle)
+    }
+    fn owned_command(&self) -> bool {
+        !self.foreground_shell()
+    }
+    fn background_shell(&self) -> bool {
+        self.background
+    }
+    fn foreground_shell(&self) -> bool {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        return self.foreground.is_some();
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return false;
+    }
+    fn start(
+        mut self: Box<Self>,
+        call: ProviderCall,
+        cancel: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .port
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some((foreground, scope)) = self.foreground.take() {
+            return Ok(Box::pin(foreground.run(*self, scope, call, cancel, port)));
+        }
+        Ok(Box::pin(async move {
+            match self.run(call, cancel, port).await {
+                Ok(outcome) => outcome,
+                Err(error) if error.0 == "CANCELLED" => EffectOutcome::not_dispatched(error.0),
+                Err(error) => EffectOutcome::failed(error.0),
+            }
+        }))
+    }
+}
+#[cfg(windows)]
+pub(crate) fn windows_shell_command(script: &str) -> tokio::process::Command {
+    use std::os::windows::process::CommandExt;
+    static SHELL: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    let binary = SHELL.get_or_init(|| {
+        if let Some(paths) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&paths) {
+                let candidate = dir.join("pwsh.exe");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+        std::path::PathBuf::from("powershell.exe")
+    });
+    let mut command = tokio::process::Command::new(binary);
+    let wrapped = format!(
+        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n{script}"
+    );
+    command
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+        ])
+        .arg(wrapped)
+        .creation_flags(crate::recorder::CREATE_NO_WINDOW);
+    command
+}
+
+impl ShellEffect {
+    async fn spawn(
+        &self,
+        port: &EffectAdmission,
+        artifacts: &ShellArtifacts,
+    ) -> Result<tokio::process::Child, HostError> {
+        port.check().await?;
+        #[cfg(unix)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.arg("-c").arg(&self.command).process_group(0);
+            command
+        };
+        #[cfg(windows)]
+        let mut command = windows_shell_command(&self.command);
+        command
+            .current_dir(&self.cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        port.command_starting().await?;
+        artifacts
+            .check_current()
+            .map_err(|_| HostError("shell_artifact_unavailable"))?;
+        command.spawn().map_err(|_| HostError("shell_spawn_failed"))
+    }
+    async fn run(
+        self: Box<Self>,
+        call: ProviderCall,
+        cancel: CancellationToken,
+        port: EffectAdmission,
+    ) -> Result<EffectOutcome, HostError> {
+        let now = call.started_at();
+        port.check().await?;
+        if cancel.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        let mut metadata = json!({
+            "taskId": self.handle, "toolCallId": call.tool_call_id(),
+            "command": self.command, "cwd": self.cwd, "startedAt": now, "status": "running"
+        });
+        let (mut artifacts, out, err) =
+            match ShellArtifacts::begin(&self.home, now, &self.handle, &metadata) {
+                Ok(artifacts) => artifacts,
+                Err(_) => return Ok(EffectOutcome::not_dispatched("shell_artifact_unavailable")),
+            };
+        let mut child = match self.spawn(&port, &artifacts).await {
+            Ok(child) => child,
+            Err(error) => {
+                // The spawn seam returned before creating a child.
+                let mut outcome = EffectOutcome::not_dispatched(error.0);
+                outcome.output =
+                    json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
+                metadata["status"] = json!(outcome.status);
+                metadata["managedProcessEnded"] = json!(true);
+                metadata["notDispatched"] = json!(true);
+                metadata["error"] = json!(error.0);
+                if artifacts.finish(&metadata).is_err() {
+                    artifact_failed(&mut outcome);
+                }
+                return Ok(outcome);
+            }
+        };
+        let pid = child.id().expect("newly spawned child has a PID");
+        let registered = async {
+            port.command_started(pid).await?;
+            if !self.background {
+                return Ok(());
+            }
+            let reference = format!("local-shell-artifact://{}", self.handle);
+            let artifacts = artifact_refs(&reference);
+            port.background_shell_started(EffectOutcome {
+                status: "success",
+                output: json!({
+                    "taskId":self.handle, "backgroundTaskId":self.handle,
+                    "toolCallId":call.tool_call_id(), "command":self.command, "cwd":self.cwd,
+                    "status":"running", "startedAt":now, "timeoutMs":self.timeout.as_millis(),
+                    "artifactRef":reference, "artifactRefs":artifacts,
+                }),
+                error: None,
+                artifacts,
+                ended: false,
+                materialization: None,
+                not_dispatched: false,
+            })
+            .await
+        }
+        .await;
+        if let Err(error) = registered {
+            let ended = terminate(&mut child, pid).await;
+            let mut outcome = EffectOutcome::failed(if ended {
+                error.0
+            } else {
+                "execution_outcome_unknown"
+            });
+            if ended && error.0 == "CANCELLED" {
+                outcome.status = "cancelled";
+            }
+            outcome.ended = ended;
+            outcome.output = json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
+            metadata["status"] = json!(outcome.status);
+            metadata["managedProcessEnded"] = json!(ended);
+            metadata["error"] = json!(error.0);
+            if artifacts.finish(&metadata).is_err() {
+                artifact_failed(&mut outcome);
+            }
+            return Ok(outcome);
+        }
+        let mut stdout = child.stdout.take().expect("configured piped stdout");
+        let mut stderr = child.stderr.take().expect("configured piped stderr");
+        let mut out = CapturedStream::new(out);
+        let mut err = CapturedStream::new(err);
+        let result = {
+            let completion = async {
+                let (_, _, exit) =
+                    tokio::try_join!(out.drain(&mut stdout), err.drain(&mut stderr), async {
+                        child.wait().await.map_err(|_| "shell_wait_failed")
+                    },)?;
+                Ok::<_, &'static str>(exit)
+            };
+            let completion = tokio::time::timeout(self.timeout, completion);
+            tokio::pin!(completion);
+            let mut tick = tokio::time::interval(Duration::from_millis(100));
+            tick.tick().await;
+            loop {
+                tokio::select! { biased;
+                    _ = cancel.cancelled() => break Err("CANCELLED"),
+                    _ = tick.tick(), if !self.background => if let Err(error) = port.check().await { break Err(error.0) },
+                    result = &mut completion => break result.unwrap_or(Err("shell_timeout")),
+                }
+            }
+        };
+        let ended = if result.is_err() || !group_absent(pid) {
+            terminate(&mut child, pid).await
+        } else {
+            true
+        };
+        let mut outcome = match result {
+            Ok(exit) if ended => EffectOutcome {
+                status: if exit.success() { "success" } else { "failed" },
+                output: json!({
+                    "taskId": self.handle, "stdout": out.preview(), "stderr": err.preview(),
+                    "exitCode": exit.code(), "timedOut": false, "cancelled": false,
+                }),
+                error: None,
+                artifacts: vec![],
+                ended,
+                materialization: None,
+                not_dispatched: false,
+            },
+            Ok(_) => {
+                let mut unknown = EffectOutcome::failed("execution_outcome_unknown");
+                unknown.output = json!({"taskId":self.handle});
+                unknown
+            }
+            Err(reason) => {
+                let mut failed = EffectOutcome::failed(if ended {
+                    reason
+                } else {
+                    "execution_outcome_unknown"
+                });
+                if reason == "CANCELLED" {
+                    failed.status = "cancelled";
+                }
+                failed.output = json!({
+                    "taskId": self.handle, "timedOut": reason == "shell_timeout",
+                    "cancelled": reason == "CANCELLED", "interrupted": true, "stopReason": reason,
+                    "stdout":out.preview(), "stderr":err.preview(), "exitCode":null,
+                });
+                failed
+            }
+        };
+        outcome.ended = ended;
+        if out.preview_truncated() || err.preview_truncated() {
+            outcome.output["truncated"] = json!(true);
+        }
+        metadata["status"] = json!(outcome.status);
+        metadata["output"] = outcome.output.clone();
+        metadata["managedProcessEnded"] = json!(ended);
+        metadata["truncated"] = json!(out.artifact_truncated || err.artifact_truncated);
+        let streams = tokio::join!(out.finish(), err.finish());
+        if streams.0.is_err()
+            || streams.1.is_err()
+            || artifacts.finish(&metadata).is_err()
+            || outcome.error == Some("shell_artifact_unavailable")
+        {
+            artifact_failed(&mut outcome);
+            return Ok(outcome);
+        }
+        let reference = format!("local-shell-artifact://{}", self.handle);
+        outcome.artifacts = artifact_refs(&reference);
+        Ok(outcome)
+    }
+}
+
+fn artifact_refs(reference: &str) -> Vec<String> {
+    ["stdout", "stderr", "metadata"]
+        .into_iter()
+        .map(|name| format!("{reference}/{name}"))
+        .collect()
+}
+
+struct ShellStop {
+    args: Value,
+    task_id: String,
+    workspace: PathBuf,
+    port: Option<EffectAdmission>,
+}
+
+impl ShellStop {
+    fn prepare(args: Value, workspace: &Path) -> Result<Box<dyn PreparedEffect>, HostError> {
+        validate_shape(&args, &["taskId", "reason"])?;
+        let task_id = string(&args, "taskId")?.trim();
+        if !peer_protocol::shell_task_id_valid(task_id) {
+            return Err(HostError("invalid_task_id"));
+        }
+        if args
+            .get("reason")
+            .is_some_and(|reason| reason.as_str().is_none_or(|reason| reason.len() > 512))
+        {
+            return Err(HostError("invalid_stop_reason"));
+        }
+        Ok(Box::new(Self {
+            task_id: task_id.into(),
+            args,
+            workspace: workspace.into(),
+            port: None,
+        }))
+    }
+}
+
+impl PreparedEffect for ShellStop {
+    fn admission(&mut self, port: EffectAdmission) {
+        self.port = Some(port);
+    }
+    fn args(&self) -> &Value {
+        &self.args
+    }
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::ShellStop
+    }
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        peer_store::provider_execution_scopes(&self.workspace).map_err(Into::into)
+    }
+    fn start(
+        mut self: Box<Self>,
+        _: ProviderCall,
+        _: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .port
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        Ok(Box::pin(async move {
+            port.stop_background_shell(self.task_id)
+                .await
+                .unwrap_or_else(|error| {
+                    if error.0 == "execution_outcome_unknown" {
+                        let mut outcome = EffectOutcome::failed(error.0);
+                        outcome.ended = false;
+                        outcome
+                    } else {
+                        EffectOutcome::not_dispatched(error.0)
+                    }
+                })
+        }))
+    }
+}
+
+fn artifact_failed(outcome: &mut EffectOutcome) {
+    outcome.status = "failed";
+    outcome.error = Some("execution_outcome_unknown");
+    outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+}
+
+async fn terminate(child: &mut tokio::process::Child, pid: u32) -> bool {
+    stop_owned_group(child, pid, Duration::from_millis(2200)).await
+}
+
+const PREVIEW_BYTES: usize = 65_536;
+const ARTIFACT_BYTES: usize = 2_000_000;
+
+struct CapturedStream {
+    file: tokio::fs::File,
+    preview: Vec<u8>,
+    stored: usize,
+    artifact_truncated: bool,
+}
+
+impl CapturedStream {
+    fn new(file: std::fs::File) -> Self {
+        Self {
+            file: tokio::fs::File::from_std(file),
+            preview: Vec::new(),
+            stored: 0,
+            artifact_truncated: false,
+        }
+    }
+
+    async fn drain(&mut self, stream: &mut (impl AsyncRead + Unpin)) -> Result<(), &'static str> {
+        let mut chunk = [0; 16_384];
+        loop {
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|_| "shell_output_failed")?;
+            if count == 0 {
+                return Ok(());
+            }
+            self.append(&chunk[..count]).await?;
+        }
+    }
+
+    async fn append(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        let preview = bytes
+            .len()
+            .min(PREVIEW_BYTES.saturating_sub(self.preview.len()));
+        self.preview.extend_from_slice(&bytes[..preview]);
+        let stored = bytes.len().min(ARTIFACT_BYTES.saturating_sub(self.stored));
+        if stored != 0 {
+            self.file
+                .write_all(&bytes[..stored])
+                .await
+                .map_err(|_| "shell_artifact_unavailable")?;
+            self.stored += stored;
+        }
+        self.artifact_truncated |= stored < bytes.len();
+        Ok(())
+    }
+
+    fn preview(&self) -> String {
+        String::from_utf8_lossy(&self.preview).into_owned()
+    }
+
+    fn preview_truncated(&self) -> bool {
+        self.stored > self.preview.len() || self.artifact_truncated
+    }
+
+    async fn finish(&mut self) -> std::io::Result<()> {
+        if self.artifact_truncated {
+            self.file.write_all(b"\n...[artifact truncated]\n").await?;
+        }
+        self.file.flush().await?;
+        self.file.sync_all().await
+    }
+}
+
+pub(crate) fn shell_stop_outcome(
+    handle: &str,
+    args: &Value,
+    stopped: bool,
+    outcome: &EffectOutcome,
+) -> Result<EffectOutcome, HostError> {
+    if outcome.error == Some("execution_outcome_unknown") {
+        return Err(HostError("execution_outcome_unknown"));
+    }
+    let reason = if stopped {
+        args["reason"]
+            .as_str()
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+            .unwrap_or("cancelled")
+    } else {
+        "already_ended"
+    };
+    let status = match (outcome.status, outcome.output["timedOut"].as_bool()) {
+        ("success", _) => "completed",
+        (_, Some(true)) => "timeout",
+        (status, _) => status,
+    };
+    Ok(EffectOutcome {
+        status: "success",
+        output: json!({
+            "taskId":handle, "stopped":stopped, "status":status, "reason":reason,
+            "originalToolCallId":outcome.output["toolCallId"],
+            "artifactRef":format!("local-shell-artifact://{handle}"), "artifactRefs":outcome.artifacts,
+            "task":outcome.output,
+        }),
+        error: None,
+        artifacts: outcome.artifacts.clone(),
+        ended: true,
+        materialization: None,
+        not_dispatched: false,
+    })
+}
+
+pub(crate) fn background_start_fields(result: &Value) -> serde_json::Map<String, Value> {
+    [
+        "taskId",
+        "backgroundTaskId",
+        "toolCallId",
+        "status",
+        "startedAt",
+        "timeoutMs",
+        "artifactRef",
+        "artifactRefs",
+    ]
+    .into_iter()
+    .map(|key| (key.to_owned(), result["output"][key].clone()))
+    .collect()
+}
+
+pub(crate) fn restore_background_start_fields(
+    result: &mut Value,
+    startup: Option<serde_json::Map<String, Value>>,
+) -> Result<(), HostError> {
+    if let Some(startup) = startup
+        && result["output"]["nativeContentRef"].is_object()
+    {
+        result["output"]
+            .as_object_mut()
+            .ok_or(HostError("artifact_invalid"))?
+            .extend(startup);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::effect_admission::AdmissionRequest;
+
+    #[test]
+    fn shell_timeout_defaults_bounds_and_invalid_values_match_schema() {
+        for (args, ms) in [
+            (json!({}), 120_000),
+            (json!({"timeoutMs": null}), 120_000),
+            (json!({"timeoutMs": 1}), 1),
+            (json!({"timeoutMs": 1.0}), 1),
+            (json!({"timeoutMs": 600_000}), 600_000),
+        ] {
+            assert_eq!(shell_timeout(&args).unwrap(), Duration::from_millis(ms));
+        }
+        for value in [
+            json!(600_001),
+            json!(u64::MAX),
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!("500"),
+            json!(false),
+            json!([]),
+            json!({}),
+        ] {
+            assert_eq!(
+                shell_timeout(&json!({"timeoutMs": value})).unwrap_err().0,
+                INVALID_TIMEOUT
+            );
+        }
+        for non_json in ["NaN", "Infinity", "1e999"] {
+            assert!(serde_json::from_str::<Value>(non_json).is_err());
+        }
+        let projected = ShellProvider::new(ShellHostMode::OneShot).manifests();
+        let schema = &projected[0].1["inputSchema"]["properties"]["timeoutMs"];
+        let manifest: Value = serde_json::from_str(include_str!(
+            "../../../../capabilities/local.shell.exec.json"
+        ))
+        .unwrap();
+        for key in ["type", "minimum", "maximum", "default"] {
+            assert_eq!(
+                schema[key],
+                manifest["inputSchema"]["properties"]["timeoutMs"][key]
+            );
+        }
+    }
+
+    #[test]
+    fn null_cwd_uses_the_same_scope_as_an_omitted_cwd() {
+        let root = tempfile::tempdir().unwrap();
+        let mut provider = ShellProvider::new(ShellHostMode::OneShot);
+        let prepare = |provider: &mut ShellProvider, args| {
+            provider
+                .prepare("local.shell.exec", args, root.path(), root.path())
+                .unwrap()
+        };
+        let omitted = prepare(&mut provider, json!({"command":"pwd"}));
+        let null = prepare(&mut provider, json!({"command":"pwd","cwd":null}));
+        assert_eq!(null.scopes().unwrap(), omitted.scopes().unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut effect = ShellProvider::new(ShellHostMode::OneShot)
+            .prepare(
+                "local.shell.exec",
+                json!({"command":"printf forbidden > should-not-exist"}),
+                workspace.path(),
+                root.path(),
+            )
+            .unwrap();
+        let handle = effect.handle().unwrap().to_owned();
+        let cancel = CancellationToken::new();
+        let (port, mut requests) = EffectAdmission::channel(&cancel);
+        effect.admission(port);
+        let at = "2026-11-18T00:00:00.000Z";
+        let outcome = effect
+            .start(ProviderCall::new("ordinary", "call", at), cancel)
+            .unwrap();
+        let host = async {
+            let mut starting = 0;
+            while let Some(request) = requests.recv().await {
+                match request {
+                    AdmissionRequest::Check(reply) => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    AdmissionRequest::CommandStarting(reply) => {
+                        starting += 1;
+                        reply.send(Err(HostError("CANCELLED"))).unwrap();
+                    }
+                    _ => panic!("no child or connection may be started after denied starting"),
+                }
+            }
+            starting
+        };
+        let (outcome, starting) = tokio::join!(outcome, host);
+        assert_eq!(starting, 1);
+        assert_eq!(outcome.status, "cancelled");
+        assert_eq!(outcome.error, Some("CANCELLED"));
+        assert!(outcome.ended && outcome.not_dispatched);
+        assert!(!workspace.path().join("should-not-exist").exists());
+        let metadata: Value = serde_json::from_slice(
+            &std::fs::read(
+                root.path()
+                    .join("shell-artifacts/2026-11-18")
+                    .join(handle)
+                    .join("metadata.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(metadata["status"], "cancelled");
+        assert_eq!(metadata["notDispatched"], true);
+        assert_eq!(metadata["managedProcessEnded"], true);
+    }
+}

@@ -6,7 +6,18 @@ import { createUsageRequestLog } from '../usage-request-log.mjs';
 import { resolveProviderCredential } from '../provider-credential-resolver.mjs';
 import { resolveChannel } from '../provider-channels.mjs';
 import { createInputPredictionBudget } from './usage-budget.mjs';
-import { normalizeInputPredictionSettings } from '@peer-agent/protocol';
+import { INPUT_PREDICTION_LIMITS, normalizeInputPredictionSettings } from '@peer-agent/protocol';
+
+const PREDICTION_RESERVED_TOKENS = INPUT_PREDICTION_LIMITS.inputTokens + INPUT_PREDICTION_LIMITS.outputTokens;
+
+function predictionReasoningEffort(provider) {
+  const values = Array.isArray(provider?.reasoningEffortValues)
+    ? provider.reasoningEffortValues.map((v) => String(v).toLowerCase())
+    : [];
+  if (values.includes('none')) return 'none';
+  if (provider?.reasoningParamStyle === 'qwen-enable') return 'none';
+  return 'off';
+}
 
 function publicHistory(history) {
   const messages = (history?.messages ?? []).flatMap(message => {
@@ -32,11 +43,20 @@ export function createDesktopInputPrediction({ getSettings, listModels, conversa
   const registry = createPromptSourceRegistry({ sources: [createInputPredictionPromptSource(), createProjectInstructionsPromptSource()] });
   const readHistory = conversationStore.createHistoryProjection?.(publicHistory, {
     immutableInput: true, immutableOutput: true, maxEntries: 64, maxBytes: 256 * 1024,
+    tailLimit: 64, headLimit: 16,
   }) ?? (id => publicHistory(conversationStore.getPersistedConversationHistory(id)));
+  function readConversationMeta(conversationId) {
+    if (typeof conversationStore.readSessionMeta === 'function') {
+      const meta = conversationStore.readSessionMeta(conversationId);
+      if (meta && (!meta.role || ['default', 'project_agent', 'work_session'].includes(meta.role))) return meta;
+      return null;
+    }
+    return conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false })
+      .find(row => row.id === conversationId) ?? null;
+  }
   function readSnapshot(request) {
     const settings = getSettings();
-    const meta = conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false })
-      .find(row => row.id === request.conversationId);
+    const meta = readConversationMeta(request.conversationId);
     if (!meta || meta.status === 'archived' || meta.role === 'work_session') return null;
     const bot = getProjectAgent()?.projectAccess?.directory?.get(request.workspaceId);
     let workspacePath, policy;
@@ -62,7 +82,9 @@ export function createDesktopInputPrediction({ getSettings, listModels, conversa
     const resolved = resolveRoleRoute({ role: 'input_predictor', providers: listModels(), routing,
       projectPolicy: policy, requiredContextTokens: 4096 });
     const provider = resolved.ok ? listModels().find(row => row.id === resolved.selection.modelProviderId) : null;
-    const route = resolved.ok && provider ? { ...resolved, provider, routing } : resolved;
+    const route = resolved.ok && provider
+      ? { ...resolved, selection: { ...resolved.selection, reasoningEffort: predictionReasoningEffort(provider) }, provider, routing }
+      : resolved;
     const quote = request.quoteMessageId ? history.quoteSources.find(row => row.id === request.quoteMessageId) : null;
     if (request.quoteMessageId && !quote) return null;
     const context = assembleSystemContext({ workspacePath, conversationId: request.conversationId,
@@ -100,7 +122,7 @@ export function createDesktopInputPrediction({ getSettings, listModels, conversa
       const configured = settings.modelRouting?.roles?.input_predictor && resolveRoleRoute({ role: 'input_predictor',
         providers: listModels(), routing: settings.modelRouting, requiredContextTokens: 4096 }).ok;
       const reason = !config.enabled ? 'disabled' : !configured ? 'model_unconfigured'
-        : !day.complete ? 'usage_unavailable' : day.requests >= config.dailyRequestLimit || day.tokens + 4224 > config.dailyTokenLimit
+        : !day.complete ? 'usage_unavailable' : day.requests >= config.dailyRequestLimit || day.tokens + PREDICTION_RESERVED_TOKENS > config.dailyTokenLimit
           ? 'budget' : failures.get(id) ? 'provider_error' : 'ready';
       return { reason, requests: day.requests, tokens: day.tokens, estimated: day.estimated };
     },

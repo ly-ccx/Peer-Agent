@@ -46,6 +46,40 @@ function withSubscriptionContextOptions(metadata) {
 const SUBSCRIPTION_CATALOG = [
   // ChatGPT OAuth 订阅统一提供 400K / 1M 两档；模型自身输出上限仍独立保留。
   {
+    // https://developers.openai.com/api/docs/models/gpt-6.2-astra
+    id: 'gpt-6.2-astra',
+    label: 'GPT-6.2 Astra',
+    maxOutputTokens: 128_000,
+    inputPrice: 8,
+    outputPrice: 40,
+    cacheReadPrice: 0.4,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 16,
+    longContextCacheReadPrice: 0.8,
+    longContextOutputPrice: 60,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
+    // https://developers.openai.com/api/docs/models/gpt-6.2-sol
+    id: 'gpt-6.2-sol',
+    label: 'GPT-6.2 Sol',
+    maxOutputTokens: 128_000,
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.1,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 4,
+    longContextCacheReadPrice: 0.2,
+    longContextOutputPrice: 15,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
     id: 'gpt-6-astra',
     label: 'GPT-6 Astra',
     contextWindow: 272_000,
@@ -195,7 +229,7 @@ const SUBSCRIPTION_CATALOG = [
 ];
 
 // 订阅默认模型(新建订阅 / 迁移旧值时落到此)。
-const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-6-astra';
+const DEFAULT_SUBSCRIPTION_MODEL = 'gpt-6.2-astra';
 
 for (let index = 0; index < SUBSCRIPTION_CATALOG.length; index += 1) {
   SUBSCRIPTION_CATALOG[index] = withSubscriptionContextOptions(SUBSCRIPTION_CATALOG[index]);

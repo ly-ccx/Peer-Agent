@@ -40,7 +40,7 @@ const API_KEY_PROVIDER = {
 describe('subscription-provider-expansion', () => {
   it('isSubscriptionProvider 只认 oauth_chatgpt', () => {
     assert.equal(isSubscriptionProvider({ authMethod: 'oauth_chatgpt' }), true);
-    assert.equal(isSubscriptionProvider({ authMethod: 'oauth_google' }), false);
+    assert.equal(isSubscriptionProvider({ authMethod: 'oauth_grok' }), false);
     assert.equal(isSubscriptionProvider({ authMethod: 'api_key' }), false);
     assert.equal(isSubscriptionProvider({}), false);
     assert.equal(isSubscriptionProvider(null), false);

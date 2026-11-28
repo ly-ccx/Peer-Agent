@@ -116,8 +116,8 @@ test('selected conversation rows use a hairline capsule, not a lifted card or a 
     assert.doesNotMatch(body, /inset\s+2px\s+0\s+0\s+var\(--azure-trace\)/);
     assert.doesNotMatch(body, /--glass-edge-highlight/);
     assert.doesNotMatch(body, /--za-sidebar-active[-]shadow|--shadow-soft|--shadow-composer/);
-    assert.match(body, /border-color:\s*var\(--za-sidebar-active-border/);
-    assert.match(body, /background:\s*var\(--za-sidebar-active-bg/);
+    assert.match(body, /border-color:\s*var\(--chrome-sidebar-active-border/);
+    assert.match(body, /background:\s*var\(--chrome-sidebar-active-bg/);
   }
 
   // 毛玻璃底由基础选中规则提供,悬停变体不额外声明。
@@ -196,12 +196,12 @@ test('selected highlight lives on the conversation, not the workspace row', () =
   const layeredActiveHoverBody = ruleBody(chatSidebarCss, '.conversation-row.active:hover');
 
   assert.match(workspaceActiveBody, /background:\s*transparent;/);
-  assert.doesNotMatch(workspaceActiveBody, /--za-sidebar-active-bg|--ui-surface-selected/);
-  assert.match(activeBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.doesNotMatch(workspaceActiveBody, /--chrome-sidebar-active-bg|--za-sidebar-active-bg|--ui-surface-selected/);
+  assert.match(activeBody, /background:\s*var\(--chrome-sidebar-active-bg/);
   assert.doesNotMatch(activeBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
-  assert.match(layeredActiveBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.match(layeredActiveBody, /background:\s*var\(--chrome-sidebar-active-bg/);
   assert.doesNotMatch(layeredActiveBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
-  assert.match(layeredActiveHoverBody, /background:\s*var\(--za-sidebar-active-bg/);
+  assert.match(layeredActiveHoverBody, /background:\s*var\(--chrome-sidebar-active-bg/);
   assert.doesNotMatch(layeredActiveHoverBody, /--ui-surface-selected|--za-sidebar-thread-active-bg/);
 });
 
@@ -221,11 +221,11 @@ test('selected fill tracks frosted chrome hover across light and dark themes', (
 
   assert.match(
     ruleBody(sidebarCss, '.channel-conversation-list .conversation-row.active'),
-    /background:\s*var\(--za-sidebar-active-bg/,
+    /background:\s*var\(--chrome-sidebar-active-bg/,
   );
   assert.match(
     ruleBody(chatSidebarCss, '.conversation-row.active'),
-    /background:\s*var\(--za-sidebar-active-bg/,
+    /background:\s*var\(--chrome-sidebar-active-bg/,
   );
 });
 

@@ -90,12 +90,12 @@ describe('recovering provider fetch', () => {
     let nodeCalls = 0;
 
     await assert.rejects(
-      fetchWithConnectionRecovery('https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation', {
+      fetchWithConnectionRecovery('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         body: '{"request_id":"req-1"}',
       }, {
         streamId: 's-electron-required',
-        provider: 'qoder',
+        provider: 'openai',
         model: 'qmodel_latest',
         requireElectronTransport: true,
         fetchImpl: async () => {

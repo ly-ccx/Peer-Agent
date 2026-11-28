@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "toolAliases": {
+    "file": [
+      "local.file.read",
+      "local.file.list",
+      "local.file.search",
+      "local.file.edit",
+      "local.file.write"
+    ],
+    "bash": [
+      "local.shell.exec",
+      "local.shell.stop"
+    ],
+    "local.file.read": [
+      "local.file.read"
+    ],
+    "read_file": [
+      "local.file.read"
+    ],
+    "local.file.list": [
+      "local.file.list"
+    ],
+    "list_files": [
+      "local.file.list"
+    ],
+    "local.file.search": [
+      "local.file.search"
+    ],
+    "search_files": [
+      "local.file.search"
+    ],
+    "local.file.edit": [
+      "local.file.edit"
+    ],
+    "edit_file": [
+      "local.file.edit"
+    ],
+    "local.file.write": [
+      "local.file.write"
+    ],
+    "write_file": [
+      "local.file.write"
+    ],
+    "local.shell.exec": [
+      "local.shell.exec"
+    ],
+    "local.shell.stop": [
+      "local.shell.stop"
+    ],
+    "shell_stop": [
+      "local.shell.stop"
+    ],
+    "local.search.aggregate": [
+      "local.search.aggregate"
+    ],
+    "batch_search": [
+      "local.search.aggregate"
+    ],
+    "local.web.fetch": [
+      "local.web.fetch"
+    ],
+    "web_fetch": [
+      "local.web.fetch"
+    ],
+    "local.interaction.request_user_input": [
+      "local.interaction.request_user_input"
+    ],
+    "request_user_input": [
+      "local.interaction.request_user_input"
+    ],
+    "local.goal.create_plan": [
+      "local.goal.create_plan"
+    ],
+    "goal_create_plan": [
+      "local.goal.create_plan"
+    ],
+    "local.goal.update_task": [
+      "local.goal.update_task"
+    ],
+    "goal_update_task": [
+      "local.goal.update_task"
+    ],
+    "local.goal.get_plan": [
+      "local.goal.get_plan"
+    ],
+    "goal_get_plan": [
+      "local.goal.get_plan"
+    ],
+    "local.goal.explore": [
+      "local.goal.explore"
+    ],
+    "request_explorer": [
+      "local.goal.explore"
+    ],
+    "local.goal.create": [
+      "local.goal.create_plan"
+    ],
+    "local.goal.update": [
+      "local.goal.update_task"
+    ],
+    "local.goal.read": [
+      "local.goal.get_plan"
+    ],
+    "local.search.content": [
+      "local.file.search"
+    ],
+    "local_shell_exec": [
+      "local.shell.exec"
+    ]
+  }
+}

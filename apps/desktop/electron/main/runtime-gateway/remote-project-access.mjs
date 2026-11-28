@@ -68,7 +68,7 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
     const request=parsed.request;
     let inputAttempted=false;
     try {
-      const local=resolveLocal(request),admission=admitRemoteProject(request,local.admission);
+      const local=await resolveLocal(request),admission=admitRemoteProject(request,local.admission);
       if(!admission.ok)return admission;
       const ports=local.projectAccess,paths=local.privatePaths??[];
       if(!ports?.directory||!ports?.inputQueue)return {ok:false,code:'RUNTIME_UNAVAILABLE'};
@@ -78,7 +78,7 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
         if(prior)result=prior;
         else {
           inputAttempted=true;
-          const queued=ports.inputQueue.submitInput({workspaceId:request.workspaceId,inputId:inputIdFor(request),surface:'remote',text:request.text});
+          const queued=await ports.inputQueue.submitInput({workspaceId:request.workspaceId,inputId:inputIdFor(request),surface:'remote',text:request.text});
           if(queued?.workspaceId!==request.workspaceId||queued?.inputId!==inputIdFor(request)||queued?.text!==request.text.trim()||queued?.surface!=='remote') {
             return {ok:false,code:'REQUEST_CONFLICT'};
           }
@@ -105,7 +105,7 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
           .filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).slice(0,request.limit).map(row=>messageProjection(row,paths)),
           nextCursor:id(conversation.nextCursor),
           sessions:(await ports.directory.listSessions(request.workspaceId)).filter(row=>row.workspaceId===request.workspaceId).slice(0,50).map(row=>sessionProjection(row,paths,160)),
-          pendingApprovals:(ports.directory.listApprovals?.(request.workspaceId)??[]).filter(row=>['open','stale'].includes(row.state))
+          pendingApprovals:((await ports.directory.listApprovals?.(request.workspaceId))??[]).filter(row=>['open','stale'].includes(row.state))
             .slice(0,20).map(row=>({state:state(row.state),summary:text(row.summary,250,paths),needsDesktopApproval:true})),
           canMessage:local.admission.delegation.projectGrants.find(grant=>grant.workspaceId===request.workspaceId)?.allowProjectMessage===true};
       } else {
@@ -113,7 +113,7 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
         result={workspaceId:request.workspaceId,...sessionProjection(local.sessionFacts,paths),...(interactiveResults.length ? { interactiveResults } : {})};
       }
       // An async read may cross a settings change, disconnect, or bot removal.
-      const current=resolveLocal(request),exportAdmission=admitRemoteProject(request,current.admission);
+      const current=await resolveLocal(request),exportAdmission=admitRemoteProject(request,current.admission);
       if(!exportAdmission.ok)return request.operation==='project.input.submit'?{ok:false,code:'OUTCOME_UNKNOWN'}:exportAdmission;
       if(request.operation==='project.list')result.projects=result.projects.filter(row=>
         current.admission.delegation.projectGrants.some(grant=>grant.workspaceId===row.workspaceId&&grant.allowProjectRead)

@@ -6,6 +6,21 @@ import { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts'
 import { DELEGATION_TOOL_SPECS } from './project-agent/tool-specs.mjs';
 
 const encoder = new TextEncoder();
+for (const expires of [undefined, 0, NaN]) {
+  test(`stored OAuth with ${String(expires)} expiry renews before model dispatch`, async () => {
+    let refreshed = 0;
+    const provider = createChatGptResponsesProvider({
+      baseUrl: 'https://chatgpt.example', tokens: { access: 'old', expires },
+      refreshTokens: async () => { refreshed++; return { access: 'new', expires: Date.now() + 3600000 }; },
+      fetch: async (_input, init) => {
+        assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer new');
+        return response(['data: {"type":"response.completed","response":{}}', 'data: [DONE]']);
+      },
+    });
+    await provider.stream({ model: 'test', messages: [] });
+    assert.equal(refreshed, 1);
+  });
+}
 function response(lines: readonly string[]): Response {
   return new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode(`${lines.join('\n')}\n`)); controller.close(); } }), { status: 200 });
 }

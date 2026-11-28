@@ -229,6 +229,11 @@ export function createProjectRegistry({
   }
 
   function resolveWorkspace(doc, workspace, mark) {
+    const cached = typeof workspace?.id === 'string' ? workspace.id.trim() : '';
+    if (UUID_V4.test(cached)) {
+      const existing = findById(doc, cached);
+      if (existing) return existing;
+    }
     const folder = normalizePath(workspace?.path);
     if (!folder) return null;
     return findByPath(doc, folder) ?? adoptCache(doc, workspace, folder, mark) ?? ensure(doc, folder, mark);

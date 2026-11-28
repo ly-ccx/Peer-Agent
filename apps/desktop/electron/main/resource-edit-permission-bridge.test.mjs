@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createApprovalStore } from '@peer-agent/runtime-node';
 import { RESOURCE_FILE_REPLACE_CAPABILITY as capabilityId } from '@peer-agent/protocol';
 import { createResourceEditPermissionBridge } from './resource-edit-permission-bridge.mjs';
-import { createChatPermissionGate, settleActivePermissionRequest } from './chat-runtime/permission-gate.mjs';
+import { createChatPermissionGate, settleActivePermissionRequest } from './runtime-gateway/local-permission-gate.mjs';
 const digest = 'sha256:' + 'a'.repeat(64);
 function fixture(t, accessLevel = 'ask_before_local') {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-resource-permissions-')), approvals = createApprovalStore({ rootDir: root });

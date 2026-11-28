@@ -1,0 +1,1 @@
+Synthetic public test PKI, generated solely for isolated loopback TLS verification. These private keys have no production identity or authority. The CA private key was discarded. No OS trust settings are modified.

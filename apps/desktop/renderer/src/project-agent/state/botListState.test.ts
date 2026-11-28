@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BotListItem } from '@peer-agent/protocol';
+import * as botListState from './botListState.ts';
 import {
   applyBotRefresh,
   clampBotListWidth,
@@ -45,6 +46,27 @@ function bot(id: string, at: string, extra: Partial<BotListItem['state']> & { na
     },
   };
 }
+
+test('a list read issued before a settings receipt cannot roll its profile back', () => {
+  const old=bot('a','2026-11-15T00:00:00Z');
+  const committed={...old,profile:{...old.profile,autoHandoffOnPolicyAccept:true}};
+  const remote={...old,preview:'new message',state:{...old.state,unread:5}};
+  const other=bot('b','2026-11-15T00:00:00Z');
+  const incoming=[remote,other];
+  const next=botListState.retainProfileReceipts?.([old],[committed],incoming)??incoming;
+  assert.equal(next[0]?.profile.autoHandoffOnPolicyAccept,true);
+  assert.equal(next[0]?.preview,'new message');assert.equal(next[0]?.state.unread,5);
+  assert.equal(next[1],other);
+});
+
+test('a pending list cannot remove a newly committed profile, and a fresh list can', () => {
+  const old=bot('a','2026-11-15T00:00:00Z');
+  const committed={...old,profile:{...old.profile,autoHandoffOnPolicyAccept:true}};
+  assert.deepEqual(botListState.retainProfileReceipts([old],[committed],[]),[committed]);
+  assert.deepEqual(botListState.retainProfileReceipts([committed],[committed],[]),[]);
+  const remote={...old,profile:{...old.profile,autoHandoffOnPolicyAccept:false}};
+  assert.equal(botListState.retainProfileReceipts([committed],[committed],[remote])[0],remote);
+});
 
 test('机器人按最近活动排序，同一时刻保持原顺序', () => {
   const older = bot('older', '2026-09-27T01:00:00.000Z');

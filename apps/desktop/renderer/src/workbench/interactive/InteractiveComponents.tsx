@@ -59,14 +59,16 @@ function Slider({ props }: P<Field & { min: number; max: number; step: number }>
   return <div className="interactive-field"><label htmlFor={f.id}>{props.label}: {String(f.state.values[f.key])}</label><input id={f.id} type="range" min={props.min} max={props.max} step={props.step}
     disabled={f.disabled} value={Number(f.state.values[f.key])} onChange={event => { f.session.editValue(f.key, Number(event.currentTarget.value)); f.sync(); }} onBlur={() => { void f.session.flush(); }} /></div>;
 }
-function Button({ props }: P<{ label: string; action: unknown }>) { const ctx = useInteractiveRender(); return <button type="button" className="ui-button" disabled={!ctx.state.writer || ctx.state.composing || ['writer_lost', 'closing', 'closed'].includes(ctx.state.phase)} onClick={() => ctx.session.applyAction(props.action)}>{props.label}</button>; }
+function Button({ props }: P<{ label: string; action: unknown }>) { const ctx = useInteractiveRender(); return <button type="button" className="ui-button is-compact" disabled={!ctx.state.writer || ctx.state.composing || ['writer_lost', 'closing', 'closed'].includes(ctx.state.phase)} onClick={() => ctx.session.applyAction(props.action)}>{props.label}</button>; }
 
 type DataRow = Record<string, unknown>;
 type TableProps = { label: string; columns: { key: string; label: string }[]; rows: DataRow[]; rowKey: string };
 function cell(value: unknown) { if (value === undefined || value === null) return ''; return typeof value === 'object' ? JSON.stringify(value) : String(value); }
-function DataTable({ label, columns, rows, rowKey }: TableProps) {
+function DataTable({ label, columns: rawColumns, rows: rawRows, rowKey }: TableProps) {
   const { isZh } = useInteractiveRender(), [requestedPage, setPage] = useState(0);
-  const size = Math.min(L.tablePageRows, Math.floor(L.tablePageCells / columns.length)), pages = Math.max(1, Math.ceil(rows.length / size));
+  const columns = Array.isArray(rawColumns) ? rawColumns : [];
+  const rows = Array.isArray(rawRows) ? rawRows : [];
+  const size = Math.min(L.tablePageRows, Math.max(1, Math.floor(L.tablePageCells / Math.max(1, columns.length)))), pages = Math.max(1, Math.ceil(rows.length / size));
   const page = Math.min(requestedPage, pages - 1);
   return <section className="interactive-table"><div className="interactive-table-scroll" tabIndex={0} role="region" aria-label={label}><table><caption>{label}</caption><thead><tr>{columns.map(column => <th key={column.key} scope="col">{column.label}</th>)}</tr></thead>
     <tbody>{rows.slice(page * size, (page + 1) * size).map(row => <tr key={JSON.stringify([typeof row[rowKey], row[rowKey]])}>{columns.map(column => <td key={column.key}>{cell(row[column.key])}</td>)}</tr>)}</tbody></table></div>
@@ -78,16 +80,24 @@ function Table({ props }: P<TableProps>) { const ctx = useInteractiveRender(); r
 type ChartProps = { label: string; kind: 'bar' | 'line'; xKey: string; series: { key: string; label: string }[]; rows: DataRow[] };
 function Chart({ props: p }: P<ChartProps>) {
   const ctx = useInteractiveRender(), id = useId();
-  const values = p.rows.flatMap(row => p.series.map(series => Number(row[series.key]))), min = Math.min(0, ...values), max = Math.max(0, ...values);
+  const rows = Array.isArray(p.rows) ? p.rows : [];
+  const seriesList = Array.isArray(p.series) ? p.series : [];
+  const values = rows.flatMap(row => seriesList.map(series => Number(row[series.key]))), min = Math.min(0, ...values), max = Math.max(0, ...values);
   const scale = Math.max(1, ...values.map(Math.abs)), low = min / scale, range = (max / scale - low) || 1;
-  const x = (index: number) => 40 + (index + 0.5) * 640 / Math.max(1, p.rows.length), y = (value: number) => 200 - (value / scale - low) / range * 176;
+  const x = (index: number) => 40 + (index + 0.5) * 640 / Math.max(1, rows.length), y = (value: number) => 200 - (value / scale - low) / range * 176;
   return <section hidden={!ctx.showResults} className="interactive-chart"><p className="interactive-caption">{ctx.isZh ? '数值范围' : 'Value range'}: {min} – {max}</p><svg viewBox="0 0 720 240" role="img" aria-labelledby={id}><title id={id}>{p.label}</title><line className="interactive-chart-axis" x1={40} x2={680} y1={y(0)} y2={y(0)} />
-    {p.series.map((series, s) => p.kind === 'line' ? <polyline key={series.key} className={`interactive-series interactive-series-${s}`} fill="none" points={p.rows.map((row, i) => `${x(i)},${y(Number(row[series.key]))}`).join(' ')} />
-      : <g key={series.key} className={`interactive-series interactive-series-${s}`}>{p.rows.map((row, i) => { const value = Number(row[series.key]), width = 640 / Math.max(1, p.rows.length) / p.series.length;
-        return <rect key={JSON.stringify([typeof row[p.xKey], row[p.xKey]])} x={x(i) - width * p.series.length / 2 + width * s} y={Math.min(y(0), y(value))} width={Math.max(0.2, width * 0.8)} height={Math.abs(y(value) - y(0))} />; })}</g>)}
-    </svg><div className="interactive-chart-labels">{[...new Set([0, Math.floor((p.rows.length - 1) / 2), p.rows.length - 1])].filter(i => p.rows[i]).map(i => <span key={i}>{cell(p.rows[i][p.xKey])}</span>)}</div>
-    <ul className="interactive-chart-legend">{p.series.map((series, index) => <li key={series.key} className={`interactive-series-${index}`}>{series.label}</li>)}</ul>
-    <DataTable label={p.label} columns={[{ key: p.xKey, label: p.xKey }, ...p.series.map(series => ({ key: series.key, label: series.label }))]} rows={p.rows} rowKey={p.xKey} /></section>;
+    {seriesList.map((series, s) => p.kind === 'line' ? <polyline key={series.key} className={`interactive-series interactive-series-${s}`} fill="none" points={rows.map((row, i) => `${x(i)},${y(Number(row[series.key]))}`).join(' ')} />
+      : <g key={series.key} className={`interactive-series interactive-series-${s}`}>{rows.map((row, i) => {
+        const value = Number(row[series.key]);
+        const slot = 640 / Math.max(1, rows.length) / Math.max(1, seriesList.length);
+        const barWidth = Math.max(2, Math.min(slot * 0.68, 56));
+        const groupWidth = barWidth * seriesList.length + Math.max(0, seriesList.length - 1) * 4;
+        const barX = x(i) - groupWidth / 2 + s * (barWidth + 4);
+        return <rect key={JSON.stringify([typeof row[p.xKey], row[p.xKey]])} x={barX} y={Math.min(y(0), y(value))} width={barWidth} height={Math.abs(y(value) - y(0))} rx={Math.min(4, barWidth / 2)} />;
+      })}</g>)}
+    </svg><div className="interactive-chart-labels">{[...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])].filter(i => rows[i]).map(i => <span key={i}>{cell(rows[i][p.xKey])}</span>)}</div>
+    <ul className="interactive-chart-legend">{seriesList.map((series, index) => <li key={series.key} className={`interactive-series-${index}`}>{series.label}</li>)}</ul>
+    <DataTable label={p.label} columns={[{ key: p.xKey, label: p.xKey }, ...seriesList.map(series => ({ key: series.key, label: series.label }))]} rows={rows} rowKey={p.xKey} /></section>;
 }
 function SourceReference({ props }: P<{ bindingId: string; label: string }>) {
   const ctx = useInteractiveRender(), source = ctx.provenance.find(item => item.bindingId === props.bindingId);

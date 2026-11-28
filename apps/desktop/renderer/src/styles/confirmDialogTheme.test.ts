@@ -17,7 +17,7 @@ test('confirm dialog inputs use theme-aware control fill, not a white fallback',
   const input = ruleBody('.pa-confirm-input');
   assert.match(input, /appearance:\s*none/);
   assert.match(input, /-webkit-appearance:\s*none/);
-  assert.match(input, /background:\s*var\(--za-control-fill\)/);
+  assert.match(input, /background:\s*var\(--control-fill\)/);
   assert.match(input, /color-scheme:\s*inherit/);
   assert.doesNotMatch(css, /--surface-vellum,\s*#fff/);
 });
@@ -29,7 +29,7 @@ test('confirm dialog primary button uses theme primary control tokens', () => {
   assert.match(button, /color-scheme:\s*inherit/);
 
   const primary = ruleBody('.pa-confirm-btn.primary');
-  assert.match(primary, /background:\s*var\(--za-primary-control-bg\)/);
-  assert.match(primary, /color:\s*var\(--za-primary-control-ink\)/);
+  assert.match(primary, /background:\s*var\(--chrome-keycap-bg\)/);
+  assert.match(primary, /color:\s*var\(--chrome-keycap-fg\)/);
   assert.doesNotMatch(primary, /--ink-base/);
 });
