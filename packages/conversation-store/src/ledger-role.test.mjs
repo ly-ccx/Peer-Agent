@@ -9,7 +9,7 @@ import { createConversationStore } from './index.mjs';
 test('runtime turn ledger keeps role and workspaceId when the caller has them', () => {
   const dir = mkdtempSync(join(tmpdir(), 'peer-ledger-role-'));
   try {
-    const store = createConversationStore({ storeDir: dir });
+    const store = createConversationStore({ storeDir: join(dir, 'conversations') });
     const conversation = store.createConversation({ title: 'role' });
     const recorded = store.recordRuntimeTurnUsage(conversation.id, {
       usage: {

@@ -346,6 +346,15 @@ impl OwnedChild {
         self.0.take().unwrap().wait_with_output().unwrap()
     }
 }
+// Thinking and text messages may also have segments, but carry no tool evidence.
+fn has_tool_call(message: &Value) -> bool {
+    message["segments"].as_array().is_some_and(|segments| {
+        segments
+            .iter()
+            .any(|segment| segment["type"] == "tool-call")
+    })
+}
+
 impl Fixture {
     fn new(server: &Server) -> Self {
         let root = tempfile::tempdir().unwrap();
@@ -718,10 +727,7 @@ fn four_native_wires_execute_real_tools_and_preserve_only_live_provider_continua
             reply["contextSnapshot"]["provider"], channel,
             "{wire} snapshot must use the actual provider fact"
         );
-        let calls: Vec<_> = history
-            .iter()
-            .filter(|m| m["segments"].is_array())
-            .collect();
+        let calls: Vec<_> = history.iter().filter(|m| has_tool_call(m)).collect();
         assert_eq!(calls.len(), 2);
         for m in &calls {
             assert_eq!(m["segments"][0]["result"]["status"], "success");
@@ -836,10 +842,7 @@ fn configured_api_key_channels_run_native_tools_and_record_real_evidence() {
         assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-private-header"));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-private-header"));
         let history = f.history();
-        let calls: Vec<_> = history
-            .iter()
-            .filter(|m| m["segments"].is_array())
-            .collect();
+        let calls: Vec<_> = history.iter().filter(|m| has_tool_call(m)).collect();
         assert_eq!(calls.len(), 1, "{}", case["name"]);
         assert_eq!(calls[0]["segments"][0]["result"]["status"], "success");
         assert!(calls[0]["segments"][0]["result"]["evidence"].is_object());

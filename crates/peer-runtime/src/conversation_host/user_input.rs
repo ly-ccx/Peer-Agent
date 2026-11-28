@@ -10,6 +10,9 @@ use std::{
 };
 
 const MAX_IMAGES: usize = 128;
+// CLI-selected files are read and stored as inline data URLs. Keep their
+// encoded budget independent of the model transport limit for out-of-line images.
+const INLINE_INPUT_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
 pub(super) async fn message(
     workspace: &Path,
@@ -27,7 +30,7 @@ pub(super) async fn message(
         let workspace = workspace.to_owned();
         let paths = paths.to_owned();
         let cancel = cancel.clone();
-        let budget = crate::model::REQUEST_BYTES.saturating_sub(prompt.len());
+        let budget = INLINE_INPUT_BUDGET_BYTES.saturating_sub(prompt.len());
         let images =
             tokio::task::spawn_blocking(move || capture(&workspace, &paths, budget, &cancel))
                 .await
