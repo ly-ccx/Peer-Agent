@@ -384,34 +384,6 @@ impl ConversationSearchIndex {
         Ok(())
     }
 
-    fn candidate_ids_for_needle(&self, needle: &str) -> Result<HashSet<String>, ProjectError> {
-        if needle.chars().count() < 3 {
-            let pat = like_pattern(needle);
-            let mut stmt = self
-                .conn
-                .prepare(
-                    "SELECT id FROM search_doc WHERE lower(title) LIKE ?1 ESCAPE '\\' OR lower(body) LIKE ?1 ESCAPE '\\'",
-                )
-                .map_err(|e| ProjectError::new("SQLITE_ERROR", e.to_string()))?;
-            let ids = stmt
-                .query_map(params![pat], |r| r.get::<_, String>(0))
-                .map_err(|e| ProjectError::new("SQLITE_ERROR", e.to_string()))?
-                .filter_map(Result::ok)
-                .collect();
-            return Ok(ids);
-        }
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id FROM search_fts WHERE search_fts MATCH ?1")
-            .map_err(|e| ProjectError::new("SQLITE_ERROR", e.to_string()))?;
-        let ids = stmt
-            .query_map(params![fts_phrase(needle)], |r| r.get::<_, String>(0))
-            .map_err(|e| ProjectError::new("SQLITE_ERROR", e.to_string()))?
-            .filter_map(Result::ok)
-            .collect();
-        Ok(ids)
-    }
-
     pub fn search(
         &self,
         query: &str,
@@ -421,26 +393,31 @@ impl ConversationSearchIndex {
     ) -> Result<Vec<ConversationSearchHit>, ProjectError> {
         let cap = if limit == 0 { DEFAULT_LIMIT } else { limit };
         let needle = query.trim().to_lowercase();
-        let candidate_ids = if needle.is_empty() {
-            None
+        // Fetch just the SQLite candidates. Reading every document into Rust
+        // to discard it after FTS makes a rare hit pay the full corpus cost.
+        let (predicate, term) = if needle.is_empty() {
+            ("?1 = ''", String::new())
+        } else if needle.chars().count() < 3 {
+            (
+                "lower(title) LIKE ?1 ESCAPE '\\' OR lower(body) LIKE ?1 ESCAPE '\\'",
+                like_pattern(&needle),
+            )
         } else {
-            Some(self.candidate_ids_for_needle(&needle)?)
+            (
+                "id IN (SELECT id FROM search_fts WHERE search_fts MATCH ?1)",
+                fts_phrase(&needle),
+            )
         };
-        if let Some(ref cids) = candidate_ids
-            && cids.is_empty()
-        {
-            return Ok(Vec::new());
-        }
 
         let mut stmt = self
             .conn
-            .prepare(
+            .prepare(&format!(
                 "SELECT id, kind, workspace_id, title, body, message_id, session_id, memory_id, updated_at
-                 FROM search_doc",
-            )
+                 FROM search_doc WHERE {predicate}"
+            ))
             .map_err(|e| ProjectError::new("SQLITE_ERROR", e.to_string()))?;
         let rows: Vec<ConversationSearchDocument> = stmt
-            .query_map([], |r| {
+            .query_map(params![term], |r| {
                 Ok(ConversationSearchDocument {
                     id: r.get(0)?,
                     kind: r.get(1)?,
@@ -466,11 +443,6 @@ impl ConversationSearchIndex {
             }
             if let Some(allowed) = kinds
                 && !allowed.contains(&doc.kind.as_str())
-            {
-                continue;
-            }
-            if let Some(ref cids) = candidate_ids
-                && !cids.contains(&doc.id)
             {
                 continue;
             }
@@ -568,6 +540,22 @@ mod tests {
         let cjk_synced = idx_synced.search("连接池", None, None, 10).unwrap();
         assert_eq!(cjk_rebuilt, cjk_synced);
         assert_eq!(cjk_rebuilt.len(), 2);
+
+        let short = idx_synced
+            .search("连接", Some("ws-1"), Some(&["message"]), 10)
+            .unwrap();
+        assert_eq!(short.len(), 1);
+        assert_eq!(short[0].message_id.as_deref(), Some("m-1"));
+        assert_eq!(
+            idx_synced.search(" ", None, None, 10).unwrap().len(),
+            docs.len()
+        );
+        assert!(
+            idx_synced
+                .search("missing needle", None, None, 10)
+                .unwrap()
+                .is_empty()
+        );
 
         // Exact title match ranks first (score 300)
         let exact = idx_synced.search("deploy-service", None, None, 10).unwrap();

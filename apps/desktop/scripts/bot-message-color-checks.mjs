@@ -2,6 +2,7 @@ import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BOT_AVATAR_COLORS } from '@peer-agent/protocol';
+import { resolveCatPalette } from '../renderer/src/project-agent/botCatParts.ts';
 
 /** Change the real isolated bot profile, then inspect production message paint. */
 export async function checkBotMessageColors({ page, until, report, captureDirectory }) {
@@ -50,7 +51,7 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
           const user = document.querySelector('.bot-user-content');
           const body = bubble.getBoundingClientRect(), column = node.getBoundingClientRect();
           return { accent: node.closest('.bot-convo').style.getPropertyValue('--bot-message-accent'),
-            avatar: node.closest('.bot-thread-row').querySelector('.bot-avatar').style.getPropertyValue('--bot-avatar-accent'),
+            avatar: node.closest('.bot-thread-row').querySelector('.bot-avatar').style.getPropertyValue('--cat-ring-light'),
             background: style.backgroundColor, bodyColor: style.color,
             quoteColor: getComputedStyle(node.querySelector('.bot-reply-bar-excerpt')).color,
             secondaryColor: style.getPropertyValue('--bot-reply-secondary'), bodyContrast: contrast(style.color),
@@ -59,7 +60,8 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
             neutralBackground: rgb(getComputedStyle(node).getPropertyValue('--paper-hover')),
             fits: body.left >= column.left && body.right <= column.right };
         });
-        assert.equal(sample.accent, color); assert.equal(sample.avatar, color);
+        assert.equal(sample.accent, color);
+        assert.equal(sample.avatar, resolveCatPalette(color).ringLight);
         assert.ok(sample.bodyContrast >= 4.5 && sample.quoteContrast >= 4.5, JSON.stringify({ color, palette, theme, ...sample }));
         assert.ok(sample.fits);
         if (sample.userBackground) assert.deepEqual(sample.userBackground, sample.neutralBackground);
@@ -75,9 +77,10 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
     await until(() => page.locator('.bot-main-title').innerText(), name => name === 'project-001');
     const switched = await page.locator('.bot-convo').evaluate(node => ({
       accent: node.style.getPropertyValue('--bot-message-accent'),
-      avatar: document.querySelector('.bot-main-head .bot-avatar').style.getPropertyValue('--bot-avatar-accent'),
+      avatar: document.querySelector('.bot-main-head .bot-avatar').style.getPropertyValue('--cat-ring-light'),
     }));
-    assert.equal(switched.accent, switched.avatar);
+    assert.ok(BOT_AVATAR_COLORS.includes(switched.accent));
+    assert.equal(switched.avatar, resolveCatPalette(switched.accent).ringLight);
     await page.locator(`#bot-row-${workspaceId}`).click();
     await until(() => page.locator('.bot-convo').evaluate(node => node.style.getPropertyValue('--bot-message-accent')), color => color === firstColor);
     report.botMessageColors = { cases, identitySwitch: true, savedColorApplied: true };
