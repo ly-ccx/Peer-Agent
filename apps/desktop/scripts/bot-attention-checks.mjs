@@ -27,7 +27,7 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await until(() => firstRow.locator('.bot-badge').textContent(), text => Number.parseInt(text, 10) === firstTotal);
   await firstRow.locator('.bot-badge').focus(); await page.keyboard.press('Enter');
   const panel = page.getByRole('dialog', { name: '需要你处理', exact: true }); await panel.waitFor();
-  assert.equal(await panel.locator('.bot-attention-item').count(), firstTotal);
+  await until(() => panel.locator('.bot-attention-item').count(), count => count === firstTotal);
   assert.match(await panel.innerText(), /这次交付的处理方式/);
   assert.doesNotMatch(await panel.innerText(), /旧问题：|重复问题：/);
   await page.setViewportSize({ width: 1280, height: 860 }); await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });

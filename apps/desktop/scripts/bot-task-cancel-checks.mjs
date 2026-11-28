@@ -1,4 +1,4 @@
-import { openWorkPanel } from './bot-work-panel-checks.mjs';
+import { taskEntry } from './bot-work-panel-checks.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -28,8 +28,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   update({ sessions: [first, other], cancelMode: 'fail', cancelCalls: [], cancelHandshake: true, cancelRelease: [], cancelFinalize: [] });
   const panelTasks = page.locator('.bot-work-panel .bot-work-panel-session.is-task');
   await until(() => panelTasks.locator('strong').allTextContents(), titles => titles.includes(first.title) && titles.includes(other.title));
-  await openWorkPanel(page);
-  await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
+  await (await taskEntry(page, first, { source: 'active' })).click();
   const workspace = page.locator('.bot-task-workspace');
   const parent = page.locator('.bot-crumb-parent');
   const status = workspace.locator('.bot-tb-status-text');
@@ -90,8 +89,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   // Keep the production button mounted in stopping state across several frames.
   update({ sessions: [first, other], cancelMode: 'deferred-status' });
   await until(() => panelTasks.count(), count => count === 2);
-  await openWorkPanel(page);
-  await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
+  await (await taskEntry(page, first, { source: 'active' })).click();
   await workspace.getByRole('heading', { name: first.title, exact: true }).waitFor();
   await page.setViewportSize({ width: 760, height: 860 });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });

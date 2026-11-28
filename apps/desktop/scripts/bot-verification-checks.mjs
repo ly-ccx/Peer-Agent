@@ -41,7 +41,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     assert.equal(await page.locator('.bot-agent-activity[data-agent-state=verified]').count(), 0);
     assert.ok((await page.locator('#bot-msg-verification-explanation').innerText()).includes(explanation));
     await page.screenshot({ path: path.join(captureDirectory, `verification-main-${width}-${appearance}.png`), animations: 'disabled' });
-    const row = await taskEntry(page, session);
+    const row = await taskEntry(page, session, { source: 'active' });
     await row.click();
     const workspace = page.locator('.bot-task-workspace');
     const inspector = await openTaskInspector(page);

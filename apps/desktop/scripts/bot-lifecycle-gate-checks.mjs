@@ -32,7 +32,9 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
         assert.equal(item[field], decision[field]); assert.equal(session[field], decision[field]);
       }
       assert.equal(session.status,'waiting_user'); assert.equal(session.statusLabel,expected); assert.equal(session.cancelable,true);
-      const command = {...initial,seq:++seq,sessions:[session],detailReports:{},reportReadMode:'ready',conversationMessages:[]};
+      const sourceReply = { id: `rc-lifecycle-source-${key}`, kind: 'agent_reply', role: 'assistant',
+        content: expected, sources: [session.sessionId], createdAt: now };
+      const command = {...initial,seq:++seq,sessions:[session],detailReports:{},reportReadMode:'ready',conversationMessages:[sourceReply]};
       writeFileSync(commandFile+'.next',JSON.stringify(command));renameSync(commandFile+'.next',commandFile);
       const row = await taskEntry(page, session);
       await until(() => row.innerText(), text => text.includes(expected));
@@ -44,6 +46,10 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
       assert.ok(readableStatus, 'human gate status uses the primary text color');
       await page.screenshot({ path: path.join(captureDirectory, `lifecycle-${key}-list-${width}-${appearance}.png`), animations: 'disabled' });
       await row.focus(); await page.keyboard.press('Enter');
+      const source = page.locator(`#bot-msg-${sourceReply.id}`);
+      await until(() => source.evaluate(node => node === document.activeElement), Boolean);
+      const activeRow = await taskEntry(page, session, { source: 'active' });
+      await activeRow.focus(); await page.keyboard.press('Enter');
       const detail = page.locator('.bot-task-workspace');
       await until(() => detail.locator('.bot-task-status-pill').innerText(), text => text === expected);
       assert.equal(await detail.getAttribute('data-status'), decision.status);

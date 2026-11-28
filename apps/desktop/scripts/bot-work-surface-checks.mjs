@@ -195,7 +195,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   change([{ ...initial.sessions[0], status: 'accepted' }]);
   await until(() => work.getAttribute('data-status'), value => value === 'accepted');
   assert.match(await work.locator(':scope > summary').textContent(), /已签收/);
-  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task').count(), 0);
+  await page.locator('.bot-work-panel [data-lane="delivered"] .bot-work-panel-session.is-task').waitFor({ state: 'attached' });
+  assert.equal(await page.locator('.bot-work-panel .bot-work-panel-session.is-task').count(), 1);
   change([]);
   await until(() => work.getAttribute('data-status'), value => value === 'unavailable');
   assert.match(await work.innerText(), /状态暂不可用/);

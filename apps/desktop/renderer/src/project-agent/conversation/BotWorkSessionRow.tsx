@@ -3,19 +3,20 @@ import { WORK_SESSION_STATUSES, type TaskOverviewItem } from '@peer-agent/protoc
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
 import { formatDrawerSessionStatus, type DrawerSession } from '../state/drawerState';
-import { workPanelNeedsUser } from '../state/botWorkPanelState';
+import { workPanelNeedsUser, type WorkPanelLane } from '../state/botWorkPanelState';
 
-export function BotWorkSessionRow({ session, overview, parent, question, variant, i18n, onOpen }: {
+export function BotWorkSessionRow({ session, overview, parent, question, variant, lane, i18n, onOpen }: {
   readonly session: DrawerSession;
   readonly overview?: TaskOverviewItem;
   readonly parent?: DrawerSession;
   readonly question?: string;
   readonly variant: 'task' | 'agent';
+  readonly lane: WorkPanelLane;
   readonly i18n: I18nRuntime;
   readonly onOpen: (sessionId: string) => void;
 }) {
-  const needsUser = workPanelNeedsUser(session);
-  const blocked = needsUser || ['technical_block', 'local_persistence_failed'].includes(session.followUp?.reason || '') || session.followUp?.reason === 'verification_failed';
+  const needsUser = lane === 'needsYou' && (Boolean(question) || workPanelNeedsUser(session));
+  const blocked = lane === 'needsYou' && !needsUser;
   const knownStatus = WORK_SESSION_STATUSES.find(value => value === session.status);
   const status = session.status === 'waiting_user' && session.followUp?.owner === 'bot' ? i18n.t('projectAgent.chat.work.waiting')
     : session.coordination?.phase === 'stopping' || ['stopping', 'awaiting_outcome'].includes(session.status)
@@ -29,7 +30,8 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
   const detail = question || overview?.issueDetail || (session.status === 'verifying'
     ? session.verificationProgress ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
       : i18n.t('projectAgent.chat.work.verifyingHint')
-    : overview?.currentGoalTitle || (statusDetail === session.status ? status : statusDetail || status));
+    : lane === 'delivered' && session.summary ? session.summary
+      : overview?.currentGoalTitle || (statusDetail === session.status ? status : statusDetail || status));
   const isZh = Boolean(i18n.locale?.startsWith('zh'));
   const progressLabel = knownProgress ? i18n.t('projectAgent.workPanel.progress', {
     completed: knownProgress.completed, total: knownProgress.total,

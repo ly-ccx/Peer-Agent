@@ -14,9 +14,14 @@ export async function openWorkPanel(page) {
   });
 }
 
-export async function taskEntry(page, session, { history = false } = {}) {
-  if (history) {
-    await page.getByRole('button', { name: /^历史任务(?:\s*\d+)?$/ }).click();
+export async function taskEntry(page, session, { source = 'board' } = {}) {
+  if (source !== 'board') {
+    const panel = page.locator('.bot-work-layout[data-work-panel-wide="false"][data-work-panel-open="true"]');
+    if (await panel.count()) await page.locator('.bot-work-panel-toggle').click();
+    const trigger = source === 'history'
+      ? page.getByRole('button', { name: /^历史任务(?:\s*\d+)?$/ })
+      : page.locator('.bot-touchbar-summary .bot-tb-status');
+    if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
     return page.locator('.bot-touchbar-tray .bot-tray-row').filter({ has: page.getByText(session.title, { exact: true }) });
   }
   await openWorkPanel(page);
@@ -70,7 +75,7 @@ export async function checkWorkPanelLayout({ page, report, captureDirectory }) {
         }
       }
     }
-    await page.locator('.bot-work-panel-head button').focus(); await page.keyboard.press('Escape');
+    await page.locator('.bot-work-panel-actions button').last().focus(); await page.keyboard.press('Escape');
     assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
     assert.equal(await toggle.evaluate(node => node === document.activeElement), true);
   } finally {
@@ -107,7 +112,7 @@ export async function checkParallelPanelTasks({ page, until, report, captureDire
       for (const session of [initial.sessions[0], parallel]) {
         await rows.filter({ has: page.getByText(session.title, { exact: true }) }).click();
         await workspace.getByRole('heading', { name: session.title, exact: true }).waitFor();
-        await page.getByRole('button', { name: '任务详情', exact: true }).click();
+        await openTaskInspector(page);
         await inspector.getByRole('tab', { name: '边界与信息', exact: true }).click();
         await inspector.getByText(session.sessionId, { exact: true }).waitFor();
         await parent.click();

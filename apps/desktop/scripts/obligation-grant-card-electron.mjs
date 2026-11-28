@@ -98,6 +98,7 @@ ipcMain.handle('project-agent:list-obligation-grants', async (_event, payload) =
   return application.listObligationGrants(payload);
 });
 ipcMain.handle('project-agent:decide-obligation', async (_event, payload) => application.decideObligation(payload));
+ipcMain.handle('project-objectives:list', () => ({ ok: true, items: [] }));
 
 globalThis.peerObligationCard = {
   failList(value) { failList = value === true; },

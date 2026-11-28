@@ -15,6 +15,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     content: noteHeadline + '\n\n**核对范围**：保留任务目标、报告、结果引用和完成判断之间的关联。`README.md`、`AGENTS.md` 与历史报告提供背景，已有文件记录必须与具体断言对应。\n\n**后续安排**：我会逐条整理可读取的记录，对缺少原文或验证结果的部分标注无法确认，并区分已完成、部分完成和执行受阻。原任务保持现状，整理后在主对话汇报；需要你补充信息时，我会提出具体问题。不得把任务数量直接当作已完成数量，也不能把报告中的目标当作完成结论。NOTE_FULL_END' };
   const question = { ...note, id: 'rc-task-question', content: '有两条记录无法读取。你希望只核对可读取的记录，还是补充这些记录后再继续？',
     cards: [{ cardId: 'card:question:reply:rc-task-question', kind: 'question', content: '只核对可读取的记录，还是补充记录后继续？', resolvedState: 'open',
+      refs: { sessionId: task.sessionId },
       actions: [{ id: 'answer', channel: 'project-agent:submit-input', payload: { text: '只核对可读取的记录', answerTo: 'card:question:reply:rc-task-question' } }] }] };
   let conversationMessages = [note];
   const states = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled'];
@@ -30,8 +31,8 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   const brief = inspector.getByRole('tab', { name: '说明', exact: true });
   const reportFeedback = inspector.locator('.bot-task-report-read');
   const taskInstructions = inspector.locator('.bot-inspector-brief-text');
-  const open = async (history = false) => {
-    const row = await taskEntry(page, task, { history });
+  const open = async (source = 'board') => {
+    const row = await taskEntry(page, task, { source });
     await row.click();
     await detail.getByRole('heading', { name: task.title, exact: true }).waitFor();
     await openTaskInspector(page);
@@ -72,20 +73,24 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   for (const status of states) {
-    const historical = ['accepted', 'failed', 'paused', 'cancelled'].includes(status);
+    const historical = ['paused', 'cancelled'].includes(status);
+    const needsUser = ['waiting_user', 'result_ready'].includes(status);
+    const lane = ({ running: 'doing', waiting_user: 'needsYou', result_ready: 'needsYou', accepted: 'delivered',
+      failed: 'needsYou', queued: 'todo' })[status];
     change(status);
     await until(() => detail.getAttribute('data-status'), value => value === status);
     await parent.click();
     await detail.waitFor({ state: 'hidden' });
+    const boardRow = await taskEntry(page, task);
     if (historical) {
-      await openWorkPanel(page);
-      assert.equal(await page.locator('.bot-work-panel-session').filter({ hasText: task.title }).count(), 0);
+      await boardRow.waitFor({ state: 'detached' });
+    } else {
+      await boardRow.waitFor();
+      assert.equal(await boardRow.evaluate(node => node.closest('[data-lane]').dataset.lane), lane);
+      assert.equal(await boardRow.getAttribute('data-needs-user'), String(needsUser));
     }
-    const row = await taskEntry(page, task, { history: historical });
-    await row.waitFor();
-    if (!historical) {
-      assert.equal(await row.getAttribute('data-needs-user'), String(['waiting_user', 'result_ready'].includes(status)));
-    }
+    const source = historical || status === 'failed' ? 'history' : needsUser ? 'active' : 'board';
+    const row = source === 'board' ? boardRow : await taskEntry(page, task, { source });
     await row.click();
     await until(() => detail.getAttribute('data-status'), value => value === status);
     assert.equal(await inspector.count(), 0, 'task selection starts with the inspector closed');
@@ -126,7 +131,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(readTurns(), beforeEndedFollowUp, 'following up on an ended task prepares a result question without execution');
   await endedComposer.fill('');
   await page.getByRole('button', { name: '取消引用', exact: true }).click();
-  await open(true);
+  await open('history');
   change('failed', true);
   await until(() => detail.getAttribute('data-status'), value => value === 'unavailable');
   assert.match(await detail.locator('.bot-task-status-pill').innerText(), /状态暂不可用/);
@@ -179,7 +184,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.ok(await workRows.count(), 'default work rows are visible beside the main note');
   assert.doesNotMatch((await workRows.allTextContents()).join(' '), /waiting_user|internal-execution-model-id/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-note.png') });
-  await open();
+  await open('active');
   const composer = page.locator('.bot-composer textarea');
   await detail.getByRole('button', { name: `询问 ${botName} 进展`, exact: true }).click();
   await until(() => composer.inputValue(), text => text.includes(task.title));
@@ -190,18 +195,24 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-follow-up-draft.png') });
   await page.getByRole('button', { name: '取消引用', exact: true }).click();
   await composer.fill('保留我正在写的消息');
-  await open(); await detail.getByRole('button', { name: `询问 ${botName} 进展`, exact: true }).click();
+  await open('active'); await detail.getByRole('button', { name: `询问 ${botName} 进展`, exact: true }).click();
   assert.equal(await composer.inputValue(), '保留我正在写的消息');
   assert.equal(await page.getByRole('button', { name: '取消引用', exact: true }).count(), 0, 'existing draft is not silently associated with another task');
   await composer.fill('');
   const quoteRemove = page.getByRole('button', { name: '取消引用', exact: true });
   if (await quoteRemove.count()) await quoteRemove.click();
-  conversationMessages = [note, question]; change('waiting_user'); await open();
+  conversationMessages = [note, question]; change('waiting_user');
+  const boardQuestion = await taskEntry(page, task);
+  await until(() => boardQuestion.innerText(), text => text.includes(question.cards[0].content));
+  await boardQuestion.focus(); await page.keyboard.press('Enter');
+  const answer = page.locator('#bot-msg-rc-task-question .bot-question button').first();
+  await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
+  assert.equal(readTurns(), beforeNavigation, 'the matter board opens the question without answering it');
+  await open('active');
   await until(() => detail.locator('.bot-task-question').innerText(), text => text === question.cards[0].content);
   assert.equal(await detail.getByRole('button', { name: `询问 ${botName} 进展`, exact: true }).count(), 0);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-decision.png') });
   await detail.getByRole('button', { name: '在对话中回答', exact: true }).focus(); await page.keyboard.press('Enter');
-  const answer = page.locator('#bot-msg-rc-task-question .bot-question button').first();
   await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
   await until(() => detail.count(), count => count === 0);
   assert.equal(await answer.isVisible(), true);
@@ -214,7 +225,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];
-  change('waiting_user'); await open();
+  change('waiting_user'); await open('active');
   await until(() => detail.locator('.bot-task-question').count(), count => count === 0);
   await parent.click();
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);

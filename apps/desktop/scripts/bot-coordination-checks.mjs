@@ -20,7 +20,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         reason:'根据补充说明，检查对象改为引用卡片，保留已经做过的检查。',goalRevision:2,priorSessionId:base.sessionId,
         ...(state==='cancelled'?{replacementSessionId:replacement.sessionId,replacementTitle:replacement.title}:{})};
       update({sessions:[{...base,status:state==='handoff'?'starting':state,coordination},replacement]});
-      const row = await taskEntry(page, base, { history: state === 'cancelled' });
+      const row = await taskEntry(page, base, { source: state === 'cancelled' ? 'history' : 'board' });
       await row.click();
       const label = state === 'handoff' ? '正在接手' : state === 'stopping' ? '正在停止' : state === 'cancelled' ? '已取消' : '执行结果待核实';
       await until(() => workspace.locator('.bot-task-status-pill').innerText(), text => text === label);
