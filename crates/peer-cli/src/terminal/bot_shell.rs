@@ -20,7 +20,8 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use peer_project_agent::{
     BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, ForegroundTickReport, LeaseStatus,
     MemoryFilter, NativeProjectHost, QuestionState, TurnEndKind, load_local_image_attachment,
-    now_iso, parse_iso_ms, project_reply_questions, task_result_references,
+    now_iso, parse_iso_ms, project_reply_questions, project_reply_questions_with_queued,
+    task_result_references,
 };
 use peer_protocol::interactive_result::{InteractiveAvailability, InteractiveOwner};
 use peer_runtime::{
@@ -645,7 +646,24 @@ impl<'a> BotShellState<'a> {
             }
         }
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
-        let q_states = project_reply_questions(&raw_messages, now_ms);
+        let base_q_states = project_reply_questions(&raw_messages, now_ms);
+        let q_states = if base_q_states
+            .values()
+            .any(|st| st.state == QuestionState::Open)
+        {
+            let queued = self
+                .host
+                .inputs()
+                .list_unconsumed_meta(&ws_id)
+                .unwrap_or_default();
+            if queued.is_empty() {
+                base_q_states
+            } else {
+                project_reply_questions_with_queued(&raw_messages, &queued, now_ms)
+            }
+        } else {
+            base_q_states
+        };
         for m in &raw_messages {
             if m["kind"] == "agent_reply"
                 && m["question"].is_object()

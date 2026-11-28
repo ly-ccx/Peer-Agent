@@ -99,6 +99,24 @@ pub struct InputDiagnosticSnapshot {
     pub executed_cursor: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedInputMeta {
+    pub input_id: String,
+    pub created_at: String,
+    pub answer_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawInputMeta {
+    input_id: String,
+    workspace_id: String,
+    surface: String,
+    created_at: String,
+    #[serde(default)]
+    answer_to: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConsumeOutcome {
     pub consumed: Vec<ProjectInput>,
@@ -312,6 +330,63 @@ impl InputQueue {
             return Err(ProjectError::code("INVALID_WORKSPACE"));
         }
         self.read_inputs_unlocked(ws)
+    }
+
+    /// Lightweight read-only view of durably queued inputs that have not yet been
+    /// consumed into the canonical conversation log (past `input-cursor.json`).
+    /// Skips deserializing heavy payload fields such as text and image attachments.
+    pub fn list_unconsumed_meta(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Vec<QueuedInputMeta>, ProjectError> {
+        let ws = workspace_id.trim();
+        if !is_valid_workspace_id(ws) {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
+        }
+        let file = self.queue_file(ws)?;
+        let meta = match fs::metadata(&file) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(ProjectError::new("IO_ERROR", e.to_string())),
+        };
+        if !meta.is_file() || meta.len() > MAX_QUEUE_BYTES {
+            return Err(ProjectError::code("INPUT_QUEUE_LIMIT"));
+        }
+        let cursor = self.read_cursor_state(ws)?;
+        let raw =
+            fs::read_to_string(&file).map_err(|e| ProjectError::new("IO_ERROR", e.to_string()))?;
+        let mut rows = Vec::new();
+        let mut seen = HashSet::new();
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(row) = serde_json::from_str::<RawInputMeta>(line) else {
+                continue;
+            };
+            if row.workspace_id != ws
+                || !is_valid_input_id(&row.input_id)
+                || !valid_surface(&row.surface)
+            {
+                continue;
+            }
+            if seen.insert(row.input_id.clone()) {
+                rows.push(QueuedInputMeta {
+                    input_id: row.input_id,
+                    created_at: row.created_at,
+                    answer_to: row.answer_to,
+                });
+            }
+        }
+        let start = match cursor.input_id.as_deref() {
+            Some(last_id) => rows
+                .iter()
+                .position(|row| row.input_id == last_id)
+                .map(|idx| idx + 1)
+                .unwrap_or(0),
+            None => 0,
+        };
+        Ok(rows.into_iter().skip(start).collect())
     }
 
     /// Read-only check for unconsumed or delivered-but-unexecuted user inputs.
@@ -928,5 +1003,83 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(err.code, "EMPTY_INPUT");
+    }
+
+    #[test]
+    fn list_unconsumed_meta_tracks_cursor_and_deduplicates() {
+        let dir = tempdir().unwrap();
+        let queue = InputQueue::new(dir.path());
+        let convs = ConversationStore::new(dir.path());
+        let conv = convs
+            .create_project_conversation(
+                &NewProjectConversation {
+                    id: None,
+                    title: "Meta",
+                    workspace_id: "ws-meta",
+                    workspace_path: None,
+                    role: "project_agent",
+                    parent_conversation_id: None,
+                    mode: "project_agent",
+                    created_at: "2026-11-27T00:00:00.000Z",
+                },
+                None,
+                None,
+            )
+            .unwrap();
+        let conv_id = conv["id"].as_str().unwrap();
+
+        assert!(queue.list_unconsumed_meta("ws-meta").unwrap().is_empty());
+
+        queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-meta",
+                input_id: "in-1",
+                surface: "desktop",
+                text: "First",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                task_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: Some("card:question:reply:q-1".into()),
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+        let unconsumed = queue.list_unconsumed_meta("ws-meta").unwrap();
+        assert_eq!(unconsumed.len(), 1);
+        assert_eq!(unconsumed[0].input_id, "in-1");
+        assert_eq!(
+            unconsumed[0].answer_to.as_deref(),
+            Some("card:question:reply:q-1")
+        );
+
+        // Consuming advances cursor so unconsumed list empties.
+        queue.consume("ws-meta", conv_id, &convs, true).unwrap();
+        assert!(queue.list_unconsumed_meta("ws-meta").unwrap().is_empty());
+
+        // Submitting a new input after cursor exposes only the newly queued item.
+        queue
+            .submit_input(&SubmitInputRequest {
+                workspace_id: "ws-meta",
+                input_id: "in-2",
+                surface: "desktop",
+                text: "Second",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                task_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: None,
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+        let unconsumed2 = queue.list_unconsumed_meta("ws-meta").unwrap();
+        assert_eq!(unconsumed2.len(), 1);
+        assert_eq!(unconsumed2[0].input_id, "in-2");
+        assert_eq!(unconsumed2[0].answer_to, None);
     }
 }

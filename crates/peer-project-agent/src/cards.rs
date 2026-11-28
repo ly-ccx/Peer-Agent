@@ -7,10 +7,13 @@
 //! only non-authoritative UI dismissals.
 
 use crate::{
-    BotListSession, BotProfileStore, MemoryFilter, MemoryStore, ObjectiveActions, ObjectiveStore,
-    ProjectError,
+    BotListSession, BotProfileStore, InputQueue, MemoryFilter, MemoryStore, ObjectiveActions,
+    ObjectiveStore, ProjectError, QueuedInputMeta,
     acceptance::{handoff_question_id, is_handoff_conflict},
-    directory::{QuestionState, project_reply_questions},
+    directory::{
+        QuestionState, is_answer_recorded, project_reply_questions,
+        project_reply_questions_with_queued,
+    },
     is_valid_workspace_id, now_iso,
     obligation::read_coordination_snapshot_readonly,
     parse_iso_ms,
@@ -795,7 +798,25 @@ pub fn project_workspace_cards(
     }
     let sessions = list_sessions_projected(data_home, Some(workspace_id), None, None, None, None);
 
-    let question_states = project_reply_questions(parent_messages, now_ms);
+    let base_question_states = project_reply_questions(parent_messages, now_ms);
+    let has_open_reply_question = base_question_states
+        .values()
+        .any(|st| st.state == QuestionState::Open);
+    let has_waiting_user_session = sessions
+        .iter()
+        .any(|row| row["status"].as_str() == Some("waiting_user"));
+    let queued = if has_open_reply_question || has_waiting_user_session {
+        InputQueue::new(data_home)
+            .list_unconsumed_meta(workspace_id)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let question_states = if queued.is_empty() {
+        base_question_states
+    } else {
+        project_reply_questions_with_queued(parent_messages, &queued, now_ms)
+    };
     let enriched_replies: Vec<Value> = parent_messages
         .iter()
         .filter(|m| m["kind"].as_str() == Some("agent_reply"))
@@ -844,9 +865,7 @@ pub fn project_workspace_cards(
                     question_id: qid.to_owned(),
                     prompt: format!("「{title}」的前置任务未成功签收。要取消还是重新安排？"),
                     options: vec!["取消这个任务".to_owned(), "重新安排任务".to_owned()],
-                    answered: parent_messages
-                        .iter()
-                        .any(|m| m["answerTo"].as_str() == Some(answer_to.as_str())),
+                    answered: is_answer_recorded(parent_messages, &queued, &answer_to),
                 });
             } else if let Some(cid) = row["conversationId"].as_str().filter(|s| !s.is_empty()) {
                 let child_msgs = child_msgs_cache
@@ -859,9 +878,7 @@ pub fn project_workspace_cards(
                         question_id: qid,
                         prompt,
                         options,
-                        answered: parent_messages
-                            .iter()
-                            .any(|m| m["answerTo"].as_str() == Some(answer_to.as_str())),
+                        answered: is_answer_recorded(parent_messages, &queued, &answer_to),
                     });
                 }
             }
@@ -2114,6 +2131,24 @@ pub fn project_waiting_user_question_cards(
     waiting_sessions: &[&BotListSession],
     resolutions: &[CardResolution],
 ) -> Vec<Value> {
+    project_waiting_user_question_cards_with_queued(
+        data_home,
+        workspace_id,
+        parent_messages,
+        &[],
+        waiting_sessions,
+        resolutions,
+    )
+}
+
+pub fn project_waiting_user_question_cards_with_queued(
+    data_home: &Path,
+    workspace_id: &str,
+    parent_messages: &[Value],
+    queued: &[QueuedInputMeta],
+    waiting_sessions: &[&BotListSession],
+    resolutions: &[CardResolution],
+) -> Vec<Value> {
     if waiting_sessions.is_empty() {
         return Vec::new();
     }
@@ -2128,9 +2163,7 @@ pub fn project_waiting_user_question_cards(
             Some("dependency_failed" | "dependency_missing")
         ) {
             let answer_to = format!("card:question:{}:dependency", session.session_id);
-            let answered = parent_messages
-                .iter()
-                .any(|m| m["answerTo"].as_str() == Some(answer_to.as_str()));
+            let answered = is_answer_recorded(parent_messages, queued, &answer_to);
             drafts.push(TaskQuestionDraft {
                 session_id: session.session_id.clone(),
                 question_id: "dependency".into(),
@@ -2160,9 +2193,7 @@ pub fn project_waiting_user_question_cards(
             continue;
         };
         let answer_to = format!("card:question:{}:{question_id}", session.session_id);
-        let answered = parent_messages
-            .iter()
-            .any(|m| m["answerTo"].as_str() == Some(answer_to.as_str()));
+        let answered = is_answer_recorded(parent_messages, queued, &answer_to);
         drafts.push(TaskQuestionDraft {
             session_id: session.session_id.clone(),
             question_id,
@@ -2824,5 +2855,102 @@ mod tests {
         assert_eq!(rows[0].resolved_state, "resolved");
         assert_eq!(rows[0].resolution, "dismissed");
         assert!(!rows[0].at.is_empty());
+    }
+
+    #[test]
+    fn project_workspace_cards_marks_reply_and_task_questions_resolved_when_answer_is_queued() {
+        let dir = tempdir().unwrap();
+        let data_home = dir.path();
+        let ws = "ws-queued-cards";
+        setup_coordination_sqlite(data_home, ws, &[]);
+
+        let parent_msgs = vec![json!({
+            "id": "reply-q-card",
+            "role": "assistant",
+            "kind": "agent_reply",
+            "content": "Pick one?",
+            "createdAt": "2026-11-27T03:01:00.000Z",
+            "question": { "options": ["Yes", "No"] }
+        })];
+
+        let before =
+            project_workspace_cards(data_home, ws, &parent_msgs, "2026-11-27T03:02:00.000Z")
+                .unwrap();
+        let card_before = before
+            .iter()
+            .find(|c| c["cardId"] == "card:question:reply:reply-q-card")
+            .expect("open reply question card");
+        assert_eq!(card_before["resolvedState"], "open");
+
+        InputQueue::new(data_home)
+            .submit_input(&crate::SubmitInputRequest {
+                workspace_id: ws,
+                input_id: "in-card-queued-1",
+                surface: "desktop",
+                text: "Yes",
+                anchor_refs: vec![],
+                quote_refs: vec![],
+                task_refs: vec![],
+                attachment_refs: vec![],
+                attachments: vec![],
+                answer_to: Some("card:question:reply:reply-q-card".into()),
+                history_ref: None,
+                history_snapshot_id: None,
+                history_confirmed: None,
+            })
+            .unwrap();
+
+        let after =
+            project_workspace_cards(data_home, ws, &parent_msgs, "2026-11-27T03:02:10.000Z")
+                .unwrap();
+        let card_after = after
+            .iter()
+            .find(|c| c["cardId"] == "card:question:reply:reply-q-card")
+            .expect("resolved reply question card");
+        assert_eq!(card_after["resolvedState"], "resolved");
+        assert_eq!(card_after["actions"], json!([]));
+
+        // Also verify waiting_user dependency task question closes when answer is queued.
+        let waiting = BotListSession {
+            session_id: "sess-dep-1".into(),
+            title: "Blocked Task".into(),
+            status: "waiting_user".into(),
+            updated_at: Some("2026-11-27T03:02:00.000Z".into()),
+            conversation_id: None,
+            plan_id: None,
+            anchor_message_id: None,
+            phase_label: None,
+            queue_reason: Some("dependency_failed".into()),
+            result_confirmation_required: None,
+            completion_review_required: false,
+            follow_up: None,
+        };
+        let open_task_cards = project_waiting_user_question_cards_with_queued(
+            data_home,
+            ws,
+            &[],
+            &[],
+            &[&waiting],
+            &[],
+        );
+        assert_eq!(open_task_cards.len(), 1);
+        assert_eq!(open_task_cards[0]["resolvedState"], "open");
+
+        let queued_task_ans = vec![QueuedInputMeta {
+            input_id: "in-task-ans-1".into(),
+            created_at: "2026-11-27T03:02:15.000Z".into(),
+            answer_to: Some("card:question:sess-dep-1:dependency".into()),
+        }];
+        let resolved_task_cards = project_waiting_user_question_cards_with_queued(
+            data_home,
+            ws,
+            &[],
+            &queued_task_ans,
+            &[&waiting],
+            &[],
+        );
+        assert_eq!(resolved_task_cards.len(), 1);
+        assert_eq!(resolved_task_cards[0]["resolvedState"], "resolved");
+        assert_eq!(resolved_task_cards[0]["actions"], json!([]));
     }
 }

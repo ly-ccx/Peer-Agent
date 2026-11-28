@@ -168,3 +168,94 @@ test('large multi-image draft uploads chunk sequentially across CAS revisions wi
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0]!.attachments.length, 3);
 });
+
+test('option click rejected with QUESTION_CLOSED is dismissed cleanly without leaving an unconfirmed bubble or touching unrelated draft', async () => {
+  const f = fixture();
+  f.port.submit = async input => {
+    f.calls.push(input);
+    return { ok: false, code: 'QUESTION_CLOSED' };
+  };
+  const session = f.make(); await session.load();
+  session.edit({ text: 'unrelated draft' }); await session.flush();
+  const result = await session.send({ text: 'Option A', answerTo: 'card:question:reply:q-1', useDraft: false });
+  await session.flush();
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'QUESTION_CLOSED');
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(session.getSnapshot().received.length, 0);
+  assert.equal(f.stored().pending.length, 0);
+  assert.equal(session.getSnapshot().draft.text, 'unrelated draft');
+});
+
+test('repeat option click after durable receipt returns QUESTION_CLOSED immediately without allocating a duplicate pending input', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const first = await session.send({ text: 'Option A', answerTo: 'card:question:reply:q-2', useDraft: false });
+  assert.equal(first.ok, true);
+  assert.equal(session.getSnapshot().received.length, 1);
+
+  const second = await session.send({ text: 'Option A', answerTo: 'card:question:reply:q-2', useDraft: false });
+  assert.equal(second.ok, false);
+  assert.equal(second.code, 'QUESTION_CLOSED');
+  assert.equal(f.calls.length, 1);
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(f.stored().pending.length, 0);
+});
+
+test('freeform composer send rejected with QUESTION_CLOSED preserves the user draft instead of losing text', async () => {
+  const f = fixture();
+  f.port.submit = async input => {
+    f.calls.push(input);
+    if (input.answerTo) return { ok: false, code: 'QUESTION_CLOSED' };
+    return f.received(input);
+  };
+  const session = f.make(); await session.load();
+  session.edit({ text: 'Long custom reply', quote: { messageId: 'm-1', text: 'quoted' } });
+  const r1 = await session.send({ quoteRefs: ['m-1'], answerTo: 'card:question:reply:q-3' });
+  await session.flush();
+  assert.equal(r1.code, 'QUESTION_CLOSED');
+  assert.equal(session.getSnapshot().pending.length, 0);
+  assert.equal(session.getSnapshot().draft.text, 'Long custom reply');
+  assert.equal(session.getSnapshot().draft.quote?.messageId, 'm-1');
+
+  // If the user started typing a newer draft before QUESTION_CLOSED returned, keep the prior composed
+  // input in pending with answerTo stripped so retry delivers it cleanly without overwriting the new draft.
+  const gate = f.defer();
+  f.port.submit = async input => {
+    f.calls.push(input);
+    if (input.answerTo) return gate.promise;
+    return f.received(input);
+  };
+  const sending = session.send({ answerTo: 'card:question:reply:q-4' });
+  const firstInputId = session.getSnapshot().pending[0]!.inputId;
+  session.edit({ text: 'Newer draft' });
+  gate.resolve({ ok: false, code: 'QUESTION_CLOSED' });
+  const r2 = await sending;
+  await session.flush();
+  assert.equal(r2.code, 'QUESTION_CLOSED');
+  assert.equal(session.getSnapshot().draft.text, 'Newer draft');
+  assert.equal(session.getSnapshot().pending.length, 1);
+  assert.equal(session.getSnapshot().pending[0]!.inputId, firstInputId);
+  assert.equal(session.getSnapshot().pending[0]!.answerTo, undefined);
+  const retried = await session.retry(firstInputId);
+  assert.equal(retried.ok, true);
+  assert.equal(session.getSnapshot().pending.length, 0);
+});
+
+test('observeReceived heals pre-existing stuck duplicate reply answers and preserves non-duplicate unknown inputs', async () => {
+  const f = fixture(), first = f.make(); await first.load();
+  f.lose();
+  await first.send({ text: 'Option A', answerTo: 'card:question:reply:q-legacy', useDraft: false });
+  first.edit({ text: 'Custom unsent note' });
+  await first.send({ answerTo: 'card:question:reply:q-legacy' });
+  await first.flush();
+  assert.equal(f.stored().pending.length, 2);
+
+  const reopened = f.make(); await reopened.load();
+  reopened.observeReceived(
+    ['different-committed-input-id'],
+    [{ answerTo: 'card:question:reply:q-legacy', text: 'Option A' }],
+  );
+  await reopened.flush();
+  assert.deepEqual(reopened.getSnapshot().pending.map(item => item.text), ['Custom unsent note']);
+  assert.deepEqual(f.stored().pending.map(item => item.text), ['Custom unsent note']);
+});
