@@ -34,6 +34,27 @@ impl Anthropic {
             .any(|block| matches!(block, Block::Tool { .. }))
     }
 
+    pub(super) fn reply_draft(&self) -> Option<String> {
+        let (args, initial) = self.blocks.values().find_map(|block| match block {
+            Block::Tool {
+                name,
+                args,
+                initial,
+                ..
+            } if name == reply_draft::REPLY_TOOL => Some((args, initial)),
+            _ => None,
+        })?;
+        if args.is_empty() {
+            initial
+                .as_ref()?
+                .get("text")?
+                .as_str()
+                .and_then(reply_draft::from_text)
+        } else {
+            reply_draft::from_json(args)
+        }
+    }
+
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         if v["type"] == "error" || v.get("error").is_some() {
             return Err(ModelError::provider_event("error", v));

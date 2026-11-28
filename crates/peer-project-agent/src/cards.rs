@@ -2916,6 +2916,8 @@ mod tests {
             title: "Blocked Task".into(),
             status: "waiting_user".into(),
             updated_at: Some("2026-11-27T03:02:00.000Z".into()),
+            started_at: None,
+            ended_at: None,
             conversation_id: None,
             plan_id: None,
             anchor_message_id: None,

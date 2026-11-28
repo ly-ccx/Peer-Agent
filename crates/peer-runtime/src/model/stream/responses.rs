@@ -20,6 +20,13 @@ impl Responses {
         !self.items.is_empty()
     }
 
+    pub(super) fn reply_draft(&self) -> Option<String> {
+        self.items
+            .values()
+            .find(|item| item.name == reply_draft::REPLY_TOOL)
+            .and_then(|item| reply_draft::from_json(&item.args))
+    }
+
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         match v["type"].as_str() {
             Some(kind @ ("response.failed" | "response.incomplete" | "error")) => {

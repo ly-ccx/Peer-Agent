@@ -637,13 +637,25 @@ impl NativeProjectHost {
             return Ok(Some((conv_id, ws_path, report, true)));
         }
         for (idx, input) in consumed.pending_execution.iter().enumerate() {
-            if cancel.is_cancelled() {
+            if cancel.is_cancelled()
+                && !self
+                    .runner
+                    .activity_for(workspace_id)
+                    .is_some_and(|activity| {
+                        activity.finished_at.is_none()
+                            && activity.conversation_id == conv_id
+                            && activity.reply_to == [format!("input-{}", input.input_id)]
+                    })
+            {
                 break;
             }
             let is_newly_consumed = consumed
                 .consumed
                 .iter()
                 .any(|item| item.input_id == input.input_id);
+            let retry_turn = self
+                .inputs
+                .explicit_retry_turn(workspace_id, &input.input_id)?;
             let outcome = Box::pin(self.runner.run_turn_with_verifier(
                 &RunTurnOptions {
                     workspace_id,
@@ -658,6 +670,7 @@ impl NativeProjectHost {
                 },
                 model,
                 verifier_model,
+                retry_turn.as_deref(),
                 cancel,
             ))
             .await?;
@@ -669,19 +682,24 @@ impl NativeProjectHost {
             report.bot_turns_run += 1;
             let should_mark_executed = !matches!(
                 outcome.end,
-                crate::runner::TurnEndKind::Failed { .. } | crate::runner::TurnEndKind::CircuitOpen
+                crate::runner::TurnEndKind::Failed { .. }
+                    | crate::runner::TurnEndKind::CircuitOpen
+                    | crate::runner::TurnEndKind::Yielded
             );
             let stop_tick = matches!(
                 outcome.end,
                 crate::runner::TurnEndKind::Failed { .. }
                     | crate::runner::TurnEndKind::CircuitOpen
                     | crate::runner::TurnEndKind::UserStopped
+                    | crate::runner::TurnEndKind::Yielded
             );
             if should_mark_executed {
-                let completed_id = vec![input.input_id.clone()];
-                let _ = self
-                    .inputs
-                    .mark_executed(workspace_id, &completed_id, &[], true);
+                self.inputs.mark_executed(
+                    workspace_id,
+                    std::slice::from_ref(&input.input_id),
+                    &[],
+                    true,
+                )?;
             }
             report.last_turn = Some(outcome);
             if stop_tick {
@@ -922,14 +940,37 @@ impl NativeProjectHost {
             active: &self.active_wake_trials,
             workspace_id,
         };
-        let batch = self.inbox.take_batch(workspace_id, now_ms, true);
+        let mut batch = self.inbox.take_batch(workspace_id, now_ms, true);
+        let failed = self
+            .inbox
+            .restore_failed_wake(workspace_id, conv_id, &mut batch)?;
         if batch.events.is_empty() && !self.has_due_delivery(workspace_id, now_ms) {
             return Ok(None);
         }
         let sessions = self.supervisor.list_sessions(workspace_id);
-        let ready = self
+        let mut ready = self
             .reconcile_deliveries(workspace_id, conv_id, now_ms, false, &batch.events)?
             .due;
+        if let Some(failed) = failed.as_ref().filter(|failed| failed.retry_requested) {
+            let pending = self
+                .inbox
+                .read_cursor_document(workspace_id)
+                .pending_deliveries;
+            for session in &sessions {
+                if let Some(delivery) = pending.get(&session.session_id)
+                    && delivery.stage == crate::inbox::DeliveryStage::Wake
+                    && delivery.revision == session.updated_at
+                    && !ready
+                        .iter()
+                        .any(|item| item.session_id == session.session_id)
+                    && delivery::delivery_event(session, &batch.events)["eventId"]
+                        .as_str()
+                        .is_some_and(|id| failed.event_ids.iter().any(|saved| saved == id))
+                {
+                    ready.push(session.clone());
+                }
+            }
+        }
         let mut unrelated_events = Vec::new();
         for event in &batch.events {
             if event["kind"] == "session_verified" && event["payload"]["acceptedBy"] == "policy" {
@@ -974,11 +1015,40 @@ impl NativeProjectHost {
                 .iter()
                 .map(|session| delivery::delivery_event(session, &batch.events)),
         );
-        if events.is_empty() || is_routine_host_wake_wait(&events, &sessions) {
+        if let Some(failed) = &failed {
+            let mut ordered = Vec::new();
+            for id in &failed.event_ids {
+                if let Some(index) = events
+                    .iter()
+                    .position(|event| event["eventId"] == id.as_str())
+                {
+                    ordered.push(events.swap_remove(index));
+                }
+            }
+            events = ordered;
+            ready.retain(|session| {
+                events.iter().any(|event| {
+                    crate::wake_envelope::wake_event_session_id(event) == Some(&session.session_id)
+                        && event["payload"]["deliveryRevision"] == session.updated_at
+                })
+            });
+            unrelated_events.retain(|event| {
+                failed
+                    .event_ids
+                    .iter()
+                    .any(|id| event["eventId"] == id.as_str())
+            });
+        }
+        if events.is_empty() || (failed.is_none() && is_routine_host_wake_wait(&events, &sessions))
+        {
             self.inbox
                 .commit_batch(workspace_id, batch.through_seq, true)?;
             return Ok(None);
         }
+        let retry_turn = failed
+            .as_ref()
+            .filter(|failed| failed.retry_requested)
+            .map(|failed| failed.turn_id.as_str());
         let (model, verifier_model) = models;
         let wake_cancel = cancel.child_token();
         let preempted = Arc::new(AtomicBool::new(false));
@@ -1008,10 +1078,11 @@ impl NativeProjectHost {
                 wake_events: &events,
                 worker_model_selection,
                 holds_lease: true,
-                manual_trial: false,
+                manual_trial: retry_turn.is_some(),
             },
             model,
             verifier_model,
+            retry_turn,
             &wake_cancel,
             Some(&preempted),
         ))
@@ -1036,6 +1107,20 @@ impl NativeProjectHost {
             )
             && (!matches!(outcome.end, TurnEndKind::Failed { .. })
                 || (!ready.is_empty() && unrelated_events.is_empty()));
+        if !can_advance
+            && matches!(
+                outcome.end,
+                TurnEndKind::Failed { .. } | TurnEndKind::UserStopped
+            )
+        {
+            self.inbox.record_failed_wake(
+                workspace_id,
+                conv_id,
+                &outcome.turn_id,
+                batch.through_seq,
+                &events,
+            )?;
+        }
         self.finish_delivery_attempt(
             workspace_id,
             &ready,
@@ -1680,7 +1765,9 @@ impl NativeProjectHost {
         }
         let trimmed = anchor_or_input_id.trim();
         let input_id = trimmed.strip_prefix("input-").unwrap_or(trimmed);
-        self.inputs.requeue_executed(workspace_id, input_id, true)
+        // The anchor-only surface explicitly retries the last interrupted turn for this input.
+        self.inputs
+            .requeue_for_retry(workspace_id, input_id, true, Some(""))
     }
 
     /// Execute the 7-phase workspace recovery barrier (`lease` -> `inputs` -> `inbox` -> `queue` -> `tasks` -> `watch` -> `digest`).
@@ -2880,7 +2967,8 @@ impl NativeProjectHost {
         Ok(projected)
     }
 
-    /// Retry a stopped/failed Bot turn by clearing its circuit breaker and requeuing its inputs.
+    /// Retry a stopped/failed Bot turn by clearing its circuit breaker and
+    /// requeuing its inputs or marking its existing durable wake batch.
     pub fn retry_turn(&self, workspace_id: &str, turn_id: &str) -> Result<Value, ProjectError> {
         let profile = self
             .profiles
@@ -2892,6 +2980,15 @@ impl NativeProjectHost {
             return Err(ProjectError::code("INVALID_INPUT"));
         }
         self.require_held_or_acquire_lease(workspace_id)?;
+        if let Some(conv_id) = profile.agent_conversation_id.as_deref()
+            && self
+                .inbox
+                .request_wake_retry(workspace_id, conv_id, trimmed)?
+        {
+            self.runner.reset_circuit_breaker_for(workspace_id);
+            self.clear_failure_hold(workspace_id);
+            return Ok(json!({ "ok": true, "turnId": trimmed, "requeued": 0 }));
+        }
         let mut target_inputs: Vec<String> = Vec::new();
         if let Some(ref conv_id) = profile.agent_conversation_id
             && let Ok(messages) =
@@ -2929,7 +3026,10 @@ impl NativeProjectHost {
             }
         } else {
             for iid in &target_inputs {
-                if self.inputs.requeue_executed(workspace_id, iid, true)? {
+                if self
+                    .inputs
+                    .requeue_for_retry(workspace_id, iid, true, Some(trimmed))?
+                {
                     requeued += 1;
                 }
             }
@@ -3581,3 +3681,5 @@ mod tests {
 
 #[cfg(test)]
 mod failure_hold_tests;
+#[cfg(test)]
+mod wake_retry_tests;

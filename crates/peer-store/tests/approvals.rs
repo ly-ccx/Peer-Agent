@@ -176,6 +176,146 @@ fn unknown_fields_preserved_and_changes_bind_complete_record() {
         .is_err()
     );
 }
+fn image_scope() -> Value {
+    json!({"capabilityId": "local.image.read", "action": "read_image_for_model",
+        "path": std::env::temp_dir().join("shot.png"), "workspacePath": null,
+        "fileIdentity": {"dev": 1, "ino": 2, "size": 123, "mtimeMs": 4.125, "ctimeMs": 5.125}})
+}
+
+fn seed_image(root: &std::path::Path, state: &str, scope: Value) -> (Value, Value) {
+    let store = ApprovalStore::new(root);
+    let other = store.open(&request("other"), None).unwrap();
+    let mut image = store.open(&request("image"), None).unwrap();
+    image["state"] = json!(state);
+    image["capabilityId"] = json!("local.image.read");
+    if !scope.is_null() {
+        image["imageReadScope"] = scope;
+    }
+    fs::write(
+        root.join("project-runtime/workspace/approvals.jsonl"),
+        format!("{other}\n{image}\n"),
+    )
+    .unwrap();
+    (image, other)
+}
+
+#[test]
+fn stale_image_grant_is_exact_cas_and_never_renewed_by_replay() {
+    let root = tempfile::tempdir().unwrap();
+    let s = ApprovalStore::new(root.path());
+    let scope = image_scope();
+    let (image, other) = seed_image(root.path(), "stale", scope.clone());
+    let mut tampered = image.clone();
+    tampered["imageReadScope"]["fileIdentity"]["ino"] = json!(99);
+    assert_eq!(
+        s.decide_stale_image_read(&tampered, ApprovalState::Approved, AT, Some("conversation"))
+            .unwrap_err(),
+        StoreError::ApprovalConflict
+    );
+    let decided = s
+        .decide_stale_image_read(&image, ApprovalState::Approved, AT, Some("conversation"))
+        .unwrap();
+    assert_eq!(decided["state"], "approved");
+    assert_eq!(decided["approvalId"], "image");
+    assert!(decided.get("imageReadGrant").is_none());
+    assert_eq!(
+        s.decide_stale_image_read(&image, ApprovalState::Approved, AT, Some("conversation"))
+            .unwrap_err(),
+        StoreError::ApprovalConflict
+    );
+    let rows = s.list(Some("workspace"), None).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows.contains(&other));
+    let row = rows
+        .iter()
+        .find(|r| r["kind"] == "image_read_grant")
+        .unwrap();
+    let id = row["approvalId"].as_str().unwrap();
+    assert!(id.starts_with("image-"));
+    assert_eq!(row["state"], "approved");
+    assert_eq!(row["decidedAt"], AT);
+    assert_eq!(row["decidedBy"], "local_ui");
+    assert_eq!(
+        row["imageReadGrant"],
+        json!({"schemaVersion": 1, "grantId": id,
+        "workspaceId": "workspace", "conversationId": "conversation", "policyRevision": "3",
+        "expiresAt": 1_794_630_600_000_i64, "scope": scope})
+    );
+}
+
+#[test]
+fn invalid_stale_image_scope_cannot_grant_but_can_be_denied() {
+    for bad in [
+        Value::Null,
+        json!({"path": "/shot.png"}),
+        {
+            let mut scope = image_scope();
+            scope["path"] = json!("relative.png");
+            scope
+        },
+        {
+            let mut scope = image_scope();
+            scope["fileIdentity"]["ctimeMs"] = json!("5");
+            scope
+        },
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let s = ApprovalStore::new(root.path());
+        let (image, other) = seed_image(root.path(), "stale", bad);
+        assert_eq!(
+            s.decide_stale_image_read(&image, ApprovalState::Approved, AT, Some("conversation"))
+                .unwrap_err(),
+            StoreError::InvalidInput
+        );
+        let denied = s
+            .decide_stale_image_read(&image, ApprovalState::Denied, AT, None)
+            .unwrap();
+        assert_eq!(denied["decisionReason"], "local_user_denied");
+        assert_eq!(
+            s.list(Some("workspace"), None).unwrap(),
+            vec![denied, other]
+        );
+    }
+}
+
+#[test]
+fn live_image_grant_requires_a_settled_approval_and_reuses_unexpired_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let s = ApprovalStore::new(root.path());
+    let (image, other) = seed_image(root.path(), "open", image_scope());
+    assert_eq!(
+        s.remember_live_image_read(&image, &image, "conversation")
+            .unwrap_err(),
+        StoreError::ApprovalConflict
+    );
+    let approved = s
+        .decide(
+            &image,
+            ApprovalState::Approved,
+            ApprovalDecision::LocalUser,
+            AT,
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        s.list(Some("workspace"), None).unwrap(),
+        vec![approved.clone(), other]
+    );
+    s.remember_live_image_read(&image, &approved, "conversation")
+        .unwrap();
+    let rows = s.list(Some("workspace"), None).unwrap();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.get("imageReadGrant").is_some())
+            .count(),
+        1
+    );
+    s.remember_live_image_read(&image, &approved, "conversation")
+        .unwrap();
+    assert_eq!(s.list(Some("workspace"), None).unwrap(), rows);
+}
+
 #[test]
 fn cancellation_orphan_lock_and_symlink_preserve_facts() {
     let root = tempfile::tempdir().unwrap();

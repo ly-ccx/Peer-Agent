@@ -22,6 +22,13 @@ impl ChatStream {
         !self.calls.is_empty()
     }
 
+    pub(super) fn reply_draft(&self) -> Option<String> {
+        self.calls
+            .values()
+            .find(|call| call.name == reply_draft::REPLY_TOOL)
+            .and_then(|call| reply_draft::from_json(&call.args))
+    }
+
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
         let mut frames = std::mem::take(&mut self.frames);
         let result = frames.push(chunk, |kind, bytes| {
@@ -150,7 +157,11 @@ impl ChatStream {
         let mut calls = Vec::new();
         let mut ids = std::collections::HashSet::new();
         for (index, c) in self.calls {
-            if index != calls.len() || c.id.is_empty() || !ids.insert(c.id) || c.name.is_empty() {
+            if index != calls.len()
+                || c.id.is_empty()
+                || !ids.insert(c.id.clone())
+                || c.name.is_empty()
+            {
                 return Err(ModelError::new("model_call_id_invalid"));
             }
             let arguments = decode(c.args.as_bytes(), TOOL_ARGUMENT_BYTES)?;
@@ -160,6 +171,7 @@ impl ChatStream {
             calls.push(ModelToolCall {
                 name: c.name,
                 arguments,
+                native_chat: Some((c.id, c.args)),
             })
         }
         let continuation = (!self.thought.is_empty()).then(|| continuation::Continuation {

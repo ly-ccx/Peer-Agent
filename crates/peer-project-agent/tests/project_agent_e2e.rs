@@ -674,6 +674,132 @@ async fn memory_and_objective_tools_through_governed_provider_with_chinese_fts_a
 }
 
 #[tokio::test]
+async fn tool_preview_projects_real_results_to_activity_and_persisted_rounds() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(
+        ws.path().join("README.md"),
+        format!(
+            "# README fixture content\nPRIVATE_RESULT_SECRET\n{}",
+            "x".repeat(5_000)
+        ),
+    )
+    .unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("PreviewBot")).unwrap();
+    let input_id = "in-preview";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Read README", None)
+        .unwrap();
+
+    let snapshots = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&snapshots);
+    host.runner()
+        .set_activity_listener(Some(Arc::new(move |activity, _| {
+            seen.lock()
+                .unwrap()
+                .push(serde_json::to_value(activity).unwrap());
+        })));
+    let server = start_mock_server(vec![
+        Box::new(|_| sse_tool_call("preview-ok", "read_file", &json!({"path": "README.md"}))),
+        Box::new(|req| {
+            // Display redaction must not change the tool result fed back into model history.
+            assert!(
+                last_tool_result_json(req)
+                    .unwrap()
+                    .to_string()
+                    .contains("PRIVATE_RESULT_SECRET")
+            );
+            sse_tool_call(
+                "preview-error",
+                "read_file",
+                &json!({"path": "README.md", "start_line": 100}),
+            )
+        }),
+        Box::new(move |_| {
+            sse_tool_call(
+                "preview-reply",
+                "post_reply",
+                &json!({"replyTo": [anchor], "text": "Read README."}),
+            )
+        }),
+    ]);
+    let tick = host
+        .tick(
+            &entry.workspace_id,
+            &mock_model(&server.endpoint),
+            json!({}),
+            &mut AutoAllowPermission,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let turn_id = tick.last_turn.unwrap().turn_id;
+
+    let snapshots = snapshots.lock().unwrap();
+    let reads: Vec<_> = snapshots
+        .iter()
+        .flat_map(|a| a["segments"].as_array().unwrap())
+        .filter(|s| s["name"] == "read_file")
+        .collect();
+    for (status, content) in [
+        ("done", "README fixture content"),
+        ("error", "start_line_out_of_range"),
+    ] {
+        let settled = reads.iter().find(|s| s["status"] == status).unwrap();
+        let running = reads
+            .iter()
+            .find(|s| s["status"] == "running" && s["id"] == settled["id"])
+            .unwrap();
+        assert_eq!(running["summary"], "README.md");
+        assert!(
+            running["input"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("README.md")
+        );
+        assert!(running.get("result").is_none());
+        assert!(running.get("finishedAt").is_none());
+        assert_eq!(settled["input"], running["input"]);
+        assert_eq!(settled["startedAt"], running["startedAt"]);
+        assert!(settled["finishedAt"].is_string());
+        let result = &settled["result"];
+        let text = result["text"].as_str().unwrap();
+        assert!(text.contains(content), "{result}");
+        assert!(!settled.to_string().contains("PRIVATE_"));
+        assert_eq!(result["redacted"], status == "done");
+        assert_eq!(result["truncated"], status == "done");
+        if status == "done" {
+            assert_eq!(text.encode_utf16().count(), 4_000);
+        }
+    }
+
+    let persisted = host.directory().read_conversation(
+        &entry.workspace_id,
+        &ReadConversationOptions {
+            kinds: Some(vec!["agent_turn".into()]),
+            ..Default::default()
+        },
+    );
+    let turn = persisted["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == turn_id)
+        .unwrap();
+    let success = &turn["rounds"][0]["toolCalls"][0];
+    let failure = &turn["rounds"][1]["toolCalls"][0];
+    assert_eq!(success["input"]["path"], "README.md");
+    let text = success["result"]["content"].as_str().unwrap();
+    assert!(text.contains("README fixture content"));
+    assert!(text.ends_with("…[truncated]"));
+    assert!(!success.to_string().contains("PRIVATE_"));
+    assert_eq!(failure["result"]["error"], "start_line_out_of_range");
+    assert_eq!(failure["result"]["ok"], false);
+    assert!(success["startedAtMs"].as_u64().unwrap() <= success["endedAtMs"].as_u64().unwrap());
+}
+
+#[tokio::test]
 async fn multi_round_bot_tool_loop_encodes_valid_wire_tool_calls_for_chat_and_responses() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
@@ -1330,6 +1456,193 @@ async fn bot_turn_records_canonical_usage_ledger_and_durable_agent_turn_with_str
             .as_array()
             .is_some_and(|r| !r.is_empty())
     );
+}
+
+#[tokio::test]
+async fn structured_reply_draft_streams_redacted_then_retracts_or_hands_off() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::oneshot;
+
+    async fn accept_request(listener: &TcpListener) -> (TcpStream, Value) {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(socket);
+        let mut len = None;
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                len = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+        let mut body = vec![0; len.unwrap()];
+        reader.read_exact(&mut body).await.unwrap();
+        (reader.into_inner(), serde_json::from_slice(&body).unwrap())
+    }
+
+    fn event(delta: Value, finish: Option<&str>) -> String {
+        let data = json!({"choices":[{"index":0,"delta":delta,"finish_reason":finish}]});
+        format!("data: {data}\n\n")
+    }
+
+    async fn paused_reply(
+        socket: &mut TcpStream,
+        id: &str,
+        first: &str,
+        last: &str,
+        gate: oneshot::Receiver<()>,
+    ) {
+        let first = event(
+            json!({"reasoning_content":"PRIVATE_REASONING_MARKER","tool_calls":[{
+                "index":0,"id":id,"type":"function","function":{"name":"post_reply","arguments":first}
+            }]}),
+            None,
+        );
+        let last = event(
+            json!({"tool_calls":[{"index":0,"function":{"arguments":last}}]}),
+            Some("tool_calls"),
+        ) + "data: [DONE]\n\n";
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            first.len() + last.len()
+        );
+        socket.write_all(head.as_bytes()).await.unwrap();
+        socket.write_all(first.as_bytes()).await.unwrap();
+        gate.await.unwrap();
+        socket.write_all(last.as_bytes()).await.unwrap();
+    }
+
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("DraftBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let input_id = "in-draft";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Explain the project", None)
+        .unwrap();
+
+    let (activity_tx, mut activities) = tokio::sync::mpsc::unbounded_channel();
+    host.runner()
+        .set_activity_listener(Some(Arc::new(move |activity, _| {
+            let _ = activity_tx.send(activity);
+        })));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = mock_model(&format!(
+        "http://{}/chat/completions",
+        listener.local_addr().unwrap()
+    ));
+    let (finish_rejected, rejected_gate) = oneshot::channel();
+    let (repair_requested, repair_seen) = oneshot::channel();
+    let (start_repair, repair_gate) = oneshot::channel();
+    let (finish_accepted, accepted_gate) = oneshot::channel();
+    let server = async move {
+        let (mut socket, request) = accept_request(&listener).await;
+        assert!(
+            request["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["function"]["name"] == "post_reply")
+        );
+        paused_reply(
+            &mut socket,
+            "draft-1",
+            r#"{"replyTo":["input-missing"],"text":"待确认 sk-s"#,
+            r#"ynthetic123456"}"#,
+            rejected_gate,
+        )
+        .await;
+        drop(socket);
+
+        let (mut socket, request) = accept_request(&listener).await;
+        let rejected = last_tool_result_json(&request).expect("rejected post_reply output");
+        assert_eq!(rejected["ok"], false);
+        assert_eq!(rejected["error"], "anchor_not_found");
+        repair_requested.send(()).unwrap();
+        repair_gate.await.unwrap();
+        paused_reply(
+            &mut socket,
+            "draft-2",
+            &format!(r#"{{"replyTo":["{anchor}"],"text":"项目概况\uD83D\u"#),
+            r#"DE80清楚了。"}"#,
+            accepted_gate,
+        )
+        .await;
+    };
+
+    let replies = || {
+        host.conversations()
+            .read_committed(&conv_id, None, 4 * 1024 * 1024)
+            .unwrap()
+            .history
+            .messages
+            .into_iter()
+            .filter(|m| m["kind"] == "agent_reply")
+            .collect::<Vec<_>>()
+    };
+    let assert_safe = |activity: &peer_project_agent::ProjectAgentActivity| {
+        let snapshot = serde_json::to_string(activity).unwrap();
+        for hidden in ["PRIVATE_REASONING_MARKER", "sk-s", "synthetic123456"] {
+            assert!(!snapshot.contains(hidden), "unsafe activity: {snapshot}");
+        }
+    };
+    let observe = async {
+        let first = loop {
+            let activity = activities.recv().await.unwrap();
+            assert_safe(&activity);
+            if !activity.reply_text.is_empty() {
+                break activity;
+            }
+        };
+        assert_eq!(first.phase, "responding");
+        assert_eq!(first.reply_text, "待确认 [redacted]");
+        assert!(replies().is_empty(), "the preview isn't a committed reply");
+        finish_rejected.send(()).unwrap();
+        repair_seen.await.unwrap();
+        let cleared = host.runner().activity_for(&entry.workspace_id).unwrap();
+        assert_eq!(cleared.turn_id, first.turn_id);
+        assert!(cleared.reply_text.is_empty());
+        assert!(replies().is_empty(), "a rejected draft wasn't committed");
+        start_repair.send(()).unwrap();
+
+        loop {
+            let activity = activities.recv().await.unwrap();
+            assert_safe(&activity);
+            if activity.reply_text == "项目概况" {
+                assert_eq!(activity.phase, "responding");
+                assert_eq!(activity.turn_id, first.turn_id);
+                assert!(replies().is_empty());
+                break;
+            }
+        }
+        finish_accepted.send(()).unwrap();
+        first.turn_id
+    };
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host.tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel);
+    let (tick, turn_id, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(tick, observe, server)
+    })
+    .await
+    .expect("paused SSE fixture and activity snapshots must advance together");
+    assert_eq!(tick.unwrap().bot_turns_run, 1);
+    let replies = replies();
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0]["content"], "项目概况🚀清楚了。");
+    assert_eq!(replies[0]["turnId"], turn_id);
+    // The desktop folds the terminal activity by turnId when the canonical reply arrives.
+    let done = host.runner().activity_for(&entry.workspace_id).unwrap();
+    assert_eq!(done.turn_id, turn_id);
+    assert_eq!(done.phase, "done");
+    assert!(done.finished_at.is_some());
+    while let Ok(activity) = activities.try_recv() {
+        assert_safe(&activity);
+    }
 }
 
 #[tokio::test]
@@ -5265,8 +5578,199 @@ async fn fallback_reply_store_failure_reports_failed_and_preserves_pending_input
     host.close();
 }
 
+const YIELD_OPENING: &str = "I will inspect the project before answering.";
+const YIELD_PRIVATE: &str = "PRIVATE_YIELD_REASONING";
+
+fn yield_tool_rounds() -> Vec<ScriptHandler> {
+    (0..14)
+        .map(|idx| {
+            Box::new(move |_: &Value| {
+                let id = format!("yield-checkpoint-call-{idx}");
+                let args = json!({"path": "."});
+                if idx == 0 {
+                    let private = json!({"choices":[{"index":0,"delta":{
+                        "reasoning_content": YIELD_PRIVATE
+                    },"finish_reason":null}]});
+                    format!("data: {private}\n\n")
+                        + &sse_streamed_text_then_tool_call(
+                            &[YIELD_OPENING],
+                            &id,
+                            "list_files",
+                            &args,
+                        )
+                } else {
+                    sse_tool_call(&id, "list_files", &args)
+                }
+            }) as ScriptHandler
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_leak() {
+async fn yielded_slice_restores_checkpoint_and_replaces_public_opening_without_leaking_reasoning() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("YieldBot")).unwrap();
+    let ws_id = &entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let input_id = "yield-continuation";
+    let cancel = CancellationToken::new();
+    let store = peer_store::ConversationStore::new(home.path());
+    let mut handlers = yield_tool_rounds();
+    let answer = "Here is the final project answer.";
+    handlers.push(Box::new(move |_| sse_text(answer)));
+    handlers.push(Box::new(|_| sse_text("Independent reply.")));
+    let server = start_mock_server(handlers);
+    let model = mock_model(&server.endpoint);
+    host.submit_user_input(ws_id, input_id, "Inspect this project", None)
+        .unwrap();
+
+    let first = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.inputs_consumed, 1);
+    let first = first.last_turn.unwrap();
+    assert_eq!(first.end, TurnEndKind::Yielded);
+    assert!(host.inputs().has_pending(ws_id));
+    assert!(
+        host.find_reply_for_input(ws_id, input_id)
+            .unwrap()
+            .is_none()
+    );
+    let mut trace = store
+        .read_committed(&conv_id, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages
+        .into_iter()
+        .find(|m| m["id"] == first.turn_id)
+        .unwrap();
+    hydrate_agent_turn_record(home.path(), ws_id, &mut trace);
+    let opening = trace["publicUpdates"].to_string();
+    assert_eq!(opening.matches(YIELD_OPENING).count(), 1, "{opening}");
+    assert!(!opening.contains(YIELD_PRIVATE));
+    let live = host.runner().activity_for(ws_id).unwrap();
+    assert!(live.finished_at.is_none());
+    let live = serde_json::to_string(&live).unwrap();
+    assert!(!live.contains(YIELD_OPENING));
+    assert!(!live.contains(YIELD_PRIVATE));
+
+    // The next scheduler tick uses the original queued input (no retry or resubmit).
+    let next = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(next.inputs_consumed, 0);
+    let next = next.last_turn.unwrap();
+    assert!(matches!(next.end, TurnEndKind::ReplyCommitted { .. }));
+    assert!(!host.inputs().has_pending(ws_id));
+    assert_eq!(
+        host.find_reply_for_input(ws_id, input_id).unwrap().unwrap()["content"],
+        answer
+    );
+    let snapshot = store.read_committed(&conv_id, None, 1024 * 1024).unwrap();
+    let mut resumed = snapshot
+        .history
+        .messages
+        .into_iter()
+        .find(|m| m["id"] == next.turn_id)
+        .unwrap();
+    assert_eq!(
+        resumed["meta"]["providerCheckpointResumedFrom"],
+        first.turn_id
+    );
+    hydrate_agent_turn_record(home.path(), ws_id, &mut resumed);
+    assert!(!resumed["publicUpdates"].to_string().contains(YIELD_OPENING));
+    assert!(!resumed["publicUpdates"].to_string().contains(YIELD_PRIVATE));
+
+    host.submit_user_input(ws_id, "yield-independent", "A brand-new question", None)
+        .unwrap();
+    let fresh = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    let fresh = fresh.last_turn.unwrap();
+    assert!(matches!(fresh.end, TurnEndKind::ReplyCommitted { .. }));
+    let snapshot = store.read_committed(&conv_id, None, 1024 * 1024).unwrap();
+    let fresh_trace = snapshot
+        .history
+        .messages
+        .iter()
+        .find(|m| m["id"] == fresh.turn_id)
+        .unwrap();
+    assert!(fresh_trace["meta"]["providerCheckpointResumedFrom"].is_null());
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 16);
+    assert!(
+        requests[14]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| { m["role"] == "tool" && m["tool_call_id"] == "yield-checkpoint-call-13" }),
+        "the next slice must receive the last executed tool result"
+    );
+    assert!(
+        !requests[15]["messages"]
+            .to_string()
+            .contains("yield-checkpoint-call-")
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn cancelled_yield_handoff_settles_original_input_without_dispatch() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("YieldStopBot"))
+        .unwrap();
+    let ws_id = &entry.workspace_id;
+    let cancel = CancellationToken::new();
+    let server = start_mock_server(yield_tool_rounds());
+    let model = mock_model(&server.endpoint);
+    host.submit_user_input(ws_id, "yield-stop", "Inspect this project", None)
+        .unwrap();
+    let first = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.last_turn.unwrap().end, TurnEndKind::Yielded);
+    assert!(
+        host.runner()
+            .activity_for(ws_id)
+            .unwrap()
+            .finished_at
+            .is_none()
+    );
+    cancel.cancel();
+    let stopped = host
+        .tick_foreground(ws_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(stopped.last_turn.unwrap().end, TurnEndKind::UserStopped);
+    let activity = host.runner().activity_for(ws_id).unwrap();
+    assert_eq!(activity.phase, "stopped");
+    assert!(activity.finished_at.is_some());
+    assert!(!host.inputs().has_pending(ws_id));
+    assert!(
+        host.find_reply_for_input(ws_id, "yield-stop")
+            .unwrap()
+            .is_none()
+    );
+    let later = host
+        .tick_foreground(ws_id, &model, json!({}), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(later.bot_turns_run, 0);
+    assert_eq!(server.requests.lock().unwrap().len(), 14);
+    host.close();
+}
+
+#[tokio::test]
+async fn cooperative_yield_cap_synthesizes_without_tools_and_recovers_from_dsml_leak() {
     let home = tempdir().unwrap();
     let ws = tempdir().unwrap();
     fs::write(ws.path().join("README.md"), "# Test repo\n").unwrap();
@@ -5284,10 +5788,10 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
     host.submit_user_input(&ws_id, input_id, "Inspect repository", None)
         .unwrap();
 
-    let mut handlers: Vec<ScriptHandler> = (0..14)
+    let mut handlers: Vec<ScriptHandler> = (0..42)
         .map(|idx| {
             Box::new(move |req: &Value| {
-                if idx == 13 {
+                if idx % 14 == 13 {
                     let sys_text = req["messages"]
                         .as_array()
                         .into_iter()
@@ -5309,7 +5813,7 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
             }) as ScriptHandler
         })
         .collect();
-    // Request 15: Synthesis attempt 1 sees disabled tools + explicit synthesis prompt, simulates DeepSeek DSML leak.
+    // After three slices: Synthesis attempt 1 sees disabled tools + explicit synthesis prompt, simulates DeepSeek DSML leak.
     handlers.push(Box::new(|req| {
         assert!(
             req.get("tools")
@@ -5375,12 +5879,20 @@ async fn synthesis_after_max_rounds_instructs_no_tools_and_recovers_from_dsml_le
 
     let server = start_mock_server(handlers);
     let model = mock_model(&server.endpoint);
+    for _ in 0..2 {
+        let slice = host
+            .tick_foreground(&ws_id, &model, json!({}), &cancel)
+            .await
+            .unwrap();
+        assert_eq!(slice.last_turn.unwrap().end, TurnEndKind::Yielded);
+        assert!(host.inputs().has_pending(&ws_id));
+    }
     let report = host
         .tick_foreground(&ws_id, &model, json!({}), &cancel)
         .await
         .unwrap();
     assert_eq!(report.bot_turns_run, 1);
-    assert_eq!(server.requests.lock().unwrap().len(), 16);
+    assert_eq!(server.requests.lock().unwrap().len(), 44);
     assert!(matches!(
         report.last_turn.as_ref().map(|t| &t.end),
         Some(TurnEndKind::ReplyCommitted { .. })
