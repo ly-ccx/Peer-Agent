@@ -135,129 +135,131 @@ export function ModelSettingsDialog({
             <button type="button" className="llm-dialog-close" onClick={requestClose} aria-label={zh ? '关闭' : 'Close'}><PeerIcon name="close" size={14} /></button>
           </header>
 
-          <fieldset className="llm-model-settings-body ui-form-fields" disabled={saving}>
-            <section className="llm-settings-section">
-              <div className="llm-settings-section-heading">
-                <h4>{zh ? '基础' : 'Basics'}</h4>
-                <span className={`llm-metadata-state is-${completion}`}>{completion === 'complete' ? (zh ? '元数据完整' : 'Complete') : completion === 'partial' ? (zh ? '部分待完善' : 'Partial') : (zh ? '元数据待完善' : 'Needs metadata')}</span>
-              </div>
-              <label><span>{zh ? '昵称' : 'Nickname'}</span><input value={form.nickname} placeholder={zh ? '可选' : 'Optional'} onChange={(event) => setForm((current) => ({ ...current, nickname: event.target.value }))} /></label>
-              <label>
-                <span>Model ID</span>
-                <input
-                  value={form.modelId}
-                  placeholder={zh ? 'API 模型名（同渠道唯一）' : 'API model id (unique in channel)'}
-                  onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
-                  spellCheck={false}
-                />
-              </label>
-              <div className="llm-settings-grid">
-                <label><span>{zh ? '上下文长度' : 'Context window'}</span><input type="number" min="0" value={form.contextWindow} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, contextWindow: event.target.value }))} /></label>
-                <label><span>{zh ? '最大输出' : 'Max output'}</span><input type="number" min="0" value={form.maxOutputTokens} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, maxOutputTokens: event.target.value }))} /></label>
-              </div>
-            </section>
-
-            <section className="llm-settings-section">
-              <h4>{zh ? '能力' : 'Capabilities'}</h4>
-              <div className="llm-settings-capabilities">
-                {([
-                  ['supportsVision', zh ? '图像输入' : 'Image input'],
-                  ['supportsPromptCaching', 'Prompt Cache'],
-                  ['supportsReasoning', zh ? '推理模型' : 'Reasoning model'],
-                ] as const).map(([field, label]) => (
-                  <label key={field}>
-                    <span>{label}</span>
-                    <Dropdown
-                      value={form[field]}
-                      options={[
-                        { value: 'unknown', label: zh ? '未知' : 'Unknown' },
-                        { value: 'yes', label: zh ? '支持' : 'Supported' },
-                        { value: 'no', label: zh ? '不支持' : 'Not supported' },
-                      ]}
-                      onChange={(value) => setForm((current) => ({ ...current, [field]: value as 'unknown' | 'yes' | 'no' }))}
-                    />
-                  </label>
-                ))}
-              </div>
-              {form.supportsReasoning === 'yes' ? (
-                <>
-                  <label>
-                    <span>{zh ? '推理参数风格' : 'Reasoning parameter style'}</span>
-                    <Dropdown
-                      value={form.reasoningParamStyle || 'openai-effort'}
-                      options={[
-                        { value: 'openai-effort', label: 'reasoning_effort' },
-                        { value: 'anthropic-enabled-budget', label: 'thinking.budget_tokens' },
-                        { value: 'anthropic-adaptive-effort', label: 'adaptive thinking' },
-                        { value: 'qwen-enable', label: 'enable_thinking' },
-                        { value: 'none', label: zh ? '不发送额外参数' : 'No extra parameter' },
-                      ]}
-                      onChange={(value) => setForm((current) => ({ ...current, reasoningParamStyle: value as LlmReasoningParamStyle }))}
-                    />
-                  </label>
-                  <label>
-                    <span>{zh ? '推理强度映射' : 'Reasoning effort map'}</span>
-                    <textarea
-                      rows={5}
-                      value={form.reasoningEffortMapText}
-                      placeholder={'{"low": 1024, "medium": 4096, "high": 8192}'}
-                      onChange={(event) => setForm((current) => ({ ...current, reasoningEffortMapText: event.target.value }))}
-                    />
-                    <small>{zh ? '支持 JSON，或每行 key=value。留空表示未知。' : 'Use JSON or one key=value per line. Leave blank for unknown.'}</small>
-                  </label>
-                </>
-              ) : null}
-            </section>
-
-            {model.modelOptions?.length ? (
+          <div className="llm-model-settings-body">
+            <fieldset className="llm-model-settings-fields ui-form-fields" disabled={saving}>
               <section className="llm-settings-section">
-                <h4>{zh ? '渠道模型选项' : 'Channel model options'}</h4>
+                <div className="llm-settings-section-heading">
+                  <h4>{zh ? '基础' : 'Basics'}</h4>
+                  <span className={`llm-metadata-state is-${completion}`}>{completion === 'complete' ? (zh ? '元数据完整' : 'Complete') : completion === 'partial' ? (zh ? '部分待完善' : 'Partial') : (zh ? '元数据待完善' : 'Needs metadata')}</span>
+                </div>
+                <label><span>{zh ? '昵称' : 'Nickname'}</span><input value={form.nickname} placeholder={zh ? '可选' : 'Optional'} onChange={(event) => setForm((current) => ({ ...current, nickname: event.target.value }))} /></label>
+                <label>
+                  <span>Model ID</span>
+                  <input
+                    value={form.modelId}
+                    placeholder={zh ? 'API 模型名（同渠道唯一）' : 'API model id (unique in channel)'}
+                    onChange={(event) => setForm((current) => ({ ...current, modelId: event.target.value }))}
+                    spellCheck={false}
+                  />
+                </label>
                 <div className="llm-settings-grid">
-                  {model.modelOptions.map((definition) => {
-                    const selected = form.modelOptionValues[definition.id] ?? definition.defaultValue;
-                    return (
-                      <label key={definition.id}>
-                        <span>{definition.label}</span>
-                        <Dropdown
-                          value={String(selected)}
-                          options={definition.choices.map((choice) => ({
-                            value: String(choice.value),
-                            label: choice.label,
-                          }))}
-                          onChange={(value) => setForm((current) => ({
-                            ...current,
-                            modelOptionValues: updateModelOptionSelection(
-                              model.modelOptions,
-                              current.modelOptionValues,
-                              definition.id,
-                              value,
-                            ),
-                          }))}
-                        />
-                        {definition.description ? <small>{definition.description}</small> : null}
-                      </label>
-                    );
-                  })}
+                  <label><span>{zh ? '上下文长度' : 'Context window'}</span><input type="number" min="0" value={form.contextWindow} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, contextWindow: event.target.value }))} /></label>
+                  <label><span>{zh ? '最大输出' : 'Max output'}</span><input type="number" min="0" value={form.maxOutputTokens} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, maxOutputTokens: event.target.value }))} /></label>
                 </div>
               </section>
-            ) : null}
 
-            <section className="llm-settings-section">
-              <h4>{zh ? '价格（美元 / 百万 tokens）' : 'Pricing (USD / 1M tokens)'}</h4>
-              <div className="llm-settings-grid">
-                <label><span>{zh ? '输入' : 'Input'}</span><input type="number" min="0" step="any" value={form.inputPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, inputPrice: event.target.value }))} /></label>
-                <label><span>{zh ? '输出' : 'Output'}</span><input type="number" min="0" step="any" value={form.outputPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, outputPrice: event.target.value }))} /></label>
-                <label><span>{zh ? '缓存写入' : 'Cache write'}</span><input type="number" min="0" step="any" value={form.cacheWritePrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, cacheWritePrice: event.target.value }))} /></label>
-                <label><span>{zh ? '缓存读取' : 'Cache read'}</span><input type="number" min="0" step="any" value={form.cacheReadPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, cacheReadPrice: event.target.value }))} /></label>
-              </div>
-            </section>
+              <section className="llm-settings-section">
+                <h4>{zh ? '能力' : 'Capabilities'}</h4>
+                <div className="llm-settings-capabilities">
+                  {([
+                    ['supportsVision', zh ? '图像输入' : 'Image input'],
+                    ['supportsPromptCaching', 'Prompt Cache'],
+                    ['supportsReasoning', zh ? '推理模型' : 'Reasoning model'],
+                  ] as const).map(([field, label]) => (
+                    <label key={field}>
+                      <span>{label}</span>
+                      <Dropdown
+                        value={form[field]}
+                        options={[
+                          { value: 'unknown', label: zh ? '未知' : 'Unknown' },
+                          { value: 'yes', label: zh ? '支持' : 'Supported' },
+                          { value: 'no', label: zh ? '不支持' : 'Not supported' },
+                        ]}
+                        onChange={(value) => setForm((current) => ({ ...current, [field]: value as 'unknown' | 'yes' | 'no' }))}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {form.supportsReasoning === 'yes' ? (
+                  <>
+                    <label>
+                      <span>{zh ? '推理参数风格' : 'Reasoning parameter style'}</span>
+                      <Dropdown
+                        value={form.reasoningParamStyle || 'openai-effort'}
+                        options={[
+                          { value: 'openai-effort', label: 'reasoning_effort' },
+                          { value: 'anthropic-enabled-budget', label: 'thinking.budget_tokens' },
+                          { value: 'anthropic-adaptive-effort', label: 'adaptive thinking' },
+                          { value: 'qwen-enable', label: 'enable_thinking' },
+                          { value: 'none', label: zh ? '不发送额外参数' : 'No extra parameter' },
+                        ]}
+                        onChange={(value) => setForm((current) => ({ ...current, reasoningParamStyle: value as LlmReasoningParamStyle }))}
+                      />
+                    </label>
+                    <label>
+                      <span>{zh ? '推理强度映射' : 'Reasoning effort map'}</span>
+                      <textarea
+                        rows={5}
+                        value={form.reasoningEffortMapText}
+                        placeholder={'{"low": 1024, "medium": 4096, "high": 8192}'}
+                        onChange={(event) => setForm((current) => ({ ...current, reasoningEffortMapText: event.target.value }))}
+                      />
+                      <small>{zh ? '支持 JSON，或每行 key=value。留空表示未知。' : 'Use JSON or one key=value per line. Leave blank for unknown.'}</small>
+                    </label>
+                  </>
+                ) : null}
+              </section>
 
-            <section className="llm-settings-section llm-metadata-source">
-              <div><span>{zh ? '数据来源' : 'Metadata source'}</span><strong>{sourceLabel(model.metadataSource, zh)}</strong></div>
-              <div><span>{zh ? '最后更新' : 'Last updated'}</span><strong>{model.metadataSyncedAt ? new Date(model.metadataSyncedAt).toLocaleString() : (zh ? '未知' : 'Unknown')}</strong></div>
-            </section>
-            {saveError ? <p className="llm-catalog-error" role="alert">{saveError}</p> : null}
-          </fieldset>
+              {model.modelOptions?.length ? (
+                <section className="llm-settings-section">
+                  <h4>{zh ? '渠道模型选项' : 'Channel model options'}</h4>
+                  <div className="llm-settings-grid">
+                    {model.modelOptions.map((definition) => {
+                      const selected = form.modelOptionValues[definition.id] ?? definition.defaultValue;
+                      return (
+                        <label key={definition.id}>
+                          <span>{definition.label}</span>
+                          <Dropdown
+                            value={String(selected)}
+                            options={definition.choices.map((choice) => ({
+                              value: String(choice.value),
+                              label: choice.label,
+                            }))}
+                            onChange={(value) => setForm((current) => ({
+                              ...current,
+                              modelOptionValues: updateModelOptionSelection(
+                                model.modelOptions,
+                                current.modelOptionValues,
+                                definition.id,
+                                value,
+                              ),
+                            }))}
+                          />
+                          {definition.description ? <small>{definition.description}</small> : null}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="llm-settings-section">
+                <h4>{zh ? '价格（美元 / 百万 tokens）' : 'Pricing (USD / 1M tokens)'}</h4>
+                <div className="llm-settings-grid">
+                  <label><span>{zh ? '输入' : 'Input'}</span><input type="number" min="0" step="any" value={form.inputPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, inputPrice: event.target.value }))} /></label>
+                  <label><span>{zh ? '输出' : 'Output'}</span><input type="number" min="0" step="any" value={form.outputPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, outputPrice: event.target.value }))} /></label>
+                  <label><span>{zh ? '缓存写入' : 'Cache write'}</span><input type="number" min="0" step="any" value={form.cacheWritePrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, cacheWritePrice: event.target.value }))} /></label>
+                  <label><span>{zh ? '缓存读取' : 'Cache read'}</span><input type="number" min="0" step="any" value={form.cacheReadPrice} placeholder={zh ? '未知' : 'Unknown'} onChange={(event) => setForm((current) => ({ ...current, cacheReadPrice: event.target.value }))} /></label>
+                </div>
+              </section>
+
+              <section className="llm-settings-section llm-metadata-source">
+                <div><span>{zh ? '数据来源' : 'Metadata source'}</span><strong>{sourceLabel(model.metadataSource, zh)}</strong></div>
+                <div><span>{zh ? '最后更新' : 'Last updated'}</span><strong>{model.metadataSyncedAt ? new Date(model.metadataSyncedAt).toLocaleString() : (zh ? '未知' : 'Unknown')}</strong></div>
+              </section>
+              {saveError ? <p className="llm-catalog-error" role="alert">{saveError}</p> : null}
+            </fieldset>
+          </div>
 
           <footer className="llm-dialog-footer">
             <button type="button" className="ui-button" onClick={requestClose}>{zh ? '取消' : 'Cancel'}</button>

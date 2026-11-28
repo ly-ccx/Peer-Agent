@@ -41,7 +41,7 @@ async function renderer(output) {
         const i18n = createI18n('en-US');
         const message = normalizeBotMessage(fixture.textReply);
         return <><ReplyBubble workspaceId={fixture.owner.workspaceId} message={message} referenceIds={[]} anchors={new Map()} highlighted={false} i18n={i18n}
-          onJump={()=>{}} onQuote={()=>{}} workIndex={indexBotWork([],true)} onOpenWork={()=>{}}/>
+          onJump={()=>{}} onQuote={()=>{}} workIndex={indexBotWork([],true)} taskRows={[]} onOpenWork={()=>{}}/>
           <CardView workspaceId={fixture.owner.workspaceId} cards={fixture.governanceCards} i18n={i18n}/></>;
       }
       if(window.peerResource)createRoot(document.getElementById('root')).render(<ConfirmProvider><NativeResourceWindow/></ConfirmProvider>);
@@ -195,6 +195,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
       replaceOwner(){activeOwner={...owner,conversationId:'replacement-conversation'};withholdOwnerOutcome=true},
       restoreOwner(){activeOwner=owner;withholdOwnerOutcome=false},
       rejectLayoutWrites(){rejectLayoutWrite=true},
+      allowLayoutWrites(){rejectLayoutWrite=false},
       allowOutcome(){withholdOwnerOutcome=false},
       replacementLayout:()=>interactive.readLayout(source.webContents,{owner:activeOwner}),
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&!['fixture-result-anchor','fixture-text-anchor'].includes(row.id)).map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
@@ -487,8 +488,30 @@ test('the main workspace opens canonical interactive deliveries, restores result
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, value);
       node.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
     }, raw);
+    // Establish both fixed views and their saved layout before creating an
+    // unsaved layout change alongside the unfinished condition edit.
+    await page.bringToFront();
     await compose(revised.getByLabel('Trial name', { exact: true }), 'Native local recovery');
     await compose(page.getByLabel('Trial name', { exact: true }), 'Main local recovery');
+    await page.waitForFunction(async version => {
+      const { fixture } = await window.peerAgent.getBootstrap();
+      const reply = await window.peerAgent.resourcePresentation.readLayout({ owner: fixture.owner });
+      const layout = reply.snapshot?.interactive;
+      if (!reply.ok || layout?.tabs.length !== 2) return false;
+      const active = layout.tabs.find(tab => tab.id === layout.activeTabId);
+      return !!active && active.reference.contentVersion !== version
+        && layout.tabs.some(tab => tab.reference.contentVersion === version)
+        && !document.querySelector('.resource-layout-notice');
+    }, next.contentVersion);
+    await electron.evaluate(() => globalThis.workspaceFixture.rejectLayoutWrites());
+    const readingChanged = await page.locator('.resource-interactive-view[data-active="true"] .resource-interactive-body').evaluate(node => {
+      const previous = node.scrollTop;
+      node.scrollTop = previous > 100 ? 0 : 700;
+      node.dispatchEvent(new Event('scroll'));
+      return node.scrollTop !== previous;
+    });
+    assert.equal(readingChanged, true, 'the layout guard has a real unsaved reading position');
+    await page.locator('.resource-layout-notice').waitFor();
     await electron.evaluate(() => globalThis.workspaceFixture.replaceOwner());
     await revised.getByRole('button', { name: 'Close this window', exact: true }).click();
     const nativeRecovery = revised.getByRole('region', { name: 'Previous view input recovery' });
@@ -537,12 +560,20 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await closedReading;
 
     await electron.evaluate(() => globalThis.workspaceFixture.closeSource());
-    const mainRecovery = page.getByRole('region', { name: 'Previous view input recovery' });
+    const mainRecovery = page.getByRole('region', { name: 'Previous view input recovery' })
+      .filter({ has: page.getByLabel('Preserved local input', { exact: true }) });
     await mainRecovery.getByLabel('Preserved local input', { exact: true }).waitFor();
     assert.ok((await mainRecovery.getByLabel('Preserved local input', { exact: true }).inputValue()).includes('Trial name: Main local recovery'));
     assert.equal(page.isClosed(), false);
     await page.screenshot({ path: path.join(root, 'workspace-owner-replacement.png'), animations: 'disabled' });
     await discard(page, mainRecovery);
+    await mainRecovery.waitFor({ state: 'detached' });
+    const remainingView = page.getByRole('region', { name: 'Previous view input recovery' })
+      .filter({ hasNot: page.getByLabel('Preserved local input', { exact: true }) });
+    await remainingView.getByRole('button', { name: 'Discard local changes', exact: true }).waitFor();
+    assert.equal(await page.getByText('You can close or reload again.', { exact: true }).count(), 0,
+      'discarding one replaced view does not release the other view or unblock closing');
+    await discard(page, remainingView, 0);
     await page.getByText('You can close or reload again.', { exact: true }).waitFor();
     assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.replacementLayout()), { ok: true, snapshot: null });
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$name, 'Workspace trial');
@@ -566,7 +597,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await cleaned.getByRole('button', { name: 'Close this window', exact: true }).click();
     await closedTombstone;
 
-    await electron.evaluate(() => globalThis.workspaceFixture.restoreOwner());
+    await electron.evaluate(() => { globalThis.workspaceFixture.restoreOwner(); globalThis.workspaceFixture.allowLayoutWrites(); });
     await reloadSavedWorkspace(electron, page);
     await page.getByText('Deliveries', { exact: true }).click();
     await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();

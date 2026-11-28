@@ -356,7 +356,7 @@ test('list, get, cancel, message, and post_reply return structured success and e
   ));
   assert.equal(bare.error, 'invalid_input');
   const tooLong = outputOf(await provider.executeCapability(
-    call('local.delegation.post_reply', { replyTo: ['u1'], text: 'x'.repeat(2001) }, 'reply-4'),
+    call('local.delegation.post_reply', { replyTo: ['u1'], text: 'x'.repeat(8001) }, 'reply-4'),
     { ...context, toolCallOrdinal: 12 },
   ));
   assert.equal(tooLong.error, 'invalid_input');

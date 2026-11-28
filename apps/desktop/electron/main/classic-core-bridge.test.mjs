@@ -3589,7 +3589,7 @@ test('E2E: remote-device-connector (setupRemoteAccess + createRemoteProjectAcces
 });
 
 test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.interactive.validate -> verifier evaluates -> Desktop opens card', async () => {
-  const { root, dataHome, workspace, cleanup } = makeTempDirs();
+  const { dataHome, workspace, cleanup } = makeTempDirs();
   const binaryPath = resolveTestBinary();
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const conversationStore = createConversationStore({ storeDir: path.join(dataHome, 'conversations') });
@@ -3709,17 +3709,22 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
       return;
     }
 
-    // Main Bot turns
-    if (joined.includes('Process ') && joined.includes('wake event')) {
+    // ADR 138 delivers the completed worker's report in the wake input.
+    const wake = messages.findLast((m) => m.role === 'user')?.content;
+    if (typeof wake === 'string' && wake.startsWith('[Host Wake Event Payload')) {
       if (lastRole === 'tool') {
-        res.end(sseText('bot-wake-done', ''));
+        const result = JSON.parse(messages.at(-1).content);
+        assert.equal(result.reverified, true, JSON.stringify(result));
+        assert.equal(result.verificationReport?.passed, true, JSON.stringify(result));
+        res.end(sseText('', '已经为你渲染好「项目交付概览」交互卡片，可直接打开体验筛选。'));
         return;
       }
-      res.end(sseTool('bot-wake-reply-1', 'post_reply', {
-        proactive: true,
-        sources: spawnedSessionId ? [spawnedSessionId] : [],
-        text: '已经为你渲染好「项目交付概览」交互卡片，可直接打开体验筛选。',
-      }));
+      if (spawnedSessionId && publishedArtifactRef
+        && wake.includes('"status":"result_ready"') && wake.includes(publishedArtifactRef)) {
+        res.end(sseTool('bot-wake-verify-1', 'verify_session', { sessionId: spawnedSessionId, force: true }));
+        return;
+      }
+      res.end(sseText('', 'NO_REPLY'));
       return;
     }
 
@@ -3729,14 +3734,7 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
         const parsed = JSON.parse(toolMsg?.content || '{}');
         if (typeof parsed?.sessionId === 'string') spawnedSessionId = parsed.sessionId;
       } catch { /* ignore */ }
-      if (toolMsg?.content?.includes('"sessionId"')) {
-        res.end(sseTool('bot-wait-1', 'wait_for_sessions', {
-          sessionIds: [spawnedSessionId],
-          summary: '正在生成 OpenUI 演示卡片',
-        }));
-        return;
-      }
-      res.end(sseText('bot-user-done', ''));
+      res.end(sseText('', '正在生成 OpenUI 演示卡片。'));
       return;
     }
 
@@ -3795,10 +3793,26 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
     });
     assert.equal(submitted.ok, true);
 
-    // Wait for Main Bot wake reply carrying the interactive-result://... evidenceRef.
+    // The worker's internal publication is still subject to the host approval gate.
+    let pending;
+    const approvalDeadline = Date.now() + 20_000;
+    while (!pending && Date.now() < approvalDeadline) {
+      const listed = await bridge.projectBotListApprovals({ workspaceId });
+      assert.equal(listed.ok, true, JSON.stringify(listed));
+      pending = listed.approvals.find((approval) => approval.state === 'open'
+        && approval.sessionId === spawnedSessionId && approval.capabilityId === 'local.interactive.publish');
+      if (!pending) await new Promise((r) => setTimeout(r, 80));
+    }
+    assert.ok(pending, 'worker must request approval for publish_interactive_result');
+    const approved = await bridge.projectBotDecideApproval({
+      workspaceId, approvalId: pending.approvalId, decision: 'approve', duration: 'once',
+    });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+
+    // Wait for the verify_session round trip and the natural reply with host Evidence.
     let replyWithInteractive = null;
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
+    const replyDeadline = Date.now() + 20_000;
+    while (Date.now() < replyDeadline) {
       const conv = await bridge.projectBotReadConversation({ workspaceId, limit: 20 });
       const hit = (conv.messages || []).find((m) => (
         m.kind === 'agent_reply'

@@ -8,6 +8,7 @@
 }
 
 .bot-column {
+  --bot-column-gutter: 10px;
   position: relative;
   display: flex;
   flex: 0 0 var(--peer-bot-list-width, 292px);
@@ -15,7 +16,7 @@
   width: var(--peer-bot-list-width, 292px);
   min-width: 0;
   min-height: 0;
-  padding: 40px 10px 12px;
+  padding: 40px var(--bot-column-gutter) 12px;
   background: transparent;
   border-right: 0;
   -webkit-app-region: drag;
@@ -545,8 +546,8 @@
 }
 
 [data-theme="dark"] .bot-row.is-open {
-  /* Lift the selected surface above both the glass sidebar and its hover fill. */
-  background: color-mix(in srgb, var(--graphite-base) 14%, var(--chrome-active));
+  /* Keep the selected row legible even over bright desktop vibrancy. */
+  background: color-mix(in srgb, var(--chrome-glass-row-active) 12%, var(--paper-active));
 }
 
 .bot-row-copy {
@@ -746,7 +747,8 @@
   gap: 8px;
   flex: none;
   margin-top: 10px;
-  padding: 8px 4px 0;
+  margin-inline: calc(-1 * var(--bot-column-gutter));
+  padding: var(--space-2) calc(var(--bot-column-gutter) + var(--space-1)) 0;
 }
 
 .bot-dock-actions {

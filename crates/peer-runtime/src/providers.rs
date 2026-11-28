@@ -29,7 +29,8 @@ pub(crate) use crate::recorder::group_absent;
 #[cfg(windows)]
 pub(crate) use shell::windows_shell_command;
 pub(crate) use shell::{
-    background_start_fields, restore_background_start_fields, shell_stop_outcome,
+    INVALID_TIMEOUT, TIMEOUT_DETAIL, background_start_fields, restore_background_start_fields,
+    shell_stop_outcome,
 };
 pub(crate) mod interaction;
 mod shell_risk;

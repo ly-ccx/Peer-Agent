@@ -24,3 +24,8 @@ ratatui = { version = "=0.30.2", default-features = false, features = ["crosster
 # can spin inside a read loop without returning to our cancellation flag.
 # `use-dev-tty` is enabled per-crate on Unix targets.
 crossterm = { version = "=0.29.0", features = ["bracketed-paste"] }
+
+# Media integration tests measure the real input path with large payloads.
+# Avoid measuring debug-only overhead in the software SHA-256 implementation.
+[profile.test.package.sha2]
+opt-level = 3
