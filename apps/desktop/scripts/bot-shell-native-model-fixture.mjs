@@ -5,6 +5,7 @@ export const STREAM_INPUT = 'RC_NATIVE_STREAM';
 export const STOP_INPUT = 'RC_NATIVE_STOP';
 export const LONG_INPUT = 'RC_STREAM_LONG';
 export const RETRY_INPUT = 'RC_NATIVE_RETRY';
+export const RETRY_PROVIDER_MESSAGE = 'RC controlled provider rejection';
 export const WORK_INPUT = 'RC_NATIVE_WORK';
 export const CLASSIC_IMAGE_INPUT = 'RC_NATIVE_CLASSIC_IMAGE';
 export const PRIVATE_REASONING = 'PRIVATE_REASONING_MUST_NOT_RENDER';
@@ -34,7 +35,7 @@ export async function startBotShellModelFixture() {
     if (scenario === RETRY_INPUT && round === 1) {
       record.finished = true;
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: 'RC controlled provider rejection', code: 'invalid_request' } }));
+      res.end(JSON.stringify({ error: { message: RETRY_PROVIDER_MESSAGE, code: 'invalid_request_error' } }));
       return;
     }
 

@@ -459,6 +459,33 @@ mod tests {
     }
 
     #[test]
+    fn bad_request_diagnostic_keeps_only_allowlisted_provider_code() {
+        for (code, expected_code) in [
+            ("invalid_request_error", Some("invalid_request_error")),
+            ("invalid_request", None),
+        ] {
+            let body = json!({"error": {
+                "code": code,
+                "message": "RC controlled provider rejection",
+                "headers": {"Authorization": "Bearer synthetic-key", "Cookie": "synthetic-cookie"}
+            }});
+            let error = ModelError::http(400, body.to_string().as_bytes());
+            assert!(!error.is_transient_retryable());
+            assert_eq!(error.provider_code, expected_code);
+            assert_eq!(error.http_detail, None);
+            let provider_field = expected_code
+                .map(|code| format!(", provider_code={code}"))
+                .unwrap_or_default();
+            assert_eq!(
+                error.format_diagnostic().unwrap(),
+                format!(
+                    "HTTP 400 (model_http_rejected) [failure_phase=Terminal, http_status=400{provider_field}]"
+                )
+            );
+        }
+    }
+
+    #[test]
     fn generates_safe_http_detail_for_known_schema_assertion() {
         let error = ModelError::http(400, br#"[{"error":{"status":"INVALID_ARGUMENT","message":"Invalid JSON payload received. Unknown name \"additionalProperties\". secret tail"}}]"#);
         let label = error.format_http_rejection().unwrap();

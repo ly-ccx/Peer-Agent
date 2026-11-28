@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { openReplyDetails, closeReplyDetails, selectBotByName, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import {
-  CLASSIC_IMAGE_INPUT, FIRST_PARAGRAPH, PRIVATE_REASONING, RETRY_INPUT, SECOND_PARAGRAPH,
+  CLASSIC_IMAGE_INPUT, FIRST_PARAGRAPH, PRIVATE_REASONING, RETRY_INPUT, RETRY_PROVIDER_MESSAGE, SECOND_PARAGRAPH,
   STOP_INPUT, STREAM_INPUT, STREAM_REPLY, WORK_INPUT,
 } from './bot-shell-native-model-fixture.mjs';
 
@@ -99,15 +99,21 @@ async function retry(page, bot, turnId) {
 }
 
 export async function checkNativeBotRetry({ page, model, until, report, bot, home, captureDirectory }) {
+  const latestFailure = () => history(home, bot).findLast(row => row.card === 'agent_unavailable');
+  const previousFailureId = latestFailure()?.id;
   await submit(page, RETRY_INPUT);
   await until(() => wireRequests(model, RETRY_INPUT).some(request => request.finished), Boolean);
-  const failure = thread(page).locator('.bot-unavailable-reply').last();
-  await failure.waitFor();
-  const original = await until(() => history(home, bot).findLast(row =>
-    row.card === 'agent_unavailable' && row.content?.includes('RC controlled provider rejection')), Boolean);
+  const original = await until(latestFailure, row => Boolean(row && row.id !== previousFailureId));
   assert.ok(original.turnId);
   assert.equal(original.meta?.httpStatus, 400);
-  assert.equal(wireRequests(model, RETRY_INPUT).length, 1);
+  assert.equal(original.meta?.errorCode, 'model_http_rejected');
+  assert.match(original.content, /\bHTTP 400 \(model_http_rejected\)/);
+  assert.match(original.content, /\bprovider_code=invalid_request_error\b/);
+  assert.match(original.content, /\battempts_used=1\b/);
+  assert.ok(!JSON.stringify(original).includes(RETRY_PROVIDER_MESSAGE), 'provider free text must stay out of history');
+  assert.equal(wireRequests(model, RETRY_INPUT).length, 1, 'HTTP 400 must not be replayed automatically');
+  const failure = thread(page).locator(`[data-card-id="card:agent_unavailable:${original.turnId}"]`);
+  await failure.getByText('服务未接受这次请求。').waitFor();
   await failure.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'native-retry-failed.png') });
   await selectBotByName(page, 'project-001');
   await selectBotByName(page, 'project-000');
@@ -125,14 +131,15 @@ export async function checkNativeBotRetry({ page, model, until, report, bot, hom
   await thread(page).getByText(expected, { exact: true }).waitFor();
   const rows = history(home, bot);
   const inputs = rows.filter(row => row.kind === 'user_input' && row.content === RETRY_INPUT);
-  const replies = rows.filter(row => row.kind === 'agent_reply' && row.content === expected);
   assert.equal(inputs.length, 1);
+  const replies = rows.filter(row => row.kind === 'agent_reply' && row.replyTo?.includes(inputs[0].id));
   assert.equal(replies.length, 1);
+  assert.equal(replies[0].content, expected);
   assert.deepEqual(replies[0].replyTo, [inputs[0].id]);
   assert.notEqual(replies[0].turnId, original.turnId);
   assert.equal(wireRequests(model, RETRY_INPUT).length, 2);
   report.nativeManualRetry = { originalTurnId: original.turnId, replyId: replies[0].id, inputId: inputs[0].id, dispatches: 2, surface: 'preload' };
-  report.checks.push('manual retry through real preload IPC and Rust requeues the same input after a provider error and commits one replacement reply');
+  report.checks.push('HTTP 400 shows a sanitized rejection and dispatches once before explicit retry through preload IPC commits one replacement reply for the same input');
 }
 
 export async function checkNativeBotStop({ page, model, until, report, bot, home, captureDirectory }) {
