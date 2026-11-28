@@ -48,6 +48,11 @@ export async function checkBotCompletionReview({ page, until, report, captureDir
   const initialViewport = page.viewportSize();
   await page.setViewportSize({ width: 760, height: 860 });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  // The preceding task flow can leave the compact Work panel open over the conversation.
+  await page.waitForFunction(() => document.querySelector('.bot-work-layout')?.dataset.workPanelWide === 'false');
+  const workPanel = page.locator('.bot-work-panel-toggle');
+  if (await workPanel.getAttribute('aria-expanded') === 'true') await workPanel.click();
+  await until(() => workPanel.getAttribute('aria-expanded'), value => value === 'false');
   await current.scrollIntoViewIfNeeded();
   const fits = await current.evaluate(node => {
     const rect = node.getBoundingClientRect();

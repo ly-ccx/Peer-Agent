@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type MouseEventHandler } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
 import { ExecutorIcon, executorDisplayName } from '../ExecutorIcon';
@@ -34,7 +34,7 @@ export interface TaskWorkspaceTouchBarProps {
   readonly onApprove?: () => void;
   readonly onReject?: () => void;
   readonly onVerify?: () => void;
-  readonly onCancel?: () => void;
+  readonly onCancel?: MouseEventHandler<HTMLButtonElement>;
   readonly onCiteToBot?: () => void;
   readonly onRerunDraft?: () => void;
 }
@@ -98,7 +98,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
   const followUp = session.followUp;
   const ended = followUp ? !followUp.inCurrentList : ['accepted', 'cancelled', 'superseded', 'paused', 'failed'].includes(session.status);
   const verifyFailed = session.status === 'result_ready' && followUp?.reason === 'verification_failed';
-  const cancelable = !ended && canCancelTask(session.status, session.cancelable);
+  const cancelable = !ended && (canCancelTask(session.status, session.cancelable) || session.status === 'stopping');
   const statusText = formatDrawerSessionStatus(session, i18n);
   const verifyAttempts = session.verification?.reviewAttempts.length ?? 0;
   const canReverify = verifyFailed && verifyAttempts < 3;
@@ -149,7 +149,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
         ) : canReverify && props.onVerify ? (
           <>
             {cancelable && props.onCancel ? (
-              <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
+              <button key="cancel-task" type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="close" size={12} />
                 <span>{props.cancelBusy ? (isZh ? '正在关闭…' : 'Closing…') : (isZh ? '关闭任务' : 'Dismiss')}</span>
               </button>
@@ -166,7 +166,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
         ) : reverifyExhausted ? (
           <>
             {cancelable && props.onCancel ? (
-              <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
+              <button key="cancel-task" type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="close" size={12} />
                 <span>{props.cancelBusy ? (isZh ? '正在关闭…' : 'Closing…') : (isZh ? '关闭任务' : 'Dismiss')}</span>
               </button>
@@ -195,7 +195,7 @@ export const ComposerTouchBar = memo(function ComposerTouchBar(props: ComposerTo
         ) : (
           <>
             {cancelable && props.onCancel ? (
-              <button type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
+              <button key="cancel-task" type="button" className="bot-tb-chip" disabled={props.cancelBusy} onClick={props.onCancel}>
                 <PeerIcon name="stop" size={12} />
                 <span>{props.cancelBusy ? (isZh ? '正在停止…' : 'Stopping…') : (isZh ? '停止' : 'Stop')}</span>
               </button>
