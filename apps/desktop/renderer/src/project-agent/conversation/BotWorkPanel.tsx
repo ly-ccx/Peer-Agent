@@ -6,7 +6,6 @@ import { isImeKey } from '../../chat/state/compositionGuard';
 import { interactionLayers } from '../../app/components/interactionLayers';
 import { useInteractionLayer } from '../../app/hooks/useInteractionLayer';
 import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
-import type { BotInspect } from '../drawer/agentProcess';
 import type { BotChatMessage, ConversationDisplayRow } from '../state/botConversationState';
 import type { BotWorkIndex } from '../state/botWorkState';
 import {
@@ -17,7 +16,6 @@ import {
   workPanelNeedsUser,
   workPanelSessions,
 } from '../state/botWorkPanelState';
-import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useBotWorkPanelData } from '../state/useBotWorkPanelData';
 import { taskConversationContext } from '../state/taskConversationState';
 import { BotWorkSessionRow } from './BotWorkSessionRow';
@@ -27,7 +25,7 @@ import '../styles/bot-work-panel.css';
 
 /** A stable conversation container; panel visibility never remounts the thread or Composer. */
 export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recovering, headerTarget, i18n,
-  onOpenTask, onInspect, onRefreshWork, obligationGrants = [], obligationError = null, obligationWriter = null, obligationSubmittingId = null,
+  onOpenTask, onRefreshWork, obligationGrants = [], obligationError = null, obligationWriter = null, obligationSubmittingId = null,
   onObligationConfirm, onObligationReject, onObligationRetry, children }: {
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
@@ -37,7 +35,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   readonly headerTarget: HTMLElement | null;
   readonly i18n: I18nRuntime;
   readonly onOpenTask: (id: string) => void;
-  readonly onInspect?: (inspect: BotInspect) => void;
   readonly onRefreshWork: () => Promise<void>;
   readonly obligationGrants?: readonly ObligationGrantView[];
   readonly obligationError?: string | null;
@@ -95,10 +92,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   const resources = useResourceWorkspace();
   const workspacePath = resources?.owner?.workspaceId === workspaceId && resources.ready ? resources.owner.path : null;
   const data = useBotWorkPanelData(workspaceId, workspacePath, open);
-  const activity = recovering ? undefined : workPanelActivity(rows);
-  const focusLabel = replyActivityLabel(activity, i18n);
-  const publicUpdate = activity?.segments.filter(segment => segment.kind === 'text').at(-1)?.text;
-  const references = activity?.resourceReferences;
+  const references = recovering ? undefined : workPanelActivity(rows)?.resourceReferences;
   const materials = useMemo(() => workPanelMaterials(workspaceId, workIndex, data.items, messages, { resourceReferences: references }),
     [workspaceId, workIndex, data.items, messages, references]);
   const sessions = useMemo(() => workPanelSessions(workIndex), [workIndex]);
@@ -138,13 +132,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
       <ObligationGrantList variant="panel" grants={obligationGrants} error={obligationError} writer={obligationWriter} submittingId={obligationSubmittingId}
         i18n={i18n} onConfirm={onObligationConfirm || (() => {})} onReject={onObligationReject || (() => {})} onRetry={onObligationRetry || (() => {})} />
       <div className="bot-work-panel-scroll motion-enter-fade" hidden={view !== 'overview'}>
-        <section className="bot-work-panel-attention" aria-label={i18n.t('projectAgent.workPanel.attention')}>
-          <h3><PeerIcon name="circle" size={13} />{i18n.t('projectAgent.workPanel.attention')}</h3>
-          <p className="bot-work-panel-focus">{recovering ? i18n.t('projectAgent.workPanel.recovering') : focusLabel ?? i18n.t('projectAgent.workPanel.quiet')}</p>
-          {activity && onInspect ? <button type="button" className="bot-work-panel-focus-source" onClick={() => onInspect({ replyId: activity.turnId, evidence: null, rounds: null })}>
-            <span>{publicUpdate || i18n.t('projectAgent.process.heading')}</span><PeerIcon name="arrowUpRight" size={13} /></button>
-            : <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.quietHint')}</p>}
-        </section>
         {!workIndex.available ? <div className="bot-work-panel-feedback" role="status"><p>{i18n.t('projectAgent.workPanel.unavailable')}</p>
           <button type="button" className="ui-button is-compact" onClick={() => { void onRefreshWork(); }}>{i18n.t('resources.retryRead')}</button></div> : <>
           <section className="bot-work-panel-section" aria-labelledby={`${id}-tasks`}>
