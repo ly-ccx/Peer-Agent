@@ -1,6 +1,7 @@
 //! Durable intent precedes effects; only actual Provider outcomes and local
 //! decisions become canonical Tool Result/Grant/Evidence facts.
 use super::*;
+use crate::turn_loop::TurnHost;
 use crate::{
     capability::ProviderPermission,
     providers::{EffectOutcome, interaction},
@@ -30,7 +31,9 @@ impl Host<'_> {
         // run. These rejections happen before any intent, grant or dispatch
         // exists; policy, admission and capability rejections stay terminal
         // (ADR 137 D3).
-        let verification_args = self.delegated_verification.then(|| call.arguments.clone());
+        let verification_args = self
+            .is_delegated_verification()
+            .then(|| call.arguments.clone());
         let unprojected_detail = delegated_args.as_ref().map(|_| {
             let names = projection.tool_names();
             if names.is_empty() {
@@ -501,7 +504,8 @@ impl Host<'_> {
                     .to_owned(),
             });
         }
-        if outcome.status == "denied" && (self.delegated_verification || self.repairing_goal()) {
+        if outcome.status == "denied" && (self.is_delegated_verification() || self.repairing_goal())
+        {
             return Err(HostError("permission_denied"));
         }
         Ok(ToolStep::Continue(call_id))

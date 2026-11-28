@@ -20,6 +20,8 @@ pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
 mod interactive_result;
 mod resources;
+mod working_plan;
+pub use working_plan::WorkingPlanStore;
 mod session_delete;
 pub use session_delete::{delete_session, session_delete_exists};
 mod shell_artifacts;
@@ -117,6 +119,7 @@ pub enum StoreError {
     McpInventoryInvalid,
     ContextInvalid,
     ContextConflict,
+    Conflict,
     ContextCommitUncertain,
     UsageInvalid,
     UsageLimit,
@@ -162,6 +165,7 @@ impl StoreError {
             Self::McpCredentialMissing => "mcp_credential_missing",
             Self::McpInventoryInvalid => "MCP_INVENTORY_INVALID",
             Self::ContextInvalid => "CONTEXT_SNAPSHOT_INVALID",
+            Self::Conflict => "STORE_CONFLICT",
             Self::ContextConflict => "CONTEXT_SNAPSHOT_CHANGED",
             Self::ContextCommitUncertain => "CONTEXT_SNAPSHOT_COMMIT_UNCERTAIN",
             Self::UsageInvalid => "USAGE_LEDGER_INVALID",

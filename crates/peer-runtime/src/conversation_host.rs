@@ -13,18 +13,24 @@ use crate::{
     providers::{ProviderRegistry, RuntimeMode, RuntimeProjection},
     session_host::{LocalPermissionDecision, PermissionInput},
     system_context::{
-        ConversationContext, assemble_conversation_context, instructions::ProjectInstructions,
+        ConversationContext, assemble_conversation_context,
+        delegated::{
+            DelegatedVerificationContext, DelegatedWorkContext, assemble_delegated_verification,
+            assemble_delegated_work,
+        },
+        instructions::ProjectInstructions,
     },
     usage_accounting::{RequestMetadata, RuntimeUsageAccounting, UsageSnapshot},
 };
 use peer_protocol::{
     ConversationExecution, ConversationExecutionIdentity, ConversationExecutionPhase,
-    LocalAccessLevel, UsagePurpose,
+    LocalAccessLevel, UsagePurpose, WORKING_PLAN_CAPABILITY, WorkingPlanSnapshot,
+    WorkingPlanStepStatus, format_working_plan_fact_block,
 };
 use peer_store::{
     ConversationExecutionToken, ConversationMetadataPublication, ConversationModelSelection,
     ConversationStore, GoalStore, HistorySnapshot, McpRegistryStore, NewConversation,
-    NewConversationExecution, RunnerAdmission, RunnerStop,
+    NewConversationExecution, RunnerAdmission, RunnerStop, WorkingPlanStore,
 };
 use serde_json::{Value, json};
 use std::{
@@ -420,6 +426,25 @@ struct DelegatedMaterials {
 
 type DelegatedInputReader = Arc<dyn Fn(u64) -> Result<Vec<Value>, HostError> + Send + Sync>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegatedCriterionFact {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DelegatedTaskContract {
+    pub session_id: String,
+    pub title: String,
+    pub goal: String,
+    pub success_criteria: Vec<DelegatedCriterionFact>,
+    pub read_only: bool,
+    pub follow_up_epoch: u64,
+    pub follow_up_prompt: Option<String>,
+    pub turn_budget: Option<usize>,
+}
+
 /// One Host instance owns the bounded live registry across ordinary sessions.
 /// Discovery is read-only. A dropped runner stays unknown, never implicitly idle.
 pub struct NativeConversationRuntime {
@@ -429,14 +454,30 @@ pub struct NativeConversationRuntime {
     capability_overrides: CapabilityOverrides,
     delegated_inputs: Option<DelegatedInputReader>,
     delegated_materials: Option<DelegatedMaterials>,
+    delegated_contract: Option<DelegatedTaskContract>,
 }
-#[derive(Clone, Copy)]
-enum ExecutionSurface {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecutionSurface {
     Headless,
     DelegatedWork,
     DelegatedVerification,
     Observed,
     Interactive,
+}
+
+fn read_working_plan_prefix(
+    home: &Path,
+    conversation: &str,
+    surface: ExecutionSurface,
+) -> Option<WorkingPlanSnapshot> {
+    if surface == ExecutionSurface::DelegatedVerification {
+        return None;
+    }
+    WorkingPlanStore::new(home)
+        .read(conversation)
+        .ok()
+        .flatten()
+        .filter(|plan| !plan.steps.is_empty() || !plan.archived.is_empty())
 }
 
 impl NativeConversationRuntime {
@@ -448,10 +489,15 @@ impl NativeConversationRuntime {
             capability_overrides: CapabilityOverrides::default(),
             delegated_inputs: None,
             delegated_materials: None,
+            delegated_contract: None,
         }
     }
     pub fn with_capability_overrides(mut self, overrides: CapabilityOverrides) -> Self {
         self.capability_overrides = overrides;
+        self
+    }
+    pub fn with_delegated_contract(mut self, contract: DelegatedTaskContract) -> Self {
+        self.delegated_contract = Some(contract);
         self
     }
     /// Read durable work-session input between delegated model requests. The
@@ -739,7 +785,11 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: false,
-            delegated_verification: false,
+            surface: ExecutionSurface::Observed,
+            delegated_contract: None,
+            working_plan_prefix: None,
+            completion_guard_used: false,
+            pending_guard_input: None,
             delegated_inputs: None,
             delegated_input_seq: 0,
             workspace_image_resolver: None,
@@ -1123,6 +1173,18 @@ impl NativeConversationRuntime {
             crate::providers::ShellHostMode::Conversation,
         )?;
         providers.add_ordinary_tools(options.mode, interactive_user_input);
+        if matches!(options.mode, RuntimeMode::Chat | RuntimeMode::Goal)
+            && surface != ExecutionSurface::DelegatedVerification
+        {
+            let epoch = if surface == ExecutionSurface::DelegatedWork {
+                self.delegated_contract
+                    .as_ref()
+                    .map_or(0, |contract| contract.follow_up_epoch)
+            } else {
+                0
+            };
+            providers.add_working_plan_tool(epoch);
+        }
         for extra in extra_providers.drain(..) {
             providers.register(extra);
         }
@@ -1253,7 +1315,16 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input,
-            delegated_verification,
+            surface,
+            delegated_contract: match surface {
+                ExecutionSurface::DelegatedWork | ExecutionSurface::DelegatedVerification => {
+                    self.delegated_contract.clone()
+                }
+                _ => None,
+            },
+            working_plan_prefix: read_working_plan_prefix(&self.home, &conversation, surface),
+            completion_guard_used: false,
+            pending_guard_input: None,
             delegated_inputs: if delegated {
                 self.delegated_inputs.clone()
             } else {
@@ -1510,6 +1581,9 @@ impl NativeConversationRuntime {
             crate::providers::ShellHostMode::Conversation,
         )?;
         providers.add_ordinary_tools(options.mode, true);
+        if matches!(options.mode, RuntimeMode::Chat | RuntimeMode::Goal) {
+            providers.add_working_plan_tool(0);
+        }
         for extra in options.extra_providers.drain(..) {
             providers.register(extra);
         }
@@ -1688,7 +1762,15 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: true,
-            delegated_verification: false,
+            surface: ExecutionSurface::Interactive,
+            delegated_contract: None,
+            working_plan_prefix: read_working_plan_prefix(
+                &self.home,
+                &conversation,
+                ExecutionSurface::Interactive,
+            ),
+            completion_guard_used: false,
+            pending_guard_input: None,
             delegated_inputs: None,
             delegated_input_seq: 0,
             workspace_image_resolver: None,
@@ -1981,7 +2063,11 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             interactive_user_input: true,
-            delegated_verification: false,
+            surface: ExecutionSurface::Observed,
+            delegated_contract: None,
+            working_plan_prefix: None,
+            completion_guard_used: false,
+            pending_guard_input: None,
             delegated_inputs: None,
             delegated_input_seq: 0,
             workspace_image_resolver: None,
@@ -2165,7 +2251,11 @@ struct Host<'a> {
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
     interactive_user_input: bool,
-    delegated_verification: bool,
+    surface: ExecutionSurface,
+    delegated_contract: Option<DelegatedTaskContract>,
+    working_plan_prefix: Option<WorkingPlanSnapshot>,
+    completion_guard_used: bool,
+    pending_guard_input: Option<String>,
     delegated_inputs: Option<DelegatedInputReader>,
     delegated_input_seq: u64,
     workspace_image_resolver: Option<crate::canonical_history::WorkspaceImageResolver>,
@@ -2543,17 +2633,66 @@ impl CognitionHost for Host<'_> {
             }
             .map_err(HostError);
         }
+        let conversation = &self.identity.conversation_id;
+        let workspace = self
+            .workspace
+            .to_str()
+            .ok_or(HostError("invalid_workspace"))?;
+        let provider = self.model.provider();
+        let model = self.model.model_id();
+        let at = now();
+        match self.surface {
+            ExecutionSurface::DelegatedWork => {
+                return assemble_delegated_work(
+                    &DelegatedWorkContext {
+                        conversation,
+                        workspace,
+                        provider,
+                        model,
+                        effort: &self.effort,
+                        skill_names: &self.projection.skill_names(),
+                        projected_capabilities: &self.projection.capabilities(),
+                        instructions: &self.instructions,
+                        contract: self.delegated_contract.as_ref(),
+                        working_plan: self.working_plan_prefix.as_ref(),
+                        runtime_reminders: &self.runtime_reminders,
+                        context_attachments: &self.context_attachments,
+                        context_extensions: &self.context_extensions,
+                    },
+                    continuity,
+                    &at,
+                )
+                .map_err(HostError);
+            }
+            ExecutionSurface::DelegatedVerification => {
+                return assemble_delegated_verification(
+                    &DelegatedVerificationContext {
+                        conversation,
+                        workspace,
+                        provider,
+                        model,
+                        projected_capabilities: &self.projection.capabilities(),
+                        contract: self.delegated_contract.as_ref(),
+                        context_extensions: &self.context_extensions,
+                    },
+                    continuity,
+                    &at,
+                )
+                .map_err(HostError);
+            }
+            ExecutionSurface::Headless
+            | ExecutionSurface::Observed
+            | ExecutionSurface::Interactive => {}
+        }
         let registry_path = std::path::absolute(self.home.join("mcp-registry.json"))
             .map_err(|_| HostError("invalid_data_home"))?;
         assemble_conversation_context(
             &ConversationContext {
-                conversation: &self.identity.conversation_id,
-                workspace: self
-                    .workspace
-                    .to_str()
-                    .ok_or(HostError("invalid_workspace"))?,
-                provider: self.model.provider(),
-                model: self.model.model_id(),
+                conversation,
+                workspace,
+                provider,
+                model,
+                working_plan: self.working_plan_prefix.as_ref(),
                 mode: self.mode,
                 effort: &self.effort,
                 registry_path: registry_path
@@ -2571,7 +2710,7 @@ impl CognitionHost for Host<'_> {
                 context_extensions: &self.context_extensions,
             },
             continuity,
-            &now(),
+            &at,
         )
         .map_err(HostError)
     }
@@ -2579,7 +2718,32 @@ impl CognitionHost for Host<'_> {
         self.workspace_image_resolver.clone()
     }
     fn request_input(&self, projected: &Value) -> Option<(usize, &str)> {
-        self.runner_request_input(projected)
+        if let Some(input) = self.runner_request_input(projected) {
+            return Some(input);
+        }
+        let reminder = self.pending_guard_input.as_deref()?;
+        let index = projected["messages"].as_array().map_or(0, Vec::len);
+        Some((index, reminder))
+    }
+    fn protected_working_plan_for_compaction(&self) -> Option<String> {
+        read_working_plan_prefix(&self.home, &self.identity.conversation_id, self.surface)
+            .filter(|plan| !plan.steps.is_empty())
+            .map(|plan| {
+                crate::tool_markup::neutralize_tool_call_syntax(&format_working_plan_fact_block(
+                    &plan,
+                ))
+            })
+    }
+    fn on_compacted(&mut self) -> Result<(), HostError> {
+        if self.surface != ExecutionSurface::DelegatedVerification {
+            self.working_plan_prefix = WorkingPlanStore::new(&self.home)
+                .read(&self.identity.conversation_id)
+                .map_err(|error| match error {
+                    peer_store::StoreError::HistoryCorrupt => HostError("working_plan_corrupt"),
+                    other => other.into(),
+                })?;
+        }
+        Ok(())
     }
     fn observe(
         &mut self,
@@ -2721,7 +2885,7 @@ impl CognitionHost for Host<'_> {
 }
 impl crate::turn_loop::TurnHost for Host<'_> {
     fn is_delegated_verification(&self) -> bool {
-        self.delegated_verification
+        matches!(self.surface, ExecutionSurface::DelegatedVerification)
     }
 
     fn ingest_pending_user_input(&mut self) -> Result<bool, HostError> {
@@ -2747,6 +2911,44 @@ impl crate::turn_loop::TurnHost for Host<'_> {
             added = true;
         }
         Ok(added)
+    }
+
+    fn check_completion_guard(&mut self) -> Result<bool, HostError> {
+        if self.surface != ExecutionSurface::DelegatedWork
+            || self.completion_guard_used
+            || self.worker.is_some()
+            || self.runner.is_some()
+            || !self.projection.has_capability(WORKING_PLAN_CAPABILITY)
+        {
+            return Ok(false);
+        }
+        let Some(plan) = WorkingPlanStore::new(&self.home).read(&self.identity.conversation_id)?
+        else {
+            return Ok(false);
+        };
+        if plan.open_steps().is_empty() {
+            return Ok(false);
+        }
+        let mut lines = vec![
+            "[Host completion check — one-time reminder]".into(),
+            "Your working plan still has open step(s):".into(),
+        ];
+        for (index, step) in plan.steps.iter().enumerate().filter(|(_, step)| {
+            matches!(
+                step.status,
+                WorkingPlanStepStatus::Pending | WorkingPlanStepStatus::InProgress
+            )
+        }) {
+            let mut line = format!("- [{}] {}. {}", step.status.as_str(), index + 1, step.title);
+            if let Some(check) = &step.check {
+                line.push_str(&format!(" (check: {check})"));
+            }
+            lines.push(crate::tool_markup::neutralize_tool_call_syntax(&line));
+        }
+        lines.push("Before finishing: either complete and verify them (updating the plan via update_plan), or mark genuinely blocked/deferred items as blocked with a concise note, then deliver your final factual report.".into());
+        self.completion_guard_used = true;
+        self.pending_guard_input = Some(lines.join("\n"));
+        Ok(true)
     }
 
     async fn request(&mut self) -> Result<ModelTurn, TurnError> {
@@ -2798,6 +3000,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
             }
         }
         .await;
+        self.pending_guard_input = None;
         self.cognition_source = None;
         if let Some(runner) = &mut self.runner {
             runner.frame = None;

@@ -288,6 +288,11 @@ pub fn resolve_work_session_profile_with_interactive(
     // `local.web.control.*` remain forbidden). Independent verifiers, explorers,
     // and default read-only workers never receive either web capability.
     if agent_kind == "worker" {
+        push_unique(
+            peer_protocol::WORKING_PLAN_CAPABILITY.to_owned(),
+            &mut allowlist,
+            &mut seen,
+        );
         if requested_web_search {
             push_unique("local.web.search".to_owned(), &mut allowlist, &mut seen);
         }
@@ -800,6 +805,9 @@ fn collect_conversation_evidence_refs(
     }
     if let Ok(rows) = evidence_store.list_for_conversation(conversation_id, None) {
         for row in rows {
+            if row["capabilityId"] == peer_protocol::WORKING_PLAN_CAPABILITY {
+                continue;
+            }
             if let Some(r) = row["evidenceRef"].as_str().map(str::trim)
                 && !r.is_empty()
             {
@@ -1737,6 +1745,38 @@ mod tests {
         assert!(!summary.contains("alpha-skill"));
         assert!(summary.contains("Ops Server"));
         assert!(!summary.contains("Docs Server"));
+    }
+
+    #[test]
+    fn working_plan_is_projected_only_for_workers() {
+        for read_only in [false, true] {
+            let plan = json!({
+                "delegationOrigin": {
+                    "readOnly": read_only,
+                    "requiredCapabilities": [
+                        "local.plan.update", "local.goal.create_plan", "local.goal.update_task",
+                        "local.goal.get_plan", "local.goal.explore", "local.file.read",
+                    ],
+                },
+            });
+            for role in ["worker", "verifier", "explorer", "visual_verifier"] {
+                let profile = resolve_work_session_profile(&plan, role).unwrap();
+                assert_eq!(
+                    profile
+                        .allowlist
+                        .iter()
+                        .any(|id| id == peer_protocol::WORKING_PLAN_CAPABILITY),
+                    role == "worker",
+                    "{role} read_only={read_only}",
+                );
+                assert!(
+                    !profile
+                        .allowlist
+                        .iter()
+                        .any(|id| id.starts_with("local.goal."))
+                );
+            }
+        }
     }
 
     #[test]

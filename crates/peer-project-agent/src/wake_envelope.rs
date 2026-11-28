@@ -1,6 +1,7 @@
 //! Bounded factual context for a background Project Agent turn.
 
 use crate::{SessionSupervisor, WorkSessionReport};
+use peer_protocol::WorkingPlanSnapshot;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
@@ -32,6 +33,8 @@ pub struct InlineWakeItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_output_preview: Option<String>,
     pub worker_output_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_progress: Option<String>,
     pub changed_files: Vec<String>,
     pub changed_files_total: usize,
     pub evidence_refs: Vec<String>,
@@ -129,6 +132,27 @@ fn event_values<'a>(payload: &'a Value, key: &str) -> impl Iterator<Item = &'a s
         .filter_map(Value::as_str)
 }
 
+fn plan_progress(plan: &WorkingPlanSnapshot) -> Option<String> {
+    let (completed, total, blocked) = plan.counts();
+    let open = plan.open_steps();
+    if blocked == 0 && open.is_empty() {
+        return None;
+    }
+    let mut progress = format!("{completed}/{total} completed");
+    for (label, steps) in [("blocked", plan.blocked_steps()), ("open", open)] {
+        if let Some(first) = steps.first() {
+            let line = first.title.split_whitespace().collect::<Vec<_>>().join(" ");
+            let _ = write!(
+                progress,
+                "; {label}: {} ({})",
+                steps.len(),
+                clipped(&line, 120)
+            );
+        }
+    }
+    Some(clipped(&progress, 300))
+}
+
 fn inline_item(
     event: &Value,
     report: Option<&WorkSessionReport>,
@@ -183,6 +207,9 @@ fn inline_item(
         },
         worker_output_preview: output.map(|s| clipped(s, output_limit)),
         worker_output_truncated: output.is_some_and(|s| s.chars().nth(output_limit).is_some()),
+        plan_progress: report
+            .and_then(|r| r.working_plan.as_ref())
+            .and_then(plan_progress),
         changed_files,
         changed_files_total,
         evidence_refs: bounded_values(refs.into_iter(), MAX_INLINE_EVIDENCE_REFS),
@@ -217,9 +244,13 @@ fn quoted(text: &str) -> String {
 fn render_item(mut item: InlineWakeItem, event: &Value, index: usize, budget: usize) -> String {
     let output = item.worker_output_preview.take();
     let question = item.pending_agent_question.take();
+    let progress = item.plan_progress.take();
     let mut text = format!("\n### Event {index}\n");
     let fields = serde_json::to_string(&item).unwrap_or_default();
     let _ = writeln!(text, "<facts>{}</facts>", quoted(&fields));
+    if let Some(progress) = progress {
+        let _ = writeln!(text, "planProgress: {}", quoted(&progress));
+    }
     if item.session_id.is_empty() && !event["payload"].is_null() {
         let payload = event["payload"].to_string();
         let payload = quoted(&clipped(&payload, 1200));
@@ -366,5 +397,48 @@ mod tests {
         assert!(!text.contains("<system>"));
         assert!(text.ends_with(FOOTER));
         assert!(text.len() <= MAX_WAKE_ENVELOPE_BYTES);
+    }
+
+    #[test]
+    fn working_plan_progress_is_single_line_and_respects_wake_budget() {
+        let mut report: WorkSessionReport = serde_json::from_value(json!({
+            "summary": {"sessionId": "work", "workspaceId": "ws", "conversationId": "conv",
+                "planId": "plan", "title": "Audit", "status": "failed", "phase": "failed",
+                "readOnly": true, "priority": "normal", "updatedAt": "now", "accepted": false},
+            "taskBrief": "Audit filesystem",
+            "evidenceRefs": [],
+            "changedFiles": [],
+            "verdictOutcome": "failed",
+            "independentVerifier": "not_required",
+            "workerOutput": "摘".repeat(8000),
+            "workingPlan": {
+                "schemaVersion": 1, "conversationId": "conv", "epoch": 0, "revision": 1,
+                "updatedAt": "2026-11-27T00:00:00Z",
+                "steps": [
+                    {"title": "First", "status": "completed"},
+                    {"title": format!("Needs input\n{}", "路".repeat(100)), "status": "blocked"},
+                    {"title": format!("Verify later\n{}", "验".repeat(100)), "status": "pending"}
+                ]
+            }
+        }))
+        .unwrap();
+        let events = (0..MAX_ITEMS)
+            .map(|index| json!({"eventId": index.to_string(), "kind": "session_failed", "sessionId": index.to_string()}))
+            .collect::<Vec<_>>();
+        let message = build_with_reports(&events, |_| Some(report.clone())).message;
+        let progress = message
+            .lines()
+            .find_map(|line| line.strip_prefix("planProgress: "))
+            .unwrap();
+        assert!(progress.starts_with("1/3 completed; blocked: 1 (Needs input "));
+        assert!(progress.contains("open: 1 (Verify later "));
+        assert!(progress.chars().count() <= 300);
+        assert!(message.len() <= MAX_WAKE_ENVELOPE_BYTES);
+        assert!(message.contains(OMITTED));
+        for step in &mut report.working_plan.as_mut().unwrap().steps {
+            step.status = peer_protocol::WorkingPlanStepStatus::Completed;
+        }
+        let message = build_with_reports(&events[..1], |_| Some(report.clone())).message;
+        assert!(!message.contains("planProgress:"));
     }
 }

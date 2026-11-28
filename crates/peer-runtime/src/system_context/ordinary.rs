@@ -13,6 +13,7 @@ pub struct ConversationContext<'a> {
     pub servers: &'a [Value],
     pub skill_names: &'a [&'a str],
     pub instructions: &'a instructions::ProjectInstructions,
+    pub working_plan: Option<&'a peer_protocol::WorkingPlanSnapshot>,
     pub goal_runner: Option<&'a Value>,
     pub runtime_reminders: &'a [(String, String)],
     pub context_attachments: &'a [Value],
@@ -40,7 +41,7 @@ fn format_bytes(bytes: f64) -> String {
     }
 }
 
-fn attachment_context_section(raw_attachments: &[Value]) -> Option<Value> {
+pub(super) fn attachment_context_section(raw_attachments: &[Value]) -> Option<Value> {
     struct Row {
         id: String,
         name: String,
@@ -218,7 +219,7 @@ fn sanitize_extension_id(raw: &str) -> String {
         .collect()
 }
 
-fn context_extension_sections(raw_extensions: &[Value]) -> Vec<Value> {
+pub(super) fn context_extension_sections(raw_extensions: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     for (index, item) in raw_extensions.iter().enumerate() {
         let Some(obj) = item.as_object() else {
@@ -348,6 +349,9 @@ pub fn assemble_conversation_context(
     if let Some(plan) = input.goal_runner {
         sections.extend(goal_runner::sections(plan)?);
     }
+    if let Some(plan) = input.working_plan.filter(|plan| !plan.steps.is_empty()) {
+        sections.push(working_plan_section(plan));
+    }
     if let Some(section) = continuity::render(continuity) {
         sections.push(section);
     }
@@ -375,22 +379,7 @@ pub fn assemble_conversation_context(
         source,
         "runtime",
     ));
-    for (idx, (id, content)) in input.runtime_reminders.iter().enumerate() {
-        let reminder_id = peer_protocol::javascript_trim(id);
-        let body = peer_protocol::javascript_trim(content);
-        if reminder_id.is_empty() || body.is_empty() {
-            continue;
-        }
-        sections.push(section(
-            reminder_id,
-            "L6_MODE_REMINDER",
-            10 + idx as i64,
-            "Runtime reminder",
-            body.to_owned(),
-            json!({ "id": reminder_id, "kind": "runtime-reminder" }),
-            "runtime",
-        ));
-    }
+    sections.extend(runtime_reminder_sections(input.runtime_reminders));
     let mcp = &resource["mcp"];
     let servers = input.servers.iter().take(40).collect::<Vec<_>>();
     let mut content = format!(
@@ -445,26 +434,38 @@ pub fn assemble_conversation_context(
         source,
         "builtin",
     ));
-    sections.sort_by(|a, b| {
-        rank(&a["layer"])
-            .cmp(&rank(&b["layer"]))
-            .then(a["priority"].as_i64().cmp(&b["priority"].as_i64()))
-            .then(a["id"].as_str().cmp(&b["id"].as_str()))
-    });
-    let rendered = sections
-        .iter()
-        .filter_map(|s| s["content"].as_str())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    if rendered.len() > 512 * 1024 {
-        return Err("context_resource_limit");
-    }
-    let digest = hash(&rendered);
-    Ok(
-        json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":at,"conversationId":input.conversation,"workspacePath":input.workspace,"provider":input.provider,"model":input.model,"mode":mode,"sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
+    finish_conversation_context(
+        sections,
+        input.conversation,
+        input.workspace,
+        input.provider,
+        input.model,
+        mode,
+        at,
     )
 }
+
+pub(super) fn runtime_reminder_sections(reminders: &[(String, String)]) -> Vec<Value> {
+    let mut sections = Vec::new();
+    for (idx, (id, content)) in reminders.iter().enumerate() {
+        let reminder_id = peer_protocol::javascript_trim(id);
+        let body = peer_protocol::javascript_trim(content);
+        if reminder_id.is_empty() || body.is_empty() {
+            continue;
+        }
+        sections.push(section(
+            reminder_id,
+            "L6_MODE_REMINDER",
+            10 + idx as i64,
+            "Runtime reminder",
+            body.to_owned(),
+            json!({ "id": reminder_id, "kind": "runtime-reminder" }),
+            "runtime",
+        ));
+    }
+    sections
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,6 +488,7 @@ mod tests {
                 servers: c["servers"].as_array().unwrap(),
                 instructions: &instructions::ProjectInstructions::default(),
                 goal_runner: None,
+                working_plan: None,
                 runtime_reminders: &[],
                 context_attachments: &[],
                 context_extensions: &[],
@@ -535,6 +537,7 @@ mod tests {
             skill_names: &[],
             instructions: &instructions::ProjectInstructions::default(),
             goal_runner: None,
+            working_plan: None,
             runtime_reminders: &[],
             context_attachments: &attachments,
             context_extensions: &extensions,

@@ -617,6 +617,9 @@ fn supports_reference(
     call: &str,
     reference: &str,
 ) -> Result<bool, GoalError> {
+    if row["capabilityId"] == peer_protocol::WORKING_PLAN_CAPABILITY {
+        return Ok(false);
+    }
     let result = &segment["result"];
     if result.is_object() {
         if result["toolCallId"] != call
@@ -663,6 +666,96 @@ fn supports_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_working_plan_cannot_support_a_classic_goal_task() {
+        use crate::{HostToolEvidence, NewConversation};
+
+        let home = tempfile::tempdir().unwrap();
+        let store = ConversationStore::new(home.path());
+        let at = "2026-11-27T00:00:00Z";
+        let created = store
+            .create(
+                &NewConversation {
+                    title: "Classic goal",
+                    workspace_path: None,
+                    mode: "goal",
+                    created_at: at,
+                },
+                None,
+            )
+            .unwrap();
+        let conversation = created["id"].as_str().unwrap();
+        let evidence = EvidenceIndexStore::new(home.path());
+
+        for (call, tool, capability) in [
+            (
+                "plan-call",
+                peer_protocol::WORKING_PLAN_TOOL_NAME,
+                peer_protocol::WORKING_PLAN_CAPABILITY,
+            ),
+            ("read-call", "read_file", "local.file.read"),
+        ] {
+            let grant = json!({"grantId":format!("grant-{call}"), "toolCallId":call, "granted":true, "duration":"once", "decidedAt":at});
+            let result = json!({"toolCallId":call, "capabilityId":capability, "status":"success", "completedAt":at,
+                "outputPreview":{"kind":"json"}, "evidence":{"evidenceId":format!("evidence-{call}"),"toolCallId":call,"summary":tool,"artifactRefs":[]}});
+            let message = json!({"id":format!("message-{call}"), "role":"assistant", "content":"", "streamId":"stream",
+                "permissionGrants":[grant], "segments":[{"type":"tool-call", "toolCallId":call, "tool":tool, "result":result}]});
+            let history = store
+                .read_committed(conversation, None, log::MAX_BYTES)
+                .unwrap();
+            store.commit_message(&history, &message, at, None).unwrap();
+            evidence
+                .register(
+                    &HostToolEvidence {
+                        conversation_id: conversation,
+                        plan_id: Some("plan"),
+                        stream_id: Some("stream"),
+                        tool_name: tool,
+                        capability_id: capability,
+                        tool_call_id: call,
+                        grant: &grant,
+                        result: &result,
+                    },
+                    None,
+                )
+                .unwrap();
+        }
+
+        let plan_ref = "tool-result://plan-call".to_owned();
+        let read_ref = "tool-result://read-call".to_owned();
+        assert_eq!(
+            evidence
+                .find(std::slice::from_ref(&plan_ref), None)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            observed_scoped_evidence(
+                home.path(),
+                conversation,
+                "plan",
+                std::slice::from_ref(&plan_ref),
+                None,
+                None
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(
+            observed_scoped_evidence(
+                home.path(),
+                conversation,
+                "plan",
+                &[plan_ref, read_ref.clone()],
+                None,
+                None
+            )
+            .unwrap(),
+            HashSet::from([read_ref]),
+        );
+    }
 
     #[test]
     fn validates_plan_approval_and_authoritative_evidence_before_changing_the_leaf() {

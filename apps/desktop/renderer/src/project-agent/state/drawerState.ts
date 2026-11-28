@@ -3,7 +3,7 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
-import type { ExecutionClaimClosure, ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
+import type { ExecutionClaimClosure, ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress, WorkingPlanStepStatus, WorkingPlanStepView, WorkingPlanView } from '@peer-agent/protocol';
 import { normalizeExecutionResourceScope } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
@@ -41,6 +41,7 @@ export interface DrawerStore {
 
 export interface DrawerSession {
   readonly followUpEpoch?: number;
+  readonly workingPlan?: WorkingPlanView;
   readonly parentSessionId?: string;
   readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
   readonly planId?: string;
@@ -272,6 +273,54 @@ export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18
     : fallback;
 }
 
+function planInteger(value: unknown, minimum: number): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum;
+}
+
+function planText(value: unknown, maxChars: number): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && Array.from(value).length <= maxChars;
+}
+
+function planStepStatus(value: unknown): value is WorkingPlanStepStatus {
+  return value === 'pending' || value === 'in_progress' || value === 'completed' || value === 'blocked';
+}
+
+const WORKING_PLAN_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+function readWorkingPlan(raw: unknown): WorkingPlanView | undefined {
+  if (!raw || typeof raw !== 'object') return;
+  const { epoch, revision, updatedAt, summary, invariants, completed, total, blocked, steps } = raw as Record<string, unknown>;
+  if (!planInteger(epoch, 0) || !planInteger(revision, 1)
+    || typeof updatedAt !== 'string' || updatedAt.length > 64
+    || !WORKING_PLAN_TIMESTAMP.test(updatedAt) || !Number.isFinite(Date.parse(updatedAt))
+    || (summary != null && !planText(summary, 200))
+    || (invariants !== undefined && (!Array.isArray(invariants) || invariants.length > 6 || !invariants.every(item => planText(item, 160))))
+    || !planInteger(completed, 0) || !planInteger(blocked, 0) || !planInteger(total, 1)
+    || !Array.isArray(steps) || steps.length !== total || total > 12) return;
+
+  const parsedSteps: WorkingPlanStepView[] = [];
+  let completedCount = 0;
+  let blockedCount = 0;
+  let inProgressCount = 0;
+  for (const step of steps) {
+    if (!step || typeof step !== 'object') return;
+    const { title, status, check, note } = step as Record<string, unknown>;
+    if (!planText(title, 120) || !planStepStatus(status)
+      || (check != null && !planText(check, 160))
+      || (note != null && !planText(note, 200))) return;
+    completedCount += Number(status === 'completed');
+    blockedCount += Number(status === 'blocked');
+    inProgressCount += Number(status === 'in_progress');
+    parsedSteps.push({ title, status, ...(check != null ? { check } : {}), ...(note != null ? { note } : {}) });
+  }
+  if (completedCount !== completed || blockedCount !== blocked || inProgressCount > 1) return;
+  return {
+    epoch, revision, updatedAt, completed, total, blocked, steps: parsedSteps,
+    ...(summary != null ? { summary } : {}),
+    ...(invariants !== undefined ? { invariants: [...invariants] } : {}),
+  };
+}
+
 export function readDrawerSession(raw: unknown): DrawerSession | null {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -294,8 +343,10 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && Number.isFinite(Date.parse(progress.startedAt)) && Number.isFinite(Date.parse(progress.lastProgressAt))
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
   const epoch = record.followUpEpoch;
+  const workingPlan = readWorkingPlan(record.workingPlan);
   return {
     sessionId,
+    ...(workingPlan ? { workingPlan } : {}),
     ...(typeof epoch === 'number' && Number.isSafeInteger(epoch) && epoch >= 0 ? { followUpEpoch: epoch } : {}),
     ...(readString(origin.parentSessionId) ? { parentSessionId: readString(origin.parentSessionId) } : {}),
     ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),

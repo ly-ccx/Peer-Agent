@@ -6,6 +6,8 @@ pub use conversation_shell::{
     NativeShellCommandBinding, NativeShellSession, background_shell_handle,
     background_shell_process, shell_task_id_valid,
 };
+pub mod working_plan;
+pub use working_plan::*;
 mod work_shell;
 pub use work_shell::{
     NativeWorkShellSession, WORK_SHELL_SEMANTIC_FLOOR, native_work_has_shell_facts,

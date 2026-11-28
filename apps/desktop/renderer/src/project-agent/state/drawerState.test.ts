@@ -332,3 +332,56 @@ test('task status distinguishes live verification, pending reports, failures and
     assert.equal(formatDrawerSessionStatus(session, i18n), label);
   }
 });
+
+test('working plan accepts bounded host facts and normalizes nullable optional fields', () => {
+  const title = '审'.repeat(120);
+  const workingPlan = {
+    epoch: 2,
+    revision: 4,
+    updatedAt: '2026-11-27T00:00:00Z',
+    summary: null,
+    invariants: ['保持只读'],
+    completed: 1,
+    total: 2,
+    blocked: 0,
+    steps: [
+      { title: '读取', status: 'completed', check: '检查版本', note: null },
+      { title, status: 'in_progress', check: null, note: '处理中' },
+    ],
+  };
+  assert.deepEqual(readDrawerSession({ sessionId: 'work', workingPlan })?.workingPlan, {
+    epoch: 2,
+    revision: 4,
+    updatedAt: workingPlan.updatedAt,
+    invariants: workingPlan.invariants,
+    completed: 1,
+    total: 2,
+    blocked: 0,
+    steps: [
+      { title: '读取', status: 'completed', check: '检查版本' },
+      { title, status: 'in_progress', note: '处理中' },
+    ],
+  });
+});
+
+test('working plan drops the whole invalid payload while retaining the session', () => {
+  const valid = {
+    epoch: 0, revision: 1, updatedAt: '2026-11-27T00:00:00Z',
+    total: 2, completed: 0, blocked: 0,
+    steps: [{ title: 'One', status: 'in_progress' }, { title: 'Two', status: 'pending' }],
+  };
+  for (const invalid of [
+    { epoch: -1 }, { revision: 1.2 }, { updatedAt: 'invalid' }, { updatedAt: '0' }, { completed: 2 },
+    { total: 0, steps: [] }, { blocked: '1' }, { invariants: [false] }, { summary: 4 },
+    { steps: [valid.steps[0], { title: 'Two', status: 'unknown' }] },
+    { steps: [valid.steps[0], { title: 'Two', status: 'in_progress' }] },
+    { steps: [valid.steps[0], { title: ' ', status: 'pending' }] },
+    { steps: [valid.steps[0], { title: '验'.repeat(121), status: 'pending' }] },
+    { steps: [valid.steps[0], { title: 'Two', status: 'pending', check: {} }] },
+  ]) {
+    const parsed = readDrawerSession({ sessionId: 'work', workingPlan: { ...valid, ...invalid } });
+    assert.equal(parsed?.sessionId, 'work');
+    assert.equal(parsed?.workingPlan, undefined);
+  }
+  assert.equal(readDrawerSession({ sessionId: 'work' })?.workingPlan, undefined);
+});

@@ -222,6 +222,9 @@ pub fn delete_session(home: &Path, id: &str) -> Result<(), StoreError> {
     if let Some(directory) = optional_directory(&stores.conversations.join(".context-snapshots"))? {
         remove.push(directory.join(format!("{id}.json")));
     }
+    if let Some(directory) = optional_directory(&stores.conversations.join(".working-plans"))? {
+        remove.push(directory.join(format!("{id}.json")));
+    }
     let progress = optional_directory(&stores.goals.join("runner-progress"))?;
     for plan in &selected.plans {
         remove.push(stores.goals.join(format!("{plan}.json")));

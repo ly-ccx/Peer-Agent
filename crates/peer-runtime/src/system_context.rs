@@ -4,6 +4,7 @@ use peer_protocol::javascript_json_string;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 mod continuity;
+pub(crate) mod delegated;
 pub(crate) mod explorer;
 pub(crate) mod goal_runner;
 mod ordinary;
@@ -174,6 +175,66 @@ pub(crate) fn assemble_work_context_for_turn(
     Ok(
         json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":now,"conversationId":goal["conversationId"],"workspacePath":workspace,"provider":provider,"model":model,"mode":"goal","sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
     )
+}
+
+fn working_plan_section(plan: &peer_protocol::WorkingPlanSnapshot) -> Value {
+    section(
+        "runtime.working-plan",
+        "L7_CONTINUITY",
+        20,
+        "Working plan snapshot",
+        continuity::neutralize(&peer_protocol::format_working_plan_fact_block(plan)),
+        json!({"id":"runtime.working-plan","kind":"working-plan"}),
+        "runtime",
+    )
+}
+
+// Conversation surfaces use the same ordering, byte budget and snapshot binding.
+fn finish_conversation_context(
+    mut sections: Vec<Value>,
+    conversation: &str,
+    workspace: &str,
+    provider: &str,
+    model: &str,
+    mode: &str,
+    at: &str,
+) -> Result<Value, &'static str> {
+    sections.sort_by(|a, b| {
+        rank(&a["layer"])
+            .cmp(&rank(&b["layer"]))
+            .then(a["priority"].as_i64().cmp(&b["priority"].as_i64()))
+            .then(a["id"].as_str().cmp(&b["id"].as_str()))
+    });
+    let rendered = sections
+        .iter()
+        .filter_map(|s| s["content"].as_str())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if rendered.len() > 512 * 1024 {
+        return Err("context_resource_limit");
+    }
+    let digest = hash(&rendered);
+    let section_refs = sections
+        .iter()
+        .map(|s| json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]}))
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "version": 1,
+        "sections": sections,
+        "rendered": rendered,
+        "snapshot": {
+            "id": format!("prompt-{}", &digest[..16]),
+            "createdAt": at,
+            "conversationId": conversation,
+            "workspacePath": workspace,
+            "provider": provider,
+            "model": model,
+            "mode": mode,
+            "sectionRefs": section_refs,
+            "renderedHash": digest,
+        },
+    }))
 }
 
 #[cfg(test)]

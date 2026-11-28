@@ -1205,3 +1205,5 @@ export { normalizeConversationExecution, conversationExecutionPermitsNewRun } fr
 export type { ConversationExecutionIdentity, ConversationExecution } from './conversation-execution.ts';
 
 export * from './quiet-reply.js';
+
+export type { WorkingPlanStepStatus, WorkingPlanStepView, WorkingPlanView } from './working-plan.ts';

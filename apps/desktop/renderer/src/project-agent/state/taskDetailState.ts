@@ -24,6 +24,7 @@ export function mergeTaskDetail(selected: DrawerSession | null, detail: DrawerSe
     verificationActive: selected.verificationActive,
     verificationProgress: selected.verificationProgress ?? (current && isActivelyVerifying(selected) ? detail.verificationProgress : undefined),
     workerOutput: detail.workerOutput ?? selected.workerOutput,
+    workingPlan: detail.workingPlan ?? selected.workingPlan,
     failure: detail.failure ?? selected.failure,
     evidenceRefs: detail.evidenceRefs,
     verification: current ? detail.verification : undefined };
