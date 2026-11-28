@@ -102,7 +102,7 @@ fn all_standard_wires_send_saved_images_and_count_the_same_request_through_a_rea
         }
         let h = f.history();
         assert_eq!(h.iter().find(|m| m["id"] == "input-c").unwrap(), &original);
-        let tool = h.iter().find(|m| m["segments"].is_array()).unwrap();
+        let tool = h.iter().find(|m| has_tool_call(m)).unwrap();
         assert_eq!(tool["permissionGrants"][0]["granted"], true);
         assert_eq!(tool["segments"][0]["result"]["status"], "success");
         assert!(tool["segments"][0]["result"]["evidence"].is_object());

@@ -2,6 +2,49 @@
 use super::*;
 
 #[test]
+fn invalid_shell_timeout_returns_a_tool_error_without_dispatch_and_allows_retry() {
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"touch should-not-exist","timeoutMs":600_001}),
+        ),
+        reply_tool(
+            "bash",
+            json!({"command":"printf recovered","timeoutMs":null,"cwd":null}),
+        ),
+        reply_text("Recovered after correcting the timeout."),
+    ]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let history = f.history();
+    let result = &history[1]["segments"][0]["result"];
+    assert_eq!(result["error"]["code"], "invalid_timeout");
+    assert_eq!(result["error"]["recoverable"], true);
+    assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+    assert_eq!(history[1]["permissionGrants"][0]["granted"], false);
+    assert_eq!(
+        history[2]["segments"][0]["result"]["output"]["stdout"],
+        "recovered"
+    );
+    assert!(!f.root.path().join("workspace/should-not-exist").exists());
+    assert!(
+        f.budget(|_| {})["uncertainDispatches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[1].to_string().contains("invalid_timeout"));
+}
+
+#[test]
 fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task() {
     let server = Server::new(vec![
         reply_tool(

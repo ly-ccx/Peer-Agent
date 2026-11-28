@@ -117,6 +117,43 @@ fn history_bounds_allocations_across_rows_before_building_large_trees() {
 }
 
 #[test]
+fn recent_committed_kind_scans_long_history_and_excludes_live_suffix() {
+    let root = fixture();
+    let dir = root.path().join("conversations");
+    let body = format!(
+        "{{\"id\":\"old\",\"kind\":\"agent_turn\"}}\n{}{{\"id\":\"recent\",\"kind\":\"agent_turn\"}}\n{{\"id\":\"live\",\"kind\":\"agent_turn\"}}\n{{\"id\":\"suffix\",\"kind\":\"agent_turn\"}}\n",
+        "{\"kind\":\"agent_reply\",\"role\":\"assistant\",\"content\":\"old reply\",\"meta\":[1,2,3,4]}\n".repeat(10_000),
+    );
+    fs::write(dir.join("c.jsonl"), body).unwrap();
+    fs::write(
+        dir.join("c.stream.json"),
+        r#"{"version":1,"conversationId":"c","messageId":"live","patch":{}}"#,
+    )
+    .unwrap();
+    let store = ConversationStore::new(root.path());
+    let budget = 1_048_576;
+    assert_eq!(
+        store.read_committed("c", None, budget).unwrap_err(),
+        StoreError::HistoryLimit
+    );
+    let projected = store
+        .read_recent_committed_by_kind("c", "agent_turn", 1, budget)
+        .unwrap();
+    assert_eq!(projected, [json!({"id":"recent","kind":"agent_turn"})]);
+    fs::write(
+        dir.join("c.stream.json"),
+        r#"{"version":1,"conversationId":"c","messageId":"missing","patch":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .read_recent_committed_by_kind("c", "agent_turn", 1, budget)
+            .unwrap_err(),
+        StoreError::StreamTargetMissing
+    );
+}
+
+#[test]
 fn directory_lock_contends_cancels_and_never_reclaims_unknown_owner() {
     let root = tempfile::tempdir().unwrap();
     let file = root.path().join("index.jsonl");

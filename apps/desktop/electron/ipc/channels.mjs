@@ -379,6 +379,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'skills:link',
   'skills:list',
   'skills:list-available',
+  'skills:list-install-targets',
   'skills:marketplace:get-detail',
   'skills:marketplace:install',
   'skills:marketplace:list',

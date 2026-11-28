@@ -28,6 +28,9 @@ const executor = {
     return scheduler.withTurn(
       { planId: input?.turnProfile?.planId, workspaceId: input?.turnProfile?.workspaceId || workspaceId, lane: 'work', signal: input?.signal },
       async () => {
+        // Yield as the original executor did so the parent can crash at
+        // task_created before this worker dispatches its first model request.
+        await new Promise(resolve => setImmediate(resolve));
         workerCalls++;
         return { requestedUserInput: true, terminalStatus: 'done' };
       },

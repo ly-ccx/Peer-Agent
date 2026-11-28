@@ -1,4 +1,6 @@
-use crate::{StoreError, files, identity};
+use crate::StoreError;
+#[cfg(unix)]
+use crate::{files, identity};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -10,16 +12,31 @@ use std::{
 /// Uses exactly the existing TS `${file}.lock` mkdir protocol; never expires it.
 pub struct DirectoryLock {
     path: PathBuf,
+    #[cfg(unix)]
     identity: files::FileIdentity,
+    #[cfg(windows)]
+    identity: same_file::Handle,
     owned: bool,
 }
 
 impl DirectoryLock {
     pub fn check_owned(&self) -> Result<(), StoreError> {
-        if !self.owned || identity(&self.path)?.as_ref() != Some(&self.identity) {
+        if !self.owned || !self.path_still_owned()? {
             return Err(StoreError::LockOwnershipChanged);
         }
         Ok(())
+    }
+
+    fn path_still_owned(&self) -> Result<bool, StoreError> {
+        #[cfg(unix)]
+        {
+            Ok(identity(&self.path)?.as_ref() == Some(&self.identity))
+        }
+        #[cfg(windows)]
+        {
+            Ok(crate::platform::open_directory_identity(&self.path)
+                .is_ok_and(|current| current == self.identity))
+        }
     }
     pub fn acquire(
         file: &Path,
@@ -36,7 +53,11 @@ impl DirectoryLock {
             }
             match fs::create_dir(&path) {
                 Ok(()) => {
+                    #[cfg(unix)]
                     let version = identity(&path)?.ok_or(StoreError::LockOwnershipChanged)?;
+                    #[cfg(windows)]
+                    let version = crate::platform::open_directory_identity(&path)
+                        .map_err(|_| StoreError::LockOwnershipChanged)?;
                     let lock = Self {
                         path,
                         identity: version,
@@ -62,10 +83,9 @@ impl DirectoryLock {
     }
 
     fn unlock(&mut self) -> Result<(), StoreError> {
+        let ownership = self.check_owned();
         self.owned = false;
-        if identity(&self.path)?.as_ref() != Some(&self.identity) {
-            return Err(StoreError::LockOwnershipChanged);
-        }
+        ownership?;
         // Never recursively delete an unknown lock body or replacement owner.
         fs::remove_dir(&self.path).map_err(|_| StoreError::LockOwnershipChanged)
     }

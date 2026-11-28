@@ -344,6 +344,27 @@
   }
 }
 
+@keyframes motion-iridescent-flow {
+  to { transform: translateX(-50%); }
+}
+
+.motion-iridescent-flow {
+  transform-box: fill-box;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .motion-iridescent-flow {
+    animation: motion-iridescent-flow var(--za-motion-iridescent-flow) linear infinite;
+  }
+}
+
+@media (forced-colors: active) {
+  .motion-iridescent-flow {
+    animation: none;
+    fill: currentColor;
+  }
+}
+
 @keyframes bot-avatar-breathe {
   0%, 100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-1px) scale(1.035, 0.975); }

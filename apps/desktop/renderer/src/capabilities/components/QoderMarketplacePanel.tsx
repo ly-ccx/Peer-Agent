@@ -1,12 +1,12 @@
 import { PeerIcon } from '../../ui/icons';
-import type { QoderInstallScope, QoderMarketplaceEntry, QoderMarketplacePage, QoderMarketplaceSkillDetail, QoderMarketplaceSort, QoderTaxonomyItem } from '@peer-agent/protocol';
+import type { QoderMarketplaceEntry, QoderMarketplacePage, QoderMarketplaceSkillDetail, QoderMarketplaceSort, QoderTaxonomyItem } from '@peer-agent/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
 import { buildPageItems } from './marketplace-pagination';
-import { getMarketplaceWorkspaceTarget, getMarketplaceWorkspaceTargets, type MarketplaceWorkspaceTarget } from './marketplace-workspace-target';
+import { MarketplaceSkillInstall } from './MarketplaceSkillInstall';
 
 const PAGE_SIZE = 20;
 const EMPTY_PAGE: QoderMarketplacePage = {
@@ -30,7 +30,8 @@ function formatInstallError(error: unknown): string {
   if (message.includes('qoder_download_error_')) return '下载安装包失败，请稍后重试';
   if (message.includes('skill_already_installed')) return '该 Skill 已安装';
   if (message.includes('zip') || message.includes('archive')) return '安装包解析失败';
-  return '安装失败，请稍后重试';
+  if (message.includes('skill_install_unreadable')) return 'SKILL.md 无法解析或缺少技能描述';
+  return message ? `安装失败（${message}）` : '安装失败，请稍后重试';
 }
 
 function SkillAvatar({ name, iconUrl, className = 'skill-avatar' }: { readonly name: string; readonly iconUrl: string | null; readonly className?: string }) {
@@ -80,43 +81,15 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const [selected, setSelected] = useState<QoderMarketplaceEntry | null>(null);
   const [detail, setDetail] = useState<(QoderMarketplaceSkillDetail & { readonly skillMd: string | null }) | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [installScope, setInstallScope] = useState<QoderInstallScope>('global');
-  const [workspaceTargets, setWorkspaceTargets] = useState<readonly MarketplaceWorkspaceTarget[]>([]);
-  const [workspaceTarget, setWorkspaceTarget] = useState<MarketplaceWorkspaceTarget | null>(null);
-  const hasWorkspace = workspaceTargets.length > 0;
-  const workspaceOptions = useMemo(
-    () => workspaceTargets.map((target) => ({ value: target.path, label: target.optionLabel })),
-    [workspaceTargets],
-  );
+  const [installPending, setInstallPending] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setPage(1); setDebouncedKeyword(keyword.trim()); }, 300);
     return () => window.clearTimeout(timer);
   }, [keyword]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void clientApi.workspaceList()
-      .then((value) => {
-        if (cancelled) return;
-        const targets = getMarketplaceWorkspaceTargets(value);
-        const target = getMarketplaceWorkspaceTarget(value);
-        setWorkspaceTargets(targets);
-        setWorkspaceTarget(target);
-        if (!target) setInstallScope('global');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setWorkspaceTargets([]);
-          setWorkspaceTarget(null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, []);
 
   // 只保留分类筛选（对齐 skillhub 市场）。taxonomies 接口带 Accept-Language: zh-CN 直接返回中文标签。
   useEffect(() => {
@@ -157,10 +130,10 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
     if (!selected) { setDetail(null); setDetailLoading(false); return; }
     let cancelled = false;
     setDetailLoading(true);
-    setInstallError(null);
+    setDetailError(false);
     void clientApi.getQoderSkillDetail({ skillId: selected.skillId })
       .then((value) => { if (!cancelled) setDetail(value); })
-      .catch(() => { if (!cancelled) setInstallError('无法读取 Skill 详情'); })
+      .catch(() => { if (!cancelled) setDetailError(true); })
       .finally(() => { if (!cancelled) setDetailLoading(false); });
     return () => { cancelled = true; };
   }, [selected]);
@@ -170,34 +143,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
   const closeSelected = () => {
     setSelected(null);
     setDetail(null);
-    setInstallError(null);
   };
-
-  const chooseInstallScope = (scope: QoderInstallScope) => {
-    if (scope === 'workspace' && !hasWorkspace) return;
-    setInstallScope(scope);
-  };
-
-  const install = async (entry: QoderMarketplaceEntry) => {
-    setInstallError(null);
-    setInstalling(entry.skillId);
-    try {
-      await clientApi.installQoderSkill({
-        skillId: entry.skillId,
-        scope: installScope,
-        workspacePath: installScope === 'workspace' ? workspaceTarget?.path : undefined,
-        iconUrl: entry.iconUrl,
-      });
-      setInstalling(null);
-      closeSelected();
-      onInstalled?.();
-    } catch (cause) {
-      setInstalling(null);
-      setInstallError(formatInstallError(cause));
-    }
-  };
-
-  const installSummary = (entry: QoderMarketplaceEntry): string => installing === entry.skillId ? '正在安装…' : '安装';
 
   return (
     <section className="skill-marketplace" aria-label="Qoder 市场">
@@ -256,7 +202,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                   <span>{displayCount(entry.installCount)}</span>
                 </em>
               </span>
-              <button type="button" className="skill-marketplace-install" disabled={installing === entry.skillId} onClick={() => setSelected(entry)}>{installSummary(entry)}</button>
+              <button type="button" className="skill-marketplace-install" onClick={() => setSelected(entry)}>安装</button>
             </div>
           </article>
         ))}
@@ -283,7 +229,7 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
         </nav>
       ) : null}
       {selected ? (
-        <Overlay onClose={closeSelected} ariaLabel={`${selected.nameCn || selected.name} 详情`} panelClassName="skill-marketplace-detail">
+        <Overlay onClose={closeSelected} ariaLabel={`${selected.nameCn || selected.name} 详情`} panelClassName="skill-marketplace-detail" onRequestClose={() => !installPending}>
           {({ requestClose }) => (() => {
             const description = detail?.descriptionCn || detail?.description || selected.descriptionCn || selected.description;
             return (<>
@@ -332,61 +278,18 @@ export function QoderMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                     </p>
                   </section>
                 ) : null}
-                <div className="skill-marketplace-install-row">
-                  <div className="skill-marketplace-install-actions">
-                    <span className="skill-marketplace-install-label">安装位置</span>
-                    <div className="skill-marketplace-install-targets">
-                      <div className="skill-marketplace-install-scope" role="radiogroup" aria-label="安装位置">
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={installScope === 'global'}
-                          className={installScope === 'global' ? 'is-active' : undefined}
-                          onClick={() => chooseInstallScope('global')}
-                        >
-                          全局
-                        </button>
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={installScope === 'workspace'}
-                          className={installScope === 'workspace' ? 'is-active' : undefined}
-                          disabled={!hasWorkspace}
-                          onClick={() => chooseInstallScope('workspace')}
-                        >
-                          机器人
-                        </button>
-                      </div>
-                      {installScope === 'workspace' ? (
-                        <div className="skill-marketplace-workspace-picker">
-                          <Dropdown
-                            ariaLabel="选择安装机器人"
-                            value={workspaceTarget?.path ?? ''}
-                            options={workspaceOptions}
-                            placeholder="选择机器人"
-                            disabled={!hasWorkspace}
-                            onChange={(value) => setWorkspaceTarget(workspaceTargets.find((target) => target.path === value) ?? null)}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="skill-marketplace-install skill-marketplace-install--primary"
-                    disabled={installing === selected.skillId || (installScope === 'workspace' && !hasWorkspace)}
-                    onClick={() => void install(selected)}
-                  >
-                    {installing === selected.skillId
-                      ? '正在下载并安装…'
-                      : installScope === 'workspace'
-                        ? '下载并安装到机器人'
-                        : '下载并安装到全局'}
-                  </button>
-                  {installError ? (
-                    <p className="skill-marketplace-install-error" role="alert">{installError}</p>
-                  ) : null}
-                </div>
+                {detailError && <p className="skill-marketplace-install-note" role="alert">无法读取 Skill 详情</p>}
+                <MarketplaceSkillInstall
+                  verb="下载并安装"
+                  install={(destination) => clientApi.installQoderSkill({
+                    ...destination,
+                    skillId: selected.skillId,
+                    iconUrl: selected.iconUrl,
+                  })}
+                  formatError={formatInstallError}
+                  onPendingChange={setInstallPending}
+                  onInstalled={() => { closeSelected(); onInstalled?.(); }}
+                />
               </div>
             </>);
           })()}

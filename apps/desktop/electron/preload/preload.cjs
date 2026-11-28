@@ -235,6 +235,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
   stopShellTask: (taskId) => ipcRenderer.invoke('shell:tasks:stop', { taskId }),
   listShellPermissionRules: () => ipcRenderer.invoke('shell:permissions:list'),
   addShellPermissionRule: (rule) => ipcRenderer.invoke('shell:permissions:add', rule),
+  listSkillInstallTargets: () => ipcRenderer.invoke('skills:list-install-targets'),
   listSkills: (workspacePaths) => ipcRenderer.invoke('skills:list', { workspacePaths }),
   getSkillDetail: (skillId, workspacePath) => ipcRenderer.invoke('skills:get-detail', { skillId, workspacePath }),
   refreshSkills: (workspacePaths) => ipcRenderer.invoke('skills:refresh', { workspacePaths }),

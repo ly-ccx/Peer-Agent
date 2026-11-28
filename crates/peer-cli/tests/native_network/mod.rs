@@ -81,11 +81,7 @@ fn base_url(f: &Fixture, url: &str) {
     put(file, &config);
 }
 fn tool_evidence(f: &Fixture) {
-    let tool = f
-        .history()
-        .into_iter()
-        .find(|m| m["segments"].is_array())
-        .unwrap();
+    let tool = f.history().into_iter().find(has_tool_call).unwrap();
     assert_eq!(tool["permissionGrants"][0]["granted"], true);
     assert_eq!(tool["segments"][0]["result"]["status"], "success");
     assert!(tool["segments"][0]["result"]["evidence"].is_object());
