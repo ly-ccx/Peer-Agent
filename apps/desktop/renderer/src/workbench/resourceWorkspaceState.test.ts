@@ -4,13 +4,21 @@ import { reconcileResourceOrder, resourceNeighbor, normalizeResourcePreferences,
 import { createDocumentSessionState, createDocumentTabSession, openDocumentTab, normalizeDocumentComparison, normalizeDocumentSessionState } from './documentSessionState.ts';
 
 test('resource layout preserves two usable surfaces by collapsing navigation before using a single area', () => {
-  const bounds = (width: number) => resourceLayoutBounds(width, 292, 10, 480, 320);
+  const bounds = (width: number) => resourceLayoutBounds(width, 292, 10, 480, 320, 0);
   assert.deepEqual(bounds(1316), { navigationCollapsed: false, primaryMin: 792, compact: false, sideMax: 514 });
   assert.deepEqual(bounds(1000), { navigationCollapsed: true, primaryMin: 500, compact: false, sideMax: 490 });
   assert.equal(bounds(830).compact, false);
   assert.equal(bounds(829).compact, true);
   assert.equal(bounds(1600).navigationCollapsed, false);
   assert.equal(bounds(0).sideMax, 320);
+});
+
+test('solid resource layout budgets the collapsed card inset without changing expanded width', () => {
+  const bounds = (width: number) => resourceLayoutBounds(width, 292, 0, 480, 320, 8);
+  assert.deepEqual(bounds(1092), { navigationCollapsed: false, primaryMin: 772, compact: false, sideMax: 320 });
+  assert.deepEqual(bounds(1000), { navigationCollapsed: true, primaryMin: 488, compact: false, sideMax: 512 });
+  assert.equal(bounds(808).compact, false);
+  assert.equal(bounds(807).compact, true);
 });
 
 test('R4d mixed order retains identity and closes to a real adjacent resource', () => {
