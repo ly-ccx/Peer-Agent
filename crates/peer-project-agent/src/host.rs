@@ -38,7 +38,10 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 pub const FAMILIARIZE_READ_CAPABILITIES: [&str; 5] = [
@@ -144,6 +147,24 @@ impl Drop for WakeAdmission<'_> {
     }
 }
 
+struct ActiveWakeEntry {
+    cancel: CancellationToken,
+    preempted: Arc<AtomicBool>,
+}
+
+struct ActiveWakeGuard<'a> {
+    active: &'a Mutex<HashMap<String, ActiveWakeEntry>>,
+    workspace_id: &'a str,
+}
+
+impl Drop for ActiveWakeGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(self.workspace_id);
+        }
+    }
+}
+
 pub struct NativeProjectHost {
     data_home: PathBuf,
     host_identity: HostIdentity,
@@ -167,6 +188,7 @@ pub struct NativeProjectHost {
     runner: ProjectAgentRunner,
     failure_holds: Mutex<HashMap<String, FailureHold>>,
     active_wake_trials: Mutex<HashSet<String>>,
+    active_wakes: Mutex<HashMap<String, ActiveWakeEntry>>,
     directory: BotDirectory,
     conversations: ConversationStore,
     digests: DigestQueue,
@@ -235,6 +257,7 @@ impl NativeProjectHost {
             runner,
             failure_holds: Mutex::new(HashMap::new()),
             active_wake_trials: Mutex::new(HashSet::new()),
+            active_wakes: Mutex::new(HashMap::new()),
             host_identity,
             data_home: home,
         })
@@ -660,6 +683,127 @@ impl NativeProjectHost {
         Ok(Some((conv_id, ws_path, report, false)))
     }
 
+    /// Preempt any in-flight background `wake` turn for `workspace_id` so fresh user input
+    /// takes priority immediately without emitting a user-stopped card or advancing inbox cursor.
+    pub fn preempt_active_wake(&self, workspace_id: &str) -> bool {
+        let Ok(guard) = self.active_wakes.lock() else {
+            return false;
+        };
+        let Some(entry) = guard.get(workspace_id) else {
+            return false;
+        };
+        entry.preempted.store(true, Ordering::SeqCst);
+        entry.cancel.cancel();
+        true
+    }
+
+    /// Persist a visible `agent_unavailable` card when host-level setup (e.g. model loading or
+    /// foreground tick error) fails while pending user inputs are waiting for a reply.
+    pub fn record_host_input_failure(
+        &self,
+        workspace_id: &str,
+        code: &'static str,
+    ) -> Result<bool, ProjectError> {
+        if !self.holds_lease(workspace_id) || !self.inputs.has_pending(workspace_id) {
+            return Ok(false);
+        }
+        let Some(profile) = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+        else {
+            return Ok(false);
+        };
+        let Some(conv_id) = profile.agent_conversation_id else {
+            return Ok(false);
+        };
+        let consumed = self
+            .inputs
+            .consume(workspace_id, &conv_id, &self.conversations, true)?;
+        if consumed.pending_execution.is_empty() {
+            return Ok(false);
+        }
+        let anchors: Vec<String> = consumed
+            .pending_execution
+            .iter()
+            .map(|inp| format!("input-{}", inp.input_id))
+            .collect();
+        let turn_id = format!("turn-{}", uuid::Uuid::new_v4());
+        // Host and loader details may contain provider response bodies or private endpoints.
+        let content = if code == "MODEL_UNAVAILABLE" {
+            "代理暂时无法加载模型，请检查模型配置后重试。"
+        } else {
+            "代理暂时无法处理这条消息，请重试。"
+        };
+        let at = now_iso();
+        let meta = json!({
+            "errorCode": code,
+        });
+        self.conversations.append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": format!("{turn_id}-card"),
+                "role": "assistant",
+                "kind": "system_card",
+                "card": "agent_unavailable",
+                "turnId": turn_id,
+                "replyTo": anchors,
+                "content": content,
+                "actions": ["retry"],
+                "meta": meta,
+                "cards": [{
+                    "cardId": format!("card:agent_unavailable:{turn_id}"),
+                    "kind": "agent_unavailable",
+                    "content": content,
+                    "actions": [{
+                        "id": "retry",
+                        "channel": "project-agent:retry",
+                        "payload": {
+                            "workspaceId": workspace_id,
+                            "turnId": turn_id,
+                        }
+                    }]
+                }],
+                "createdAt": at,
+            }),
+            &at,
+            None,
+        )?;
+        if let Err(err) = self.conversations.append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": turn_id,
+                "role": "assistant",
+                "kind": "agent_turn",
+                "turnId": turn_id,
+                "turnKind": "user",
+                "userInputs": anchors,
+                "replyTo": anchors,
+                "content": "",
+                "createdAt": at,
+                "meta": {
+                    "diagnosticTiming": {
+                        "startedAt": at,
+                        "finishedAt": at,
+                        "durationMs": 0,
+                        "outcome": "error",
+                    }
+                },
+            }),
+            &at,
+            None,
+        ) {
+            // The card already carries the input anchors and retry action.
+            let err = ProjectError::from(err);
+            eprintln!(
+                "project-host failed to record failure timing for {turn_id}: {}",
+                err.code
+            );
+        }
+        self.runner.set_error_status(workspace_id);
+        Ok(true)
+    }
+
     pub fn failure_hold(&self, workspace_id: &str) -> Option<FailureHold> {
         self.failure_holds.lock().ok()?.get(workspace_id).cloned()
     }
@@ -679,7 +823,10 @@ impl NativeProjectHost {
         let Some(signal) = &outcome.failure_hold else {
             if !matches!(
                 outcome.end,
-                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+                TurnEndKind::Failed { .. }
+                    | TurnEndKind::CircuitOpen
+                    | TurnEndKind::UserStopped
+                    | TurnEndKind::Preempted
             ) {
                 self.clear_failure_hold(workspace_id);
             }
@@ -818,7 +965,25 @@ impl NativeProjectHost {
             return Ok(None);
         }
         let (model, verifier_model) = models;
-        let outcome = Box::pin(self.runner.run_turn_with_verifier(
+        let wake_cancel = cancel.child_token();
+        let preempted = Arc::new(AtomicBool::new(false));
+        if let Ok(mut active) = self.active_wakes.lock() {
+            active.insert(
+                workspace_id.to_owned(),
+                ActiveWakeEntry {
+                    cancel: wake_cancel.clone(),
+                    preempted: Arc::clone(&preempted),
+                },
+            );
+        }
+        let _wake_guard = ActiveWakeGuard {
+            active: &self.active_wakes,
+            workspace_id,
+        };
+        if self.inputs.has_pending(workspace_id) || cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let outcome = Box::pin(self.runner.run_turn_with_preempt(
             &RunTurnOptions {
                 workspace_id,
                 workspace_path: ws_path,
@@ -832,7 +997,8 @@ impl NativeProjectHost {
             },
             model,
             verifier_model,
-            cancel,
+            &wake_cancel,
+            Some(&preempted),
         ))
         .await?;
         if !self.holds_lease_generation(workspace_id, &epoch) {
@@ -843,6 +1009,9 @@ impl NativeProjectHost {
             &outcome,
             parse_iso_ms(&now_iso()).unwrap_or(now_ms),
         );
+        if matches!(outcome.end, TurnEndKind::Preempted) {
+            return Ok(Some(outcome));
+        }
         let finished_ms = parse_iso_ms(&now_iso()).unwrap_or(now_ms);
         self.reconcile_deliveries(workspace_id, conv_id, finished_ms, false, &[])?;
         let can_advance = outcome.failure_hold.is_none()

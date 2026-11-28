@@ -15,7 +15,7 @@ use crate::{
     objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
     reply::{
         ComposeReplyInput, SessionStatusFact, StatusClaim, Surfacing, SurfacingEvent,
-        compose_reply, decide_surfacing, resolve_user_anchors,
+        compose_reply, decide_surfacing, normalize_proactivity, resolve_user_anchors,
     },
     skill_packs::{
         ACTIVATE_SKILL_PACK_CAPABILITY, ACTIVATE_SKILL_PACK_TOOL, all_skill_pack_ids,
@@ -1339,7 +1339,19 @@ pub(crate) fn commit_composed_reply(
     let surfacing = if state.kind == "user" || fallback {
         Surfacing::Message
     } else {
-        let is_agent_proactive = proactive && reply_to.is_empty() && question.is_none();
+        let cites_user_task = sessions.iter().any(|session| {
+            sources.contains(&session.session_id)
+                && session
+                    .anchor_message_ids
+                    .iter()
+                    .any(|anchor| state.valid_user_message_ids.contains(anchor))
+        });
+        // An acknowledged task can still report immediately at low proactivity. With
+        // proactivity off, unanchored follow-ups retain their digest delivery policy.
+        let is_agent_proactive = proactive
+            && reply_to.is_empty()
+            && question.is_none()
+            && (normalize_proactivity(Some(&proactivity)) == "off" || !cites_user_task);
         decide_surfacing(
             &SurfacingEvent {
                 origin: if is_agent_proactive {

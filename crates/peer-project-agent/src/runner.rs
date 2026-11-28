@@ -54,7 +54,10 @@ use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 const USER_MAX_BOT_ROUNDS: usize = 14;
@@ -90,6 +93,7 @@ pub enum TurnEndKind {
     AwaitingChildren { session_ids: Vec<String> },
     QuietSettled { reason: String },
     Yielded,
+    Preempted,
     UserStopped,
     CircuitOpen,
     Failed { code: String },
@@ -292,6 +296,11 @@ impl ProjectAgentRunner {
         });
     }
 
+    pub(crate) fn set_error_status(&self, workspace_id: &str) {
+        self.dispose_activity(workspace_id);
+        self.set_status_only(workspace_id, "error");
+    }
+
     fn set_status_only(&self, workspace_id: &str, status: &str) {
         if let Ok(mut guard) = self.statuses.lock() {
             guard.insert(workspace_id.to_owned(), status.to_owned());
@@ -422,7 +431,11 @@ impl ProjectAgentRunner {
             let _ = self
                 .breaker_store
                 .abandon_trial(ctx.workspace_id, Some(ctx.provider_scope));
-            return TurnEndKind::UserStopped;
+            return if ctx.is_preempted() {
+                TurnEndKind::Preempted
+            } else {
+                TurnEndKind::UserStopped
+            };
         }
         let reason_for_breaker = display_reason.unwrap_or(code);
         let outcome = self.breaker_store.record_failure(
@@ -511,7 +524,32 @@ struct TurnFailureCtx<'a> {
     turn_id: &'a str,
     provider_scope: &'a str,
     now_ms: i64,
+    preempted: Option<&'a AtomicBool>,
     failure_hold: Mutex<Option<FailureHoldSignal>>,
+}
+
+impl TurnFailureCtx<'_> {
+    fn is_preempted(&self) -> bool {
+        self.preempted
+            .is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+}
+
+struct TrialGuard<'a> {
+    store: &'a CircuitBreakerStore,
+    workspace_id: &'a str,
+    scope_key: &'a str,
+    active: bool,
+}
+
+impl Drop for TrialGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self
+                .store
+                .abandon_trial(self.workspace_id, Some(self.scope_key));
+        }
+    }
 }
 
 fn should_settle_quiet_wake_empty_response(
@@ -1829,25 +1867,83 @@ impl ProjectAgentRunner {
         verifier_model: Option<&NativeModel>,
         cancel: &CancellationToken,
     ) -> Result<AgentTurnOutcome, ProjectError> {
+        self.run_turn_with_preempt(opts, model, verifier_model, cancel, None)
+            .await
+    }
+
+    pub(crate) async fn run_turn_with_preempt(
+        &self,
+        opts: &RunTurnOptions<'_>,
+        model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
+        cancel: &CancellationToken,
+        preempted: Option<&AtomicBool>,
+    ) -> Result<AgentTurnOutcome, ProjectError> {
         if !opts.holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
         if let Ok(mut guard) = self.last_workspace_id.lock() {
             *guard = Some(opts.workspace_id.to_owned());
         }
+        let is_preempted = || preempted.is_some_and(|flag| flag.load(Ordering::SeqCst));
         let turn_id = format!("turn-{}", uuid::Uuid::new_v4());
         let now_str = now_iso();
         let now_ms = parse_iso_ms(&now_str).unwrap_or(0);
         let provider_scope = format!("provider:{}", model.provider());
         let manual_trial = opts.manual_trial;
 
-        let mut trial_in_flight = match self.breaker_store.admit(
+        let mut trial_guard = match self.breaker_store.admit(
             opts.workspace_id,
             manual_trial,
             Some(&provider_scope),
             now_ms,
         ) {
             Ok(CircuitAdmit::Blocked { open_until }) => {
+                if opts.kind == "user" && manual_trial {
+                    let conv_store = ConversationStore::new(&self.data_home);
+                    let anchors: Vec<String> = opts
+                        .user_inputs
+                        .iter()
+                        .map(|i| format!("input-{}", i.input_id))
+                        .collect();
+                    let content =
+                        "代理熔断保护生效中，暂时无法处理这条消息。请稍后再试，或点击重试。";
+                    let at = now_iso();
+                    let _ = conv_store.append_message_idempotent(
+                        opts.conversation_id,
+                        &json!({
+                            "id": format!("{turn_id}-card"),
+                            "role": "assistant",
+                            "kind": "system_card",
+                            "card": "agent_unavailable",
+                            "turnId": turn_id,
+                            "replyTo": anchors,
+                            "content": content,
+                            "actions": ["retry"],
+                            "meta": {
+                                "errorCode": "model_circuit_open",
+                                "circuitOpenUntil": open_until,
+                            },
+                            "cards": [{
+                                "cardId": format!("card:agent_unavailable:{turn_id}"),
+                                "kind": "agent_unavailable",
+                                "content": content,
+                                "actions": [{
+                                    "id": "retry",
+                                    "channel": "project-agent:retry",
+                                    "payload": {
+                                        "workspaceId": opts.workspace_id,
+                                        "turnId": turn_id,
+                                    }
+                                }]
+                            }],
+                            "createdAt": at,
+                        }),
+                        &at,
+                        None,
+                    );
+                    self.set_error_status(opts.workspace_id);
+                }
                 return Ok(AgentTurnOutcome {
                     turn_id,
                     end: TurnEndKind::CircuitOpen,
@@ -1858,8 +1954,18 @@ impl ProjectAgentRunner {
                     }),
                 });
             }
-            Ok(CircuitAdmit::Admitted { trial }) => trial,
-            Err(_) => false,
+            Ok(CircuitAdmit::Admitted { trial }) => TrialGuard {
+                store: &self.breaker_store,
+                workspace_id: opts.workspace_id,
+                scope_key: &provider_scope,
+                active: trial,
+            },
+            Err(_) => TrialGuard {
+                store: &self.breaker_store,
+                workspace_id: opts.workspace_id,
+                scope_key: &provider_scope,
+                active: false,
+            },
         };
 
         let (max_rounds, max_tool_calls) = if opts.kind == "user" {
@@ -2107,13 +2213,17 @@ impl ProjectAgentRunner {
                 }
             }
         }
-        let instructions = ProjectInstructions::observe_desktop_host(
-            opts.workspace_path,
-            &self.data_home,
-            None,
-            cancel,
-        )
-        .unwrap_or_default();
+        let instructions = {
+            let ws_path = opts.workspace_path.to_path_buf();
+            let home = self.data_home.clone();
+            let cancel_clone = cancel.clone();
+            tokio::task::spawn_blocking(move || {
+                ProjectInstructions::observe_desktop_host(&ws_path, &home, None, &cancel_clone)
+                    .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default()
+        };
         let retry_continuity = read_retry_continuity_in(
             Some(&self.data_home),
             Some(opts.workspace_id),
@@ -2289,7 +2399,19 @@ impl ProjectAgentRunner {
             mut compaction_epoch,
             mut live_messages,
             mut committed_message_ids,
-        } = load_bot_history(&self.data_home, opts.workspace_id, &history_messages);
+        } = {
+            let home = self.data_home.clone();
+            let ws = opts.workspace_id.to_owned();
+            let msgs = history_messages;
+            tokio::task::spawn_blocking(move || load_bot_history(&home, &ws, &msgs))
+                .await
+                .unwrap_or(LoadedBotHistory {
+                    continuity_summary: None,
+                    compaction_epoch: 0,
+                    live_messages: Vec::new(),
+                    committed_message_ids: Vec::new(),
+                })
+        };
 
         if opts.kind == "user" && !opts.user_inputs.is_empty() {
             for inp in opts.user_inputs {
@@ -2572,6 +2694,7 @@ impl ProjectAgentRunner {
             turn_id: &turn_id,
             provider_scope: &provider_scope,
             now_ms,
+            preempted,
             failure_hold: Mutex::new(None),
         };
 
@@ -2587,7 +2710,11 @@ impl ProjectAgentRunner {
         while round < max_rounds {
             round += 1;
             if cancel.is_cancelled() {
-                final_end = TurnEndKind::UserStopped;
+                final_end = if is_preempted() {
+                    TurnEndKind::Preempted
+                } else {
+                    TurnEndKind::UserStopped
+                };
                 break;
             }
             self.set_activity_phase(opts.workspace_id, "thinking", None, false);
@@ -2681,7 +2808,7 @@ impl ProjectAgentRunner {
                             {
                                 Ok(t) => Some(t),
                                 Err(retry_err) => {
-                                    trial_in_flight = false;
+                                    trial_guard.active = false;
                                     final_end = self.record_model_turn_failure(
                                         &failure_ctx,
                                         &retry_err,
@@ -2692,12 +2819,12 @@ impl ProjectAgentRunner {
                             }
                         }
                         Ok(None) => {
-                            trial_in_flight = false;
+                            trial_guard.active = false;
                             final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                             break;
                         }
                         Err(compact_err) => {
-                            trial_in_flight = false;
+                            trial_guard.active = false;
                             final_end =
                                 self.record_model_turn_failure(&failure_ctx, &compact_err, cancel);
                             break;
@@ -2722,7 +2849,7 @@ impl ProjectAgentRunner {
                     break;
                 }
                 Err(err) => {
-                    trial_in_flight = false;
+                    trial_guard.active = false;
                     final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                     break;
                 }
@@ -2748,7 +2875,11 @@ impl ProjectAgentRunner {
                     "text": content,
                     "toolCalls": [],
                 }));
-                final_end = TurnEndKind::UserStopped;
+                final_end = if is_preempted() {
+                    TurnEndKind::Preempted
+                } else {
+                    TurnEndKind::UserStopped
+                };
                 break;
             }
 
@@ -2772,7 +2903,7 @@ impl ProjectAgentRunner {
                     && opts.kind == "user"
                     && strip_literal_tool_call_blocks(content).trim().is_empty()
                 {
-                    trial_in_flight = false;
+                    trial_guard.active = false;
                     final_end =
                         self.record_turn_failure(&failure_ctx, "unsupported_tool_response", cancel);
                     break;
@@ -2805,7 +2936,7 @@ impl ProjectAgentRunner {
                         continue;
                     }
                     Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
-                        trial_in_flight = false;
+                        trial_guard.active = false;
                         let code = if leaked_protocol {
                             "unsupported_tool_response"
                         } else {
@@ -2815,7 +2946,7 @@ impl ProjectAgentRunner {
                     }
                     Ok(NaturalReplyOutcome::NoReply) => {}
                     Err(err) => {
-                        trial_in_flight = false;
+                        trial_guard.active = false;
                         final_end = self.record_turn_failure(&failure_ctx, err.code, cancel);
                     }
                 }
@@ -2833,7 +2964,11 @@ impl ProjectAgentRunner {
             let calls = std::mem::take(&mut model_turn.calls);
             for call in calls {
                 if cancel.is_cancelled() {
-                    final_end = TurnEndKind::UserStopped;
+                    final_end = if is_preempted() {
+                        TurnEndKind::Preempted
+                    } else {
+                        TurnEndKind::UserStopped
+                    };
                     stop_loop = true;
                     break;
                 }
@@ -3032,6 +3167,7 @@ impl ProjectAgentRunner {
                 TurnEndKind::ReplyCommitted { .. }
                     | TurnEndKind::AwaitingChildren { .. }
                     | TurnEndKind::QuietSettled { .. }
+                    | TurnEndKind::Preempted
                     | TurnEndKind::UserStopped
                     | TurnEndKind::Failed { .. }
                     | TurnEndKind::CircuitOpen
@@ -3131,7 +3267,7 @@ impl ProjectAgentRunner {
                                         );
                                     }
                                     Ok(NaturalReplyOutcome::NeedsRepair(_)) => {
-                                        trial_in_flight = false;
+                                        trial_guard.active = false;
                                         let code = if has_literal_tool_call_syntax(&t.content) {
                                             "unsupported_tool_response"
                                         } else {
@@ -3142,7 +3278,7 @@ impl ProjectAgentRunner {
                                     }
                                     Ok(_) => {}
                                     Err(err) => {
-                                        trial_in_flight = false;
+                                        trial_guard.active = false;
                                         final_end = self.record_turn_failure(
                                             &failure_ctx,
                                             err.code,
@@ -3153,7 +3289,7 @@ impl ProjectAgentRunner {
                             }
                         }
                         Err(err) => {
-                            trial_in_flight = false;
+                            trial_guard.active = false;
                             final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                         }
                     }
@@ -3162,7 +3298,7 @@ impl ProjectAgentRunner {
                     final_end = TurnEndKind::Yielded;
                 }
                 Err(err) => {
-                    trial_in_flight = false;
+                    trial_guard.active = false;
                     final_end = self.record_model_turn_failure(&failure_ctx, &err, cancel);
                 }
             }
@@ -3175,6 +3311,7 @@ impl ProjectAgentRunner {
                 TurnEndKind::ReplyCommitted { .. }
                     | TurnEndKind::AwaitingChildren { .. }
                     | TurnEndKind::QuietSettled { .. }
+                    | TurnEndKind::Preempted
                     | TurnEndKind::UserStopped
                     | TurnEndKind::Failed { .. }
                     | TurnEndKind::CircuitOpen
@@ -3254,8 +3391,10 @@ impl ProjectAgentRunner {
                 _ => "done",
             };
             if visible_activity {
-                if matches!(final_end, TurnEndKind::QuietSettled { .. })
-                    || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
+                if matches!(
+                    final_end,
+                    TurnEndKind::QuietSettled { .. } | TurnEndKind::Preempted
+                ) || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
                 {
                     self.dispose_activity(opts.workspace_id);
                 } else {
@@ -3272,15 +3411,19 @@ impl ProjectAgentRunner {
         }
 
         match &final_end {
-            TurnEndKind::UserStopped => {
-                if trial_in_flight {
+            TurnEndKind::UserStopped | TurnEndKind::Preempted => {
+                if trial_guard.active {
+                    trial_guard.active = false;
                     let _ = self
                         .breaker_store
                         .abandon_trial(opts.workspace_id, Some(&provider_scope));
                 }
             }
-            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => {}
+            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => {
+                trial_guard.active = false;
+            }
             _ => {
+                trial_guard.active = false;
                 let _ = self
                     .breaker_store
                     .record_success(opts.workspace_id, Some(&provider_scope));
@@ -3374,6 +3517,7 @@ impl ProjectAgentRunner {
         let duration_ms = finished_ms.saturating_sub(now_ms).max(0);
         let outcome_label = match &final_end {
             TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
+            TurnEndKind::Preempted => "preempted",
             TurnEndKind::UserStopped => "stopped",
             _ => "done",
         };
@@ -3478,7 +3622,7 @@ impl ProjectAgentRunner {
                     TurnEndKind::AwaitingChildren { .. } => "waiting_children",
                     TurnEndKind::UserStopped => "stopped",
                     TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "blocked",
-                    TurnEndKind::Yielded => "runnable",
+                    TurnEndKind::Yielded | TurnEndKind::Preempted => "runnable",
                 };
             let _ = self.coordination.ensure_work(
                 opts.workspace_id,
@@ -3492,7 +3636,10 @@ impl ProjectAgentRunner {
 
         if !matches!(
             final_end,
-            TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen | TurnEndKind::UserStopped
+            TurnEndKind::Failed { .. }
+                | TurnEndKind::CircuitOpen
+                | TurnEndKind::UserStopped
+                | TurnEndKind::Preempted
         ) {
             let curator = crate::MemoryCurator::new(&self.data_home);
             if opts.kind == "user" && !opts.user_inputs.is_empty() {

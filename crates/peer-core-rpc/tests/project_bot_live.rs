@@ -15,8 +15,8 @@ use peer_runtime::{
     },
 };
 use peer_store::{
-    AcquireLease, ApprovalStore, ExecutionResourceStore, HostIdentity, HostLeaseStore, PolicyStore,
-    ResourceReservation,
+    AcquireLease, ApprovalStore, DirectoryLock, ExecutionResourceStore, HostIdentity,
+    HostLeaseStore, PolicyStore, ResourceReservation,
 };
 use serde_json::{Value, json};
 use std::{
@@ -1311,6 +1311,7 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
     let sse_stop = CancellationToken::new();
     {
         let stop_srv = sse_stop.clone();
+        let index = home.join("conversations/index.jsonl");
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -1318,14 +1319,24 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
                     _ = stop_srv.cancelled() => break,
                     accepted = listener.accept() => {
                         let Ok((mut socket, _)) = accepted else { break; };
+                        let index = index.clone();
                         tokio::spawn(async move {
                             let req_text = read_http_request(&mut socket).await;
                             let body_str = req_text.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
                             let has_tool_result = body_str.contains(r#""role":"tool""#)
                                 || body_str.contains(r#""role": "tool""#);
-                            let sse = if !has_tool_result
-                                && body_str.contains("Delegated Task: Plan Gate Worker")
-                            {
+                            let plan_worker_call = !has_tool_result
+                                && body_str.contains("Delegated Task: Plan Gate Worker");
+                            let index_lock = if plan_worker_call {
+                                // A writer in another runtime owns the shared index while the
+                                // approved worker receives the write tool call.
+                                Some(tokio::task::spawn_blocking(move || {
+                                    DirectoryLock::acquire(&index, Duration::from_secs(2), None).unwrap()
+                                }).await.unwrap())
+                            } else {
+                                None
+                            };
+                            let sse = if plan_worker_call {
                                 sse_tool_call_response(
                                     "tc-write-1",
                                     "write_file",
@@ -1343,6 +1354,11 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
                                 sse_text_response("Completed cleanly.")
                             };
                             write_sse_reply(&mut socket, &sse).await;
+                            if let Some(lock) = index_lock {
+                                // Hold past the former 100 ms Rust-only index budget.
+                                tokio::time::sleep(Duration::from_millis(450)).await;
+                                lock.release().unwrap();
+                            }
                         });
                     }
                 }
@@ -1409,10 +1425,17 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
             {
                 break found["approvalId"].as_str().unwrap().to_owned();
             }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "timed out waiting for live worker open approval: {list}"
-            );
+            if tokio::time::Instant::now() >= deadline {
+                let session = client
+                    .call(
+                        "project.bot.getSession",
+                        json!({ "workspaceId": ws_id, "sessionId": s_plan.session_id, "detail": "report" }),
+                    )
+                    .await;
+                panic!(
+                    "timed out waiting for live worker open approval: approvals={list}; session={session}"
+                );
+            }
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
     };
@@ -1527,10 +1550,17 @@ async fn decide_approval_plan_live_worker_and_policy_drift() {
             }) {
                 break found["approvalId"].as_str().unwrap().to_owned();
             }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "timed out waiting for second live approval: {list}"
-            );
+            if tokio::time::Instant::now() >= deadline {
+                let session = client
+                    .call(
+                        "project.bot.getSession",
+                        json!({ "workspaceId": ws_id, "sessionId": s2.session_id, "detail": "report" }),
+                    )
+                    .await;
+                panic!(
+                    "timed out waiting for second live approval: approvals={list}; session={session}"
+                );
+            }
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
     };
@@ -2526,5 +2556,225 @@ async fn explicit_reverification_withdrawal_cancels_the_live_request_and_notifie
     );
     assert_eq!(plan["runner"]["verifierRuns"][0]["status"], "interrupted");
     assert!(plan["resultAcceptance"].is_null());
+    client.shutdown(handle).await;
+}
+
+#[tokio::test]
+async fn submit_input_preempts_inflight_slow_background_wake_and_replies_promptly() {
+    let home = TempDir::new().unwrap();
+    let ws = TempDir::new().unwrap();
+    let ws_dir = ws.path().to_string_lossy().into_owned();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let endpoint = format!("http://{addr}/v1/chat/completions");
+    let wake_reached = Arc::new(Notify::new());
+    let wake_reached_srv = Arc::clone(&wake_reached);
+    let stop_srv = CancellationToken::new();
+    let stop_srv_clone = stop_srv.clone();
+    let req_idx = Arc::new(AtomicUsize::new(0));
+    let req_idx_srv = Arc::clone(&req_idx);
+
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = stop_srv_clone.cancelled() => break,
+                accepted = listener.accept() => {
+                    let Ok((mut socket, _)) = accepted else { break; };
+                    let idx = req_idx_srv.fetch_add(1, Ordering::SeqCst);
+                    let notify = Arc::clone(&wake_reached_srv);
+                    let stop_conn = stop_srv_clone.clone();
+                    tokio::spawn(async move {
+                        let _ = read_http_request(&mut socket).await;
+                        if idx == 0 {
+                            // First call is the invisible background wake turn: stall until preempted.
+                            notify.notify_one();
+                            stop_conn.cancelled().await;
+                            let _ = socket.shutdown().await;
+                        } else if idx == 1 {
+                            write_sse_reply(&mut socket, &sse_text_response("立即回复用户消息")).await;
+                        } else {
+                            write_sse_reply(&mut socket, &sse_text_response("NO_REPLY")).await;
+                        }
+                    });
+                }
+            }
+        }
+    });
+
+    let (mut client, handle) =
+        spawn_live_server(home.path(), Some(make_test_loader(endpoint))).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({ "enabled": true, "heartbeatIntervalMs": 60 }),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({ "path": ws_dir, "name": "Preempt Bot", "startFamiliarize": false }),
+        )
+        .await;
+    let ws_id = created["profile"]["workspaceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Enqueue a background wake inbox event; heartbeat wakes the workspace and stalls in request #0.
+    let inbox = peer_project_agent::ProjectInbox::new(home.path());
+    inbox
+        .append(
+            &ws_id,
+            &[json!({ "eventId": "ev-stall-1", "kind": "objective_signal" })],
+        )
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), wake_reached.notified())
+        .await
+        .expect("background wake turn should start and block on slow provider");
+
+    // While the invisible wake holds the workspace lock, submit a fresh user input.
+    let sub = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id,
+                "inputId": "inp-preempt-live",
+                "text": "立刻回我",
+                "surface": "desktop",
+            }),
+        )
+        .await;
+    assert_eq!(sub["ok"], true);
+
+    // User input must preempt the slow wake and receive its reply well before any model timeout.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let conv = client
+            .call(
+                "project.bot.readConversation",
+                json!({ "workspaceId": ws_id }),
+            )
+            .await;
+        let msgs = conv["messages"].as_array().cloned().unwrap_or_default();
+        assert!(
+            !msgs.iter().any(|m| m["card"] == "agent_stopped"),
+            "preempted background wake must not surface an agent_stopped card: {msgs:?}"
+        );
+        if msgs.iter().any(|m| {
+            m["kind"] == "agent_reply"
+                && m["content"] == "立即回复用户消息"
+                && m["replyTo"] == json!(["input-inp-preempt-live"])
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for preempted user reply: {conv}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    stop_srv.cancel();
+    client.shutdown(handle).await;
+}
+
+#[tokio::test]
+async fn model_load_failure_surfaces_unavailable_card_instead_of_silent_received_hang() {
+    let home = TempDir::new().unwrap();
+    let ws = TempDir::new().unwrap();
+    let ws_dir = ws.path().to_string_lossy().into_owned();
+
+    let failing_loader: ModelLoader = Arc::new(|_home, _provider_id, _effort, _fast, _cancel| {
+        Box::pin(async {
+            Err(peer_core_rpc::RpcError::internal_error(
+                "oauth token expired at https://private-proxy.example with Bearer private-token",
+            ))
+        })
+    });
+
+    let (mut client, handle) = spawn_live_server(home.path(), Some(failing_loader)).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({ "enabled": true, "heartbeatIntervalMs": 60 }),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({ "path": ws_dir, "name": "ModelErr Bot", "startFamiliarize": false }),
+        )
+        .await;
+    let ws_id = created["profile"]["workspaceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let sub = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id,
+                "inputId": "inp-model-err-1",
+                "text": "还在吗？",
+                "surface": "desktop",
+            }),
+        )
+        .await;
+    assert_eq!(sub["ok"], true);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let conv = client
+            .call(
+                "project.bot.readConversation",
+                json!({ "workspaceId": ws_id }),
+            )
+            .await;
+        let msgs = conv["messages"].as_array().cloned().unwrap_or_default();
+        if let Some(card) = msgs.iter().find(|m| m["card"] == "agent_unavailable") {
+            let content = card["content"].as_str().unwrap_or("");
+            assert!(content.contains("无法加载模型"), "{content}");
+            let payload = conv.to_string();
+            for private_detail in [
+                "oauth token expired",
+                "private-proxy.example",
+                "private-token",
+            ] {
+                assert!(!payload.contains(private_detail), "{payload}");
+            }
+            assert_eq!(card["meta"]["errorCode"], "MODEL_UNAVAILABLE");
+            assert_eq!(card["replyTo"], json!(["input-inp-model-err-1"]));
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for MODEL_UNAVAILABLE card: {conv}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Subsequent heartbeats must NOT spam duplicate error cards for the same input.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let conv_after = client
+        .call(
+            "project.bot.readConversation",
+            json!({ "workspaceId": ws_id }),
+        )
+        .await;
+    let card_count = conv_after["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| m["card"] == "agent_unavailable")
+        .count();
+    assert_eq!(
+        card_count, 1,
+        "heartbeat must not spam duplicate model-error cards"
+    );
+
     client.shutdown(handle).await;
 }

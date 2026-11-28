@@ -291,3 +291,202 @@ async fn natural_user_retry_auto_cites_unreported_result_ready_session_for_ancho
         "accepted"
     );
 }
+
+#[tokio::test]
+async fn preempting_active_wake_yields_immediately_without_stop_card_or_advancing_inbox() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = Arc::new(NativeProjectHost::new(home.path(), "test", Some(1)).unwrap());
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("Preempt")).unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.ensure_lease(&ws_id).unwrap();
+
+    let cursor_before = host.inbox().read_cursor(&ws_id).seq;
+    host.inbox()
+        .append(
+            &ws_id,
+            &[json!({"eventId": "ev-slow-wake", "kind": "objective_signal"})],
+        )
+        .unwrap();
+
+    // Start a mock HTTP server whose first connection stalls indefinitely so we can preempt
+    // the background wake mid-flight while waiting on the model response.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let slow_endpoint = format!("http://{addr}/v1/chat/completions");
+    let wake_started = Arc::new(tokio::sync::Notify::new());
+    let wake_started_srv = Arc::clone(&wake_started);
+    let release_slow = CancellationToken::new();
+    let release_slow_srv = release_slow.clone();
+    let srv = tokio::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+            wake_started_srv.notify_one();
+            release_slow_srv.cancelled().await;
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    let cancel = CancellationToken::new();
+    let local = tokio::task::LocalSet::new();
+    let wake_tick = local
+        .run_until(async {
+            let host_wake = Arc::clone(&host);
+            let ws_wake = ws_id.clone();
+            let cancel_wake = cancel.clone();
+            let wake_task = tokio::task::spawn_local(async move {
+                host_wake
+                    .tick_foreground(
+                        &ws_wake,
+                        &mock_model(&slow_endpoint),
+                        json!({}),
+                        &cancel_wake,
+                    )
+                    .await
+                    .unwrap()
+            });
+
+            // Startup recovery and context assembly run before the request and compete with
+            // the rest of the suite. Measure preemption separately after the provider is reached.
+            tokio::time::timeout(std::time::Duration::from_secs(15), wake_started.notified())
+                .await
+                .expect("wake request should reach mock server");
+
+            // Submit fresh user input and preempt the in-flight wake turn.
+            host.submit_user_input(&ws_id, "preempt-u1", "立刻回答这个问题", None)
+                .unwrap();
+            assert!(
+                host.preempt_active_wake(&ws_id),
+                "active wake turn should be registered and preemptable"
+            );
+
+            tokio::time::timeout(std::time::Duration::from_secs(3), wake_task)
+                .await
+                .expect("preempted wake turn must exit promptly")
+                .unwrap()
+        })
+        .await;
+    release_slow.cancel();
+    let _ = srv.await;
+
+    assert_eq!(
+        wake_tick.last_turn.as_ref().map(|t| &t.end),
+        Some(&TurnEndKind::Preempted)
+    );
+    assert_eq!(
+        host.inbox().read_cursor(&ws_id).seq,
+        cursor_before,
+        "preempted wake must preserve inbox cursor so deferred events run after user input"
+    );
+    assert!(host.failure_hold(&ws_id).is_none());
+
+    let msgs_after_preempt = host
+        .conversations()
+        .read_committed(&conv_id, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    assert!(
+        !msgs_after_preempt
+            .iter()
+            .any(|m| m["card"] == "agent_stopped"),
+        "preempted background wake must never append an agent_stopped card"
+    );
+
+    // Next tick answers the fresh user input first, then drains the deferred wake cleanly.
+    let fast_server = start_mock_server(vec![
+        Box::new(|_| sse_text("马上给你回答。")),
+        Box::new(|_| sse_text("NO_REPLY")),
+    ]);
+    let next_tick = host
+        .tick_foreground(
+            &ws_id,
+            &mock_model(&fast_server.endpoint),
+            json!({}),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(next_tick.bot_turns_run, 1);
+    assert_eq!(next_tick.wake_turns_run, 1);
+    let reply = host
+        .find_reply_for_input(&ws_id, "preempt-u1")
+        .unwrap()
+        .expect("user input must be replied to");
+    assert_eq!(reply["content"], "马上给你回答。");
+    assert_eq!(host.inbox().read_cursor(&ws_id).seq, cursor_before + 1);
+}
+
+#[tokio::test]
+async fn natural_wake_report_for_user_task_is_not_swallowed_into_digest_under_low_proactivity() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("README.md"), "# Demo").unwrap();
+    let host = NativeProjectHost::new(home.path(), "test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("LowProact")).unwrap();
+    let ws_id = entry.workspace_id;
+    let parent = profile.agent_conversation_id.unwrap();
+    host.ensure_lease(&ws_id).unwrap();
+    host.profiles().set_proactivity(&ws_id, "low").unwrap();
+
+    let child = spawn_autonomy_fixture(&host, &ws_id, &parent, ws.path());
+    // Mark originating user input already answered (just like after dispatch ack).
+    let at = crate::now_iso();
+    host.conversations()
+        .append_message_idempotent(
+            &parent,
+            &json!({
+                "id": "reply-ack-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "replyTo": [input_message_id("auto-input").unwrap()],
+                "sources": [child.session_id],
+                "content": "已安排后台处理。",
+                "createdAt": at,
+            }),
+            &at,
+            None,
+        )
+        .unwrap();
+
+    host.supervisor().promote_queued(&ws_id, true).unwrap();
+    let worker = start_mock_server(vec![Box::new(|_| sse_text("Task finished cleanly."))]);
+    let cancel = CancellationToken::new();
+    host.run_promoted_session(
+        &ws_id,
+        &child.session_id,
+        &mock_model(&worker.endpoint),
+        None,
+        &mut AutoAllowPermission,
+        8,
+        &cancel,
+    )
+    .await
+    .unwrap();
+
+    let bot = start_mock_server(vec![Box::new(|_| sse_text("后台任务已完成，结果正常。"))]);
+    let tick = host
+        .tick_foreground(&ws_id, &mock_model(&bot.endpoint), json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.wake_turns_run, 1);
+
+    let messages = host
+        .conversations()
+        .read_committed(&parent, None, 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let report = messages
+        .iter()
+        .find(|m| m["kind"] == "agent_reply" && m["content"] == "后台任务已完成，结果正常。")
+        .expect("user task wake report must be delivered immediately, not queued into digest");
+    assert_eq!(report["meta"]["surfacing"], "message");
+    assert_eq!(report["sources"], json!([child.session_id]));
+    assert_eq!(host.digests().pending(&ws_id), 0);
+}

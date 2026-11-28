@@ -46,6 +46,20 @@ impl DecodeBudget {
     }
 }
 
+fn read_stable_snapshot<T>(
+    mut read: impl FnMut() -> Result<T, StoreError>,
+) -> Result<T, StoreError> {
+    // A writer to another conversation can replace the shared index mid-read.
+    // Repeat the whole read and its identity checks before returning any facts.
+    for _ in 0..2 {
+        match read() {
+            Err(StoreError::VersionChanged) => {}
+            result => return result,
+        }
+    }
+    read()
+}
+
 fn rows(bytes: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Value>, StoreError> {
     let mut values = Vec::new();
     for line in bytes.split(|byte| *byte == b'\n') {
@@ -114,6 +128,13 @@ impl ConversationStore {
         if !valid_id(conversation_id, false) {
             return Err(StoreError::InvalidInput);
         }
+        read_stable_snapshot(|| self.read_metadata_snapshot(conversation_id))
+    }
+
+    fn read_metadata_snapshot(
+        &self,
+        conversation_id: &str,
+    ) -> Result<ConversationMetadataSnapshot, StoreError> {
         let path = self.directory.join("index.jsonl");
         let before = identity(&path)?.ok_or(StoreError::NotFound)?;
         let rows = crate::durable_jsonl::read(&path, None)?;
@@ -177,6 +198,18 @@ impl ConversationStore {
         if !valid_id(conversation_id, false) || budget == 0 || budget > MAX_HISTORY_BYTES {
             return Err(StoreError::InvalidInput);
         }
+        read_stable_snapshot(|| {
+            self.read_committed_snapshot(conversation_id, expected_revision, budget, projection)
+        })
+    }
+
+    fn read_committed_snapshot(
+        &self,
+        conversation_id: &str,
+        expected_revision: Option<u64>,
+        budget: usize,
+        projection: Option<(&str, usize)>,
+    ) -> Result<HistorySnapshot, StoreError> {
         let files = [
             self.directory.join("index.jsonl"),
             self.directory.join(format!("{conversation_id}.jsonl")),

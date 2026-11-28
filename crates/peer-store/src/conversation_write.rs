@@ -73,16 +73,24 @@ pub(super) fn timestamp(at: &str) -> bool {
     at.len() <= 64
         && time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).is_ok()
 }
+pub(crate) fn lock_index(
+    directory: &Path,
+    cancel: Option<&AtomicBool>,
+) -> Result<DirectoryLock, StoreError> {
+    // Bot and worker runtimes serialize durable writes to the same index.
+    // Allow ordinary writer contention while returning promptly for a retained lock.
+    DirectoryLock::acquire(
+        &directory.join("index.jsonl"),
+        Duration::from_secs(2),
+        cancel,
+    )
+}
 pub(crate) fn locks(
     directory: &Path,
     id: Option<&str>,
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<DirectoryLock>, StoreError> {
-    let mut held = vec![DirectoryLock::acquire(
-        &directory.join("index.jsonl"),
-        Duration::from_millis(100),
-        cancel,
-    )?];
+    let mut held = vec![lock_index(directory, cancel)?];
     if let Some(id) = id {
         held.push(DirectoryLock::acquire(
             &directory.join(format!("{id}.jsonl")),

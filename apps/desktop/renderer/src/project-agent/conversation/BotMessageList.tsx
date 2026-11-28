@@ -3,7 +3,7 @@ import type { BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TaskConversationRequest } from '../state/taskConversationState';
 import {
-  formatConversationStamp,
+  formatConversationSeparator,
   repliedUserIds,
   type BotChatMessage,
   type ConversationRow,
@@ -309,17 +309,9 @@ function SystemCard({
   );
 }
 
-function separatorText(
+export function separatorText(
   row: Extract<ConversationRow, { type: 'separator' }>,
   i18n: I18nRuntime,
 ): string {
-  if (row.label) return row.label;
-  const stamp = formatConversationStamp(row.at);
-  const when = stamp
-    ? (stamp.sameDay
-      ? i18n.t('projectAgent.chat.today', { time: stamp.clock })
-      : i18n.t('projectAgent.chat.earlierDay', { date: stamp.date, time: stamp.clock }))
-    : '';
-  if (row.proactive && when) return `${when} · ${i18n.t('projectAgent.chat.digest')}`;
-  return when;
+  return formatConversationSeparator(row, i18n);
 }
