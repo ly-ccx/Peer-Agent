@@ -697,6 +697,149 @@ async fn live_submit_input_emits_push_events_and_commits_agent_reply() {
 }
 
 #[tokio::test]
+async fn yielded_response_resumes_automatically_and_original_turn_id_stops_it() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let (resumed_tx, resumed_rx) = tokio::sync::oneshot::channel();
+    let (disconnected_tx, disconnected_rx) = tokio::sync::oneshot::channel();
+    let req_count = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&req_count);
+    let mock = tokio::spawn(async move {
+        let mut resumed = Some((resumed_tx, disconnected_tx));
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let raw = read_http_request(&mut socket).await;
+            let request: Value =
+                serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let idx = count.fetch_add(1, Ordering::SeqCst);
+            if idx < 14 {
+                write_sse_reply(
+                    &mut socket,
+                    &sse_tool_call_response(
+                        &format!("rpc-yield-{idx}"),
+                        "list_files",
+                        r#"{"path":"."}"#,
+                    ),
+                )
+                .await;
+            } else if let Some((resumed, disconnected)) = resumed.take() {
+                resumed.send(request).unwrap();
+                // Do not send a result: stopResponse must abort the live request,
+                // not wait for the model to finish before settling the activity.
+                let _ = socket.read(&mut [0_u8; 1]).await;
+                disconnected.send(()).unwrap();
+            } else {
+                write_sse_reply(&mut socket, &sse_text_response("Unexpected extra reply")).await;
+            }
+        }
+    });
+
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-yield");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&ws_dir).unwrap();
+    let (mut client, handle) = spawn_live_server(&home, Some(make_test_loader(endpoint))).await;
+    client
+        .call(
+            "project.bot.hostConfigure",
+            json!({"enabled": true, "heartbeatIntervalMs": 60}),
+        )
+        .await;
+    let created = client
+        .call(
+            "project.bot.create",
+            json!({
+                "path": ws_dir, "name": "Yield Bot", "startFamiliarize": false,
+            }),
+        )
+        .await;
+    let ws_id = created["profile"]["workspaceId"].as_str().unwrap();
+    let submitted = client
+        .call(
+            "project.bot.submitInput",
+            json!({
+                "workspaceId": ws_id, "inputId": "rpc-yield", "text": "Inspect this project",
+            }),
+        )
+        .await;
+    assert_eq!(submitted["ok"], true);
+    let first = client
+        .wait_for_notification(Duration::from_secs(5), "first slice activity", |n| {
+            n["method"] == "project.bot.activity"
+                && n["params"]["workspaceId"] == ws_id
+                && n["params"]["activity"]["turnId"].is_string()
+        })
+        .await;
+    let first_id = first["params"]["activity"]["turnId"].as_str().unwrap();
+    // The first slice performs fourteen actual tool round trips before yielding.
+    let request = tokio::time::timeout(Duration::from_secs(20), resumed_rx)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "next slice must send a request without a second client action; observed {} requests",
+                req_count.load(Ordering::SeqCst)
+            )
+        })
+        .unwrap();
+    assert!(
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| { m["role"] == "tool" && m["tool_call_id"] == "rpc-yield-13" })
+    );
+    let resumed = client
+        .call("project.bot.hostStatus", json!({"workspaceId": ws_id}))
+        .await;
+    let activity = &resumed["activities"][ws_id];
+    let resumed_id = activity["turnId"].as_str().unwrap();
+    assert_ne!(resumed_id, first_id);
+    assert!(activity["finishedAt"].is_null());
+    let stop = client
+        .call(
+            "project.bot.stopResponse",
+            json!({
+                "workspaceId": ws_id, "turnId": first_id,
+            }),
+        )
+        .await;
+    assert_eq!(stop["ok"], true, "{stop}");
+    tokio::time::timeout(Duration::from_secs(5), disconnected_rx)
+        .await
+        .expect("stop must disconnect the outstanding model request")
+        .unwrap();
+    client
+        .wait_for_notification(Duration::from_secs(5), "resumed slice stops", |n| {
+            n["method"] == "project.bot.activity"
+                && n["params"]["workspaceId"] == ws_id
+                && n["params"]["activity"]["turnId"] == resumed_id
+                && n["params"]["activity"]["phase"] == "stopped"
+                && n["params"]["activity"]["finishedAt"].is_string()
+        })
+        .await;
+    let conv = client
+        .call(
+            "project.bot.readConversation",
+            json!({"workspaceId": ws_id}),
+        )
+        .await;
+    assert!(
+        !conv["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["kind"] == "agent_reply")
+    );
+    client.shutdown(handle).await;
+    assert_eq!(req_count.load(Ordering::SeqCst), 15);
+    mock.abort();
+}
+
+#[tokio::test]
 async fn stop_response_aborts_slow_turn_and_retry_completes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1214,6 +1357,181 @@ async fn cancel_resume_confirm_result_and_handoff_answer() {
     assert!(accepted["decision"]["acceptedBy"].is_string());
 
     sse_stop.cancel();
+    client.shutdown(handle).await;
+}
+
+#[tokio::test]
+async fn decide_approval_stale_image_scope_and_replay() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("home");
+    let ws_dir = temp.path().join("ws-image-approvals");
+    fs::create_dir_all(&ws_dir).unwrap();
+    let host = NativeProjectHost::new_for_surface(&home, HostSurface::Desktop, "0.1.0-test", None)
+        .unwrap();
+    let (entry, profile) = host.bind_workspace(&ws_dir, Some("Image Bot")).unwrap();
+    let ws_id = entry.workspace_id;
+    let conv_id = profile.agent_conversation_id.unwrap();
+    let at = peer_project_agent::now_iso();
+    let policies = PolicyStore::new(&home);
+    policies
+        .initialize(LocalAccessLevel::AskBeforeLocal, &at, None)
+        .unwrap();
+    let policy = policies.read_or_register(&ws_id, &at).unwrap();
+    let stamp = format!("bot:{ws_id}:{conv_id}:{}", policy.revision);
+    let image = ws_dir.join("shot.png");
+    let scope = json!({"capabilityId": "local.image.read", "action": "read_image_for_model",
+        "path": image, "workspacePath": ws_dir, "fileIdentity": {"dev": 1, "ino": 2,
+        "size": 123, "mtimeMs": 4.125, "ctimeMs": 5.125}});
+    let row = |id, capability, state| {
+        json!({"approvalId": id, "workspaceId": ws_id,
+        "conversationId": conv_id, "capabilityId": capability, "state": state,
+        "summary": "permission fixture", "policyRevision": stamp, "createdAt": at,
+        "argsDigest": javascript_json_digest(&json!({"path": image, "fileIdentity": scope["fileIdentity"]})).unwrap()})
+    };
+    let other = row("other", "local.file.write", "open");
+    let mut rows = vec![other.clone(), row("ordinary", "local.file.write", "stale")];
+    for (id, state) in [
+        ("task", "stale"),
+        ("once", "stale"),
+        ("missing", "stale"),
+        ("invalid", "stale"),
+        ("reject", "stale"),
+        ("cancel", "stale"),
+        ("expired", "stale"),
+        ("drifted", "stale"),
+        ("open-task", "open"),
+        ("open-reject", "open"),
+    ] {
+        let mut image_row = row(id, "local.image.read", state);
+        if id != "missing" {
+            image_row["imageReadScope"] = scope.clone();
+        }
+        if id == "invalid" {
+            image_row["imageReadScope"]["fileIdentity"]["ctimeMs"] = Value::Null;
+        }
+        if id == "expired" {
+            image_row["deadlineAt"] = json!("2020-01-01T00:00:00.000Z");
+        }
+        if id == "drifted" {
+            image_row["policyRevision"] = json!(format!("bot:{ws_id}:{conv_id}:0"));
+        }
+        rows.push(image_row);
+    }
+    let dir = home.join("project-runtime").join(&ws_id);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("approvals.jsonl"),
+        rows.iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+
+    let (mut client, handle) = spawn_live_server(&home, None).await;
+    let params = |id, decision, duration| {
+        json!({"workspaceId": ws_id, "approvalId": id,
+        "decision": decision, "duration": duration})
+    };
+    let method = "project.bot.decideApproval";
+    let mut request = params("task", "approve", "task");
+    // Neither capability nor scope from IPC may substitute the durable request.
+    request["capabilityId"] = json!("local.file.write");
+    request["imageReadScope"] = json!({"path": "/spoofed.png"});
+    let before = now_ms();
+    let approved = client.call(method, request.clone()).await;
+    assert_eq!(approved["ok"], true, "{approved}");
+    assert_eq!(approved["approval"]["state"], "approved");
+    assert_eq!(client.call(method, request).await, approved);
+    for (id, code) in [
+        ("ordinary", "NOT_FOUND"),
+        ("missing", "IMAGE_AUTHORIZATION_UNAVAILABLE"),
+        ("invalid", "IMAGE_AUTHORIZATION_UNAVAILABLE"),
+    ] {
+        assert_eq!(
+            client.call(method, params(id, "approve", "task")).await,
+            json!({"ok": false, "code": code}),
+            "{id}"
+        );
+    }
+    for (id, decision, duration, state, reason) in [
+        ("once", "approve", "once", "approved", Value::Null),
+        (
+            "reject",
+            "reject",
+            "denied",
+            "denied",
+            json!("local_user_denied"),
+        ),
+        (
+            "cancel",
+            "cancel",
+            "denied",
+            "cancelled",
+            json!("permission_cancelled"),
+        ),
+        (
+            "expired",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_timeout"),
+        ),
+        (
+            "drifted",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_policy_changed"),
+        ),
+        // A persisted open row cannot stand in for a live waiter.
+        (
+            "open-task",
+            "approve",
+            "task",
+            "expired",
+            json!("permission_unavailable"),
+        ),
+        (
+            "open-reject",
+            "reject",
+            "denied",
+            "expired",
+            json!("permission_unavailable"),
+        ),
+    ] {
+        let response = client.call(method, params(id, decision, duration)).await;
+        assert_eq!(response["ok"], true, "{id}: {response}");
+        assert_eq!(response["approval"]["state"], state, "{id}");
+        assert_eq!(response["approval"]["decisionReason"], reason, "{id}");
+    }
+    let stored = ApprovalStore::new(&home).list(Some(&ws_id), None).unwrap();
+    assert!(stored.contains(&other));
+    for id in ["ordinary", "missing", "invalid"] {
+        assert_eq!(
+            stored.iter().find(|r| r["approvalId"] == id).unwrap()["state"],
+            "stale"
+        );
+    }
+    let grants: Vec<_> = stored
+        .iter()
+        .filter(|r| r.get("imageReadGrant").is_some())
+        .collect();
+    let [grant] = grants.as_slice() else {
+        panic!("expected one grant, got {grants:?}")
+    };
+    assert_eq!(grant["kind"], "image_read_grant");
+    assert_eq!(grant["state"], "approved");
+    assert_eq!(grant["decidedBy"], "local_ui");
+    let expires = grant["imageReadGrant"]["expiresAt"].as_i64().unwrap();
+    let issued = peer_project_agent::parse_iso_ms(grant["decidedAt"].as_str().unwrap()).unwrap();
+    assert!((before..=now_ms()).contains(&issued));
+    assert_eq!(expires - issued, 1_800_000);
+    assert_eq!(
+        grant["imageReadGrant"],
+        json!({"schemaVersion": 1, "grantId": grant["approvalId"],
+        "workspaceId": ws_id, "conversationId": conv_id, "policyRevision": stamp, "expiresAt": expires,
+        "scope": scope})
+    );
     client.shutdown(handle).await;
 }
 
@@ -2374,7 +2692,11 @@ async fn heartbeat_does_not_replay_failed_turn_until_explicit_retry() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     };
 
-    // Let >= 6 heartbeat intervals pass; heartbeat must NOT spam retries or duplicate cards.
+    let wake = client
+        .call("project.bot.wake", json!({ "workspaceId": ws_id }))
+        .await;
+    assert_eq!(wake["woken"], true);
+    // Give both the ordinary wake and the heartbeat a chance to run.
     tokio::time::sleep(Duration::from_millis(320)).await;
     assert_eq!(
         req_count.load(Ordering::SeqCst),

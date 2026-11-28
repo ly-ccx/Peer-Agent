@@ -31,6 +31,10 @@ pub struct BotListSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_confirmation_required: Option<bool>,
     #[serde(default)]
     pub completion_review_required: bool,
@@ -2230,6 +2234,8 @@ mod tests {
                     title: "UniqueMigrations".into(),
                     status: "waiting_user".into(),
                     updated_at: Some("2026-11-22T01:06:00.000Z".into()),
+                    started_at: None,
+                    ended_at: None,
                     result_confirmation_required: None,
                     completion_review_required: false,
                     conversation_id: Some(child_conv_id),
@@ -2244,6 +2250,8 @@ mod tests {
                     title: "BlockedDeploy".into(),
                     status: "waiting_user".into(),
                     updated_at: Some("2026-11-22T01:04:00.000Z".into()),
+                    started_at: None,
+                    ended_at: None,
                     result_confirmation_required: None,
                     completion_review_required: false,
                     conversation_id: None,
@@ -2258,6 +2266,8 @@ mod tests {
                     title: "ManualReviewTask".into(),
                     status: "waiting_user".into(),
                     updated_at: Some("2026-11-22T01:03:00.000Z".into()),
+                    started_at: None,
+                    ended_at: None,
                     result_confirmation_required: None,
                     completion_review_required: true,
                     conversation_id: None,
@@ -2613,6 +2623,8 @@ mod tests {
                     title: title.into(),
                     status: status.into(),
                     updated_at: Some(updated.into()),
+                    started_at: None,
+                    ended_at: None,
                     result_confirmation_required: None,
                     completion_review_required: false,
                     conversation_id: None,

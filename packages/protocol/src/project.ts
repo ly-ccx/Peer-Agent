@@ -240,6 +240,8 @@ export type ProjectAgentStopResponseResult =
   | { readonly ok: false; readonly code: 'PROJECT_AGENT_DISABLED' | 'NOT_FOUND' | 'HOST_OFFLINE' | 'STALE_TURN' | 'INVALID_INPUT' };
 
 export interface BotListSession {
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly sessionId?: string;
   readonly title?: string;
   readonly status: WorkSessionStatus;

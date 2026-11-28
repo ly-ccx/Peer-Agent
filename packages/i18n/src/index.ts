@@ -401,6 +401,11 @@ export type TranslationKey =
   | 'projectAgent.process.seconds'
   | 'projectAgent.process.lessThanSecond'
   | 'projectAgent.process.minutes'
+  | 'projectAgent.process.hours'
+  | 'projectAgent.taskTiming.spawned'
+  | 'projectAgent.taskTiming.started'
+  | 'projectAgent.taskTiming.ended'
+  | 'projectAgent.taskTiming.queuedFor'
   | 'projectAgent.process.done'
   | 'projectAgent.process.failed'
   | 'projectAgent.process.cancelled'
@@ -2256,6 +2261,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.seconds': '{seconds} 秒',
     'projectAgent.process.lessThanSecond': '少于 1 秒',
     'projectAgent.process.minutes': '{minutes} 分 {seconds} 秒',
+    'projectAgent.process.hours': '{hours} 小时 {minutes} 分',
+    'projectAgent.taskTiming.spawned': '发起：{time}',
+    'projectAgent.taskTiming.started': '实际开跑：{time}',
+    'projectAgent.taskTiming.ended': '结束：{time}',
+    'projectAgent.taskTiming.queuedFor': '排队等待：{duration}',
     'projectAgent.process.done': '已结束',
     'projectAgent.process.failed': '未完成',
     'projectAgent.process.cancelled': '已取消',
@@ -3849,6 +3859,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.process.seconds': '{seconds}s',
     'projectAgent.process.lessThanSecond': 'Less than 1s',
     'projectAgent.process.minutes': '{minutes}m {seconds}s',
+    'projectAgent.process.hours': '{hours}h {minutes}m',
+    'projectAgent.taskTiming.spawned': 'Requested: {time}',
+    'projectAgent.taskTiming.started': 'Started: {time}',
+    'projectAgent.taskTiming.ended': 'Ended: {time}',
+    'projectAgent.taskTiming.queuedFor': 'Queue wait: {duration}',
     'projectAgent.process.done': 'Finished',
     'projectAgent.process.failed': 'Did not complete',
     'projectAgent.process.cancelled': 'Cancelled',

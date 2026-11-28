@@ -396,6 +396,8 @@ export function createSessionSupervisor({
       accepted: Boolean(plan.resultAcceptance?.acceptedAt),
       resultConfirmationRequired: humanGate,
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
+      startedAt: plan.sessionExecution?.startedAt,
+      endedAt: plan.sessionExecution?.endedAt,
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
@@ -847,6 +849,7 @@ export function createSessionSupervisor({
         const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
         const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
           acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
+          startedAt: plan.sessionExecution?.startedAt, endedAt: plan.sessionExecution?.endedAt,
           conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
           ...claimClosureFacts(plan),
           ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),

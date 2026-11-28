@@ -18,6 +18,7 @@ mod request;
 mod retry;
 pub use count::ProviderTokenCount;
 const TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+mod reply_draft;
 mod sse;
 pub use continuation::LiveHistory;
 mod error;
@@ -36,6 +37,7 @@ pub struct NativeModel {
     endpoint: reqwest::Url,
     model: String,
     provider: String,
+    provider_id: Option<String>,
     authentication: Arc<authentication::Access>,
     deadline: Duration,
     wire: wire::Wire,
@@ -68,6 +70,8 @@ pub struct ModelConfig {
 pub struct ModelToolCall {
     pub name: String,
     pub arguments: Value,
+    /// Original Chat tool-call identity and argument text, when supplied by the provider.
+    pub native_chat: Option<(String, String)>,
 }
 pub struct ModelTurn {
     pub content: String,
@@ -92,6 +96,8 @@ pub enum ModelDelta<'a> {
     Text(&'a str),
     Thinking(&'a str),
     ToolIntent,
+    /// Replacement preview of one structured reply's root text, never execution evidence.
+    ReplyDraft(&'a str),
 }
 
 impl NativeModel {
@@ -131,6 +137,20 @@ impl NativeModel {
     pub fn provider(&self) -> &str {
         &self.provider
     }
+    pub(crate) fn with_provider_id(mut self, provider_id: Option<&str>) -> Self {
+        self.provider_id = provider_id.map(str::to_owned);
+        self
+    }
+    pub fn provider_id(&self) -> &str {
+        self.provider_id.as_deref().unwrap_or(&self.provider)
+    }
+    /// Stable routing identity for local checkpoints, not an authentication token.
+    pub fn checkpoint_route(&self) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{:?}\n{}", self.wire, self.endpoint).as_bytes())
+        )
+    }
     pub fn new(
         config: ModelConfig,
         secret: Option<Secret>,
@@ -163,6 +183,7 @@ impl NativeModel {
             endpoint,
             model: config.model,
             provider: config.provider,
+            provider_id: None,
             authentication: Arc::new(authentication::Access::from_key(secret)),
             deadline,
             wire: config.wire,
@@ -430,6 +451,7 @@ impl PreparedRequest<'_> {
             let mut shown = 0;
             let mut shown_thinking = 0;
             let mut reported_tool_intent = false;
+            let mut shown_reply = String::new();
             while let Some(chunk) = response_chunk(&mut response, model.deadline).await? {
                 phase = MidStream;
                 decoder.push(&chunk)?;
@@ -446,6 +468,13 @@ impl PreparedRequest<'_> {
                 if text.len() > shown {
                     publish(ModelDelta::Text(&text[shown..])).await?;
                     shown = text.len();
+                }
+                if reported_tool_intent {
+                    let reply = decoder.reply_draft().unwrap_or_default();
+                    if reply != shown_reply {
+                        publish(ModelDelta::ReplyDraft(&reply)).await?;
+                        shown_reply = reply;
+                    }
                 }
                 if decoder.terminal() {
                     phase = Terminal;

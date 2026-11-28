@@ -14,6 +14,16 @@ impl Gemini {
         !self.calls.is_empty()
     }
 
+    pub(super) fn reply_draft(&self) -> Option<String> {
+        // This wire supplies a materialized args object per functionCall part,
+        // independently of the candidate's finishReason.
+        self.calls
+            .iter()
+            .find(|call| call.name == reply_draft::REPLY_TOOL)
+            .and_then(|call| call.arguments["text"].as_str())
+            .and_then(reply_draft::from_text)
+    }
+
     pub fn event(&mut self, event: &Value) -> Result<bool, ModelError> {
         let v = event.get("response").unwrap_or(event);
         if let Some(usage) = v.get("usageMetadata") {

@@ -18,6 +18,7 @@ import * as drawerState from './state/drawerState.ts';
 import * as workPanelState from './state/botWorkPanelState.ts';
 import * as agentActivityState from './state/agentActivityState.ts';
 import { mergeTaskDetail } from './state/taskDetailState.ts';
+import { taskExecutionTitle } from './state/taskExecutionDuration.ts';
 import { verdictStrip } from './task-workspace/verdictStrip.ts';
 import * as protocol from '@peer-agent/protocol';
 import type { ExecutorIcon as Executor } from './ExecutorIcon';
@@ -51,6 +52,7 @@ const icons = {
 const { BotSidebarTasks } = loadComponent<{ BotSidebarTasks: typeof SidebarTree }>('./BotSidebarTasks.tsx', {
   './ExecutorIcon': executors,
   './state/workerStatus': status,
+  './TaskExecutionDuration': { TaskExecutionDuration: () => null },
 });
 const { ReplyTaskReferences } = loadComponent<{ ReplyTaskReferences: typeof InlineFeed }>('./conversation/ReplyTaskReferences.tsx', {
   '../../ui/icons': { PeerIcon: () => null },
@@ -104,6 +106,8 @@ const { TaskWorkspaceView } = loadComponent<typeof import('./task-workspace/Task
   '../BotAccessControl': { BotAccessControl: () => null },
   '../state/drawerState': drawerState,
   '../state/taskDetailState': { mergeTaskDetail },
+  '../TaskExecutionDuration': { TaskExecutionDuration: () => null },
+  '../state/taskExecutionDuration': { taskExecutionTitle },
   '../state/useTaskReport': { useTaskReport: () => ({ detail: null }) },
   '../state/TaskCancellation': { useTaskCancellation: () => ({ states: {}, cancel() {} }) },
   '../state/taskCancellationFocus': {},

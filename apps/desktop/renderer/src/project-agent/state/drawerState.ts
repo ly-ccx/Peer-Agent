@@ -59,6 +59,8 @@ export interface DrawerSession {
   /** 生命周期决策给出的可取消事实；缺省时 renderer 才退回状态表。 */
   readonly cancelable?: boolean;
   readonly spawnedAt: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly conversationId: string;
   readonly anchorMessageId: string;
   readonly objectiveId?: string;
@@ -363,6 +365,8 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     statusLabel: readString(record.statusLabel),
     ...(typeof record.cancelable === 'boolean' ? {cancelable:record.cancelable} : {}),
     spawnedAt: readString(record.spawnedAt),
+    ...(readString(record.startedAt) ? { startedAt: readString(record.startedAt) } : {}),
+    ...(readString(record.endedAt) ? { endedAt: readString(record.endedAt) } : {}),
     conversationId: readString(record.conversationId),
     anchorMessageId: readString(origin.anchorMessageId),
     ...(readString(origin.objectiveId) ? {objectiveId:readString(origin.objectiveId)} : {}),

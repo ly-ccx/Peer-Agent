@@ -24,6 +24,8 @@ export interface SidebarTaskEntry {
   readonly title: string;
   readonly status: string;
   readonly updatedAt: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly followUp?: FollowUpProjection;
   readonly verificationActive?: boolean;
   readonly phaseLabel?: string;
@@ -185,6 +187,8 @@ function fromBotListSession(session: BotListSession): SidebarTaskEntry | null {
     title: session.title || session.sessionId,
     status: session.status,
     updatedAt: session.updatedAt || '',
+    ...(session.startedAt ? { startedAt: session.startedAt } : {}),
+    ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     followUp: session.followUp,
     phaseLabel: session.phaseLabel,
     anchorMessageId: session.anchorMessageId,
@@ -198,6 +202,8 @@ function fromDrawerSession(session: DrawerSession): SidebarTaskEntry {
     title: session.title || session.sessionId,
     status: session.status,
     updatedAt: session.spawnedAt || '',
+    ...(session.startedAt ? { startedAt: session.startedAt } : {}),
+    ...(session.endedAt ? { endedAt: session.endedAt } : {}),
     followUp: session.followUp,
     verificationActive: session.verificationActive,
     phaseLabel: session.statusLabel,

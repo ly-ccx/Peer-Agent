@@ -154,6 +154,8 @@ impl Default for HostRuntimeSettings {
 
 struct ActiveTurnEntry {
     cancel: CancellationToken,
+    // The renderer can still display the previous slice during the handoff.
+    yielded_activity: Option<ProjectAgentActivity>,
 }
 
 struct ActiveWorkerEntry {
@@ -834,15 +836,19 @@ impl ProjectHostRuntime {
         self.wake_workspace(workspace_id);
     }
 
+    pub fn resume_workspace(self: &Arc<Self>, workspace_id: &str) {
+        if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
+            paused.remove(workspace_id);
+        }
+        self.wake_workspace(workspace_id);
+    }
+
     pub fn wake_workspace(self: &Arc<Self>, workspace_id: &str) {
         if !self.is_enabled() || !is_valid_workspace_id(workspace_id) {
             return;
         }
         if self.host.inputs().has_pending(workspace_id) {
             self.host.preempt_active_wake(workspace_id);
-        }
-        if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
-            paused.remove(workspace_id);
         }
         {
             let mut pending = self.pending_wakes.lock().unwrap_or_else(|e| e.into_inner());
@@ -983,6 +989,7 @@ impl ProjectHostRuntime {
                 workspace_id.to_owned(),
                 ActiveTurnEntry {
                     cancel: turn_cancel.clone(),
+                    yielded_activity: None,
                 },
             );
         }
@@ -1003,21 +1010,66 @@ impl ProjectHostRuntime {
         } else {
             Some(bot_model.clone())
         };
-        let had_failure_hold = self.host.failure_hold(workspace_id).is_some();
-        let inbox_cursor = self.host.inbox().read_cursor(workspace_id).seq;
-        let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
-            workspace_id,
-            &bot_model,
-            verifier_model.as_ref(),
-            worker_sel,
-            &turn_cancel,
-        ))
-        .await;
-
+        // The serialized workspace pump owns one stop token for the whole chain.
+        // External wakes cannot replace it or run a concurrent slice.
+        loop {
+            let had_failure_hold = self.host.failure_hold(workspace_id).is_some();
+            let inbox_cursor = self.host.inbox().read_cursor(workspace_id).seq;
+            let tick_res = Box::pin(self.host.tick_foreground_with_verifier(
+                workspace_id,
+                &bot_model,
+                verifier_model.as_ref(),
+                worker_sel.clone(),
+                &turn_cancel,
+            ))
+            .await;
+            let resume = tick_res.as_ref().is_ok_and(|report| {
+                report.bot_turns_run > 0
+                    && report.wake_turns_run == 0
+                    && matches!(
+                        report.last_turn.as_ref().map(|turn| &turn.end),
+                        Some(peer_project_agent::TurnEndKind::Yielded)
+                    )
+            });
+            if resume
+                && let Ok(mut turns) = self.active_turns.lock()
+                && let Some(entry) = turns.get_mut(workspace_id)
+            {
+                entry.yielded_activity = self.host.runner().activity_for(workspace_id);
+            }
+            self.publish_tick_result(
+                workspace_id,
+                conv_id.as_deref(),
+                (had_failure_hold, inbox_cursor),
+                &turn_cancel,
+                tick_res,
+            );
+            if !resume || loop_cancel.is_cancelled() {
+                break;
+            }
+            // A cancelled turn still enters the host once to settle its input;
+            // that slice cannot dispatch a provider request or a tool.
+            tokio::task::yield_now().await;
+            if loop_cancel.is_cancelled() {
+                break;
+            }
+        }
         if let Ok(mut turns) = self.active_turns.lock() {
             turns.remove(workspace_id);
         }
+    }
 
+    fn publish_tick_result(
+        self: &Arc<Self>,
+        workspace_id: &str,
+        conv_id: Option<&str>,
+        (had_failure_hold, inbox_cursor): (bool, u64),
+        turn_cancel: &CancellationToken,
+        tick_res: Result<
+            peer_project_agent::ForegroundTickReport,
+            peer_project_agent::ProjectError,
+        >,
+    ) {
         match tick_res {
             Ok(report) => {
                 let ended_in_failure = matches!(
@@ -1027,7 +1079,11 @@ impl ProjectHostRuntime {
                             | peer_project_agent::TurnEndKind::CircuitOpen
                     )
                 );
-                if ended_in_failure {
+                let inbox_advanced = self.host.inbox().read_cursor(workspace_id).seq > inbox_cursor;
+                // Delivery-only failures use the delivery ledger's bounded backoff.
+                let delivery_retry_scheduled = report.wake_turns_run > 0
+                    && (inbox_advanced || !self.host.inbox().has_pending(workspace_id));
+                if ended_in_failure && !delivery_retry_scheduled {
                     let cursor = self.host.inputs().read_cursor(workspace_id).ok().flatten();
                     if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
                         paused.insert(workspace_id.to_owned(), cursor);
@@ -1052,9 +1108,9 @@ impl ProjectHostRuntime {
                     || report.wake_turns_run > 0
                     || !report.promoted_session_ids.is_empty()
                 {
-                    self.emit_conversation_changed(workspace_id, conv_id.as_deref());
+                    self.emit_conversation_changed(workspace_id, conv_id);
                     self.emit_changed(vec![workspace_id.to_owned()]);
-                } else if self.host.inbox().read_cursor(workspace_id).seq > inbox_cursor {
+                } else if inbox_advanced {
                     // Policy-settlement events can be reconciled without a Bot response.
                     self.emit_changed(vec![workspace_id.to_owned()]);
                 }
@@ -1076,7 +1132,7 @@ impl ProjectHostRuntime {
                     if let Ok(mut paused) = self.heartbeat_paused_inputs.lock() {
                         paused.insert(workspace_id.to_owned(), cursor);
                     }
-                    self.emit_conversation_changed(workspace_id, conv_id.as_deref());
+                    self.emit_conversation_changed(workspace_id, conv_id);
                 }
                 self.emit_changed(vec![workspace_id.to_owned()]);
             }
@@ -1384,27 +1440,14 @@ impl ProjectHostRuntime {
         if !self.host.holds_lease(workspace_id) {
             return json!({ "ok": false, "code": "HOST_OFFLINE" });
         }
-        let active_tid = self
-            .host
-            .runner()
-            .activity_for(workspace_id)
-            .filter(|a| a.finished_at.is_none())
-            .map(|a| a.turn_id);
-        let has_turn = self
-            .active_turns
-            .lock()
-            .ok()
-            .is_some_and(|g| g.contains_key(workspace_id));
-        if !has_turn {
-            return json!({ "ok": false, "code": "STALE_TURN" });
-        }
-        if let Some(ref cur_tid) = active_tid
-            && cur_tid != turn_id
-        {
-            return json!({ "ok": false, "code": "STALE_TURN" });
-        }
         if let Ok(turns) = self.active_turns.lock()
             && let Some(entry) = turns.get(workspace_id)
+            && let Some(active) = self.host.runner().activity_for(workspace_id)
+            && active.finished_at.is_none()
+            && (active.turn_id == turn_id
+                || entry.yielded_activity.as_ref().is_some_and(|yielded| {
+                    yielded.turn_id == turn_id && yielded.work_id == active.work_id
+                }))
         {
             entry.cancel.cancel();
             return json!({ "ok": true, "turnId": turn_id, "stopping": true });
@@ -1705,5 +1748,308 @@ impl PermissionInput for BotApprovalPermissionInput {
             }
             decision
         })
+    }
+}
+
+#[cfg(test)]
+mod yielded_turn_tests {
+    use super::*;
+    use crate::{
+        CoreEngine, CoreServerConfig, ResolvedTurnModel, project_bot_live::handle_stop_response,
+    };
+    use peer_runtime::model::{ModelConfig, wire::Wire};
+    use std::{future::poll_fn, task::Poll};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    #[tokio::test]
+    async fn stop_response_during_yield_handoff_prevents_next_dispatch() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!(
+            "http://{}/v1/chat/completions",
+            listener.local_addr().unwrap()
+        );
+        let mock = tokio::spawn(async move {
+            for i in 0..14 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                // Drain the whole request before closing the connection after the SSE reply.
+                let mut request = Vec::new();
+                let mut chunk = [0; 4096];
+                loop {
+                    let n = stream.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let header = std::str::from_utf8(&request[..end]).unwrap();
+                        let length = header
+                            .lines()
+                            .filter_map(|l| l.split_once(':'))
+                            .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                            .unwrap()
+                            .1
+                            .trim()
+                            .parse::<usize>()
+                            .unwrap();
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let delta = json!({"choices":[{"index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":format!("handoff-{i}"),"type":"function",
+                    "function":{"name":"list_files","arguments":"{\"path\":\".\"}"}
+                }]},"finish_reason":"tool_calls"}]});
+                let body = format!("data: {delta}\n\ndata: [DONE]\n\n");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            listener
+        });
+        let mut config = CoreServerConfig::new("0.1.0-test", home.path().to_owned());
+        config.model_loader = Some(Arc::new(move |_, _, _, _, _| {
+            let endpoint = endpoint.clone();
+            Box::pin(async move {
+                Ok(ResolvedTurnModel {
+                    model: NativeModel::new(
+                        ModelConfig {
+                            endpoint,
+                            model: "mock-gpt".into(),
+                            provider: "openai".into(),
+                            wire: Wire::Chat,
+                            generation: Default::default(),
+                        },
+                        None,
+                        Duration::from_secs(5),
+                    )
+                    .unwrap(),
+                    provider_id: "mock-openai".into(),
+                    effort: "default".into(),
+                })
+            })
+        }));
+        let engine = CoreEngine::new(config, CancellationToken::new(), None).unwrap();
+        let ctx = engine.context_for_client(1);
+        let runtime = &engine.project_host;
+        runtime.enabled.store(true, Ordering::SeqCst);
+        let (entry, profile) = runtime
+            .host
+            .bind_workspace(workspace.path(), Some("Handoff Bot"))
+            .unwrap();
+        let ws = &entry.workspace_id;
+        let conv_id = profile.agent_conversation_id.unwrap();
+        runtime
+            .host
+            .submit_user_input(ws, "stop-handoff", "Inspect this project", None)
+            .unwrap();
+
+        let mut tick = Box::pin(runtime.run_single_tick(ws));
+        // Observe the real pump at its scheduling boundary, while the first
+        // slice's activity is still live and the next slice has not been polled.
+        let (turn, token) = tokio::time::timeout(
+            Duration::from_secs(10),
+            poll_fn(|cx| {
+                assert!(
+                    tick.as_mut().poll(cx).is_pending(),
+                    "pump ended without yielding"
+                );
+                let turns = runtime.active_turns.lock().unwrap();
+                if let Some(entry) = turns.get(ws)
+                    && let Some(activity) = &entry.yielded_activity
+                {
+                    assert!(activity.finished_at.is_none());
+                    return Poll::Ready((activity.turn_id.clone(), entry.cancel.clone()));
+                }
+                Poll::Pending
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!token.is_cancelled());
+        let result =
+            handle_stop_response(&ctx, json!({"workspaceId": ws, "turnId": turn})).unwrap();
+        assert_eq!(result["ok"], true, "{result}");
+        assert!(token.is_cancelled());
+
+        let listener = mock.await.unwrap();
+        tokio::select! {
+            biased;
+            _ = listener.accept() => panic!("stopped continuation sent another provider request"),
+            result = tokio::time::timeout(Duration::from_secs(5), tick) => result.unwrap(),
+        }
+        assert!(runtime.active_turns.lock().unwrap().get(ws).is_none());
+        assert!(!runtime.host.inputs().has_pending(ws));
+        let snap = peer_store::ConversationStore::new(home.path())
+            .read_committed(&conv_id, None, 1024 * 1024)
+            .unwrap();
+        assert!(
+            snap.history
+                .messages
+                .iter()
+                .any(|m| m["meta"]["diagnosticTiming"]["outcome"] == "stopped")
+        );
+        assert!(
+            runtime
+                .host
+                .find_reply_for_input(ws, "stop-handoff")
+                .unwrap()
+                .is_none()
+        );
+        engine.shutdown_and_drain().await;
+    }
+}
+
+#[cfg(test)]
+mod image_approval_tests {
+    use super::*;
+    use crate::{
+        project_bot_live::handle_decide_approval,
+        server::{CoreEngine, CoreServerConfig},
+    };
+
+    #[tokio::test]
+    async fn open_image_read_requires_live_claim_and_only_task_writes_grant() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path();
+        let engine = CoreEngine::new(
+            CoreServerConfig::new("0.1.0-test", path.to_owned()),
+            CancellationToken::new(),
+            None,
+        )
+        .unwrap();
+        let ctx = engine.context_for_client(1);
+        let workspace = "ws-image";
+        let at = now_iso();
+        let scope = json!({"capabilityId": "local.image.read", "action": "read_image_for_model",
+            "path": path.join("shot.png"), "workspacePath": null,
+            "fileIdentity": {"dev": 1, "ino": 2, "size": 3, "mtimeMs": 4.5, "ctimeMs": 5.5}});
+        let dir = path.join("project-runtime").join(workspace);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixtures = ["once", "reject", "cancel", "invalid", "task"].map(|id| {
+            json!({"approvalId": id, "workspaceId": workspace, "capabilityId": "local.image.read",
+                "conversationId": "conversation", "state": "open", "summary": "image",
+                "createdAt": at, "policyRevision": "1", "argsDigest": "0".repeat(64),
+                "imageReadScope": if id == "invalid" { Value::Null } else { scope.clone() }})
+        });
+        std::fs::write(
+            dir.join("approvals.jsonl"),
+            fixtures
+                .iter()
+                .map(|row| format!("{row}\n"))
+                .collect::<String>(),
+        )
+        .unwrap();
+        let store = ApprovalStore::new(path);
+        for (id, decision, duration, expected, expected_state, reason) in [
+            (
+                "once",
+                "approve",
+                "once",
+                LocalPermissionDecision::Approve,
+                ApprovalState::Approved,
+                None,
+            ),
+            (
+                "reject",
+                "reject",
+                "denied",
+                LocalPermissionDecision::Deny,
+                ApprovalState::Denied,
+                Some("local_user_denied"),
+            ),
+            (
+                "cancel",
+                "cancel",
+                "denied",
+                LocalPermissionDecision::Cancel,
+                ApprovalState::Cancelled,
+                Some("permission_cancelled"),
+            ),
+            (
+                "invalid",
+                "approve",
+                "task",
+                LocalPermissionDecision::Deny,
+                ApprovalState::Open,
+                None,
+            ),
+            (
+                "task",
+                "approve",
+                "task",
+                LocalPermissionDecision::Approve,
+                ApprovalState::Approved,
+                None,
+            ),
+        ] {
+            let (tx, rx) = oneshot::channel();
+            ctx.project_host.live_approvals.lock().unwrap().insert(
+                id.to_owned(),
+                LiveApprovalWaiter {
+                    workspace_id: workspace.to_owned(),
+                    mirrored_in_workspace: true,
+                    tx,
+                },
+            );
+            let row = store
+                .list(Some(workspace), None)
+                .unwrap()
+                .into_iter()
+                .find(|row| row["approvalId"] == id)
+                .unwrap();
+            let mut params = json!({"workspaceId": workspace, "approvalId": id, "decision": decision, "duration": duration});
+            if id == "invalid" {
+                let result = handle_decide_approval(&ctx, params.clone()).await.unwrap();
+                assert_eq!(
+                    result,
+                    json!({"ok": false, "code": "IMAGE_AUTHORIZATION_UNAVAILABLE"})
+                );
+                assert_eq!(ctx.project_host.is_live_approval_mirrored(id), Some(true));
+                // Rejecting a malformed request must still settle the waiter.
+                params["decision"] = json!("reject");
+            }
+            let state = if id == "invalid" {
+                ApprovalState::Denied
+            } else {
+                expected_state
+            };
+            let reason = if id == "invalid" {
+                Some("local_user_denied")
+            } else {
+                reason
+            };
+            let waiter = async {
+                let actual = rx.await.unwrap();
+                assert_eq!(actual, expected);
+                store
+                    .decide(
+                        &row,
+                        state,
+                        ApprovalDecision::LocalUser,
+                        &now_iso(),
+                        reason,
+                        None,
+                    )
+                    .unwrap()
+            };
+            let (result, decided) = tokio::join!(handle_decide_approval(&ctx, params), waiter);
+            assert_eq!(result.unwrap(), json!({"ok": true, "approval": decided}));
+            let rows = store.list(Some(workspace), None).unwrap();
+            let grants: Vec<_> = rows
+                .iter()
+                .filter(|row| row.get("imageReadGrant").is_some())
+                .collect();
+            assert_eq!(grants.len(), usize::from(id == "task"), "{id}");
+            if id == "task" {
+                assert_eq!(grants[0]["imageReadGrant"]["scope"], scope);
+            }
+        }
+        engine.shutdown_and_drain().await;
     }
 }

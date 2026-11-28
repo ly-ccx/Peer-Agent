@@ -1,3 +1,4 @@
+import { advanceSessionExecution } from './project-agent/session-execution.mjs';
 import { performance } from 'node:perf_hooks';
 import { createGoalPlanTransactions } from './goal-plan-transactions.mjs';
 import { createGoalPlanCheckpoints } from "./goal-plan-checkpoints.mjs";
@@ -759,6 +760,7 @@ export function createGoalPlanStore({
     'activation',
     'executionPolicy',
     'delegationOrigin',
+    'sessionExecution',
     'deliveryBinding',
     'deliveryHandoff',
     'evidenceRefs',
@@ -935,6 +937,8 @@ export function createGoalPlanStore({
     if (!timing && Object.prototype.hasOwnProperty.call(next, 'timing')) {
       delete next.timing;
     }
+    const sessionExecution = advanceSessionExecution(next, existing);
+    if (sessionExecution) next.sessionExecution = sessionExecution;
     if (shouldSidecarRunningPersist(existing, next, options)) {
       rememberNewRunEvents(existing, next);
       // 不写正文，也不追加 changeKind=persist。硬状态跃迁仍走下面的整篇写盘。

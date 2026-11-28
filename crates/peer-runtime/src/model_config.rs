@@ -269,7 +269,7 @@ pub async fn load_session_model(
         if context.is_some() {
             return Err(ModelError::new("model_context_selection_unavailable"));
         }
-        return Ok(model);
+        return Ok(model.with_provider_id(selected["modelProviderId"].as_str()));
     }
     let config = read(&home.join("llm-providers.json"))?;
     let mut resolved = resolve_with_context(&config, selected, context)?;
@@ -330,6 +330,7 @@ pub async fn load_session_model(
     )
     .and_then(|model| {
         model
+            .with_provider_id(selected["modelProviderId"].as_str())
             .with_context_window(resolved.context_window)
             .with_headers(resolved.headers)
             .with_oauth(oauth)

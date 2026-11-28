@@ -7,6 +7,7 @@ import { createI18n } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import * as drawerState from '../state/drawerState.ts';
 import { mergeTaskDetail } from '../state/taskDetailState.ts';
+import { taskExecutionTitle } from '../state/taskExecutionDuration.ts';
 
 test('task workspace places current plan above the conversation and hides earlier epochs', () => {
   const reports: unknown[][] = [];
@@ -29,6 +30,8 @@ test('task workspace places current plan above the conversation and hides earlie
     '../BotAccessControl': { BotAccessControl: 'access' },
     '../state/drawerState': drawerState,
     '../state/taskDetailState': { mergeTaskDetail },
+    '../TaskExecutionDuration': { TaskExecutionDuration: 'execution-duration' },
+    '../state/taskExecutionDuration': { taskExecutionTitle },
     '../state/useTaskReport': { useTaskReport: (...args: unknown[]) => {
       reports.push(args);
       return { detail: null, state: 'ready' };

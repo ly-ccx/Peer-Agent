@@ -8,6 +8,11 @@
 //! `agent_turn` / `agent_unavailable` records, and logs canonical usage to
 //! `usage/requests.jsonl`.
 
+mod provider_checkpoint;
+mod tool_preview;
+use provider_checkpoint::ProviderCheckpoint;
+use tool_preview::{INPUT_LIMIT, PreviewBudget, RESULT_LIMIT, ToolPreview};
+
 pub use crate::circuit_breaker::CircuitBreaker;
 use crate::{
     BotProfileStore, CoordinationHub, InteractiveResultStore, MemoryFilter, MemoryStore,
@@ -62,6 +67,8 @@ use std::{
 
 const USER_MAX_BOT_ROUNDS: usize = 14;
 const USER_MAX_BOT_TOOL_CALLS: usize = 28;
+// Keep exhaustion bounded across scheduling slices, not just within one slice.
+const MAX_USER_YIELD_RESUMES: u64 = 2;
 const WAKE_MAX_BOT_ROUNDS: usize = 8;
 const WAKE_MAX_BOT_TOOL_CALLS: usize = 16;
 const MAX_BOT_HISTORY_MESSAGES: usize = 40;
@@ -336,6 +343,7 @@ impl ProjectAgentRunner {
         name: &str,
         summary: Option<&str>,
         started_at: &str,
+        input: Value,
     ) {
         const MAX_ACTIVITY_SEGMENTS: usize = 100;
         self.update_activity(workspace_id, |act| {
@@ -347,6 +355,7 @@ impl ProjectAgentRunner {
                     "name": name,
                     "status": "running",
                     "startedAt": started_at,
+                    "input": input,
                 });
                 if let Some(s) = summary.filter(|s| !s.is_empty()) {
                     seg["summary"] = json!(s);
@@ -362,6 +371,7 @@ impl ProjectAgentRunner {
         call_id: &str,
         ok: bool,
         finished_at: &str,
+        result: Value,
     ) {
         let status = if ok { "done" } else { "error" };
         self.update_activity(workspace_id, |act| {
@@ -369,10 +379,11 @@ impl ProjectAgentRunner {
                 .segments
                 .iter_mut()
                 .rev()
-                .find(|s| s["id"].as_str() == Some(call_id))
+                .find(|s| s["kind"] == "tool" && s["id"].as_str() == Some(call_id))
             {
                 seg["status"] = json!(status);
                 seg["finishedAt"] = json!(finished_at);
+                seg["result"] = result;
             }
         });
     }
@@ -604,7 +615,7 @@ fn activity_tool_summary(name: &str, args: &Value) -> Option<String> {
     {
         return None;
     }
-    Some(trimmed.chars().take(160).collect())
+    Some(tool_preview::summary(trimmed))
 }
 
 fn compact_persisted_value(value: &Value, key: Option<&str>, depth: usize) -> Value {
@@ -749,21 +760,54 @@ fn write_agent_turn_trace(
     rounds: &[Value],
     public_updates: &[Value],
     diagnostic_timing: &Value,
+    provider_checkpoint: Option<&ProviderCheckpoint>,
 ) -> bool {
     let Some(path) = turn_trace_path(data_home, workspace_id, turn_id) else {
         return false;
     };
-    let payload = json!({
+    let mut payload = json!({
         "schemaVersion": 1,
         "turnId": turn_id,
         "rounds": rounds,
         "publicUpdates": public_updates,
         "diagnosticTiming": diagnostic_timing,
     });
+    if let Some(checkpoint) = provider_checkpoint
+        && !checkpoint.messages.is_empty()
+        && let Ok(bytes) = serde_json::to_vec(checkpoint)
+        && bytes.len() as u64 <= provider_checkpoint::MAX_BYTES
+        && let Ok(value) = serde_json::from_slice::<Value>(&bytes)
+    {
+        payload["providerCheckpoint"] = value;
+    }
     let Ok(bytes) = serde_json::to_vec(&payload) else {
         return false;
     };
     atomic_write(&path, &bytes).is_ok()
+}
+
+fn read_provider_checkpoint(
+    data_home: &Path,
+    workspace_id: &str,
+    turn_id: &str,
+) -> Option<ProviderCheckpoint> {
+    use std::io::Read;
+    let path = turn_trace_path(data_home, workspace_id, turn_id)?;
+    let limit = provider_checkpoint::MAX_BYTES * 2;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > limit {
+        return None;
+    }
+    let mut trace: Value = serde_json::from_slice(&bytes).ok()?;
+    if trace["schemaVersion"] != 1 || trace["turnId"] != turn_id {
+        return None;
+    }
+    serde_json::from_value(trace.get_mut("providerCheckpoint")?.take()).ok()
 }
 
 /// Hydrate an offloaded `agent_turn` stub (`traceRef`) with its persisted `rounds` and
@@ -808,6 +852,40 @@ pub fn hydrate_agent_turn_record(data_home: &Path, workspace_id: &str, msg: &mut
 
 /// Reconstruct factual continuity from the latest stopped/failed `agent_turn` for
 /// `current_input_anchors` (before any answering `agent_reply`).
+/// Only the latest record for these exact input anchors can authorize a continuation.
+/// In particular, a later stop, failure, or delivered reply retires any old yield.
+fn yielded_user_slice<'a>(messages: &'a [Value], anchors: &[String]) -> Option<(&'a str, u64)> {
+    if anchors.is_empty() {
+        return None;
+    }
+    let anchors_json = json!(anchors);
+    for message in messages.iter().rev() {
+        if message["kind"] == "agent_reply"
+            && message["replyTo"].as_array().is_some_and(|ids| {
+                ids.iter().any(|id| {
+                    id.as_str()
+                        .is_some_and(|id| anchors.iter().any(|anchor| anchor == id))
+                })
+            })
+        {
+            return None;
+        }
+        if message["kind"] == "agent_turn"
+            && message["turnKind"] == "user"
+            && message["userInputs"] == anchors_json
+        {
+            if message["meta"]["diagnosticTiming"]["outcome"] != "yielded" {
+                return None;
+            }
+            return Some((
+                message["turnId"].as_str()?,
+                message["meta"]["yieldCount"].as_u64()?,
+            ));
+        }
+    }
+    None
+}
+
 pub fn read_retry_continuity(
     messages: &[Value],
     current_input_anchors: &[String],
@@ -1612,12 +1690,17 @@ impl ProjectAgentRunner {
         let mut attempts = 0;
         let mut deadline = None;
         let mut permit = None;
+        let reply_offered = tools_json.as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["function"]["name"] == "post_reply")
+        });
         loop {
             if cancel.is_cancelled() {
                 return Err(ModelError::new("CANCELLED"));
             }
             attempts += 1;
-            let stream_state = Mutex::new(Some(String::new()));
+            let stream_state = Mutex::new((Some(String::new()), String::new()));
             let result = prepared
                 .send_with_deltas(
                     cancel,
@@ -1625,12 +1708,12 @@ impl ProjectAgentRunner {
                     // Preview state belongs to this physical attempt.
                     async |delta| {
                         if let Ok(mut state) = stream_state.lock() {
+                            let (plain, reply) = &mut *state;
                             match delta {
                                 ModelDelta::Thinking(_) => {}
                                 ModelDelta::ToolIntent => {
-                                    // Retract the uncommitted preview. Structured calls
-                                    // are admitted and displayed by the tool host.
-                                    *state = None;
+                                    // Ordinary text is not the body of a structured reply.
+                                    *plain = None;
                                     self.set_activity_phase(
                                         workspace_id,
                                         "thinking",
@@ -1638,13 +1721,31 @@ impl ProjectAgentRunner {
                                         false,
                                     );
                                 }
+                                ModelDelta::ReplyDraft(text) if reply_offered => {
+                                    let text = tool_preview::reply_draft(text);
+                                    if *reply != text {
+                                        let phase = if text.is_empty() {
+                                            "thinking"
+                                        } else {
+                                            "responding"
+                                        };
+                                        self.set_activity_phase(
+                                            workspace_id,
+                                            phase,
+                                            Some(&text),
+                                            false,
+                                        );
+                                        *reply = text;
+                                    }
+                                }
+                                ModelDelta::ReplyDraft(_) => {}
                                 ModelDelta::Text(chunk) => {
-                                    if let Some(raw) = state.as_mut() {
+                                    if let Some(raw) = plain.as_mut() {
                                         let available =
                                             MAX_STREAM_TEXT_BYTES.saturating_sub(raw.len());
                                         raw.push_str(clip_utf8_bytes(chunk, available));
                                         if has_literal_tool_call_syntax(raw) {
-                                            *state = None;
+                                            *plain = None;
                                             self.set_activity_phase(
                                                 workspace_id,
                                                 "thinking",
@@ -1672,6 +1773,13 @@ impl ProjectAgentRunner {
                 )
                 .await;
             drop(permit.take());
+            if result.is_err()
+                && stream_state
+                    .into_inner()
+                    .is_ok_and(|(_, reply)| !reply.is_empty())
+            {
+                self.set_activity_phase(workspace_id, "thinking", Some(""), false);
+            }
             record_attempt_usage(accounting, &result, true);
             match result {
                 Ok(turn) => {
@@ -1857,7 +1965,8 @@ impl ProjectAgentRunner {
         model: &NativeModel,
         cancel: &CancellationToken,
     ) -> Result<AgentTurnOutcome, ProjectError> {
-        self.run_turn_with_verifier(opts, model, None, cancel).await
+        self.run_turn_with_verifier(opts, model, None, None, cancel)
+            .await
     }
 
     pub(crate) async fn run_turn_with_verifier(
@@ -1865,10 +1974,18 @@ impl ProjectAgentRunner {
         opts: &RunTurnOptions<'_>,
         model: &NativeModel,
         verifier_model: Option<&NativeModel>,
+        explicit_retry_turn: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<AgentTurnOutcome, ProjectError> {
-        self.run_turn_with_preempt(opts, model, verifier_model, cancel, None)
-            .await
+        self.run_turn_with_preempt(
+            opts,
+            model,
+            verifier_model,
+            explicit_retry_turn,
+            cancel,
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn run_turn_with_preempt(
@@ -1876,6 +1993,7 @@ impl ProjectAgentRunner {
         opts: &RunTurnOptions<'_>,
         model: &NativeModel,
         verifier_model: Option<&NativeModel>,
+        explicit_retry_turn: Option<&str>,
         cancel: &CancellationToken,
         preempted: Option<&AtomicBool>,
     ) -> Result<AgentTurnOutcome, ProjectError> {
@@ -1892,82 +2010,81 @@ impl ProjectAgentRunner {
         let provider_scope = format!("provider:{}", model.provider());
         let manual_trial = opts.manual_trial;
 
-        let mut trial_guard = match self.breaker_store.admit(
-            opts.workspace_id,
-            manual_trial,
-            Some(&provider_scope),
-            now_ms,
-        ) {
-            Ok(CircuitAdmit::Blocked { open_until }) => {
-                if opts.kind == "user" && manual_trial {
-                    let conv_store = ConversationStore::new(&self.data_home);
-                    let anchors: Vec<String> = opts
-                        .user_inputs
-                        .iter()
-                        .map(|i| format!("input-{}", i.input_id))
-                        .collect();
-                    let content =
-                        "代理熔断保护生效中，暂时无法处理这条消息。请稍后再试，或点击重试。";
-                    let at = now_iso();
-                    let _ = conv_store.append_message_idempotent(
-                        opts.conversation_id,
-                        &json!({
-                            "id": format!("{turn_id}-card"),
-                            "role": "assistant",
-                            "kind": "system_card",
-                            "card": "agent_unavailable",
-                            "turnId": turn_id,
-                            "replyTo": anchors,
-                            "content": content,
-                            "actions": ["retry"],
-                            "meta": {
-                                "errorCode": "model_circuit_open",
-                                "circuitOpenUntil": open_until,
-                            },
-                            "cards": [{
-                                "cardId": format!("card:agent_unavailable:{turn_id}"),
-                                "kind": "agent_unavailable",
-                                "content": content,
-                                "actions": [{
-                                    "id": "retry",
-                                    "channel": "project-agent:retry",
-                                    "payload": {
-                                        "workspaceId": opts.workspace_id,
-                                        "turnId": turn_id,
-                                    }
-                                }]
-                            }],
-                            "createdAt": at,
-                        }),
-                        &at,
-                        None,
-                    );
-                    self.set_error_status(opts.workspace_id);
-                }
-                return Ok(AgentTurnOutcome {
-                    turn_id,
-                    end: TurnEndKind::CircuitOpen,
-                    spawned_session_ids: vec![],
-                    tool_calls: 0,
-                    failure_hold: Some(FailureHoldSignal::CircuitOpen {
-                        open_until_ms: open_until.as_deref().and_then(parse_iso_ms),
-                    }),
-                });
-            }
-            Ok(CircuitAdmit::Admitted { trial }) => TrialGuard {
-                store: &self.breaker_store,
-                workspace_id: opts.workspace_id,
-                scope_key: &provider_scope,
-                active: trial,
-            },
-            Err(_) => TrialGuard {
-                store: &self.breaker_store,
-                workspace_id: opts.workspace_id,
-                scope_key: &provider_scope,
-                active: false,
-            },
+        let mut trial_guard = TrialGuard {
+            store: &self.breaker_store,
+            workspace_id: opts.workspace_id,
+            scope_key: &provider_scope,
+            active: false,
         };
+        if !cancel.is_cancelled() {
+            trial_guard.active = match self.breaker_store.admit(
+                opts.workspace_id,
+                manual_trial,
+                Some(&provider_scope),
+                now_ms,
+            ) {
+                Ok(CircuitAdmit::Blocked { open_until }) => {
+                    if opts.kind == "user" && manual_trial {
+                        let conv_store = ConversationStore::new(&self.data_home);
+                        let anchors: Vec<String> = opts
+                            .user_inputs
+                            .iter()
+                            .map(|i| format!("input-{}", i.input_id))
+                            .collect();
+                        let content =
+                            "代理熔断保护生效中，暂时无法处理这条消息。请稍后再试，或点击重试。";
+                        let at = now_iso();
+                        let _ = conv_store.append_message_idempotent(
+                            opts.conversation_id,
+                            &json!({
+                                "id": format!("{turn_id}-card"),
+                                "role": "assistant",
+                                "kind": "system_card",
+                                "card": "agent_unavailable",
+                                "turnId": turn_id,
+                                "replyTo": anchors,
+                                "content": content,
+                                "actions": ["retry"],
+                                "meta": {
+                                    "errorCode": "model_circuit_open",
+                                    "circuitOpenUntil": open_until,
+                                },
+                                "cards": [{
+                                    "cardId": format!("card:agent_unavailable:{turn_id}"),
+                                    "kind": "agent_unavailable",
+                                    "content": content,
+                                    "actions": [{
+                                        "id": "retry",
+                                        "channel": "project-agent:retry",
+                                        "payload": {
+                                            "workspaceId": opts.workspace_id,
+                                            "turnId": turn_id,
+                                        }
+                                    }]
+                                }],
+                                "createdAt": at,
+                            }),
+                            &at,
+                            None,
+                        );
+                        self.set_error_status(opts.workspace_id);
+                    }
+                    return Ok(AgentTurnOutcome {
+                        turn_id,
+                        end: TurnEndKind::CircuitOpen,
+                        spawned_session_ids: vec![],
+                        tool_calls: 0,
+                        failure_hold: Some(FailureHoldSignal::CircuitOpen {
+                            open_until_ms: open_until.as_deref().and_then(parse_iso_ms),
+                        }),
+                    });
+                }
+                Ok(CircuitAdmit::Admitted { trial }) => trial,
+                Err(_) => false,
+            };
+        }
 
+        let mut activity_preview_budget = PreviewBudget::default();
         let (max_rounds, max_tool_calls) = if opts.kind == "user" {
             (USER_MAX_BOT_ROUNDS, USER_MAX_BOT_TOOL_CALLS)
         } else {
@@ -2231,6 +2348,52 @@ impl ProjectAgentRunner {
             &current_input_anchors,
             Some(&turn_id),
         );
+
+        let wake_event_ids = if opts.kind == "wake" && opts.user_inputs.is_empty() {
+            crate::inbox::wake_event_ids(opts.wake_events).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        // An explicit retry and a cooperative continuation have different durable
+        // predecessors. A retry marker can still be on the queue when that retry yields.
+        let yielded = if opts.kind == "user" {
+            yielded_user_slice(&history_messages, &current_input_anchors)
+        } else {
+            None
+        };
+        let has_yielded_slice = yielded.is_some();
+        let yield_count = yielded.map_or(0, |(_, count)| count);
+        let resumed = (|| {
+            let previous = if let Some((previous, _)) = yielded {
+                previous
+            } else if opts.kind == "user" {
+                let target = explicit_retry_turn?;
+                let previous = retry_continuity.as_ref()?["previousTurnId"].as_str()?;
+                if !target.is_empty() && target != previous {
+                    return None;
+                }
+                previous
+            } else {
+                // The host resolved this target against the durable inbox batch.
+                explicit_retry_turn
+                    .filter(|target| !wake_event_ids.is_empty() && !target.is_empty())?
+            };
+            let checkpoint =
+                read_provider_checkpoint(&self.data_home, opts.workspace_id, previous)?;
+            if !checkpoint.matches(model, opts.conversation_id, &current_input_anchors)
+                || checkpoint.wake_event_ids != wake_event_ids
+            {
+                return None;
+            }
+            let messages = checkpoint.canonical_messages()?;
+            Some((previous.to_owned(), checkpoint, messages))
+        })();
+        let (resumed_from, resumed) = match resumed {
+            Some((previous, checkpoint, messages)) => {
+                (Some(previous), Some((checkpoint, messages)))
+            }
+            None => (None, None),
+        };
 
         if coord_active {
             let _ = self.coordination.ensure_work(
@@ -2656,6 +2819,8 @@ impl ProjectAgentRunner {
         let mut rounds_record: Vec<Value> = Vec::new();
         let mut public_updates: Vec<Value> = Vec::new();
         let mut public_update_chars = 0usize;
+        let mut opening = None;
+        let mut budget_exhausted = false;
 
         // Pre-flight proactive compaction if conversation history is already >= 85% of context window.
         if let Some(window) = model.context_window()
@@ -2687,6 +2852,24 @@ impl ProjectAgentRunner {
             }
         }
 
+        // Restore after proactive compaction: saved pairs are not historical summaries.
+        let (mut provider_checkpoint, replay_reads) = match resumed {
+            Some((checkpoint, messages)) => {
+                let reads = provider_checkpoint::completed_reads(&messages);
+                committed_message_ids.extend(std::iter::repeat_n(None, messages.len()));
+                live_messages.extend(messages);
+                (Some(checkpoint), reads)
+            }
+            None if (opts.kind == "user" && !current_input_anchors.is_empty())
+                || !wake_event_ids.is_empty() =>
+            {
+                let mut checkpoint =
+                    ProviderCheckpoint::new(model, opts.conversation_id, &current_input_anchors);
+                checkpoint.wake_event_ids = wake_event_ids;
+                (Some(checkpoint), Vec::new())
+            }
+            None => (None, Vec::new()),
+        };
         let failure_ctx = TurnFailureCtx {
             conv_store: &conv_store,
             workspace_id: opts.workspace_id,
@@ -2706,8 +2889,14 @@ impl ProjectAgentRunner {
         let mut protocol_repair_attempts = 0usize;
         let mut round = 0usize;
         let mut wake_budget_nudged = false;
-        let mut budget_exhausted = false;
-        while round < max_rounds {
+        // Never restart a yielded turn from scratch if its native history is
+        // missing or no longer matches the selected route.
+        if has_yielded_slice && resumed_from.is_none() {
+            trial_guard.active = false;
+            final_end =
+                self.record_turn_failure(&failure_ctx, "yield_checkpoint_unavailable", cancel);
+        }
+        while round < max_rounds && matches!(final_end, TurnEndKind::Yielded) {
             round += 1;
             if cancel.is_cancelled() {
                 final_end = if is_preempted() {
@@ -2765,6 +2954,7 @@ impl ProjectAgentRunner {
                 Err(err)
                     if err.context_overflow_status.is_some()
                         && !compacted_this_turn
+                        && resumed_from.is_none()
                         && live_messages.len() > 1 =>
                 {
                     compacted_this_turn = true;
@@ -2954,7 +3144,17 @@ impl ProjectAgentRunner {
             }
 
             let mut model_turn = model_turn.expect("nonempty tool calls require a model turn");
+            // Only the provider's public text channel can supply an opening.
+            // ModelDelta::Thinking and structured reply drafts are never narration.
+            if opts.kind == "user" && yield_count == 0 && round == 1 && !leaked_protocol {
+                let text = tool_preview::reply_draft(&model_turn.content);
+                if !text.trim().is_empty() {
+                    opening = Some(text);
+                }
+            }
             let mut assistant_tool_calls = Vec::new();
+            let mut native_calls = Vec::new();
+            let mut native_results = Vec::new();
             let mut tool_results = Vec::new();
             let mut round_tool_records = Vec::new();
             let mut executed_ids = Vec::new();
@@ -2962,6 +3162,7 @@ impl ProjectAgentRunner {
             let mut all_pack_activations = true;
 
             let calls = std::mem::take(&mut model_turn.calls);
+            let had_reply_draft = calls.iter().any(|call| call.name == "post_reply");
             for call in calls {
                 if cancel.is_cancelled() {
                     final_end = if is_preempted() {
@@ -2980,15 +3181,47 @@ impl ProjectAgentRunner {
                 }
                 total_tool_calls += 1;
                 let call_id = format!("tc-{}", uuid::Uuid::new_v4());
+                let (native_id, native_args) = call.native_chat.unwrap_or_else(|| {
+                    (
+                        call_id.clone(),
+                        serde_json::to_string(&call.arguments).expect("JSON arguments"),
+                    )
+                });
+                let native_id = if native_calls.iter().any(|c: &Value| c["id"] == native_id)
+                    || provider_checkpoint
+                        .as_ref()
+                        .is_some_and(|checkpoint| checkpoint.has_call_id(&native_id))
+                {
+                    call_id.clone()
+                } else {
+                    native_id
+                };
+                if call.name == "read_file"
+                    && let Some((_, content)) = replay_reads
+                        .iter()
+                        .find(|(args, _)| args == &call.arguments)
+                {
+                    assistant_tool_calls
+                        .push(json!({"id": call_id, "name": call.name, "arguments": native_args}));
+                    tool_results.push(json!({"role": "tool", "toolCallId": call_id, "name": call.name, "content": content}));
+                    native_calls.push(json!({"id": native_id, "type": "function", "function": {"name": call.name, "arguments": native_args}}));
+                    native_results.push(
+                        json!({"role": "tool", "tool_call_id": native_id, "content": content}),
+                    );
+                    all_pack_activations = false;
+                    continue;
+                }
                 let started_at = now_iso();
                 let started_ms = parse_iso_ms(&started_at).unwrap_or(0);
                 let tool_summary = activity_tool_summary(&call.name, &call.arguments);
+                let input_preview = ToolPreview::new(&call.arguments);
                 self.record_activity_tool_start(
                     opts.workspace_id,
                     &call_id,
                     &call.name,
                     tool_summary.as_deref(),
                     &started_at,
+                    activity_preview_budget.project(&input_preview, INPUT_LIMIT),
                 );
 
                 let cap_id = projection
@@ -3021,11 +3254,14 @@ impl ProjectAgentRunner {
 
                 let completed_at = now_iso();
                 let ended_ms = parse_iso_ms(&completed_at).unwrap_or(started_ms);
+                let tool_output = format_tool_outcome_output(&outcome);
+                let result_preview = ToolPreview::new(&tool_output);
                 self.record_activity_tool_finish(
                     opts.workspace_id,
                     &call_id,
                     outcome.status == "success",
                     &completed_at,
+                    activity_preview_budget.project(&result_preview, RESULT_LIMIT),
                 );
                 let grant = json!({
                     "grantId": format!("grant-{call_id}"),
@@ -3061,26 +3297,40 @@ impl ProjectAgentRunner {
                     None,
                 );
 
-                let tool_output = format_tool_outcome_output(&outcome);
+                // The trace is a display record; model history below still gets the
+                // original tool output. Preserve objects for legacy round readers.
                 round_tool_records.push(json!({
                     "name": call.name,
-                    "input": call.arguments,
-                    "result": compact_persisted_tool_result(&tool_output),
+                    "input": input_preview.value,
+                    "result": compact_persisted_tool_result(&result_preview.value),
                     "startedAtMs": started_ms,
                     "endedAtMs": ended_ms,
                 }));
 
+                if outcome
+                    .error
+                    .is_some_and(|code| code.ends_with("outcome_unknown"))
+                    || tool_output["error"]
+                        .as_str()
+                        .is_some_and(|code| code.ends_with("outcome_unknown"))
+                {
+                    provider_checkpoint = None;
+                }
+                let content = serde_json::to_string(&tool_output).expect("JSON tool result");
+                native_calls.push(json!({"id": native_id, "type": "function", "function": {"name": call.name, "arguments": native_args}}));
+                native_results
+                    .push(json!({"role": "tool", "tool_call_id": native_id, "content": content}));
                 executed_ids.push(call_id.clone());
                 assistant_tool_calls.push(json!({
                     "id": call_id,
                     "name": call.name,
-                    "arguments": serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".into()),
+                    "arguments": native_args,
                 }));
                 tool_results.push(json!({
                     "role": "tool",
                     "toolCallId": call_id,
                     "name": call.name,
-                    "content": serde_json::to_string(&tool_output).unwrap_or_else(|_| "{}".into()),
+                    "content": content,
                 }));
 
                 if outcome.output["control"]["terminal"] == true {
@@ -3089,6 +3339,13 @@ impl ProjectAgentRunner {
                 }
             }
 
+            if had_reply_draft
+                && !turn_state
+                    .lock()
+                    .is_ok_and(|state| state.reply_committed_id.is_some())
+            {
+                self.update_activity(opts.workspace_id, |act| act.reply_text.clear());
+            }
             rounds_record.push(json!({
                 "text": model_turn.content,
                 "toolCalls": round_tool_records,
@@ -3099,6 +3356,10 @@ impl ProjectAgentRunner {
                     &peer_runtime::canonical_history::sanitize_assistant(&model_turn.content),
                 ));
                 let trimmed = peer_protocol::javascript_trim(&sanitized);
+                if let Some(checkpoint) = &mut provider_checkpoint {
+                    checkpoint.messages.push(json!({"role": "assistant", "content": if trimmed.is_empty() { Value::Null } else { json!(trimmed) }, "tool_calls": native_calls}));
+                    checkpoint.messages.extend(native_results);
+                }
                 if !trimmed.is_empty() {
                     live_messages.push(json!({
                         "role": "assistant",
@@ -3160,7 +3421,22 @@ impl ProjectAgentRunner {
             && turn_state.lock().is_ok_and(|state| {
                 has_undelivered_wake_result(&self.supervisor, &state, opts.wake_events)
             });
+        let cooperative_yield = opts.kind == "user"
+            && !cancel.is_cancelled()
+            && matches!(final_end, TurnEndKind::Yielded)
+            && (budget_exhausted || round >= max_rounds)
+            && yield_count < MAX_USER_YIELD_RESUMES
+            && !current_input_anchors.is_empty()
+            && provider_checkpoint.as_ref().is_some_and(|checkpoint| {
+                checkpoint.canonical_messages().is_some()
+                    && serde_json::to_vec(checkpoint)
+                        .is_ok_and(|bytes| bytes.len() as u64 <= provider_checkpoint::MAX_BYTES)
+            })
+            && turn_state
+                .lock()
+                .is_ok_and(|s| s.reply_committed_id.is_none() && s.waiting_session_ids.is_empty());
         let needs_synthesis = (opts.kind == "user" || wake_synthesis)
+            && !cooperative_yield
             && !cancel.is_cancelled()
             && !matches!(
                 final_end,
@@ -3385,20 +3661,44 @@ impl ProjectAgentRunner {
                 session_ids: waiting_ids,
             };
         } else {
-            let phase = match final_end {
-                TurnEndKind::UserStopped => "stopped",
-                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
-                _ => "done",
-            };
-            if visible_activity {
-                if matches!(
-                    final_end,
-                    TurnEndKind::QuietSettled { .. } | TurnEndKind::Preempted
-                ) || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
-                {
-                    self.dispose_activity(opts.workspace_id);
+            if cancel.is_cancelled() && matches!(final_end, TurnEndKind::Yielded) {
+                final_end = if is_preempted() {
+                    TurnEndKind::Preempted
                 } else {
-                    self.set_activity_phase(opts.workspace_id, phase, None, true);
+                    TurnEndKind::UserStopped
+                };
+            } else if opts.kind == "user"
+                && matches!(final_end, TurnEndKind::Yielded)
+                && !cooperative_yield
+            {
+                // Synthesis may return neither a reply nor a terminal state.
+                // Do not let that look like another schedulable yield.
+                final_end =
+                    self.record_turn_failure(&failure_ctx, "user_turn_budget_exhausted", cancel);
+            }
+            if cooperative_yield && matches!(final_end, TurnEndKind::Yielded) {
+                if let Some(text) = opening {
+                    push_public_update(&mut public_updates, &mut public_update_chars, &text);
+                }
+                // Keep the live turn stoppable through the handoff. The opening
+                // is rendered from the durable publicUpdates, not a second live draft.
+                self.set_activity_phase(opts.workspace_id, "thinking", Some(""), false);
+            } else {
+                let phase = match final_end {
+                    TurnEndKind::UserStopped => "stopped",
+                    TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
+                    _ => "done",
+                };
+                if visible_activity {
+                    if matches!(
+                        final_end,
+                        TurnEndKind::QuietSettled { .. } | TurnEndKind::Preempted
+                    ) || matches!(final_end, TurnEndKind::Yielded) && public_updates.is_empty()
+                    {
+                        self.dispose_activity(opts.workspace_id);
+                    } else {
+                        self.set_activity_phase(opts.workspace_id, phase, None, true);
+                    }
                 }
             }
         }
@@ -3519,9 +3819,10 @@ impl ProjectAgentRunner {
             TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "error",
             TurnEndKind::Preempted => "preempted",
             TurnEndKind::UserStopped => "stopped",
+            TurnEndKind::Yielded if cooperative_yield => "yielded",
             _ => "done",
         };
-        let diagnostic_timing = json!({
+        let mut diagnostic_timing = json!({
             "startedAt": now_str,
             "finishedAt": finished_at,
             "durationMs": duration_ms,
@@ -3538,7 +3839,30 @@ impl ProjectAgentRunner {
             &rounds_record,
             &public_updates,
             &diagnostic_timing,
+            provider_checkpoint
+                .as_ref()
+                .filter(|_| matches!(outcome_label, "stopped" | "error" | "yielded")),
         );
+        if outcome_label == "yielded" && !trace_offloaded {
+            final_end =
+                self.record_turn_failure(&failure_ctx, "yield_checkpoint_write_failed", cancel);
+            diagnostic_timing["outcome"] =
+                json!(if matches!(final_end, TurnEndKind::UserStopped) {
+                    "stopped"
+                } else {
+                    "error"
+                });
+            self.set_activity_phase(
+                opts.workspace_id,
+                if cancel.is_cancelled() {
+                    "stopped"
+                } else {
+                    "error"
+                },
+                Some(""),
+                true,
+            );
+        }
         let mut completed_tools_summary = Vec::new();
         if trace_offloaded && matches!(outcome_label, "stopped" | "error") {
             for round in &rounds_record {
@@ -3568,6 +3892,12 @@ impl ProjectAgentRunner {
             "workId": work_id,
             "diagnosticTiming": diagnostic_timing,
         });
+        if matches!(final_end, TurnEndKind::Yielded) && cooperative_yield {
+            meta["yieldCount"] = json!(yield_count + 1);
+        }
+        if let Some(previous) = resumed_from {
+            meta["providerCheckpointResumedFrom"] = json!(previous);
+        }
         if !completed_tools_summary.is_empty() {
             meta["completedToolsSummary"] = json!(completed_tools_summary);
         }
@@ -3589,12 +3919,25 @@ impl ProjectAgentRunner {
             agent_turn_msg["rounds"] = json!(rounds_record);
             agent_turn_msg["publicUpdates"] = json!(public_updates);
         }
-        let _ = conv_store.append_message_idempotent(
+        let stored = conv_store.append_message_idempotent(
             opts.conversation_id,
             &agent_turn_msg,
             &finished_at,
             None,
         );
+        if matches!(final_end, TurnEndKind::Yielded) && cooperative_yield && stored.is_err() {
+            final_end = self.record_turn_failure(&failure_ctx, "yield_record_write_failed", cancel);
+            self.set_activity_phase(
+                opts.workspace_id,
+                if cancel.is_cancelled() {
+                    "stopped"
+                } else {
+                    "error"
+                },
+                Some(""),
+                true,
+            );
+        }
 
         if coord_active {
             let end_state =
@@ -3802,6 +4145,7 @@ mod tests {
             "read_file",
             None,
             "2026-11-22T00:00:01.000Z",
+            PreviewBudget::default().project(&ToolPreview::new(&Value::Null), INPUT_LIMIT),
         );
         assert_eq!(
             runner.activity_for("ws-a").unwrap().segments,
@@ -3811,9 +4155,17 @@ mod tests {
                 "name": "read_file",
                 "status": "running",
                 "startedAt": "2026-11-22T00:00:01.000Z",
+                "input": {"text": "", "redacted": false, "truncated": false},
             })]
         );
-        runner.record_activity_tool_finish("ws-a", "tc-1", true, "2026-11-22T00:00:02.000Z");
+        runner.record_activity_tool_finish(
+            "ws-a",
+            "tc-1",
+            true,
+            "2026-11-22T00:00:02.000Z",
+            PreviewBudget::default()
+                .project(&ToolPreview::new(&json!("fixture content")), RESULT_LIMIT),
+        );
         assert_eq!(
             runner.activity_for("ws-a").unwrap().segments,
             vec![json!({
@@ -3823,6 +4175,8 @@ mod tests {
                 "status": "done",
                 "startedAt": "2026-11-22T00:00:01.000Z",
                 "finishedAt": "2026-11-22T00:00:02.000Z",
+                "input": {"text": "", "redacted": false, "truncated": false},
+                "result": {"text": "fixture content", "redacted": false, "truncated": false},
             })]
         );
         runner.set_activity_phase("ws-a", "responding", Some("hello"), false);
@@ -4143,6 +4497,7 @@ mod tests {
             &rounds,
             &updates,
             &timing,
+            None,
         ));
         assert!(
             turn_trace_path(dir.path(), ws_id, turn_id)

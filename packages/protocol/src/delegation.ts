@@ -85,6 +85,8 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly conversationId?: string;
   readonly workspaceId: string;
   readonly spawnedAt?: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly origin: DelegationOrigin;
   readonly supersededBy?: string;
   readonly acceptance?: 'auto' | 'confirm';
@@ -118,6 +120,8 @@ export interface WorkSession extends SessionQueueFacts {
   readonly cancelable?: boolean;
   readonly needsYouReason?: TaskOverviewItem['needsYouReason'];
   readonly spawnedAt: string;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
   readonly conversationId?: string;
   readonly origin: DelegationOrigin;
   readonly supersededBy?: string;
@@ -553,6 +557,8 @@ export function projectWorkSession(
     ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
+    ...(conversationMeta.startedAt ? { startedAt: conversationMeta.startedAt } : {}),
+    ...(conversationMeta.endedAt ? { endedAt: conversationMeta.endedAt } : {}),
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
     ...(conversationMeta.resourceBlocker ? { resourceBlocker: conversationMeta.resourceBlocker } : {}),

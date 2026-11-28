@@ -882,6 +882,18 @@
   cursor: pointer;
   transition: background var(--za-motion-fast) ease, color var(--za-motion-fast) ease;
 }
+.bot-sidebar-task:has(> .bot-sidebar-task-duration) {
+  grid-template-columns: 15px minmax(0, 1fr) max-content;
+}
+
+.bot-sidebar-task-duration {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--graphite-soft);
+}
+
 .bot-sidebar-task:hover:not(.is-selected) {
   background: var(--chrome-glass-hover, var(--chrome-hover));
   color: var(--graphite-base);
