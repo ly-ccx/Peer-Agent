@@ -217,7 +217,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     page.on('dialog', dialog => { void dialog.dismiss().catch(error => { if (!error.message.includes('No dialog is showing')) errors.push(error.message); }); }); };
   electron.context().on('page', observe); electron.windows().forEach(observe);
   await electron.context().route(/^https?:/, route => { external.push(route.request().url()); return route.abort(); });
-  let page, recoveredView;
+  let page, native, recoveredView;
   try {
     page = await electron.firstWindow(); await page.getByText('Trial delivery', { exact: true }).waitFor();
     const uncitedReply = page.locator('article[data-kind="agent_reply"]');
@@ -323,9 +323,12 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(await position.evaluate(node => node.scrollTop), localReading, 'late layout receipts cannot overwrite active reading');
     await page.screenshot({ path: path.join(root, 'workspace-layout-reading-recovered.png'), animations: 'disabled' });
     const nativeOpening = electron.waitForEvent('window'); await page.getByRole('button', { name: 'Open separate view', exact: true }).click();
-    const native = await nativeOpening; await native.waitForURL(url => url.href.startsWith(location)); await native.getByLabel('Divisor', { exact: true }).waitFor();
+    native = await nativeOpening; await native.waitForURL(url => url.href.startsWith(location)); await native.getByLabel('Divisor', { exact: true }).waitFor();
     assert.equal(await native.getByLabel('Divisor', { exact: true }).inputValue(), '5');
-    await native.waitForFunction(() => document.querySelector('.resource-interactive-body').scrollTop >= 400);
+    const sourceTop = await native.evaluate(async () => (await window.peerResource.bootstrap()).context?.sourceNavigation?.top);
+    assert.equal(sourceTop, localReading, 'the separate view receives the source reading point');
+    // Hidden fixture windows may not deliver animation frames during startup.
+    await native.waitForFunction(() => document.querySelector('.resource-interactive-body').scrollTop >= 400, undefined, { polling: 50 });
     await native.getByRole('button', { name: 'Continue calculation here', exact: true }).click();
     await native.getByLabel('Divisor', { exact: true }).fill('4'); await native.getByText('Conditions saved', { exact: true }).waitFor();
     await native.getByRole('button', { name: 'Add current conditions to draft', exact: true }).click();
@@ -633,7 +636,13 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const closedMain = page.waitForEvent('close'); await electron.evaluate(() => globalThis.workspaceFixture.closeSource()); await closedMain;
     assert.deepEqual(external, []);
   } catch (error) {
-    if (page && !page.isClosed()) { console.log('Workspace fixture diagnostics:', JSON.stringify({ text: (await page.locator('body').innerText()).slice(0, 2600), errors, root })); await page.screenshot({ path: path.join(root, 'workspace-failed.png'), animations: 'disabled' }); }
+    const nativeReading = native && !native.isClosed() ? await native.evaluate(async () => {
+      const body = document.querySelector('.resource-interactive-body');
+      const binding = await window.peerResource.bootstrap();
+      return { top: body?.scrollTop, maxTop: body && body.scrollHeight - body.clientHeight,
+        sourceTop: binding.context?.sourceNavigation?.top, visibility: document.visibilityState };
+    }).catch(() => null) : null;
+    if (page && !page.isClosed()) { console.log('Workspace fixture diagnostics:', JSON.stringify({ text: (await page.locator('body').innerText()).slice(0, 2600), nativeReading, errors, root })); await page.screenshot({ path: path.join(root, 'workspace-failed.png'), animations: 'disabled' }); }
     throw error;
   } finally { await electron.evaluate(({BrowserWindow})=>{for(const window of BrowserWindow.getAllWindows())window.destroy()}).catch(()=>{}); await electron.close(); }
   console.log(`Interactive workspace screenshots: ${root}`);
