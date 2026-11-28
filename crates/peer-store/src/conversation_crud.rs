@@ -3,7 +3,7 @@
 //! DirectoryLock ordering, and `.changes.json` notifications with TS stores.
 
 use crate::{
-    ConversationStore, DirectoryLock, StoreError, context_model_key, conversation_execution,
+    ConversationStore, StoreError, context_model_key, conversation_execution,
     conversation_preview::preview, durable_jsonl as log, files, valid_id,
 };
 use peer_protocol::{JsonLimits, decode_json_bounded, javascript_json_string};
@@ -1372,11 +1372,7 @@ impl ConversationStore {
 
     pub fn reorder_pinned(&self, ids: &[String]) -> Result<Value, StoreError> {
         let directory = self.write_directory()?;
-        let _held = [DirectoryLock::acquire(
-            &directory.join("index.jsonl"),
-            std::time::Duration::from_millis(100),
-            None,
-        )?];
+        let _held = crate::conversation_write::locks(&directory, None, None)?;
         let file = directory.join("index.jsonl");
         let mut index = log::read(&file, None)?;
 
@@ -1439,11 +1435,7 @@ impl ConversationStore {
             .filter(|s| !s.is_empty())
             .collect();
         let directory = self.write_directory()?;
-        let _held = [DirectoryLock::acquire(
-            &directory.join("index.jsonl"),
-            std::time::Duration::from_millis(100),
-            None,
-        )?];
+        let _held = crate::conversation_write::locks(&directory, None, None)?;
         let file = directory.join("index.jsonl");
         if files::identity(&file)?.is_none() {
             return Ok(json!({ "archivedIds": [], "archivedCount": 0 }));
