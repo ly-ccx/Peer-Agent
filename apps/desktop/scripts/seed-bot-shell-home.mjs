@@ -1,6 +1,6 @@
 /** RC-01 synthetic data only. Refuses a nonempty directory or the personal data home. */
 import assert from 'node:assert/strict';
-import { mkdirSync, existsSync, readdirSync, writeFileSync, realpathSync, lstatSync } from 'node:fs';
+import { mkdirSync, existsSync, readdirSync, readFileSync, writeFileSync, realpathSync, lstatSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +35,24 @@ export function assertIsolatedHome(home, personalHome = path.join(os.homedir(), 
   return resolved;
 }
 
+export function writeBotShellHistory(home, conversationId, messages) {
+  const directory = path.join(home, 'conversations');
+  writeFileSync(path.join(directory, conversationId + '.jsonl'), messages.map(row => JSON.stringify(row) + '\n').join(''));
+  // Bulk setup owns both sides of the commit. Rust's writer verifies the
+  // persisted message count before appending to a seeded conversation.
+  const file = path.join(directory, 'index.jsonl');
+  const index = readFileSync(file, 'utf8').trim().split('\n').map(line => {
+    const row = JSON.parse(line);
+    if (row.id === conversationId) {
+      row.messageCount = messages.length;
+      row.contentRevision = messages.length ? 1 : 0;
+      row.preview.contentRevision = row.contentRevision;
+    }
+    return JSON.stringify(row);
+  });
+  writeFileSync(file, index.join('\n') + '\n');
+}
+
 export function seedBotShellHome({ home, projectRoot = null, scale = RC_SCALE } = {}) {
   const resolved = assertIsolatedHome(home);
   for (const key of Object.keys(RC_SCALE)) assert.ok(Number.isInteger(scale[key]) && scale[key] >= 0, `invalid ${key}`);
@@ -65,8 +83,8 @@ export function seedBotShellHome({ home, projectRoot = null, scale = RC_SCALE } 
   // Every row is then parsed by the production stores in the benchmark.
   const messages = Array.from({ length: scale.messages }, (_, i) => ({ id: `rc-message-${i}`, role: i % 2 ? 'assistant' : 'user',
     kind: i % 2 ? 'agent_reply' : 'user_input', content: `合成验收消息 ${i} ${i === 123 ? 'unique-needle' : 'ordinary'}`,
-    createdAt: at, timestamp: Date.now() + i }));
-  writeFileSync(path.join(home, 'conversations', first.conversationId + '.jsonl'), messages.map(r => JSON.stringify(r)).join('\n') + (messages.length ? '\n' : ''));
+    createdAt: at }));
+  writeBotShellHistory(home, first.conversationId, messages);
   const runtime = path.join(home, 'project-runtime', first.workspaceId);
   mkdirSync(runtime, { recursive: true });
   const events = Array.from({ length: scale.inboxEvents }, (_, i) => ({ eventId: `rc-event-${i}`, seq: i + 1, workspaceId: first.workspaceId,

@@ -19,7 +19,8 @@ describe('lifetimeUsage byModel split (切换 Provider 不串账)', () => {
   });
 
   function makeStore() {
-    return createConversationStore({ storeDir: dir });
+    // The default ledger directory is a sibling of the conversation store.
+    return createConversationStore({ storeDir: join(dir, 'conversations') });
   }
 
   function runtimeTurn(overrides = {}) {

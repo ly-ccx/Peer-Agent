@@ -81,6 +81,7 @@
 .bot-work-panel-status > svg { flex: none; }
 .bot-work-panel-session[data-needs-user="true"] .bot-work-panel-status { color: var(--azure-seal); background: color-mix(in srgb, var(--azure-seal) 12%, transparent); }
 .bot-work-panel-session-detail { color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
+.bot-work-panel-session[data-needs-user="true"] .bot-work-panel-session-detail { color: var(--graphite-base); }
 .bot-work-panel-session-meta { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
 .bot-work-panel-session-meta:empty { display: none; }
 .bot-work-panel-progress { display: block; height: 3px; margin-block: var(--space-1); border-radius: var(--ui-radius-pill); background: var(--control-fill); overflow: hidden; }

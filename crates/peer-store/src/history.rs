@@ -2,9 +2,11 @@ use crate::{StoreError, files, identity, valid_id};
 use peer_protocol::{JsonDecodeError, JsonLimits, PersistedHistory, decode_json_bounded};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
+const MAX_HISTORY_NODES: usize = 65_536;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub struct ConversationStore {
@@ -59,6 +61,50 @@ fn rows(bytes: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Value>, StoreErro
     Ok(values)
 }
 
+fn recent_rows(
+    bytes: &[u8],
+    budget: &mut DecodeBudget,
+    excluded: Option<&str>,
+    kind: &str,
+    limit: usize,
+) -> Result<Vec<Value>, StoreError> {
+    let mut selected = VecDeque::new();
+    let mut committed = true;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        // Validate one row at a time. Keep only offsets into the bounded body
+        // until the selected rows are decoded under the shared snapshot budget.
+        let row = DecodeBudget(JsonLimits {
+            bytes: budget.0.bytes,
+            nodes: MAX_HISTORY_NODES,
+            depth: budget.0.depth,
+            string_bytes: budget.0.bytes,
+        })
+        .decode(line, StoreError::HistoryCorrupt)?;
+        if !row.is_object() {
+            return Err(StoreError::HistoryCorrupt);
+        }
+        if excluded.is_some_and(|id| row["id"] == id) {
+            committed = false;
+        }
+        if committed && row["kind"] == kind {
+            if selected.len() == limit {
+                selected.pop_front();
+            }
+            selected.push_back(line);
+        }
+    }
+    if committed && excluded.is_some() {
+        return Err(StoreError::StreamTargetMissing);
+    }
+    selected
+        .into_iter()
+        .map(|line| budget.decode(line, StoreError::HistoryCorrupt))
+        .collect()
+}
+
 impl ConversationStore {
     /// Identity/ancestry lookup reads the index only, never a long message body.
     pub fn read_metadata(
@@ -101,6 +147,33 @@ impl ConversationStore {
         expected_revision: Option<u64>,
         budget: usize,
     ) -> Result<HistorySnapshot, StoreError> {
+        self.read_committed_projection(conversation_id, expected_revision, budget, None)
+    }
+
+    /// Read the latest committed rows of one kind in chronological order.
+    /// Like a full snapshot, this excludes the active stream and its suffix.
+    pub fn read_recent_committed_by_kind(
+        &self,
+        conversation_id: &str,
+        kind: &str,
+        limit: usize,
+        budget: usize,
+    ) -> Result<Vec<Value>, StoreError> {
+        if limit == 0 {
+            return Err(StoreError::InvalidInput);
+        }
+        let snapshot =
+            self.read_committed_projection(conversation_id, None, budget, Some((kind, limit)))?;
+        Ok(snapshot.history.messages)
+    }
+
+    fn read_committed_projection(
+        &self,
+        conversation_id: &str,
+        expected_revision: Option<u64>,
+        budget: usize,
+        projection: Option<(&str, usize)>,
+    ) -> Result<HistorySnapshot, StoreError> {
         if !valid_id(conversation_id, false) || budget == 0 || budget > MAX_HISTORY_BYTES {
             return Err(StoreError::InvalidInput);
         }
@@ -119,7 +192,7 @@ impl ConversationStore {
         // Bytes alone do not bound the number of small allocated JSON nodes.
         let mut decode = DecodeBudget(JsonLimits {
             bytes: budget,
-            nodes: 65_536,
+            nodes: MAX_HISTORY_NODES,
             depth: 64,
             string_bytes: budget,
         });
@@ -161,8 +234,13 @@ impl ConversationStore {
         remaining = remaining
             .checked_sub(body.as_ref().map_or(0, Vec::len))
             .ok_or(StoreError::HistoryLimit)?;
-        let mut messages = rows(body.as_deref().unwrap_or_default(), &mut decode)?;
-        if revision > 0 && messages.is_empty() {
+        let body = body.as_deref().unwrap_or_default();
+        let mut messages = if projection.is_none() {
+            rows(body, &mut decode)?
+        } else {
+            Vec::new()
+        };
+        if revision > 0 && body.iter().all(u8::is_ascii_whitespace) {
             return Err(StoreError::HistoryCorrupt);
         }
         let sidecar = files::read(&files[2], remaining)?;
@@ -178,15 +256,19 @@ impl ConversationStore {
                 .as_str()
                 .filter(|id| !id.is_empty())
                 .ok_or(StoreError::StreamStateInvalid)?;
+            Some(id.to_owned())
+        } else {
+            None
+        };
+        if let Some((kind, limit)) = projection {
+            messages = recent_rows(body, &mut decode, excluded.as_deref(), kind, limit)?;
+        } else if let Some(id) = excluded.as_deref() {
             let index = messages
                 .iter()
                 .position(|row| row["id"].as_str() == Some(id))
                 .ok_or(StoreError::StreamTargetMissing)?;
             messages.truncate(index);
-            Some(id.to_owned())
-        } else {
-            None
-        };
+        }
         let after: Vec<_> = files
             .iter()
             .map(|file| identity(file))

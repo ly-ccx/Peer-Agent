@@ -202,6 +202,12 @@
   height: 100%;
 }
 
+/* The read-only chat still has a bottom wrapper for inline prompts and approvals. */
+.bot-task-workspace .bot-inline-scene--seamless .chat-surface,
+.bot-task-workspace .bot-inline-scene--seamless .chat-surface > .chat-composer-wrap {
+  background: var(--paper-base);
+}
+
 .bot-task-empty-stage {
   flex: 1;
   display: flex;

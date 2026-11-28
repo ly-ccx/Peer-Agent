@@ -25,6 +25,75 @@ pub(super) struct GoalTurnHost<'a, 'f> {
     pub usage: &'a mut RuntimeUsageAccounting,
     pub system: Option<Value>,
 }
+impl GoalTurnHost<'_, '_> {
+    fn reject_invalid_timeout(
+        &mut self,
+        call: &ModelToolCall,
+        capability: &str,
+    ) -> Result<ToolStep, HostError> {
+        use crate::providers::{INVALID_TIMEOUT, TIMEOUT_DETAIL};
+        use crate::session_host::tool_authorization::ToolAuthorization;
+
+        let frame = self.frame;
+        let conversation = frame.billing.conversation;
+        let call_id = format!("call-{}", uuid::Uuid::new_v4());
+        let at = now();
+        let dispatch = frame.budget.dispatch(
+            self.host,
+            crate::execution_budget::DispatchFacts {
+                call: &call_id,
+                capability,
+                scopes: &[],
+                stream: self.stream,
+                conversation,
+                hook_intent: None,
+            },
+            &at,
+        )?;
+        let grant = ToolAuthorization::not_dispatched(HostError(INVALID_TIMEOUT))
+            .denied_facts(&call_id, capability);
+        let result = json!({
+            "toolCallId": call_id,
+            "capabilityId": capability,
+            "status": "failed",
+            "output": {},
+            "outputPreview": {"kind": "json"},
+            "completedAt": at,
+            "error": {"code": INVALID_TIMEOUT, "message": TIMEOUT_DETAIL, "recoverable": true},
+            "evidence": {
+                "evidenceId": format!("evidence-{}", uuid::Uuid::new_v4()),
+                "toolCallId": call_id,
+                "summary": format!("{}: invalid timeout", call.name),
+                "artifactRefs": [],
+                "dispatchOutcome": "not_dispatched",
+            },
+        });
+        self.host.append_episode_message(conversation, &json!({
+            "id": uuid::Uuid::new_v4().to_string(), "role": "assistant", "content": "",
+            "createdAt": at, "streamId": self.stream,
+            "segments": [{"type": "tool-call", "tool": call.name, "toolCallId": call_id, "args": call.arguments, "result": result}],
+            "permissionGrants": [&grant],
+        }))?;
+        EvidenceIndexStore::new(&self.host.home).register(
+            &HostToolEvidence {
+                conversation_id: conversation,
+                plan_id: Some(frame.plan),
+                stream_id: Some(self.stream),
+                tool_name: &call.name,
+                capability_id: capability,
+                tool_call_id: &call_id,
+                grant: &grant,
+                result: &result,
+            },
+            None,
+        )?;
+        frame
+            .budget
+            .settle(self.host, &call_id, &dispatch, &result, &now())?;
+        Ok(ToolStep::Continue(call_id))
+    }
+}
+
 impl TurnHost for GoalTurnHost<'_, '_> {
     async fn request(&mut self) -> Result<ModelTurn, HostError> {
         let f = self.frame;
@@ -95,17 +164,23 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         let permission = &mut *self.permission;
         let epoch = self.epoch;
         let stream = self.stream;
-        let effect = providers.prepare(
-            projection,
-            &call.name,
-            call.arguments,
-            workspace,
-            &host.home,
-        )?;
         let capability = projection
             .capability(&call.name)
             .ok_or(HostError("tool_not_projected"))?
             .to_owned();
+        let effect = match providers.prepare(
+            projection,
+            &call.name,
+            call.arguments.clone(),
+            workspace,
+            &host.home,
+        ) {
+            Ok(effect) => effect,
+            Err(HostError(crate::providers::INVALID_TIMEOUT)) => {
+                return self.reject_invalid_timeout(&call, &capability);
+            }
+            Err(error) => return Err(error),
+        };
         let call_id = format!("call-{}", uuid::Uuid::new_v4());
         let args = effect.args().clone();
         let scopes = effect.scopes()?;
