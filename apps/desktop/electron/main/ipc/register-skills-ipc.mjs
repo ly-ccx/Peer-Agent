@@ -10,6 +10,7 @@ function owner(ownerName, register) {
 export function createSkillsIpcRegistrations({ skills } = {}) {
   const ports = {
     list: assertFunction(skills?.list, 'skills.list'),
+    listInstallTargets: assertFunction(skills?.listInstallTargets, 'skills.listInstallTargets'),
     getDetail: assertFunction(skills?.getDetail, 'skills.getDetail'),
     refresh: assertFunction(skills?.refresh, 'skills.refresh'),
     upload: assertFunction(skills?.upload, 'skills.upload'),
@@ -37,6 +38,7 @@ export function createSkillsIpcRegistrations({ skills } = {}) {
   return Object.freeze([
     owner('skills-ipc', (ipc) => {
       ipc.handle('skills:list', (_event, { workspacePaths } = {}) => ports.list(workspacePaths));
+      ipc.handle('skills:list-install-targets', () => ports.listInstallTargets());
       ipc.handle('skills:get-detail', (_event, { skillId, workspacePath } = {}) => ports.getDetail(skillId, workspacePath));
       ipc.handle('skills:refresh', (_event, { workspacePaths } = {}) => ports.refresh(workspacePaths));
       ipc.handle('skills:upload', (_event, { zipBase64 }) => ports.upload(zipBase64));
