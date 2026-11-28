@@ -3625,6 +3625,7 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
   let verifierEvaluatedCard = false;
   let publishedArtifactRef = null;
   let spawnedSessionId = null;
+  let verifiedReportRevision = null;
 
   const mockServer = await startMockSseServer(({ body, res }) => {
     const messages = Array.isArray(body?.messages) ? body.messages : [];
@@ -3713,9 +3714,26 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
     const wake = messages.findLast((m) => m.role === 'user')?.content;
     if (typeof wake === 'string' && wake.startsWith('[Host Wake Event Payload')) {
       if (lastRole === 'tool') {
-        const result = JSON.parse(messages.at(-1).content);
-        assert.equal(result.reverified, true, JSON.stringify(result));
-        assert.equal(result.verificationReport?.passed, true, JSON.stringify(result));
+        const toolMessage = messages.at(-1);
+        const toolCall = messages.at(-2)?.tool_calls?.find((call) => call.id === toolMessage.tool_call_id);
+        const toolName = toolCall?.function?.name;
+        const result = JSON.parse(toolMessage.content);
+        if (toolName === 'verify_session') {
+          assert.equal(result.reverified, true, JSON.stringify(result));
+          assert.equal(result.verificationReport?.passed, true, JSON.stringify(result));
+          assert.equal(result.verifierRunCount, 1, 'only the explicitly requested verifier should run');
+          // Forced verification creates a new report revision. Read it before the natural reply cites it.
+          res.end(sseTool('bot-wake-report-1', 'get_session', { sessionId: spawnedSessionId, detail: 'report' }));
+          return;
+        }
+        assert.equal(toolName, 'get_session');
+        assert.equal(result.ok, true, JSON.stringify(result));
+        assert.equal(result.session.sessionId, spawnedSessionId);
+        assert.equal(result.session.status, 'result_ready');
+        assert.equal(result.report.independentVerifier, 'passed');
+        assert.ok(result.report.evidenceRefs.includes(publishedArtifactRef));
+        verifiedReportRevision = result.session.updatedAt;
+        assert.ok(verifiedReportRevision, 'the reverified report must have a revision');
         res.end(sseText('', '已经为你渲染好「项目交付概览」交互卡片，可直接打开体验筛选。'));
         return;
       }
@@ -3833,6 +3851,11 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
     assert.ok(publishedArtifactRef && publishedArtifactRef.startsWith('interactive-result://'), 'worker must publish interactive-result:// ref');
     assert.ok(replyWithInteractive, 'main bot reply must carry interactive-result:// in meta.evidenceRefs');
     assert.equal(replyWithInteractive.meta.evidenceRefs[0], publishedArtifactRef, 'interactive ref must be prioritized first');
+    const botConvId = profileStore.read(workspaceId).agentConversationId;
+    const history = conversationStore.getPersistedConversationHistory(botConvId);
+    const committedReply = history?.messages.find((message) => message.id === replyWithInteractive.id);
+    const reportFact = `session:${spawnedSessionId}:result_ready:${verifiedReportRevision}`;
+    assert.ok(committedReply?.meta?.reportFactKeys?.includes(reportFact), 'the reply must cite the reverified report revision');
 
     // Verify Electron Desktop Interactive Results stack resolves deliveries & opens the exact Rust-published card!
     const supervisor = createSessionSupervisor({
@@ -3881,7 +3904,6 @@ test('E2E: Rust peer-native worker publishes OpenUI interactive card via host.in
 
     // 3. Desktop InteractiveViewService opens the card with real OpenUI stateSchema & initialValues!
     const fakeSender = { isDestroyed: () => false, once() {}, removeListener() {} };
-    const botConvId = profileStore.read(workspaceId).agentConversationId;
     const views = createInteractiveViewService({
       resultStore: interactive.resultStore,
       stateStore: interactive.stateStore,
