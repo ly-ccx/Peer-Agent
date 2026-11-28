@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { openBotListSearch } from './bot-reply-details-checks.mjs';
 
-/** Production directory, IPC, input queue and real renderer on the standard 10k-message home. */
+/** Production directory, IPC, input queue and real renderer on the writable Bot history. */
 export async function checkBotAttention({ page, attentionNative, until, report, captureDirectory, home, bots }) {
-  await page.locator('.bot-search').fill('');
+  await (await openBotListSearch(page)).fill('');
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const first = bots[0], other = bots[1];
+  const largeHistoryMessages = store.getPersistedConversationHistory(first.conversationId).messages.length;
   const signal = () => attentionNative('signal', [first.workspaceId, other.workspaceId]);
   const appendQuestion = (bot, id, content) => store.appendMessage(bot.conversationId, {
     id, kind: 'agent_reply', role: 'assistant', content,
@@ -33,7 +35,8 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   assert.equal(await firstRow.locator('.bot-badge').evaluate(node => document.activeElement === node), true);
   await attentionNative('failRead');
-  const globalButton = page.locator('.bot-need-filter'); await globalButton.click(); await panel.waitFor();
+  const globalButton = page.locator('.bot-dock-actions').getByRole('button', { name: /^需要你 \d+$/ });
+  await globalButton.click(); await panel.waitFor();
   await panel.getByRole('alert').waitFor();
   await panel.getByRole('button', { name: '重新读取', exact: true }).click();
   await until(() => panel.locator('.bot-attention-group').count(), n => n === 2);
@@ -52,7 +55,7 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
   await page.locator('#bot-msg-attention-current.is-anchored').waitFor({ state: 'visible' });
   await notify();
   await page.locator('#bot-msg-attention-other.is-anchored').waitFor({ state: 'visible' });
-  await page.locator('.bot-need-filter').click(); await panel.waitFor();
+  await globalButton.click(); await panel.waitFor();
 
   const firstItem = panel.locator('[data-attention-id="card:question:reply:attention-current"]');
   await attentionNative('failInput');
@@ -98,5 +101,5 @@ export async function checkBotAttention({ page, attentionNative, until, report, 
 
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'detached' });
   report.attention = { passed: true, realDirectory: true, realQueue: true, duplicateRetired: true, staleClickRejected: true,
-    keyboard: true, notificationFocus: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages: 10000 };
+    keyboard: true, notificationFocus: true, failureRecovery: true, crossBotIsolation: true, liveReplacement: true, countEqualsDetail: true, sourceLocated: true, expiresAutomatically: true, largeHistoryMessages };
 }

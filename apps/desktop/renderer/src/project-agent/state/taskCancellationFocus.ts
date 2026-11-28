@@ -3,8 +3,10 @@ export function taskCancellationFocus(trigger: HTMLButtonElement): (accepted: bo
   const document = trigger.ownerDocument;
   if (document.activeElement !== trigger) return () => {};
   const detail = trigger.closest('.bot-task-detail');
+  const workspace = trigger.closest('.bot-task-workspace');
   const returnTo = detail?.querySelector<HTMLElement>('.bot-task-back')
-    ?? trigger.closest('.bot-work-row')?.querySelector<HTMLElement>('summary');
+    ?? trigger.closest('.bot-work-row')?.querySelector<HTMLElement>('summary')
+    ?? workspace?.closest('.bot-main-thread')?.querySelector<HTMLElement>('.bot-crumb-parent');
   let accepted = false;
   let disposed = false;
   const observer = new MutationObserver(restore);
@@ -21,7 +23,7 @@ export function taskCancellationFocus(trigger: HTMLButtonElement): (accepted: bo
     dispose();
     if (document.activeElement !== document.body) return;
     // Closing the drawer must not move focus into the background conversation.
-    const target = returnTo?.isConnected ? returnTo : detail ? null
+    const target = returnTo?.isConnected ? returnTo : detail || workspace ? null
       : document.querySelector<HTMLElement>('.bot-background-work > summary, .bot-composer textarea');
     if (target?.getClientRects().length && !target.closest('[inert]')) target.focus({ preventScroll: true });
   }

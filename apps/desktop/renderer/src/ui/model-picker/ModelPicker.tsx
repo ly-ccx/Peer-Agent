@@ -412,7 +412,12 @@ export function ModelPicker({
             <PeerIcon name="bolt" size={12} className="model-selection-fast-mark" fill="currentColor" stroke="none" />
           ) : null}
           <span className="model-selection-trigger-label">{label}</span>
-          {shortEffort ? <span className="model-selection-trigger-effort">{shortEffort}</span> : null}
+          {shortEffort ? (
+            <span className="model-selection-trigger-effort">
+              {effortLevels.map(level => <span key={level} aria-hidden="true">{effortShortLabel(level, isZh)}</span>)}
+              <span>{shortEffort}</span>
+            </span>
+          ) : null}
         </span>
         {disabled ? null : busy ? <PeerIcon name="loader" size={12} className="pa-cascading-caret motion-spin" /> : statusLabel
           ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />

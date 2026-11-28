@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -42,7 +42,16 @@ test('shell task manager streams output into one artifact and finalizes metadata
 
   const task = await manager.runTask({
     toolCallId: 'call_stream',
-    command: `node -e "process.stdout.write('first'); process.stderr.write('warn'); setTimeout(() => process.stdout.write(' second'), 80)"`,
+    command: `node -e "
+      const { existsSync } = require('node:fs');
+      process.stdout.write('first');
+      process.stderr.write('warn');
+      const release = setInterval(() => {
+        if (!existsSync('release-stream')) return;
+        clearInterval(release);
+        process.stdout.write(' second');
+      }, 10);
+    "`,
     cwd: workspaceRoot,
     timeoutMs: 2_000,
     classification: { category: 'read' },
@@ -54,6 +63,8 @@ test('shell task manager streams output into one artifact and finalizes metadata
   assert.equal(task.artifact.artifactRef, `local-shell-artifact://${task.taskId}`);
   await waitFor(async () => (await readWhenAvailable(task.artifact.stdoutPath)).includes('first'));
   assert.equal(manager.getTask(task.taskId)?.status, 'running');
+  assert.equal(await readFile(task.artifact.stdoutPath, 'utf8'), 'first');
+  await writeFile(path.join(workspaceRoot, 'release-stream'), '');
 
   const output = await task.completion;
   assert.equal(output.status, 'completed');

@@ -117,7 +117,7 @@ test('a withdraw that cannot close yet stays reversible instead of becoming fata
 });
 
 test('normal completion, delivered-reply recovery and repair custody agree on the same technical obligation', async () => {
-  const sessions = [{ sessionId: 'child', status: 'failed', executionOwnership: 'ended', origin: { workId: 'work' } }];
+  const sessions = [{ sessionId: 'child', status: 'waiting_agent', executionOwnership: 'ended', origin: { workId: 'work' } }];
   const results = [];
   for (const route of ['finish', 'reply', 'custody']) {
     let work = { workId: 'work', workspaceId: 'w', parentConversationId: 'p', state: route === 'custody' ? 'delivered' : 'runnable',
