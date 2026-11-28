@@ -62,6 +62,7 @@ import { createEvidenceReader } from './evidence-reader.mjs';
 import { createEvidenceDeliveryProjection, createScopedExternalEvidenceReader } from './evidence-deliveries.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
+import { createWorkPanelGitStatus } from './work-panel-git-status.mjs';
 import { createProjectObjectivesIpcRegistrations } from '../ipc/register-project-objectives-ipc.mjs';
 import { createProjectObjectivesService } from './project-objectives-service.mjs';
 import { createProjectMemoryIpcRegistrations } from '../ipc/register-project-memory-ipc.mjs';
@@ -946,7 +947,9 @@ export function registerDesktopProjectAgent({
     },
   });
   return [
-    ...createProjectAgentIpcRegistrations({ projectAgent }),
+    ...createProjectAgentIpcRegistrations({ projectAgent,
+      readGitStatus: createWorkPanelGitStatus({ resolveWorkspacePath: workspaceId => registry.get(workspaceId)?.path }),
+    }),
     ...createProjectMemoryIpcRegistrations({ memory }),
     ...createProjectObjectivesIpcRegistrations({ objectives }),
   ];

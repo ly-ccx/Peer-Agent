@@ -20,8 +20,17 @@ export function validateGitReadQuery(input) {
   return { path: input.path, operation: input.operation || 'snapshot', limit: input.limit ?? 40 };
 }
 
+export function createGitRead(options) {
+  return createReader(options);
+}
+
+/** Fixed desktop projection, separate from the tool-facing query operations. */
+export function createWorkPanelGitRead(options) {
+  return createReader(options, true);
+}
+
 /** Fixed argv and a clean Git environment are the execution seam, never a shell. */
-export function createGitRead({ binary = 'git', timeoutMs = 15_000, maxBytes = 8 * 1024 * 1024 } = {}) {
+function createReader({ binary = 'git', timeoutMs = 15_000, maxBytes = 8 * 1024 * 1024 } = {}, workPanel = false) {
   return async function query(input, { signal, authorize, checkAuthority = () => {} } = {}) {
     const args = validateGitReadQuery(input);
     const startedAt = new Date().toISOString();
@@ -85,12 +94,15 @@ export function createGitRead({ binary = 'git', timeoutMs = 15_000, maxBytes = 8
     for (const directory of new Set([repositoryPath, gitDirectory, commonDirectory])) { await authorize(directory); guard(); }
     repositoryBinding = [`--git-dir=${gitDirectory}`, `--work-tree=${repositoryPath}`];
     env.GIT_COMMON_DIR = commonDirectory;
-    const config = await run(path, ['config', '--includes', '--show-origin', '--name-only', '--null', '--list']);
-    const configFields = config.stdout.split('\0'), configurationSources = [];
-    for (let i = 0; i + 1 < configFields.length; i += 2) {
-      if (!configFields[i].startsWith('file:')) continue;
-      const source = await realpath(resolve(path, configFields[i].slice(5)));
-      if (!configurationSources.includes(source)) { await authorize(source); guard(); configurationSources.push(source); }
+    const configurationSources = [];
+    if (!workPanel) {
+      const config = await run(path, ['config', '--includes', '--show-origin', '--name-only', '--null', '--list']);
+      const configFields = config.stdout.split('\0');
+      for (let i = 0; i + 1 < configFields.length; i += 2) {
+        if (!configFields[i].startsWith('file:')) continue;
+        const source = await realpath(resolve(path, configFields[i].slice(5)));
+        if (!configurationSources.includes(source)) { await authorize(source); guard(); configurationSources.push(source); }
+      }
     }
     // Status may hash files through configured clean/process filters. Disable every
     // effective filter before observing the worktree, including included config.
@@ -102,6 +114,13 @@ export function createGitRead({ binary = 'git', timeoutMs = 15_000, maxBytes = 8
       const head = await run(path, ['rev-parse', '--verify', '--quiet', 'HEAD'], [0, 1]);
       const branch = await run(path, ['symbolic-ref', '--quiet', '--short', 'HEAD'], [0, 1]);
       return { head: head.code === 0 ? head.stdout.trim() : null, branch: branch.code === 0 ? branch.stdout.trimEnd() : null };
+    }
+    if (workPanel) {
+      // Porcelain v2 carries branch identity in the same observation as the worktree.
+      const { stdout } = await run(path, ['-c', 'core.autocrlf=false', 'status', '--porcelain=v2', '-z',
+        '--branch', '--no-ahead-behind', '--untracked-files=all', '--ignore-submodules=all', '--no-renames']);
+      return { repositoryPath, workspacePath: path, filtersDisabled: keys.length > 0, records: stdout,
+        observedAt: new Date().toISOString() };
     }
     const before = await identity();
     const originResult = await run(path, ['config', '--includes', '--get-all', 'remote.origin.url'], [0, 1]);
